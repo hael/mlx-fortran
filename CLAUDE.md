@@ -9,33 +9,41 @@ adapted or rejected, and why.
 
 ## Where the decisions are
 
-- `doc/implementation_notes/planned/mlxf_design.md` is the design plan: its numbered decisions are the
-  contract until Phase 1 writes them into `doc/policies/binding_contract_policy.md`; from then the policy
-  is the truth and the plan is history.
+- `doc/policies/binding_contract_policy.md`: the binding contract (memory order, indices, lifetime and its
+  unsupported uses, data movement, kinds, errors, devices, threads, precision). It is the truth; the design
+  plan `doc/implementation_notes/planned/mlxf_design.md` holds the decisions' history and the phases to come.
 - `doc/architecture_principles.md`: the house rules' origin and reasons. A disagreement between it and a
   skill is a defect fixed first.
-- `doc/policies/`: the compile-time and test policies.
+- `doc/policies/`: the binding, compile-time and test policies.
 - `doc/history/YYYY-MM.md`: owner decisions, delivered batches, negative results, overrides; newest first.
+- `doc/collaboration/apple_questions.md`: questions and reports for the MLX team, numbered, with a status;
+  add to it when work meets an MLX or mlx-c question, and record the answer there when it comes.
 - `doc/how2s/how2write_agent_plans.md`: how a plan for an agent is written (from SIMPLE).
 
 ## Use the repo skills
 
 Skills live in `.claude/skills/` (a symlink to `.github/skills/`, shared with Copilot and Codex).
 `src/CLAUDE.md` imports `mlxf-modern-fortran`, which loads the first time a file under `src/` is read; its
-`references/testing.md` is the test rules in short. Edit the `SKILL.md`, never the importing `CLAUDE.md`;
+`references/testing.md` is the test rules in short. Adding a wrapper of an MLX operation: the skill
+`mlxf-binding`. Edit the `SKILL.md`, never the importing `CLAUDE.md`;
 `scripts/check_guide_imports.py` (in the static gate) catches a broken import.
 
 ## Structure
 
-- `src/core/`: the hand-written Fortran layer (`mlxf_*` modules) and its testers.
+- `src/defs/`: `mlxf_defs`, the constants and vocabularies more than one module uses (`MLXF_HARD_ERROR_STATUS`,
+  `MLX_DEVICES`, `MLX_DTYPES`): exported = defs, local = stay.
+- `src/core/`: the hand-written Fortran layer and its testers, in capability folders of one library target:
+  `runtime/` (libc, errors, registry, devices, memory, version) and `array/` (`mlxf_array`: the type and its
+  interfaces, implemented by submodules for lifetime, transfer, borrowing, evaluation and elementwise
+  operations); `mlxf.f90`, the user module, is the only module file installed.
 - `src/test/`: test-only code (assertions, the suite registry, SIMPLE-shaped kernels and benchmarks).
   It and every `*_tester.f90` compile into `mlxf_test_exec`, never into the library.
 - `test/`: `mlxf_test_exec`, the one test executable, and the CTest entries with their budget.
 - `scripts/`: the static gate (`check_tree.sh` and its checks), the formatters (`restyle_fortran.py`,
-  `format_use_blocks.py`), `fix_warnings.py`, the compile helpers, `build_mlx_deps.sh`, and from Phase 1
-  the generator of the C layer.
-- `build/gen/`: generated at build time, never edited: the build facts (`mlxf_build_info.inc`) and, from
-  Phase 1, the `bind(c)` layer generated from the mlx-c headers that are linked.
+  `format_use_blocks.py`), `fix_warnings.py`, the compile helpers, `build_mlx_deps.sh`, and the generator of
+  the C layer (`gen_mlxc_bindings.py`) with its independent prototype list (`list_mlxc_prototypes.py`).
+- `build/gen/`: generated at build time, never edited: the build facts (`mlxf_build_info.inc`) and the
+  `bind(c)` layer (`mlxf_c_types`, `mlxf_c_<header>`) generated from the mlx-c headers that are linked.
 - `doc/`: the register, plans (`implementation_notes/{planned,completed,rejected}`), policies, history,
   how-tos, `compiler_issues/` (reproducers of compiler bugs the library works around).
 
@@ -50,6 +58,8 @@ Skills live in `.claude/skills/` (a symlink to `.github/skills/`, shared with Co
   to MLX's row-major, 0-based world is the library's job, never the user's.
 - Every call of mlx-c checks its status; MLX's errors never exit the process from inside C++, and a
   procedure C++ calls never stops.
+- At most five dummy arguments per procedure (a spec type beyond); list arguments are arrays of handles; no
+  function reference inside an array constructor of handles (gfortran never finalizes it).
 
 ## Engineering defaults
 

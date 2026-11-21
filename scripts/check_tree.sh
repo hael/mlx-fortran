@@ -7,7 +7,7 @@
 # Runs, and fails on the first that fails:
 #   check_descr.py              one leading !@descr: line and at most one module or submodule per file
 #   check_rules.py              the rules reading can check (layout, inf, surface, cbind, libc, reexport,
-#                               cbstop, prints, state), with ledgers that may only shrink
+#                               cbstop, prints, state, arity, ctorcall, defs), with ledgers that may only shrink
 #   check_test_registry.py      the suite registry, the testers and the CTest areas agree
 #   check_guide_imports.py      every folder CLAUDE.md import names a file
 #   check_submodule_linkage.py  no submodule calls a private plain procedure of its module

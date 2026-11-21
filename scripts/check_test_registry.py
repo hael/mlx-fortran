@@ -7,6 +7,9 @@ Three lists must agree, or a tester never runs and nothing reports it:
   - the tester entries: every run_all_<x>_tests a *_tester.f90 under src/ defines is called by exactly one
     run_suite row, and every row calls an entry that exists. Sub-suite names are unique within an area
     and at most 32 characters.
+And the guard groups agree: every `expect_aborts <group>` entry of test/CMakeLists.txt names a group of the
+registry's GUARDS table, every group of the table has such an entry, and every member of the table has its
+case() branch in run_guard (and no branch lacks a member).
 usage: scripts/check_test_registry.py [ROOT] [--verbose]
 exit status: 0 consistent, 1 a mismatch
 """
@@ -20,6 +23,8 @@ TABLE_RE = re.compile(r"AREAS\s*\(\s*\d+\s*\)\s*=\s*\[[^\]]*::([^\]]*)\]", re.IG
 CASE_RE = re.compile(r"^\s*case\s*\(\s*'(\w+)'\s*\)", re.IGNORECASE)
 ROW_RE = re.compile(r"call\s+run_suite\s*\(\s*'([^']+)'\s*,\s*(\w+)", re.IGNORECASE)
 ENTRY_DEF_RE = re.compile(r"^\s*(?:module\s+)?subroutine\s+(run_all_\w+_tests)\b", re.IGNORECASE)
+GUARD_RE = re.compile(r"guard_member\(\s*'(\w+)'\s*,\s*'(\w+)'\s*\)", re.IGNORECASE)
+CMAKE_GUARD_RE = re.compile(r"expect_aborts\s+(\w+)", re.IGNORECASE)
 
 
 def code(path):
@@ -34,7 +39,8 @@ def main():
     problems = []
 
     with open(os.path.join(root, "test", "CMakeLists.txt"), "r", encoding="utf-8") as f:
-        m = CMAKE_AREAS_RE.search(f.read())
+        cmake_text = f.read()
+    m = CMAKE_AREAS_RE.search(cmake_text)
     cmake_areas = m.group(1).split() if m else []
     if not cmake_areas:
         problems.append("test/CMakeLists.txt: no set(MLXF_TEST_AREAS ...)")
@@ -43,14 +49,28 @@ def main():
     reg = code(reg_path)
     m = TABLE_RE.search("".join(reg))
     table_areas = re.findall(r"'(\w+)'", m.group(1)) if m else []
-    case_areas, rows, area = [], [], None
+    case_areas, rows, area, guard_cases, proc = [], [], None, [], None
     for line in reg:
+        p = re.match(r"^\s*(?:end\s+)?subroutine\s+(\w+)", line, re.IGNORECASE)
+        if p:
+            proc = None if line.lstrip().lower().startswith("end") else p.group(1).lower()
         c = CASE_RE.match(line)
-        if c:
+        if c and proc == "run_area":
             area = c.group(1)
             case_areas.append(area)
+        elif c and proc == "run_guard":
+            guard_cases.append(c.group(1))
         for name, entry in ROW_RE.findall(line):
             rows.append((area, name, entry.lower()))
+    guards = GUARD_RE.findall("".join(reg))
+    guard_groups = sorted(set(g for _, g in guards))
+    cmake_groups = sorted(set(CMAKE_GUARD_RE.findall(re.sub(r"#[^\n]*", "", cmake_text))))
+    if guard_groups != cmake_groups:
+        problems.append("guard groups differ: registry GUARDS %s, test/CMakeLists.txt expect_aborts %s" %
+                        (guard_groups, cmake_groups))
+    if sorted(n for n, _ in guards) != sorted(guard_cases):
+        problems.append("guard members differ: registry GUARDS %s, run_guard case() %s" %
+                        (sorted(n for n, _ in guards), sorted(guard_cases)))
 
     if cmake_areas != table_areas:
         problems.append("areas differ: test/CMakeLists.txt %s, registry AREAS %s" % (cmake_areas, table_areas))
@@ -83,8 +103,8 @@ def main():
     for p in problems:
         print("check_test_registry: " + p, file=sys.stderr)
     if verbose and not problems:
-        print("check_test_registry: %d areas, %d sub-suites, %d tester entries agree" %
-              (len(cmake_areas), len(rows), len(defined)))
+        print("check_test_registry: %d areas, %d sub-suites, %d tester entries, %d guard groups of %d members agree" %
+              (len(cmake_areas), len(rows), len(defined), len(guard_groups), len(guards)))
     return 1 if problems else 0
 
 

@@ -1,20 +1,45 @@
-!@descr: the area suites of mlxf_test_exec: per area, its sub-suites in order and their tester entries
+!@descr: the area suites and guard groups of mlxf_test_exec: sub-suites per area, and the members of each guard group
 ! A tester runs only from here; scripts/check_test_registry.py holds the areas to the CTest entries of
-! test/CMakeLists.txt and every run_all_<x>_tests of a tester to a row.
+! test/CMakeLists.txt, every run_all_<x>_tests of a tester to a row, and the guard groups to the table below.
+! A guard member is a stop the library makes by contract: it runs in a child process (mlxf_test_exec
+! expect_aborts <group>) and its last reachable statement is the guarded call.
 module mlxf_test_registry
-use mlxf_version_tester, only: run_all_version_tests
-use mlxf_test_utils,     only: begin_test_suite, end_test_suite
+use, intrinsic :: iso_fortran_env, only: real32, real64
+use mlxf,                 only: mlx_array, mlx_from, mlx_eval, mlx_live_count, mlx_last_error, mlx_set_default_device, &
+                                MLX_DEVICES, exp
+use mlxf_array_tester,    only: run_all_array_tests
+use mlxf_device_tester,   only: run_all_device_tests
+use mlxf_error_tester,    only: run_all_error_tests
+use mlxf_memory_tester,   only: run_all_memory_tests
+use mlxf_registry_tester, only: run_all_registry_tests
+use mlxf_version_tester,  only: run_all_version_tests
+use mlxf_test_utils,      only: begin_test_suite, end_test_suite
 implicit none
 private
 
-public :: run_area, list_areas
+public :: run_area, list_areas, run_guard, guard_members
 
 abstract interface
     subroutine tester_entry()
     end subroutine tester_entry
 end interface
 
-character(len=*), parameter :: AREAS(1) = [character(len=16) :: 'core']
+character(len=*), parameter :: AREAS(2) = [character(len=16) :: 'core', 'array']
+
+type :: guard_member
+    character(len=32) :: name  = ''
+    character(len=32) :: group = ''
+end type guard_member
+
+type(guard_member), parameter :: GUARDS(8) = [&
+    &guard_member('guard_empty_operation',   'object_contracts'), &
+    &guard_member('guard_stale_handle',      'object_contracts'), &
+    &guard_member('guard_openmp_region',     'object_contracts'), &
+    &guard_member('guard_float64_on_gpu',    'object_contracts'), &
+    &guard_member('guard_region_empty_eval', 'object_contracts'), &
+    &guard_member('guard_region_live_count', 'object_contracts'), &
+    &guard_member('guard_region_last_error', 'object_contracts'), &
+    &guard_member('guard_region_private',    'object_contracts')]
 
 contains
 
@@ -27,7 +52,13 @@ contains
         ran   = .false.
         select case( trim(area) )
             case('core')
-                call run_suite('version', run_all_version_tests, suite, ran)
+                call run_suite('version',  run_all_version_tests,  suite, ran)
+                call run_suite('device',   run_all_device_tests,   suite, ran)
+                call run_suite('memory',   run_all_memory_tests,   suite, ran)
+                call run_suite('registry', run_all_registry_tests, suite, ran)
+                call run_suite('error',    run_all_error_tests,    suite, ran)
+            case('array')
+                call run_suite('array',    run_all_array_tests,    suite, ran)
             case default
                 found = .false.
                 return
@@ -37,9 +68,13 @@ contains
 
     subroutine list_areas
         integer :: i
-        write(*,'(A)') 'mlxf_test_exec test=<name> [suite=<sub-suite>]; tests:'
+        write(*,'(A)') 'mlxf_test_exec test=<name> [suite=<sub-suite>] [device=cpu|gpu|all]; tests:'
         do i = 1, size(AREAS)
             write(*,'(A)') '    unit_'//trim(AREAS(i))
+        end do
+        write(*,'(A)') 'mlxf_test_exec expect_aborts <group> | expect_abort <member>; guard members:'
+        do i = 1, size(GUARDS)
+            write(*,'(A)') '    '//trim(GUARDS(i)%group)//': '//trim(GUARDS(i)%name)
         end do
     end subroutine list_areas
 
@@ -53,5 +88,126 @@ contains
         call end_test_suite
         ran = .true.
     end subroutine run_suite
+
+    ! the members of a guard group (none: no such group)
+    function guard_members( group ) result(names)
+        character(len=*), intent(in) :: group
+        character(len=32), allocatable :: names(:)
+        integer                        :: i
+        allocate(names(0))
+        do i = 1, size(GUARDS)
+            if( trim(GUARDS(i)%group) == trim(group) ) names = [names, GUARDS(i)%name]
+        end do
+    end function guard_members
+
+    ! runs one guard member in this process; returns only when the member did not stop
+    subroutine run_guard( name, found )
+        character(len=*), intent(in)  :: name
+        logical,          intent(out) :: found
+        found = .true.
+        select case( trim(name) )
+            case('guard_empty_operation')
+                call guard_empty_operation
+            case('guard_stale_handle')
+                call guard_stale_handle
+            case('guard_openmp_region')
+                call guard_openmp_region
+            case('guard_float64_on_gpu')
+                call guard_float64_on_gpu
+            case('guard_region_empty_eval')
+                call guard_region_empty_eval
+            case('guard_region_live_count')
+                call guard_region_live_count
+            case('guard_region_last_error')
+                call guard_region_last_error
+            case('guard_region_private')
+                call guard_region_private
+            case default
+                found = .false.
+        end select
+    end subroutine run_guard
+
+    ! an operation on a declared, never-assigned mlx_array stops
+    subroutine guard_empty_operation
+        type(mlx_array) :: a, b
+        write(*,'(A)') 'guard_empty_operation: exp of an empty mlx_array'
+        b = exp(a)
+    end subroutine guard_empty_operation
+
+    ! a copy made by allocate(source=) is used after its object was released: it stops as stale
+    subroutine guard_stale_handle
+        real(real32)                 :: x(3)
+        type(mlx_array)              :: a, b
+        type(mlx_array), allocatable :: s
+        x = 1.0_real32
+        a = mlx_from(x)
+        allocate(s, source=a)
+        call a%kill()
+        write(*,'(A)') 'guard_stale_handle: exp of a stale copy'
+        b = exp(s)
+    end subroutine guard_stale_handle
+
+    ! a library call from inside an OpenMP parallel region stops
+    subroutine guard_openmp_region
+        real(real32)    :: x(3)
+        type(mlx_array) :: a
+        x = 1.0_real32
+        write(*,'(A)') 'guard_openmp_region: mlx_from inside a parallel region'
+        !$omp parallel num_threads(2) default(shared) private(a)
+        a = mlx_from(x)
+        !$omp end parallel
+    end subroutine guard_openmp_region
+
+    ! a float64 operation built on the GPU stops (Metal has no float64)
+    subroutine guard_float64_on_gpu
+        real(real64)    :: x(3)
+        type(mlx_array) :: a, b
+        x = 1.0_real64
+        call mlx_set_default_device(MLX_DEVICES%gpu)
+        a = mlx_from(x)
+        write(*,'(A)') 'guard_float64_on_gpu: a float64 addition on the GPU'
+        b = a + a
+    end subroutine guard_float64_on_gpu
+
+    ! the one-thread guard runs before the operands are looked at: evaluating an empty list inside a parallel
+    ! region stops although there is nothing to evaluate
+    subroutine guard_region_empty_eval
+        type(mlx_array) :: none(0)
+        write(*,'(A)') 'guard_region_empty_eval: mlx_eval of an empty list inside a parallel region'
+        !$omp parallel num_threads(2) default(shared)
+        call mlx_eval(none)
+        !$omp end parallel
+    end subroutine guard_region_empty_eval
+
+    ! the registry's count is read only from the thread that builds graphs
+    subroutine guard_region_live_count
+        integer :: n
+        write(*,'(A)') 'guard_region_live_count: mlx_live_count inside a parallel region'
+        !$omp parallel num_threads(2) default(shared) private(n)
+        n = mlx_live_count()
+        !$omp end parallel
+    end subroutine guard_region_live_count
+
+    ! the last error is process-global: it is read only from the thread that builds graphs
+    subroutine guard_region_last_error
+        character(len=:), allocatable :: msg
+        write(*,'(A)') 'guard_region_last_error: mlx_last_error inside a parallel region'
+        !$omp parallel num_threads(2) default(shared) private(msg)
+        msg = mlx_last_error()
+        !$omp end parallel
+    end subroutine guard_region_last_error
+
+    ! a live handle copied into a parallel region (firstprivate, a bitwise copy) and released there stops: the
+    ! registry would be updated from several threads
+    subroutine guard_region_private
+        real(real32)    :: x(3)
+        type(mlx_array) :: a
+        x = 1.0_real32
+        a = mlx_from(x)
+        write(*,'(A)') 'guard_region_private: a firstprivate live handle inside a parallel region'
+        !$omp parallel num_threads(2) default(shared) firstprivate(a)
+        call a%kill()
+        !$omp end parallel
+    end subroutine guard_region_private
 
 end module mlxf_test_registry

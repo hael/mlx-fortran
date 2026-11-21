@@ -14,7 +14,34 @@ if(MLXF_TEST_ONLY_SOURCES)
 endif()
 set(MLXF_TEST_ONLY_SOURCES "${MLXF_TEST_ONLY_SOURCES}" PARENT_SCOPE)
 
-mlxf_add_library(mlxf ${MLXF_SOURCES})
+# The generated bind(c) layer (scripts/gen_mlxc_bindings.py): one types module and one interface module per
+# header of the mlx-c being linked, written into build/gen at build time and rerun when a header or either
+# script changes. The build fails unless the generated and skipped names equal the independent prototype
+# list (scripts/list_mlxc_prototypes.py). The set of files is known at configure time (--list-outputs).
+set(_mlxc_include "${MLX_C_INCLUDE_DIRS}")
+file(GLOB MLXF_MLXC_HEADERS CONFIGURE_DEPENDS "${_mlxc_include}/mlx/c/*.h")
+set(_gen_script  "${CMAKE_SOURCE_DIR}/scripts/gen_mlxc_bindings.py")
+set(_list_script "${CMAKE_SOURCE_DIR}/scripts/list_mlxc_prototypes.py")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_gen_script}")
+execute_process(
+    COMMAND "${MLXF_PYTHON3}" -I "${_gen_script}" "${_mlxc_include}" "${MLXF_GEN_DIR}" --list-outputs
+    OUTPUT_VARIABLE _gen_outputs
+    RESULT_VARIABLE _gen_rc
+    OUTPUT_STRIP_TRAILING_WHITESPACE)
+if(NOT _gen_rc EQUAL 0 OR NOT _gen_outputs)
+    message(FATAL_ERROR "scripts/gen_mlxc_bindings.py --list-outputs failed on ${_mlxc_include}")
+endif()
+string(REPLACE "\n" ";" MLXF_GENERATED_SOURCES "${_gen_outputs}")
+add_custom_command(
+    OUTPUT ${MLXF_GENERATED_SOURCES} "${MLXF_GEN_DIR}/mlxc_coverage.txt" "${MLXF_GEN_DIR}/mlxc_prototypes.txt"
+    COMMAND "${MLXF_PYTHON3}" -I "${_list_script}" "${_mlxc_include}" -o "${MLXF_GEN_DIR}/mlxc_prototypes.txt"
+    COMMAND "${MLXF_PYTHON3}" -I "${_gen_script}" "${_mlxc_include}" "${MLXF_GEN_DIR}"
+            --expect "${MLXF_GEN_DIR}/mlxc_prototypes.txt"
+    DEPENDS ${MLXF_MLXC_HEADERS} "${_gen_script}" "${_list_script}"
+    COMMENT "Generating the bind(c) layer from the mlx-c headers (mlxf_c_*)"
+    VERBATIM)
+
+mlxf_add_library(mlxf ${MLXF_SOURCES} ${MLXF_GENERATED_SOURCES})
 set_target_properties(mlxf PROPERTIES VERSION ${PROJECT_VERSION})
 target_include_directories(mlxf
     PUBLIC  $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/mlxf>
@@ -27,6 +54,7 @@ endif()
 install(TARGETS mlxf
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
-install(DIRECTORY "${PROJECT_BINARY_DIR}/modules/mlxf/"
-    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/mlxf"
-    FILES_MATCHING PATTERN "*.mod" PATTERN "*.smod")
+# Only the user module is installed. Every other module file (the generated mlxc_* layer, the registry, the
+# internal helpers) would let a consumer reach a handle and free it behind the reference count; gfortran
+# writes into mlxf.mod everything a consumer of its public names needs.
+install(FILES "${PROJECT_BINARY_DIR}/modules/mlxf/mlxf.mod" DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/mlxf")

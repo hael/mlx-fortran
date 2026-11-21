@@ -8,6 +8,7 @@
 #   ./recompile.sh --build-dir D   another configured build tree (or MLXF_BUILD_DIR)
 # The build type and the test setting stay as the compile script configured them. A source file added
 # or removed under src/ reruns cmake by itself (CONFIGURE_DEPENDS in src/CMakeLists.txt).
+# MLXF_CMAKE_ARGS (environment, optional) reconfigures the tree with those CMake options first.
 GATE=yes
 JOBS=""
 ROOT="$(cd "$(dirname "$0")" && pwd)"
@@ -40,6 +41,10 @@ case "$BUILD" in /*) ;; *) BUILD="$PWD/$BUILD" ;; esac
 if [[ ! -f "$BUILD/CMakeCache.txt" ]]; then
     echo "recompile.sh: no configured build in $BUILD; run ./compile_clean.sh or ./compile_debug.sh first" >&2
     exit 1
+fi
+if [[ -n "${MLXF_CMAKE_ARGS:-}" ]]; then
+    # shellcheck disable=SC2086
+    cmake ${MLXF_CMAKE_ARGS} "$BUILD" || exit $?
 fi
 make -C "$BUILD" -j"$JOBS" || exit $?
 if [[ $GATE = yes ]] && grep -Eq '^BUILD_TESTS:[A-Z]+=(ON|1|YES|TRUE)$' "$BUILD/CMakeCache.txt"; then

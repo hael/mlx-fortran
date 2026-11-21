@@ -6,8 +6,14 @@
 # MLXC_ROOT (cache or environment), the tree scripts/build_mlx_deps.sh installs (.deps/install) and the
 # default prefixes (Homebrew's when its bin/ is on PATH: brew install mlx-c).
 # ------------------------------------------------------------------------------
+# mlx-c's MLXCConfig.cmake (0.8.0) calls find_package_handle_standard_args(MLX_C ...) inside the package MLXC,
+# which makes CMake print a developer warning on every configure. FPHSA_NAME_MISMATCHED acknowledges that one
+# mismatch; it is set only around this call, so a mismatch in any other package still warns. Our checks below
+# read the target and MLXC_VERSION, never MLX_C_FOUND.
+set(FPHSA_NAME_MISMATCHED TRUE)
 find_package(MLXC CONFIG REQUIRED
     HINTS "${CMAKE_SOURCE_DIR}/.deps/install")
+unset(FPHSA_NAME_MISMATCHED)
 if(NOT TARGET mlxc)
     message(FATAL_ERROR "The MLXC package config defines no mlxc target (${MLXC_DIR})")
 endif()

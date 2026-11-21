@@ -1,0 +1,1 @@
+!@descr: the constants and vocabularies shared by more than one module of mlx-fortran (exported = defs, local = stay)

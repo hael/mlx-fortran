@@ -1,14 +1,15 @@
 !@descr: assertions, suite tracking and the summary of mlxf_test_exec
 ! Adapted from SIMPLE's simple_test_utils: same names and output, without SIMPLE's types.
 module mlxf_test_utils
-use, intrinsic :: iso_fortran_env, only: output_unit, int64, real32, real64
+use, intrinsic :: iso_fortran_env, only: output_unit, int32, int64, real32, real64
+use mlxf, only: MLX_DEVICES, mlx_device_count
 implicit none
 private
 
 public :: assert_true, assert_false, assert_int, assert_real, assert_double, assert_char
 public :: begin_test_suite, end_test_suite, report_summary
 public :: tests_run, tests_failed
-public :: set_fixed_seed
+public :: set_fixed_seed, bits_equal, test_devices, device_name
 
 integer, parameter :: MSGLEN = 512
 
@@ -26,6 +27,10 @@ type :: test_failure
     character(len=MSGLEN) :: message = ''
 end type test_failure
 
+interface bits_equal
+    module procedure bits_equal_r32, bits_equal_r64, bits_equal_c32
+end interface bits_equal
+
 integer :: tests_run    = 0
 integer :: tests_failed = 0
 integer :: active_suite = 0
@@ -33,6 +38,62 @@ type(test_suite_result), allocatable :: suites(:)
 type(test_failure),      allocatable :: failures(:)
 
 contains
+
+    ! storage identity of reals, NaN payloads and signed zeros included (never == on reals)
+    elemental logical function bits_equal_r32( a, b )
+        real(real32), intent(in) :: a, b
+        bits_equal_r32 = transfer(a, 0_int32) == transfer(b, 0_int32)
+    end function bits_equal_r32
+
+    elemental logical function bits_equal_r64( a, b )
+        real(real64), intent(in) :: a, b
+        bits_equal_r64 = transfer(a, 0_int64) == transfer(b, 0_int64)
+    end function bits_equal_r64
+
+    elemental logical function bits_equal_c32( a, b )
+        complex(real32), intent(in) :: a, b
+        bits_equal_c32 = transfer(a, 0_int64) == transfer(b, 0_int64)
+    end function bits_equal_c32
+
+    ! the devices this run tests on: those named by device=cpu|gpu|all (default all) that can allocate.
+    ! Without a GPU a Metal build of MLX allocates on neither device: the tests are skipped, and a run built
+    ! with MLXF_REQUIRE_GPU records a failure instead.
+    subroutine test_devices( devs )
+        integer, allocatable, intent(out) :: devs(:)
+        character(len=64) :: arg, which
+        integer           :: i
+        logical           :: gpu
+        which = 'all'
+        do i = 1, command_argument_count()
+            call get_command_argument(i, arg)
+            if( index(arg, 'device=') == 1 ) which = arg(8:)
+        end do
+        gpu = mlx_device_count(MLX_DEVICES%gpu) > 0
+        allocate(devs(0))
+        if( .not. gpu )then
+#ifdef MLXF_REQUIRE_GPU
+            call record_assertion(.false., 'a GPU device can be opened (MLXF_REQUIRE_GPU): none in this session')
+#else
+            write(output_unit,'(A)') '    SKIP: no GPU device in this session; a Metal build of MLX cannot allocate'
+#endif
+            return
+        endif
+        select case( trim(which) )
+            case( 'cpu' )
+                devs = [MLX_DEVICES%cpu]
+            case( 'gpu' )
+                devs = [MLX_DEVICES%gpu]
+            case default
+                devs = [MLX_DEVICES%cpu, MLX_DEVICES%gpu]
+        end select
+    end subroutine test_devices
+
+    function device_name( dev ) result(name)
+        integer, intent(in) :: dev
+        character(len=:), allocatable :: name
+        name = 'cpu'
+        if( dev == MLX_DEVICES%gpu ) name = 'gpu'
+    end function device_name
 
     ! seeds the intrinsic generator with a fixed, reproducible state derived from base_seed
     subroutine set_fixed_seed( base_seed )

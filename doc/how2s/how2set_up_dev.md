@@ -34,8 +34,17 @@ compiled at run time by the Metal framework and need no Xcode.
 ./compile_clean.sh            # Release
 ./recompile.sh                # incremental, with the gate
 build/bin/mlxf_test_exec test=list
-build/bin/mlxf_test_exec test=unit_core
+build/bin/mlxf_test_exec test=unit_core device=cpu       # device=cpu|gpu|all
+build/bin/mlxf_test_exec expect_aborts object_contracts  # the guard group, each member in a child
 ```
+
+Options: `MLXF_REQUIRE_GPU` (ON on Apple silicon) fails the device tests when the session cannot open a GPU
+(a headless or sandboxed session, a virtual machine); `MLXF_WERROR` turns warnings into errors. The compile
+scripts pass the environment variable `MLXF_CMAKE_ARGS` to CMake, as the CI does:
+`MLXF_CMAKE_ARGS="-DMLXF_REQUIRE_GPU=OFF -DMLXF_WERROR=ON" ./compile_clean.sh`. The build generates the
+`bind(c)` layer from the mlx-c headers it links (`build/gen/mlxf_c_*.f90`) and fails if the generator and
+the independent prototype list disagree. `unit_core`'s recovery test allocates half of the GPU's maximum
+buffer length per device (65 GB on a 192 GB M2 Ultra) for a few seconds.
 
 ## 4. Claude Code
 

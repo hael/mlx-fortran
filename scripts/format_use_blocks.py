@@ -11,8 +11,8 @@ The form (skill mlxf-modern-fortran; lifted from XEMA):
     first imported name;
   - a module used twice in one run is one statement;
   - a module-scope run is ordered by layer - intrinsic, the generated C layer
-    (mlxf_c_*, written into the build tree), src/core, src/test - and is
-    otherwise stable, so the layering reads top to bottom. Runs inside procedures and
+    (mlxf_c_*, written into the build tree), src/defs, src/core, src/test -
+    and is otherwise stable, so the layering reads top to bottom. Runs inside procedures and
     runs that follow a comment keep their order.
 
 Layout only. The tool proves it per file before writing: every non-use line
@@ -27,7 +27,7 @@ import sys
 
 WIDTH = 120
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-LAYERS = ['core', 'test']
+LAYERS = ['defs', 'core', 'test']
 GENERATED = re.compile(r'^mlxf_c_\w+$')   # the generated bind(c) layer, below every source module
 
 USE_START = re.compile(r'^(\s*)(!\$\s+)?use(\s*,\s*intrinsic\s*::\s*|\s+)(\w+)\s*(.*)$', re.I)

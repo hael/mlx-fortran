@@ -1,0 +1,78 @@
+!@descr: tests of mlxf_device: device counts, the default device, device information
+module mlxf_device_tester
+use, intrinsic :: iso_fortran_env, only: int64
+use mlxf,            only: MLX_DEVICES, mlx_device_count, mlx_default_device, mlx_set_default_device, &
+                           mlx_device_info_size, mlx_device_info_string, mlx_last_error
+use mlxf_test_utils, only: assert_true, assert_int, test_devices, device_name
+implicit none
+private
+
+public :: run_all_device_tests
+
+contains
+
+    subroutine run_all_device_tests
+        write(*,'(A)') '**** running all device tests ****'
+        call test_counts
+        call test_default_device
+        call test_device_info
+    end subroutine run_all_device_tests
+
+    subroutine test_counts
+        integer :: first, second
+        write(*,'(A)') 'test_counts'
+        first  = mlx_device_count(MLX_DEVICES%gpu)
+        second = mlx_device_count(MLX_DEVICES%gpu)
+        write(*,'(A,I0)') '    GPU devices: ', first
+        call assert_true(first >= 0 .and. first == second, 'the GPU device count is a stable, non-negative number')
+        call assert_int(1, mlx_device_count(MLX_DEVICES%cpu), 'MLX has one CPU device')
+    end subroutine test_counts
+
+    subroutine test_default_device
+        integer, allocatable :: devs(:)
+        integer              :: original, i, st
+        write(*,'(A)') 'test_default_device'
+        call test_devices(devs)
+        original = mlx_default_device()
+        call assert_true(original == MLX_DEVICES%cpu .or. original == MLX_DEVICES%gpu, 'the default device is the CPU or the GPU')
+        do i = 1, size(devs)
+            call mlx_set_default_device(devs(i), status=st)
+            call assert_int(0, st, 'setting the default device to the '//device_name(devs(i))//' succeeds')
+            call assert_int(devs(i), mlx_default_device(), 'the default device is then the '//device_name(devs(i)))
+        end do
+        call mlx_set_default_device(original)
+        call assert_int(original, mlx_default_device(), 'the original default device is restored')
+        if( mlx_device_count(MLX_DEVICES%gpu) == 0 )then
+            ! MLX 0.32 accepts an absent GPU as the default (the failure comes with the first allocation); a
+            ! refusal is allowed too, and then carries a message. Either way the call returns
+            call mlx_set_default_device(MLX_DEVICES%gpu, status=st)
+            if( st == 0 )then
+                call assert_int(MLX_DEVICES%gpu, mlx_default_device(), 'an absent GPU accepted as default reads back')
+            else
+                call assert_true(len(mlx_last_error()) > 0, 'an absent GPU refused as default comes with a message')
+            endif
+            call mlx_set_default_device(original)
+        endif
+    end subroutine test_default_device
+
+    subroutine test_device_info
+        integer(int64) :: maxbuf, memsize
+        write(*,'(A)') 'test_device_info'
+        if( mlx_device_count(MLX_DEVICES%gpu) == 0 )then
+            write(*,'(A)') '    SKIP: no GPU device'
+            return
+        endif
+        write(*,'(A)') '    GPU: '//mlx_device_info_string(MLX_DEVICES%gpu, 'device_name')//', '//&
+            &mlx_device_info_string(MLX_DEVICES%gpu, 'architecture')
+        maxbuf  = mlx_device_info_size(MLX_DEVICES%gpu, 'max_buffer_length')
+        memsize = mlx_device_info_size(MLX_DEVICES%gpu, 'memory_size')
+        write(*,'(A,I0,A,I0)') '    max_buffer_length ', maxbuf, ', memory_size ', memsize
+        call assert_true(len(mlx_device_info_string(MLX_DEVICES%gpu, 'architecture')) > 0, 'the GPU reports its architecture')
+        call assert_true(maxbuf > 0_int64 .and. maxbuf <= memsize, &
+            &'the GPU reports a maximum buffer length no larger than its memory')
+        call assert_true(mlx_device_info_size(MLX_DEVICES%gpu, 'no_such_key') == -1_int64, 'an absent size key gives -1')
+        call assert_true(len(mlx_device_info_string(MLX_DEVICES%gpu, 'no_such_key')) == 0, &
+            &'an absent string key gives an empty string')
+    end subroutine test_device_info
+
+end module mlxf_device_tester

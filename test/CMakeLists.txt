@@ -20,6 +20,11 @@ set_target_properties(mlxf_test_exec PROPERTIES
     Fortran_MODULE_DIRECTORY "${_moddir}")
 target_include_directories(mlxf_test_exec PRIVATE "${MLXF_GEN_DIR}")
 target_link_libraries(mlxf_test_exec PRIVATE mlxf mlxf_build_flags)
+# MLXF_REQUIRE_GPU (CMakeLists.txt) is a compile definition, not an environment variable: the library and its
+# tests read no variable of their own. With it, a session that cannot open a GPU fails the device tests.
+if(MLXF_REQUIRE_GPU)
+    target_compile_definitions(mlxf_test_exec PRIVATE MLXF_REQUIRE_GPU)
+endif()
 install(TARGETS mlxf_test_exec RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
 set(MLXF_TEST_RUNS_DIR "${CMAKE_BINARY_DIR}/test_runs")
@@ -39,13 +44,24 @@ endfunction()
 
 # ---- the fast gate: one entry per area suite -------------------------------------------------------
 # An explicit TIMEOUT overrides ctest --timeout; keep it in sync with scripts/run_fast_gate.sh.
-set(MLXF_TEST_AREAS core)
+# unit_core (above 0.5 s): its recovery gate evaluates, per device, a graph needing half the GPU's maximum
+#   buffer length (64.9 GB on a 192 GB M2 Ultra), the least that shows a failed batch recovering at half size.
+# unit_array (above 0.5 s, the area named by the design plan): its leak gate runs 10,000 iterations of every
+#   supported form of the handle model per device.
+set(MLXF_TEST_AREAS core array)
 foreach(_area IN LISTS MLXF_TEST_AREAS)
     mlxf_add_test(unit_${_area} fast 600 COMMAND $<TARGET_FILE:mlxf_test_exec> test=unit_${_area})
 endforeach()
 
+# ---- guard groups: stops that are the contract, each member in a child (expect_aborts) ----------------
+# object_contracts: an operation on an empty array, a stale handle used, a call inside an OpenMP region, a
+#   float64 operation built on the GPU, and the one-thread guard on the paths that touch no operand (an empty
+#   evaluation list, mlx_live_count, mlx_last_error) and on a live private copy released in a region; a
+#   separate entry because every member ends its process.
+mlxf_add_test(object_contracts fast 600 COMMAND $<TARGET_FILE:mlxf_test_exec> expect_aborts object_contracts)
+
 # ---- the budget ----------------------------------------------------------------------------------
-set(MLXF_CTEST_BUDGET 1)
+set(MLXF_CTEST_BUDGET 3)
 get_property(_mlxf_tests DIRECTORY PROPERTY TESTS)
 list(LENGTH _mlxf_tests _mlxf_ntests)
 if(NOT _mlxf_ntests EQUAL MLXF_CTEST_BUDGET)

@@ -54,15 +54,31 @@ changes only with an owner decision or a plan that names the new entry, recorded
   any non-zero exit, a broken fixture or a runtime check included. One guard group is one CTest entry.
 - The intended stop is the last statement the child can reach, and its fixture is proven by a passing
   sibling. Errors a checked procedure reports through `status` are tested in-process.
+- A member is a row of the `GUARDS` table and a `case` of `run_guard` in `src/test/mlxf_test_registry.f90`;
+  the child is `mlxf_test_exec guard=<member>`, and `mlxf_test_exec expect_abort <member>` runs one member as
+  the group does. The group `object_contracts` holds the stops of the binding contract (an operation on an
+  empty array, a stale handle used, a call inside an OpenMP region, a float64 operation built on the GPU, and
+  the one-thread guard on the paths that touch no operand: an empty evaluation list, `mlx_live_count`,
+  `mlx_last_error`, a live private copy released in a region).
+  Without a GPU the members are not run (each would stop for that reason instead of its own): a skip, or a
+  failure under `MLXF_REQUIRE_GPU`.
+- No test pins a compiler defect: a compiler that fixes one must not fail the build. A test that meets a
+  defect accepts the conforming result as well (the allocatable handle component: a counted copy or the
+  diagnosed bitwise one) and tests the diagnosis through a bypass every compiler takes (`allocate(source=)`).
 
 ## 4. Devices
 
 - MLX runs an operation on the CPU device or the GPU device (Metal). A test of an operation runs on
-  every device present; `mlxf_test_exec device=cpu|gpu|all` (from Phase 1 of the design plan; default
-  `all`) restricts it.
-- Whether a GPU is present is `mlx_device_count(MLX_GPU) > 0`, not `mlx_metal_is_available`, which only says
+  every device present; `mlxf_test_exec device=cpu|gpu|all` (default `all`) restricts it. A tester takes
+  its devices from `test_devices(devs)` of `mlxf_test_utils`.
+- Whether a GPU is present is `mlx_device_count(MLX_DEVICES%gpu) > 0`, not `mlx_metal_is_available`, which only says
   that the Metal backend was compiled in. In a headless, sandboxed or virtual session the count is 0, and a
-  Metal build of MLX then cannot allocate arrays on either device: tests that need a device report a skip.
+  Metal build of MLX then cannot allocate arrays on either device: tests that need a device report a skip,
+  the memory limits (the Metal allocator's) included. A test asserts no more about an absent device than
+  that the call returns: MLX 0.32 accepts an absent GPU as the default device and fails only at the first
+  allocation. The headless gate is reproduced on a Mac with
+  `sandbox-exec -p "(version 1)(allow default)(deny iokit-open)"` around a build configured with
+  `-DMLXF_REQUIRE_GPU=OFF`.
 - CMake option `MLXF_REQUIRE_GPU` (default ON on macOS arm64, OFF in the CI), a compile definition of the
   test executable, turns that skip into a failure, so a development Mac can never pass the gate without
   running the device tests.

@@ -1,6 +1,6 @@
 !@descr: tests of mlxf_version: the toolchain links mlx-c and the MLX it loads is one mlx-c 0.8 supports
 module mlxf_version_tester
-use mlxf_version,    only: mlxf_version_string, mlxf_build_description, mlx_runtime_version, mlx_gpu_device_count
+use mlxf_version,    only: mlxf_version_string, mlxf_build_description, mlx_runtime_version, mlxf_runtime_description
 use mlxf_test_utils, only: assert_true
 implicit none
 private
@@ -16,7 +16,7 @@ contains
         write(*,'(A)') '**** running all version tests ****'
         call test_runtime_version
         call test_build_description
-        call test_gpu_query
+        call test_runtime_description
     end subroutine run_all_version_tests
 
     subroutine test_runtime_version
@@ -42,14 +42,17 @@ contains
         call assert_true(index(d, 'mlx-c ') > 0, 'the build description names the mlx-c it was configured with')
     end subroutine test_build_description
 
-    subroutine test_gpu_query
-        integer :: first, second
-        write(*,'(A)') 'test_gpu_query'
-        first  = mlx_gpu_device_count()
-        second = mlx_gpu_device_count()
-        write(*,'(A,I0)') '    GPU devices: ', first
-        call assert_true(first >= 0 .and. first == second, 'the GPU device count is a stable, non-negative number')
-    end subroutine test_gpu_query
+    subroutine test_runtime_description
+        character(len=:), allocatable :: d
+        write(*,'(A)') 'test_runtime_description'
+        d = mlxf_runtime_description()
+        write(*,'(A)') '    '//d
+        call assert_true(index(d, 'MLX '//mlx_runtime_version()//';') == 1, &
+            &'the runtime description starts with the MLX version loaded')
+        call assert_true(index(d, 'MLX_ENABLE_TF32=') > 0, 'the runtime description reports MLX_ENABLE_TF32')
+        call assert_true(index(d, 'default device ') > 0 .and. index(d, 'GPU architecture ') > 0, &
+            &'the runtime description names the default device and the GPU architecture')
+    end subroutine test_runtime_description
 
     ! the leading major.minor.patch of a version string ("0.32.5.dev20261120+bd2d1fb4" gives 0 32 5)
     subroutine parse_version( v, triple, ok )

@@ -21,6 +21,11 @@ holds is `doc/architecture_principles.md`; `scripts/check_tree.sh` checks what r
   are type-bound generics (`pass(rhs)` for a scalar on the left). Intrinsic-name generics (`exp`, `sum`) are
   ordinary generic interfaces.
 - Comments use `!`, never `!>`.
+- **At most five dummy arguments** per procedure, in `src/` and `test/` (rule `arity`): one that needs more
+  takes a spec type, a derived type holding the inputs, constructed and validated once and passed whole
+  (SIMPLE's `opt_spec`). Exempt: the generated interfaces and `bind(c)` procedures whose signature C fixes.
+- **List arguments are arrays of handles** (`type(mlx_array), intent(in) :: arrays(:)`), never lists of
+  optional arguments.
 - Before handover, on every file you touched (never tree-wide):
   `python3 scripts/restyle_fortran.py FILE...` (token-proof; `--check`, `--case-indent`, `--ends-only`) and
   `python3 scripts/format_use_blocks.py FILE...` (`--check`). Then `scripts/check_tree.sh`.
@@ -29,13 +34,27 @@ holds is `doc/architecture_principles.md`; `scripts/check_tree.sh` checks what r
 
 - Module name equals file name, `mlxf_` prefix, one module or submodule per file, first line
   `!@descr: <one line>`; every directory holding Fortran has a one-line `<dir>.inf`.
+- **Capability folders, one library target.** `src/core/<capability>/` (`runtime/`, `array/`, later the
+  operations, FFTs, ...) holds a capability's modules and their testers; a new folder gets an `.inf`, never
+  a CMake target. A type with a large implementation is one parent module (the type, its generics, the
+  interface of every procedure) and implementation submodules `<module>_<part>` by concern (XEMA's search
+  engine; `mlxf_array`: lifetime, transfer, borrow, evaluation, elementwise). A helper one submodule needs
+  is a plain procedure local to it; one two submodules need is a separate module procedure with its
+  interface in the parent.
 - `use ..., only:` always (test programs too); `implicit none` always.
 - **Every library module (src/core) restricts:** one `public ::` block at the top followed by bare
-  `private`; never a `public` attribute on a declaration. Installed `.mod` files make every public name API.
+  `private`; never a `public` attribute on a declaration. Only `mlxf.mod` is installed; the restriction keeps the internal surface explicit.
   (XEMA's visibility by majority is not used here; test code may use either form.)
 - `use` blocks have one form: `only:` in one column, continuation under the first name, one statement per
-  module per run, module-scope runs ordered by layer: intrinsic, the generated `mlxf_c_*`, `src/core`,
-  `src/test`.
+  module per run, module-scope runs ordered by layer: intrinsic, the generated `mlxf_c_*`, `src/defs`,
+  `src/core`, `src/test`.
+- **Exported = defs, local = stay** (SIMPLE's and XEMA's rule): a named constant, a vocabulary or a
+  behaviourless record that another module imports is declared in `src/defs/mlxf_defs.f90`; one used only in
+  its module stays there. Move it when the second module needs it, not before. The defs module is public by
+  default, lists every name it imports in a `private ::` statement, holds no procedures and imports only the
+  generated layer. Import a constant from `mlxf_defs`, never through a module that re-exports it (test code
+  imports it through `mlxf`, as users do). A test constant shared by test modules goes to
+  `src/test/mlxf_test_defs.f90`. `check_rules.py`, rule `defs`.
 - `mlxf` is the one re-export module; no library module imports it; test code (kernels, benchmarks,
   testers of the public surface) imports it as a user would.
 - A module contains no entity of its own name, and no entity that differs from an imported name only in
@@ -50,8 +69,9 @@ holds is `doc/architecture_principles.md`; `scripts/check_tree.sh` checks what r
 - `parameter` constants in CAPITALS; everything else lower case.
 - Public MLX types and procedures `mlx_<x>`; generics that extend an intrinsic keep its name and semantics;
   the generated layer's entities `mlxc_<x>` bound to `mlx_<x>`.
-- An enum-like family of more than two codes is one derived-type named constant, plural, with a component
-  per code (`MLX_DEVICES%gpu`), so that a variable holding one code never shadows it.
+- An enum-like family is one derived-type named constant, plural, with a component per code
+  (`MLX_DEVICES%gpu`, `MLX_DTYPES%float32`), declared in `mlxf_defs`, so that a variable holding one code
+  (`device`, `dtype`) never shadows it.
 - A type owns state or is a point of polymorphism; otherwise write module procedures named for what they
   act on.
 
@@ -64,18 +84,25 @@ holds is `doc/architecture_principles.md`; `scripts/check_tree.sh` checks what r
   `intent(inout)`), which adds a Fortran-side reference in the registry.
 - **gfortran (16.2 and earlier) skips that assignment for allocatable components** when it copies an
   enclosing derived type, and `allocate(source=)` never calls it. A derived type with an allocatable handle
-  component (scalar or array) defines its own assignment that assigns those components element by element,
-  or is never copied by intrinsic assignment. No `allocate(source=)` or `mold=` on handle types; no array
-  intrinsics (`pack`, `unpack`, `reshape`, `spread`, `transpose`, `merge`, `cshift`, `eoshift`) on arrays of
-  handles. Reproducer: `doc/compiler_issues/gfortran_alloc_component_defined_assignment.f90`.
+  component (scalar or array) defines its own assignment that assigns those components element by element
+  (the pattern is in `doc/policies/binding_contract_policy.md`), or is never copied by intrinsic assignment.
+  No `allocate(source=)` or `mold=` on handle types; no array intrinsics (`pack`, `unpack`, `reshape`,
+  `spread`, `transpose`, `merge`, `cshift`, `eoshift`) on arrays of handles.
+- **gfortran mis-finalizes three more forms** (also 13.4): never a function reference inside an array
+  constructor of handles (`[mlx_from(x), exp(a)]` leaks: rule `ctorcall` checks the repository's code; build
+  the elements into variables, `call f([a, b])` is fine); never a whole-array assignment of a function result
+  to an array of handles (`v = exp(a)` leaks; assign a variable, or element by element); never a
+  self-assignment of a derived type holding handles (`w = w` releases its components first). Reproducers:
+  `doc/compiler_issues/`. A defined-operator result inside a constructor (`[a*2.0, b]`) leaks the same way
+  and is not checked; an overlapping section assignment of handles (`v(2:3) = v(1:2)`) stops as stale.
 - An `optional` dummy is present at some calls and absent at others; read `present()` once before a loop.
   Optionals are passed by keyword at call sites.
 
 ## C interoperability
 
-- `bind(c)` interfaces to mlx-c live only in the generated layer (`build/gen/mlxf_c_*.f90`); libc entry
-  points (`strlen`, `memcpy`, `posix_memalign`, `free`) only in `mlxf_libc` (rules `cbind`, `libc`; the
-  scaffold's probe in `mlxf_version` is the one ledger entry until the generated layer exists).
+- `bind(c)` interfaces to mlx-c live only in the generated layer (`build/gen/mlxf_c_*.f90`, written by
+  `scripts/gen_mlxc_bindings.py`); libc entry points (`strlen`, `memcpy`, `posix_memalign`, `free`) only in
+  `mlxf_libc` (rules `cbind`, `libc`). Adding a wrapper: the skill `mlxf-binding`.
 - An mlx-c handle is a `bind(c)` type holding one `type(c_ptr) :: ctx`, passed with `value` where C takes
   it by value. `bool*` is `logical(c_bool)`; strings to C are `trim(s)//c_null_char`; strings from C are
   copied at once and the C object freed.

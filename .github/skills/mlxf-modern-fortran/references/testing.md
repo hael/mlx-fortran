@@ -14,7 +14,8 @@ admission rules; `doc/architecture_principles.md`, section 7).
   routine's own output.
 - Tolerances are named and derived from the arithmetic, or measured on the CPU device and frozen before the
   run they judge. A tolerance widened until the test passed is a finding.
-- Storage identity is compared with `bits_equal`, never `==` on reals.
+- Storage identity is compared with `bits_equal` (`mlxf_test_utils`, real32, real64, complex64), never `==`
+  on reals.
 - Conventions are asserted: memory order, index base, dimension numbering, sign of transforms,
   normalisation of FFTs.
 - A negative control where cheap (a transposed input does not compare equal; a freed handle is not live).
@@ -34,16 +35,21 @@ admission rules; `doc/architecture_principles.md`, section 7).
 
 - Where dying is the contract (a stale handle used, an operation on an empty array, a call from inside an
   OpenMP region), the test is a member of a guard group run by `mlxf_test_exec expect_aborts <group>`: each
-  member in its own child process, accepted only with `MLXF_HARD_ERROR_STATUS`. Never a raw `WILL_FAIL`.
+  member in its own child process (`mlxf_test_exec guard=<member>`), accepted only with
+  `MLXF_HARD_ERROR_STATUS`. Never a raw `WILL_FAIL`. A member is a row of the `GUARDS` table and a `case` of
+  `run_guard` in `src/test/mlxf_test_registry.f90`.
 - The intended stop is the last statement the child can reach, its fixture is proven by a passing sibling,
   and the verbose output is read once to confirm it dies at that guard.
 - Everything a checked procedure reports through `status` is tested in-process, not by aborting.
 
 ## Devices
 
-- A test of an operation runs on every device present. A GPU is present when
-  `mlx_device_count(MLX_GPU) > 0`; without one a Metal build of MLX cannot allocate on either device, so
+- A test of an operation runs on every device `test_devices(devs)` returns (`mlxf_test_utils`: the
+  `device=` selection, the skip without a GPU, the failure under `MLXF_REQUIRE_GPU`). A GPU is present when
+  `mlx_device_count(MLX_DEVICES%gpu) > 0`; without one a Metal build of MLX cannot allocate on either device, so
   device tests report a skip, which `MLXF_REQUIRE_GPU` (ON on a development Mac) turns into a failure.
+  Anything that reaches the Metal allocator (the memory limits too) needs a device. Headless on a Mac:
+  `sandbox-exec -p "(version 1)(allow default)(deny iokit-open)"` around a `-DMLXF_REQUIRE_GPU=OFF` build.
 - GPU results are compared with tolerances, never bytes: float32 only, and atomic reductions
   (scatter-add) sum in an order that changes from run to run. float64 exists on the CPU device only.
 - CTest runs with `MLX_ENABLE_TF32=0`: full float32 matrix products.
@@ -61,6 +67,9 @@ admission rules; `doc/architecture_principles.md`, section 7).
   module exporting only `run_all_<thing>_tests`, which prints `**** running all <thing> tests ****`; each
   `test_<what>` prints its name first.
 - No `stop` or `error stop` in a tester outside a guard-group member.
+- No function reference inside an array constructor of handles (rule `ctorcall`), at most five dummy
+  arguments (rule `arity`); no test pins a compiler defect (a compiler that fixes it must not fail the
+  build): accept the conforming result too, and test a diagnosis through a bypass every compiler takes.
 - Register it with a `run_suite` row in `src/test/mlxf_test_registry.f90`; a new area also needs its
   entry in `AREAS`, a `case` branch, the CTest list in `test/CMakeLists.txt` and the budget.
 - An import three or more tests share sits at module scope; one a single test needs stays inside that test.

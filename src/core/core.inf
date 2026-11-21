@@ -1,1 +1,1 @@
-!@descr: the hand-written Fortran layer of mlx-fortran (mlxf_* modules) and its testers
+!@descr: the hand-written Fortran layer of mlx-fortran: the user module mlxf, with array/ and runtime/ beneath it

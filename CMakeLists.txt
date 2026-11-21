@@ -23,6 +23,15 @@ option(USE_OPENMP        "Compile with OpenMP so that calls from inside a parall
 option(FORTLS            "Install the fortls Fortran language server and its Claude Code plugin in the build tree" ON)
 option(MLXF_WERROR       "Treat compiler warnings as errors (CI)" OFF)
 option(MLXF_DEBUG_TRAPS  "Debug build: trap invalid, zero and overflow; initialise reals to signalling NaN" OFF)
+# On a development Mac the device tests must run: a session that cannot open a GPU fails them instead of
+# skipping (the CI's virtual runners set it OFF).
+if(APPLE AND CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
+    set(_mlxf_require_gpu_default ON)
+else()
+    set(_mlxf_require_gpu_default OFF)
+endif()
+option(MLXF_REQUIRE_GPU  "Fail the device tests when no GPU can be opened (a compile definition of mlxf_test_exec)"
+    ${_mlxf_require_gpu_default})
 # The mlx-c release the hand-written layer is written against; another one configures with a warning.
 set(MLXF_MLXC_PINNED_VERSION 0.8.0)
 
@@ -95,5 +104,6 @@ message(STATUS "mlx-c:                ${MLXC_VERSION} (${MLXF_MLXC_LIBRARY})")
 message(STATUS "mlx-c headers:        ${MLX_C_INCLUDE_DIRS}")
 message(STATUS "OpenMP:               ${USE_OPENMP}")
 message(STATUS "Build tests:          ${BUILD_TESTS}")
+message(STATUS "Require a GPU:        ${MLXF_REQUIRE_GPU}")
 message(STATUS "Warnings as errors:   ${MLXF_WERROR}")
 message(STATUS "========================================")

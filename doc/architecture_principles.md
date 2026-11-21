@@ -27,12 +27,21 @@ is imported is how Fortran is written, built, tested, checked, documented and ha
   dummy that differs from an imported constant only in case shadows it: rename on import.
 - **Adapt (XEMA's visibility by majority): every library module restricts.** XEMA writes no visibility
   statements in a module that exports most of what it holds, relying on every consumer's `use, only:`. A public
-  library installs its `.mod` files, so any public name of any module is reachable by users and becomes API.
-  Every module under `src/core/` therefore declares one `public ::` block at the top followed by bare
+  library that installed its `.mod` files would make any public name of any module API; this one installs
+  only `mlxf.mod`, and the restriction keeps the internal surface explicit all the same. Every module under
+  `src/core/` declares one `public ::` block at the top followed by bare
   `private`, and never scatters `public` attributes (XEMA's form rule, kept). The generated layer and test code
   are not installed as API and may use the default. Users import `mlxf`.
 - **Adopt (XEMA): one re-export module per layer, explicit `only:` lists.** `mlxf` is the one aggregator; no
-  library module imports it; test code imports it as a user would.
+  library module imports it; test code imports it as a user would. Only `mlxf.mod` is installed (owner's
+  review of Phase 1, decision 41): no other module file reaches a consumer.
+- **Adopt (XEMA, owner's review of Phase 1, decision 41): implementation submodules and capability
+  folders.** A type with a large implementation is one parent module (the type, its generics, every
+  procedure's interface) and submodules by concern, as XEMA's search engine; `mlxf_array` has five
+  (lifetime, transfer, borrow, evaluation, elementwise), one type and one ownership implementation with
+  private access inside the family. `src/core/` holds capability folders (`runtime/`, `array/`) of the one
+  library target. Domain-driven design in proportion: stateless operations stay module procedures, codes
+  stay constant vocabularies (decision 40), no object without state to own.
 - **Adopt (both): lifecycle.** Stateful types have `new`/`kill` symmetry with an idempotent `kill` (XEMA's
   `exists` guard); value objects carry none. **Adopt (XEMA): finalizers on resource-owning types.** A type
   owning what Fortran does not manage (here: every MLX handle) declares `final` delegating to `kill`;
@@ -41,22 +50,37 @@ is imported is how Fortran is written, built, tested, checked, documented and ha
 - **Adapt: handle copies.** XEMA's `copy` is a type-bound procedure; an MLX handle's copy is its defined
   assignment, which adds a Fortran-side reference (design plan, decision 8). gfortran skips that assignment for
   allocatable components of an enclosing type (`doc/compiler_issues/`), so such types assign their handle
-  components explicitly; the handle registry turns a missed case into a diagnosed stop.
+  components explicitly; the handle registry turns a missed case into a diagnosed stop. **Widened (owner,
+  2026-11-21, design plan decision 39)** after Phase 1's probes found three more gfortran finalization
+  defects (also in 13.4): no function reference inside an array constructor of handles, no whole-array
+  assignment of a function result to an array of handles, no self-assignment of a derived type holding
+  handles. The first two leak where the registry cannot see it; `check_rules.py`, rule `ctorcall`, checks the
+  repository's own constructors, and `mlx_live_count()` lets users assert a loop leaks nothing.
 - **Adopt (XEMA): a type owns state or is a point of polymorphism**; otherwise procedures are module
   procedures named for what they act on.
 - **Adopt (both): optionals.** A dummy is `optional` only if some callers omit it; `present()` is read once
   before a loop. **Adopt (XEMA):** optionals are passed by keyword at call sites.
 - **Adopt (XEMA): constants in CAPITALS**, everything else lower case. **Adopt (XEMA): an enum-like family is
-  one derived-type named constant, plural, with a component per code** (`MLX_DEVICES%gpu`) where a family has
-  more than two members; mlx-c's enumerators in the generated layer stay as generated.
+  one derived-type named constant, plural, with a component per code** (`MLX_DEVICES%gpu`,
+  `MLX_DTYPES%float32`), whatever the number of codes, so that every family follows one pattern;
+  mlx-c's enumerators in the generated layer stay as generated.
 - **Adapt (XEMA's "no module-level mutable state, ever").** MLX itself is process-global (default device,
   allocator, compile cache) and the library's operators cannot take a context argument. The library's own
   process-global state is limited to the handle registry, the last error and the initialisation flag, each
   private to one module, single-threaded by the one-thread rule, and listed in `check_rules.py`'s `state`
   ledger; nothing else may be added without an owner decision. Test code's counters (the assertion totals)
   are the other ledger entry, as in XEMA.
-- **Reject (XEMA): "exported constants live in `src/defs`".** There is no defs layer in a library this small;
-  a public constant stays with its owner (XEMA's exception b, closed identity vocabulary).
+- **Adopt (both): exported = defs, local = stay** (owner, 2026-11-21, reversing this register's first
+  rejection). A named constant, a vocabulary or a behaviourless record that another module imports lives in
+  `src/defs/`; one used only inside its module stays there, and a move happens on export, never in
+  anticipation. One defs module, `mlxf_defs`, while the library is one bounded context; a test constant that
+  several test modules share goes to `src/test/mlxf_test_defs.f90` when the first one appears. **Adopt
+  (XEMA): defs modules are public by default** (no visibility statement), **adapted** for an installed
+  library: every name a defs module imports (the `MLXC_*` codes its vocabularies are built from) is listed in
+  a `private ::` statement, so that its `.mod` re-exports nothing. Defs modules hold no procedures and import
+  only the generated layer. **Adopt (XEMA): import a name from its declaring module** (`mlxf` re-exports the
+  vocabularies from `mlxf_defs`). Checked: `check_rules.py`, rule `defs`, with an exceptions table for a
+  constant argued to stay with its owner (empty).
 
 ## 3. Writing Fortran
 
@@ -84,6 +108,10 @@ is imported is how Fortran is written, built, tested, checked, documented and ha
   `allocate` after an assignment (the scaffold's second bug, 2026-11-20); declaration initialisation implies
   `SAVE`; a component section of a record array passed to an array dummy is a hidden copy; gfortran never warns
   about an unused imported name.
+- **Adopt (owner's house rule, 2026-11-21, decision 39; SIMPLE's `opt_spec` the precedent): no procedure
+  has more than five dummy arguments.** One that needs more takes a spec type, constructed and validated
+  once and passed whole; exempt are the generated interfaces and `bind(c)` procedures whose signature C fixes.
+  Checked (`check_rules.py`, rule `arity`), in `src/` and `test/`.
 - **Adopt (SIMPLE): no pointer result of a polymorphic type-bound function passed straight as an actual;
   a submodule never calls a private plain procedure of its module** (gfortran before 16 does not link it;
   `scripts/check_submodule_linkage.py`).
@@ -100,6 +128,12 @@ the style of the others and checked where reading can check them.
   `error stop` or error macro inside a `bind(c)` procedure body (rule `cbstop`).
 - Every mlx-c status is checked; MLX's errors never exit the process from inside C++.
 - A raw `type(c_ptr)` never leaves the module that obtained it.
+- **New here (owner, decision 39): list arguments are arrays of handles** (`type(mlx_array), intent(in) ::
+  arrays(:)`), never lists of optional arguments; a caller fills them element by element or writes a
+  constructor of variables.
+- **New here: the generated layer's types are one module** (`mlxf_c_types`) and its interfaces one module
+  per header, because mlx-c's headers refer to each other's types in a cycle; a C type the generator's one
+  mapping table does not map stops the build, and so does a difference from the independent prototype list.
 
 ## 5. Errors
 
@@ -162,7 +196,9 @@ the style of the others and checked where reading can check them.
   `check_test_registry.py`, `check_guide_imports.py`, `check_submodule_linkage.py`, `format_use_blocks.py
   --check`; untracked sources are a warning.
 - **Adopt (XEMA): every new rule a reading can check gets its check, with a planted violation shown to fail**
-  (SIMPLE's plan standard says the same).
+  (SIMPLE's plan standard says the same). Phase 1 added `arity`, `ctorcall` and, under `reexport`, the user
+  module naming no `mlxc_` entity; `check_test_registry.py` also holds the guard groups to their CTest
+  entries.
 
 ## 9. Documentation and records
 
