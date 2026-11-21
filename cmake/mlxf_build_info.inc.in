@@ -1,0 +1,4 @@
+character(len=*), parameter :: BUILD_INFO_RELEASE    = "@PROJECT_VERSION@"
+character(len=*), parameter :: BUILD_INFO_BUILD_TYPE = "@CMAKE_BUILD_TYPE@"
+character(len=*), parameter :: BUILD_INFO_FC         = "@CMAKE_Fortran_COMPILER_ID@ @CMAKE_Fortran_COMPILER_VERSION@"
+character(len=*), parameter :: BUILD_INFO_MLXC       = "@MLXC_VERSION@"

@@ -1,0 +1,16 @@
+*.[oa]
+*.mod
+*.smod
+*~
+*.swp
+*.log
+*.dSYM
+.DS_Store
+/build*/
+/.deps/
+/build_profile/
+__pycache__
+/.vscode
+/.codex
+# written by the fortls target for this checkout (cmake/InstallFortls.cmake), never committed
+/.claude/settings.local.json
