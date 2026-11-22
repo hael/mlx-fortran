@@ -19,6 +19,7 @@ jobs:
       - name: Install dependencies
         run: |
           brew install gcc cmake mlx-c
+          brew list --versions gcc cmake mlx mlx-c
 
       # The runners are virtual machines and may open no Metal device; a Metal build of MLX then cannot
       # allocate arrays on either device. The gate's tests that need a device report a skip there
@@ -28,3 +29,6 @@ jobs:
           MLXF_CMAKE_ARGS: -DMLXF_REQUIRE_GPU=OFF -DMLXF_WERROR=ON
         run: |
           if [ "${{ matrix.build }}" = debug ]; then ./compile_debug.sh; else ./compile_clean.sh; fi
+
+      - name: Report device availability
+        run: ctest --test-dir build -R '^unit_core$' -V

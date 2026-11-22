@@ -304,3 +304,64 @@ ratio table exists with spreads; SIMPLE's fast gate passes; the branch's files a
 (One entry per phase, written by Codex: date, machine, base, files changed, each exit item and how it was
 met, log paths, decisions taken under delegation, the history text for decision 3, and "what it means, in
 short".)
+
+### Phase 0, the baseline: 2026-11-22 - complete
+
+- **Machine (measured):** Apple M3 Pro MacBook Pro, 11 CPU cores (5 performance, 6 efficiency), 18 GB;
+  macOS 26.7.3 (25G342), Command Line Tools, GFortran 16.2.0, CMake 4.4.3, Python 3.12.2. Homebrew:
+  MLX 0.32.4, mlx-c 0.8.0, GCC 16.2.0, CMake 4.4.3, FFTW 3.3.11.
+- **Base (exact):** clean worktree at `27d80aa2183cf3590c68c2ad9569f740b25b68b0` on `main`; the only
+  change from the plan-adding commit `5944901` is the revised plan itself, so the code under test is the
+  pinned base. No checkout or state-changing git command was used. User instruction: work directly in the
+  repositories, with no branches; this supersedes the SIMPLE branch requirement of decision 6.
+- **Build and gate (measured):** clean Debug and Release trees, `MLXF_WERROR=ON`, `FORTLS=OFF`, and
+  `CMAKE_INSTALL_NAME_TOOL=/usr/bin/install_name_tool`. Both compiled with no compiler warnings; the
+  static gate passed and all seven fast entries passed with Metal access. The Debug `unit_core` reported
+  one GPU (`applegpu_g15s`). Debug / Release per-entry seconds: core 0.46 / 0.64, array 8.26 / 11.80,
+  ops 0.29 / 0.52, linalg 0.15 / 0.34, FFT 0.16 / 0.60, compile 3.24 / 1.07, object contracts
+  0.56 / 0.78. Total real seconds were 8.27 / 11.81. These timings are observations, not performance
+  comparisons. The sandbox initially saw zero GPUs and all seven GPU-required Debug entries failed;
+  the successful gates ran with access to the laptop's Metal device.
+- **Files and evidence:** this Progress entry only. Trees and configure, build, gate and GPU-check logs are
+  under `/private/tmp/mlxf-m1-codex-20261122/`; timing tables are in each tree's `test_runs/`.
+- **History text:** On the M3 Pro laptop, Codex rebuilt the milestone baseline in Debug and Release with
+  warnings as errors; both static and seven-entry fast gates passed with an observed Metal device.
+
+**What it means, in short:** the local baseline is established; no work was run on the M2 Ultra.
+
+### Phase 1, CI: 2026-11-22 - evidence incomplete
+
+- **GitHub results (exact):** both matrix jobs succeeded for [`0d3537b`](https://github.com/hael/mlx-fortran/actions/runs/44957271541),
+  [`2862201`](https://github.com/hael/mlx-fortran/actions/runs/45036228067), and
+  [`0a1eec2`](https://github.com/hael/mlx-fortran/actions/runs/45055765218). Both also succeeded for
+  [`27d80aa`](https://github.com/hael/mlx-fortran/actions/runs/45068157819). The public jobs API returned
+  their conclusions; its JSON is in `/private/tmp/mlxf-m1-codex-20261122/`.
+- **Headless reproduction (measured):** in a temporary source copy, the workflow's `compile_debug.sh`
+  and `compile_clean.sh` commands, with its `MLXF_CMAKE_ARGS` and the documented `sandbox-exec` policy,
+  built, passed all seven fast entries and installed successfully. A verbose Release core run reported
+  zero GPU devices and the expected skip. Logs: `headless-debug.log`, `headless-release.log` and
+  `headless-core.log` in `/private/tmp/mlxf-m1-codex-20261122/`. No installed package was changed.
+- **Outstanding evidence:** GitHub's job page requires sign-in to view logs, and the unauthenticated
+  job-log API returned HTTP 403. Runner dependency versions and Metal status are therefore unverified.
+  Moreover, the workflow's fast gate uses `ctest --output-on-failure`, so successful jobs do not print
+  `unit_core`'s GPU count or skip line; the requested Metal line cannot be recovered from those successful
+  logs as the workflow stands. A workflow instrumentation change would conflict with this phase's
+  instruction to make no change if every run is green. The owner subsequently chose the instrumentation
+  change below.
+- **Files and decision:** this Progress entry and `.github/workflows/ci.yml`. No commit, push or branch was
+  made. Phase 1 is not marked complete while the required runner evidence remains missing.
+- **History text:** The three milestone CI runs had successful Debug and Release jobs, and both workflow
+  commands passed a local headless reproduction; runner versions and Metal status remain unverified.
+
+**What it means, in short:** the CI failures anticipated by the plan did not occur. Its requirement to
+record a Metal line from a successful run needs an instrumented workflow or a revised exit criterion.
+
+**Owner ruling, 2026-11-22:** add the missing CI logging despite the green runs. The workflow now prints
+the installed GCC, CMake, MLX and mlx-c versions, then runs `unit_core` verbosely so a successful job shows
+its GPU count or skip. The Debug workflow and the verbose core step passed in the headless source copy;
+the Release workflow and the same verbose core step passed there as well. The new command's output shows
+`GPU devices: 0` and the expected skips locally. Logs: `headless-versions.log`,
+`headless-debug-logging.log`, `headless-debug-core.log`, `headless-release-logging.log` and
+`headless-release-core.log`
+under `/private/tmp/mlxf-m1-codex-20261122/`. The owner will commit and push; the new GitHub run and its
+runner versions and device line are still required to close the phase.
