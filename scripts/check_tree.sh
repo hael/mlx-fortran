@@ -13,9 +13,10 @@
 #   check_guide_imports.py      every folder CLAUDE.md import names a file
 #   check_submodule_linkage.py  no submodule calls a private plain procedure of its module
 #   format_use_blocks.py        the one form of every use block, tree-wide
+#   restyle_fortran.py --check  the house layout of every Fortran file under src/ and test/, tree-wide
 # then warns, never fails, about Fortran sources under src/ and test/ that git does not track: the targets
-# glob their sources, so such a file builds here and is missing from a commit. restyle_fortran.py stays per
-# file (run it on every file you touched). scripts/run_fast_gate.sh runs this first.
+# glob their sources, so such a file builds here and is missing from a commit. Run restyle_fortran.py on the
+# files you touched to fix what its check reports. scripts/run_fast_gate.sh runs this first.
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PY="${1:-python3}"
@@ -38,6 +39,7 @@ run scripts/check_test_registry.py "$ROOT"
 run scripts/check_guide_imports.py "$ROOT"
 run scripts/check_submodule_linkage.py "$ROOT"
 run scripts/format_use_blocks.py --check
+run scripts/restyle_fortran.py --check --tree
 if git -C "$ROOT" --no-optional-locks rev-parse --is-inside-work-tree > /dev/null 2>&1; then
     untracked=$(git -C "$ROOT" --no-optional-locks ls-files --others --exclude-standard -- src test |
         grep -E '\.([Ff](90|08)|inc|c|h)$')

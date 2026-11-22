@@ -11,7 +11,8 @@ entry in the same change, so the ratchet holds what was gained).
 
 Rules:
   layout     no `block` construct; no `goto`; no `!>` comment; no `interface operator`/`interface
-             assignment` block (operators are type-bound generics); a THROW_HARD/THROW_WARN call on one
+             assignment` block (operators are type-bound generics); `if( cond )then`, a blank inside each
+             parenthesis of an `if`'s condition (the skill's layout); a THROW_HARD/THROW_WARN call on one
              physical line; no typed character constructor of non-literal elements passed straight as an
              argument (gfortran 15 corrupts the heap; assign it to a local first)
   inf        every directory holding Fortran has a non-empty <dir>.inf
@@ -90,16 +91,16 @@ MAX_DUMMIES = 5
 DEFS_EXCEPTIONS = {}
 ENTRY_CALLS = ('mlxf_enter', 'mlxf_guard_thread', 'mlxf_require_device')
 # helpers an entry may call first instead: each must itself open with an entry call
-ENTRY_HELPERS = ('mlxf_unary', 'mlxf_binary', 'weak_scalar')
+ENTRY_HELPERS = ('mlxf_unary', 'mlxf_binary', 'mlxf_weak_scalar', 'mlxf_int_op', 'mlxf_vector_op', 'mlxf_reduce_op', 'mlxf_ternary_op', 'mlxf_take_op', 'mlxf_scan_op', 'mlxf_slice_op', 'mlxf_concat_op', 'mlxf_zeros_op', 'mlxf_range_op', 'mlxf_fft_op', 'mlxf_fft2_op')
 # the lifetime bindings touch shared state only through a live handle: they may open with the one-thread guard
 # conditional on one (between empty handles they run anywhere; nothing they do needs initialisation)
-ENTRY_IF_LIVE = ('assign_array', 'kill_array')
+ENTRY_IF_LIVE = ('assign_array', 'kill_array', 'function_assign', 'function_kill')
 ENTRY_EXEMPT = {
     'mlxf_version_string': 'pure: returns a build constant, touches no state and calls no MLX function',
     'mlxf_build_description': 'pure: returns build constants, touches no state and calls no MLX function',
 }
 USER_MODULE = CORE + 'mlxf.f90'
-HANDLE_TYPES = ('mlx_array',)
+HANDLE_TYPES = ('mlx_array', 'mlx_function')
 HANDLE_DECL = re.compile(r'^(type|class)\s*\(\s*(' + '|'.join(HANDLE_TYPES) + r')\s*\)(.*)$', re.I)
 HANDLE_PREFIX = re.compile(r'\b(type|class)\s*\(\s*(' + '|'.join(HANDLE_TYPES) + r')\s*\)', re.I)
 HANDLE_GETTERS = ('shape', 'ndim', 'size', 'kind')
@@ -144,6 +145,8 @@ def code_of(line):
 
 BLOCK = re.compile(r'^\s*(\w+\s*:\s*)?block\s*$', re.I)
 GOTO = re.compile(r'\bgo\s*to\b', re.I)
+IF_OPEN = re.compile(r'^\s*(else\s*)?if\((?!\s)', re.I)
+IF_THEN = re.compile(r'[^\s(]\)\s*then\b', re.I)
 IFACE_OP = re.compile(r'^\s*interface\s+(operator|assignment)\s*\(', re.I)
 THROW = re.compile(r'\bTHROW_(HARD|WARN)\s*\(')
 TYPED_CTOR = re.compile(r'\[\s*character\s*\(\s*(len\s*=\s*)?[^)]*\)\s*::', re.I)
@@ -210,6 +213,8 @@ def check_layout(rel, lines, out):
             out.append('%s:%d: layout: goto' % (rel, n))
         if raw.lstrip().startswith('!>') or re.search(r'\s!>', raw):
             out.append('%s:%d: layout: a !> comment' % (rel, n))
+        if IF_OPEN.match(code) or IF_THEN.search(code):
+            out.append('%s:%d: layout: write if( cond )then, a blank inside the condition\'s parentheses' % (rel, n))
         if IFACE_OP.match(code):
             out.append('%s:%d: layout: an interface operator/assignment block (bind the operator as a type-bound generic)' % (rel, n))
         if THROW.search(code) and code.rstrip().endswith('&') or re.search(r'\bTHROW_(HARD|WARN)\s*(&\s*)?$', code.rstrip()):

@@ -20,8 +20,8 @@ the gcc-bugs and fortran mailing-list archives, as Bugzilla itself could not be 
 Their current status needs a check at the source. Where a report already covers a defect, the reproducer is
 added to it as a comment, not filed again.
 
-Common fields: host and target aarch64-apple-darwin25 (macOS 26.7.3, Apple M2 Ultra); GNU Fortran 16.2.0
-(Homebrew GCC 16.2.0), also 13.4.0 for issues 2 to 4; flags `-std=f2018`, at `-O0 -g -fcheck=bounds,do,mem`
+Common fields: host and target aarch64-apple-darwin25 (macOS 26.7.3, Apple M2 Ultra; issue 5 on an M3 Pro);
+GNU Fortran 16.2.0 (Homebrew GCC 16.2.0), also 13.4.0 for issues 2 to 4; flags `-std=f2018`, at `-O0 -g -fcheck=bounds,do,mem`
 and at `-O3`, the same output.
 
 ### 1. Defined assignment skipped for allocatable components in intrinsic assignment
@@ -82,6 +82,33 @@ and at `-O3`, the same output.
   trunk build) before filing. If it still fails, file as new with "See also" PR 110626.
 - **Where the library meets it:** unsupported use 5; the owner ends stale and is diagnosed at its next use.
 
+### 5. An allocatable array function result is freed before it is finalized
+
+- **File:** `gfortran_finalize_allocatable_array_result.f90` (found 2026-11-22 with 16.2.0 while writing
+  `mlx_function`; built with `-fsanitize=address`).
+- **Standard:** F2018 7.5.6.3, paragraph 5, as in issue 2: the result is finalized after the innermost
+  executable construct, and only then may its storage go.
+- **Expected:** both cases print PASS.
+- **Observed:** the subroutine control (an allocatable `intent(out)` array) passes. The function case
+  (`call consume(q%f())`, an allocatable array result of a finalizable type through a procedure pointer)
+  aborts with a heap-use-after-free in the final procedure. The merged program was rerun on 2026-11-22,
+  M3 Pro / macOS 26.7.3, GNU Fortran 16.2.0, exactly with its header's
+  `-std=f2018 -Wall -O0 -g -fsanitize=address` and `ASAN_OPTIONS=symbolize=0`: compile exit 0,
+  zero warnings; run return code -6 (SIGABRT). Output excerpt, with process ID and address omitted:
+
+  ```text
+  subroutine with an allocatable intent(out) output: PASS
+  ERROR: AddressSanitizer: heap-use-after-free
+  WRITE of size 4
+  ```
+  The function PASS line is not reached. Full output (including addresses and stack frames):
+  `/Users/elmlundho/for_claude/mlxf-review-2026-11-22/compiler-issue5.log`.
+- **Related:** the finalization meta-bug PR 37336; PR 121472 (function-result finalization patches, 2025);
+  PR 128856 (a function result passed as an actual argument, 2026). Check them before filing.
+- **Where the library meets it:** `mlx_function`'s callback is a subroutine with an allocatable
+  `intent(out)` output array (owner ruling, 2026-11-22; binding policy, closure callbacks), never a function
+  returning an array of handles.
+
 ## Upstream numbers
 
 | Issue | Report | Filed by | Date |
@@ -90,3 +117,4 @@ and at `-O3`, the same output.
 | 2 | (pending) | | |
 | 3 | (pending) | | |
 | 4 | (pending a run with the PR 110626 fix) | | |
+| 5 | (pending) | | |

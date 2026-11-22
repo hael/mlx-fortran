@@ -169,13 +169,14 @@ written, the skill `mlxf-modern-fortran`.
   `%complex64`. The vocabularies (`MLX_DEVICES`, `MLX_DTYPES`) and `MLXF_HARD_ERROR_STATUS` are declared in
   `mlxf_defs` and reach users through `mlxf`. complex(real64) has no specific. Nothing converts silently except the scalar rule below.
 - On the CPU device MLX computes some float64 operations in float32 (at MLX v0.32.4: `exp`, `sin`, `cos` and
-  every FFT); tests hold them to float32 tolerances. A float64 operation built on the GPU stops (Metal has no
-  float64): a guard of `object_contracts`.
+  every FFT); tests hold them to float32 tolerances. CPU float64 `sqrt` meets the float64 bound
+  `1e-12 * max(1, abs(sqrt(x)))` against a double-precision reference. A float64 operation built on the
+  GPU stops (Metal has no float64): a guard of `object_contracts`.
 - **Scalar operands are weak**: a Fortran scalar takes the array's kind when the array is real or complex; a
   real scalar with a complex64 array becomes complex64; an integer or boolean array with a real scalar gives
-  float32. A real64 literal never makes a float64 graph. The operators take `real(real32)` scalars so far:
-  with a float64 array such a scalar is widened as Fortran widens a default real (0.1 becomes
-  0.100000001490116); `real64` scalar operands come with the operation that needs them.
+  float32. A real64 literal never makes a float64 graph. Arithmetic, comparisons and `max` accept real32 and real64 scalars on either side.
+  A real32 scalar widened for a float64 array retains its original real32 rounding; a real64 scalar is
+  rounded to the array kind. Integer and boolean arrays combined with real scalars produce float32.
 
 ## 6. Errors
 
@@ -232,9 +233,94 @@ written, the skill `mlxf-modern-fortran`.
 
 ## 9. Coming with later phases (the contract they keep)
 
-- **Graph compilation** (`mlx_function`, `mlx_compile(f, shapeless)`): a Fortran function of arrays as an
-  mlx-c closure through a `bind(c)` trampoline that never stops (it returns a status) and a payload holding a
-  procedure pointer. No `grad`, `vjp` or `vmap`.
 - **Custom Metal kernels** (`mlx_metal_kernel`): configured through a spec type (name, input and output
   names, source, header, grid, threadgroup, template arguments, output shapes in Fortran order), only for a
   measured bottleneck that ordinary or compiled operations cannot handle.
+
+
+## 10. Operations, matrices and Fourier transforms
+
+- Elementwise arithmetic includes division and unary minus; comparisons return boolean arrays, and
+  `.and.`, `.or.`, `.not.` operate on those arrays. `max(a,b)` and `merge(tsource,fsource,mask)` broadcast
+  with leading Fortran dimensions aligned. `exp`, `sqrt`, `real`, `aimag`, `conjg` and `mlx_astype(a,dtype)`
+  operate elementwise. `real(a)` extracts the float32 real component of complex64 and converts other
+  numeric arrays to default real (float32), including real64 input, as Fortran's intrinsic does;
+  `cmplx(x,y)` combines two real arrays into complex64 through `x + i*y`. Fortran-style component
+  construction is guaranteed for finite parts only: a non-finite imaginary part can introduce NaN into
+  the real part through `0*y`. Use `mlx_from` of a host complex array when its non-finite components
+  must be preserved.
+- `reshape(a,shape)` traverses the input in Fortran order, including a strided input. `transpose` swaps
+  dimensions 1 and 2 while preserving batch dimensions. `mlx_permute(a,order)` requires a permutation
+  of 1 through rank. `mlx_concatenate(arrays,dim)` takes a nonempty array of handles.
+- `mlx_slice(a,lower,upper[,stride])` takes one bound per dimension, inclusive and in range 1 through
+  extent; stride defaults to one and may be negative but never zero. Oppositely ordered bounds give
+  an empty slice. `mlx_take_along_dim(a,indices,dim)` takes int32/int64 one-based indices of compatible
+  rank and shape and shifts them inside the graph. It does not check index values for the Fortran
+  range: index 0 becomes MLX index -1 and wraps to the last element of the selected dimension.
+  Callers needing strict bounds must validate indices before constructing the graph.
+- `sum(a,dim)`, `minval(a,dim)`, `minloc(a,dim)` and `mlx_logsumexp(a,dim)` remove the selected dimension.
+  `minloc` returns one-based int32 positions, choosing the first equal minimum. `mlx_logsumexp` uses
+  MLX's stable reduction; its test bound is `1e-5 * max(1, abs(logsumexp(x)))`, in log units,
+  including CPU float64 (the exponential uses float32 precision). `mlx_cumsum(a,dim)` preserves shape and is forward and inclusive.
+- `mlx_zeros(shape[,dtype])` defaults to float32. `mlx_arange(start,stop[,step,dtype])` takes real64
+  scalar bounds, defaults to unit step and float32, and excludes `stop`; negative steps are supported.
+- `matmul(a,b)` multiplies Fortran dimensions 1 and 2 and broadcasts dimensions 3 and above. Complex
+  multiplication does not conjugate either operand; use `conjg` explicitly when needed.
+- `mlx_fft`, `mlx_ifft`, `mlx_rfft`, `mlx_irfft` take `(a,dim[,n,norm])`; `mlx_fft2` and `mlx_ifft2`
+  take `(a,dims[,n,norm])` with two dimensions and, when supplied, two lengths paired with those
+  dimensions. Explicit lengths truncate or zero-pad; omitted lengths use the input extents except
+  `irfft`, whose default is `2*(extent-1)` (pass `n` for an odd-length real output).
+- `MLX_FFT_NORMS%backward` is the default: the forward transform has negative exponent and no scale,
+  the inverse has positive exponent and scale `1/n` (the product of lengths in two dimensions).
+  `%forward` scales the forward transform instead; `%ortho` scales both by `1/sqrt(n)`.
+  Every FFT wrapper rejects a `norm` outside these three `MLX_FFT_NORMS` values before calling mlx-c.
+  `rfft` stores `floor(n/2)+1` complex values. MLX transforms use float32/complex64 even for CPU float64
+  input, so the FFT tests use the documented float32 norm bound against independent double DFTs.
+
+
+## 11. Fortran callbacks and graph compilation
+
+`f = mlx_function(callback)` (or `call f%new(callback)`) owns an mlx-c closure. Its callback is a
+checked Fortran subroutine:
+
+```fortran
+subroutine callback(inputs, outputs, status)
+    type(mlx_array), intent(in) :: inputs(:)
+    type(mlx_array), allocatable, intent(out) :: outputs(:)
+    integer, intent(out) :: status
+end subroutine callback
+```
+
+- On success, allocate `outputs`, assign its elements individually and set `status=0`. On failure,
+  return a nonzero status; outputs are discarded. A zero status with unallocated outputs or an empty/stale
+  output handle is converted to a failure. An allocated zero-length output list is distinct from an
+  unallocated list. Validate callback inputs before building a graph and use `status=` on checked calls;
+  callbacks must return errors rather than stop. The wrapper cannot intercept a user callback's `stop`
+  or a programming error in an unchecked graph-building operation.
+- `call f%apply(inputs,outputs[,status])` applies the closure. It replaces the caller's allocatable output
+  list, returns checked errors and publishes no outputs on failure. Without `status`, failure stops only
+  after the C call has returned. The callback and its captured host state must remain valid while any
+  function copy can call it; a module procedure is the normal choice. A callback may apply another
+  function with `status=` and propagate that status; the apply entry and C trampoline are recursive,
+  including during compiled tracing.
+- `g = mlx_compile(f[,shapeless])` builds a compiled closure. `shapeless` defaults to false; true permits
+  the same traced graph to serve different extents at the same rank/dtype. The callback must express
+  shape-independent graph operations for that use. Choose the device before tracing and use a separately
+  created function for each device. Compilation does not promise numerical equality across arbitrary
+  shape changes or fused floating-point expressions.
+- `f%trace_count()` counts callback invocations shared by copies and compiled derivatives of `f`.
+  Uncompiled applies also increment it. Taking the count difference around compiled calls measures tracing;
+  the two-tile test observes one trace per device. This is object state, not a global counter.
+- Function assignment retains the registered closure; `kill` is idempotent and finalization releases it.
+  The compiled closure keeps the callback payload alive after the original function is killed. The
+  existing registry also tracks closures, so `mlx_live_count()` includes both arrays and functions.
+  Assignment between empty functions, empty `kill` and empty finalization touch no shared state and
+  are safe inside an OpenMP region; they do not initialize the runtime. A live handle on either side
+  of assignment, or on release, still invokes the one-thread guard.
+  The unsupported bitwise-copy and temporary-result forms of section 3 also apply to function handles.
+- A checked subroutine avoids a GNU Fortran 16.2 use-after-free when an allocatable array function result
+  of a finalizable type is consumed as an actual argument: the compiler frees the result before invoking
+  its finalizer. `doc/compiler_issues/gfortran_finalize_allocatable_array_result.f90` reproduces that
+  independently of MLX and includes the passing explicit-output control. The owner approved this callback
+  interface on 2026-11-22.
+  No `grad`, `vjp` or `vmap` is wrapped.

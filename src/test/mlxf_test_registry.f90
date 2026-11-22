@@ -6,13 +6,17 @@
 module mlxf_test_registry
 use, intrinsic :: iso_fortran_env, only: real32, real64
 use mlxf,                 only: mlx_array, mlx_from, mlx_eval, mlx_live_count, mlx_last_error, mlx_set_default_device, &
-                                MLX_DEVICES, exp
+                                MLX_DEVICES, exp, mlx_fft, mlx_fft2
 use mlxf_array_tester,    only: run_all_array_tests
 use mlxf_device_tester,   only: run_all_device_tests
 use mlxf_error_tester,    only: run_all_error_tests, run_all_recovery_half_tests
 use mlxf_memory_tester,   only: run_all_memory_tests
 use mlxf_registry_tester, only: run_all_registry_tests
 use mlxf_version_tester,  only: run_all_version_tests
+use mlxf_ops_tester,      only: run_all_ops_tests
+use mlxf_linalg_tester,   only: run_all_linalg_tests
+use mlxf_fft_tester,      only: run_all_fft_tests
+use mlxf_compile_tester,  only: run_all_compile_tests
 use mlxf_test_utils,      only: begin_test_suite, end_test_suite
 implicit none
 private
@@ -24,7 +28,7 @@ abstract interface
     end subroutine tester_entry
 end interface
 
-character(len=*), parameter :: AREAS(2) = [character(len=16) :: 'core', 'array']
+character(len=*), parameter :: AREAS(6) = [character(len=16) :: 'core', 'array', 'ops', 'linalg', 'fft', 'compile']
 ! sub-suites an area runs only when suite= names them (too costly for the fast gate)
 character(len=*), parameter :: NAMED_ONLY(1) = [character(len=32) :: 'recovery_half']
 
@@ -33,7 +37,7 @@ type :: guard_member
     character(len=32) :: group = ''
 end type guard_member
 
-type(guard_member), parameter :: GUARDS(8) = [&
+type(guard_member), parameter :: GUARDS(10) = [&
     &guard_member('guard_empty_operation',   'object_contracts'), &
     &guard_member('guard_stale_handle',      'object_contracts'), &
     &guard_member('guard_openmp_region',     'object_contracts'), &
@@ -41,7 +45,9 @@ type(guard_member), parameter :: GUARDS(8) = [&
     &guard_member('guard_region_empty_eval', 'object_contracts'), &
     &guard_member('guard_region_live_count', 'object_contracts'), &
     &guard_member('guard_region_last_error', 'object_contracts'), &
-    &guard_member('guard_region_private',    'object_contracts')]
+    &guard_member('guard_region_private',    'object_contracts'), &
+    &guard_member('guard_fft_norm',          'object_contracts'), &
+    &guard_member('guard_fft2_norm',         'object_contracts')]
 
 contains
 
@@ -62,6 +68,14 @@ contains
                 call run_suite('recovery_half', run_all_recovery_half_tests, suite, ran)
             case('array')
                 call run_suite('array',    run_all_array_tests,    suite, ran)
+            case('ops')
+                call run_suite('ops', run_all_ops_tests, suite, ran)
+            case('linalg')
+                call run_suite('linalg', run_all_linalg_tests, suite, ran)
+            case('fft')
+                call run_suite('fft', run_all_fft_tests, suite, ran)
+            case('compile')
+                call run_suite('compile', run_all_compile_tests, suite, ran)
             case default
                 found = .false.
                 return
@@ -117,6 +131,10 @@ contains
         logical,          intent(out) :: found
         found = .true.
         select case( trim(name) )
+            case('guard_fft_norm')
+                call guard_fft_norm
+            case('guard_fft2_norm')
+                call guard_fft2_norm
             case('guard_empty_operation')
                 call guard_empty_operation
             case('guard_stale_handle')
@@ -139,6 +157,22 @@ contains
     end subroutine run_guard
 
     ! an operation on a declared, never-assigned mlx_array stops
+    ! a one-dimensional FFT with a normalisation outside MLX_FFT_NORMS stops
+    subroutine guard_fft_norm
+        type(mlx_array) :: a, r
+        write(*,'(a)') 'guard_fft_norm: invalid one-dimensional FFT normalization'
+        a = mlx_from([1._real32, 2._real32])
+        r = mlx_fft(a, 1, norm=-42)
+    end subroutine guard_fft_norm
+
+    ! a two-dimensional FFT with a normalisation outside MLX_FFT_NORMS stops
+    subroutine guard_fft2_norm
+        type(mlx_array) :: a, r
+        write(*,'(a)') 'guard_fft2_norm: invalid two-dimensional FFT normalization'
+        a = mlx_from(reshape([1._real32, 2._real32, 3._real32, 4._real32], [2, 2]))
+        r = mlx_fft2(a, [1, 2], norm=-42)
+    end subroutine guard_fft2_norm
+
     subroutine guard_empty_operation
         type(mlx_array) :: a, b
         write(*,'(A)') 'guard_empty_operation: exp of an empty mlx_array'

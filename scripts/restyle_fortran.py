@@ -4,6 +4,7 @@ and intent columns, named procedure ends) without changing a token. Lifted from 
 
     scripts/restyle_fortran.py FILE ...           rewrite in place
     scripts/restyle_fortran.py --check FILE ...   change nothing; exit 1 if a file would change
+    scripts/restyle_fortran.py --check --tree     the same over every .f90/.F90 under src/ and test/ (the static gate)
     scripts/restyle_fortran.py --ends-only FILE ... name the ends and touch nothing else
     scripts/restyle_fortran.py --case-indent FILE ... indent the arms of select blocks and touch nothing else
 
@@ -13,23 +14,29 @@ What it does, and nothing else:
     relational operators get a space on each side where one is missing
     (existing wider spacing - a hand-aligned column - is kept; `=` inside
     parentheses, the keyword-argument form, is left as written);
-  - `;` is followed by one space;
+  - `;` is followed by one space; `.not.` is followed by one space; a whitespace-only line is emptied;
+  - a procedure statement's dummy list has a blank inside each parenthesis: `name( a, b )`;
+  - procedures under `contains` (not interface bodies) are separated by one blank line, added where none is;
+    a module-level `contains` has a blank line on each side, and a module-level `end type` or `end interface`
+    one after it (except a type followed by a constant of that type);
   - a run of declarations at one indent has its attribute column and its `::`
     aligned; dummies and locals align apart; a line much wider than the rest
     stays out of the alignment so it cannot drag the column right. A run whose
     `::` already share a column is left as written, and a trailing comment
     keeps its column.
-It never joins, splits or moves a line, and never looks inside a string, a
+It never joins, splits or moves a line (the one addition is the blank line between procedures), and never
+looks inside a string, a
 comment, a `!$` line or a preprocessor line. The one re-indentation is
 --case-indent: `case` / `type is` / `class is` arms sit four columns inside
 their `select` (skill mlxf-modern-fortran), so a block whose arms are flush with it has its
 whole interior moved right by four.
 
-The proof, per file, before writing: line for line, the code with all
+The proof, per file, before writing: line for line over the non-blank lines, the code with all
 whitespace outside strings removed (and procedure-end names dropped) equals
-the original, and every comment is unchanged. Files are named explicitly;
-there is no tree-wide default.
+the original, and every comment is unchanged. Files are named explicitly, or
+--tree names every Fortran file under src/ and test/.
 """
+import os
 import re
 import statistics
 import sys
@@ -41,6 +48,7 @@ PROC = re.compile(
 END_PROC = re.compile(r'^(\s*end\s*(subroutine|function))\b\s*(\w*)\s*$', re.I)
 TYPE_DEF = re.compile(r'^\s*type\s*(,[^:]*)?::\s*(\w+)\s*$|^\s*type\s+(\w+)\s*$', re.I)
 END_TYPE = re.compile(r'^(\s*end\s*type)\b\s*(\w*)\s*$', re.I)
+IO_UNIT = re.compile(r'\b(write|read)\s*\([^,()]*,$', re.I)
 RELATIONAL = ('==', '/=', '<=', '>=', '=>', '<', '>')
 
 
@@ -70,9 +78,14 @@ def split_code(line, in_string=None):
     return segs, '', quote
 
 
-def space_operators(code, depth):
-    """one code segment with the missing operator spaces added; returns (text, depth)"""
+def space_operators(code, depth, more=False):
+    """one code segment with the missing operator spaces added; returns (text, depth). more: a string
+    segment follows, so a comma or an operator ending this segment is still followed by text"""
     out, i, n = '', 0, len(code)
+
+    def followed(k):
+        return (k < n and code[k] not in ' \t') or (k == n and more)
+
     while i < n:
         c = code[i]
         if c in '([':
@@ -83,15 +96,23 @@ def space_operators(code, depth):
             out += ','
             # (:,:) stays tight, the house form of an assumed-shape rank
             tight = out.rstrip().endswith(':,') and code[i + 1:i + 2] == ':'
-            if i + 1 < n and code[i + 1] not in ' \t' and not tight:
+            # write(unit,'(A)'): an I/O control list keeps its unit tight with its format
+            tight = tight or bool(IO_UNIT.search(out))
+            if followed(i + 1) and not tight:
                 out += ' '
             i += 1
             continue
         if c == ';':
             out += ';'
-            if i + 1 < n and code[i + 1] not in ' \t':
+            if followed(i + 1):
                 out += ' '
             i += 1
+            continue
+        if code[i:i + 5].lower() == '.not.':
+            out += code[i:i + 5]
+            i += 5
+            if followed(i):
+                out += ' '
             continue
         op = next((o for o in RELATIONAL if code.startswith(o, i)), None)
         if op is None and c == '=' and depth == 0:
@@ -107,7 +128,7 @@ def space_operators(code, depth):
             out += ' '
         out += op
         i += len(op)
-        if i < n and code[i] not in ' \t':
+        if followed(i):
             out += ' '
     return out, depth
 
@@ -125,11 +146,12 @@ def restyle_spacing(lines):
         if quote:
             raise SystemExit('a string continues across lines; not restyled')
         text = ''
-        for is_string, seg in segs:
+        for k, (is_string, seg) in enumerate(segs):
             if is_string:
                 text += seg
             else:
-                seg, depth = space_operators(seg, depth)
+                more = k + 1 < len(segs) and segs[k + 1][0]
+                seg, depth = space_operators(seg, depth, more)
                 text += seg
         continued = text.rstrip().endswith('&')
         out.append((text + comment).rstrip())
@@ -308,6 +330,89 @@ def align_declarations(lines):
     return out
 
 
+def space_dummy_lists(lines):
+    """name( a, b ) on procedure statements whose dummy list opens and closes on the line"""
+    out = []
+    for line in lines:
+        segs, comment = split_code(line)[:2]
+        if any(is_s for is_s, _ in segs):
+            out.append(line)
+            continue
+        code = ''.join(t for _, t in segs)
+        m = PROC.match(code)
+        if not m or code.lstrip().lower().startswith('end'):
+            out.append(line)
+            continue
+        k = m.end()
+        while k < len(code) and code[k] in ' \t':
+            k += 1
+        if k >= len(code) or code[k] != '(':
+            out.append(line)
+            continue
+        depth, j = 0, k
+        while j < len(code):
+            depth += {'(': 1, ')': -1}.get(code[j], 0)
+            if depth == 0:
+                break
+            j += 1
+        inner = code[k + 1:j]
+        if j >= len(code) or not inner.strip():
+            out.append(line)
+            continue
+        code = code[:k + 1] + ' ' + inner.strip() + ' ' + code[j:]
+        out.append(code + comment)
+    return out
+
+
+INTERFACE = re.compile(r'^\s*(abstract\s+)?interface\b', re.I)
+END_INTERFACE = re.compile(r'^\s*end\s*interface\b', re.I)
+AFTER_PROC = re.compile(r'^\s*(end\s*(module|submodule|program)\b|contains\b|#)', re.I)
+
+
+def separate_procedures(lines):
+    """one blank line after each procedure under contains that another statement or comment follows"""
+    out, in_interface = [], False
+    for k, line in enumerate(lines):
+        out.append(line)
+        flat = ''.join(t for is_s, t in split_code(line)[0] if not is_s)
+        if INTERFACE.match(flat):
+            in_interface = True
+        elif END_INTERFACE.match(flat):
+            in_interface = False
+        if in_interface or not END_PROC.match(flat.rstrip()) or k + 1 >= len(lines):
+            continue
+        following = lines[k + 1]
+        if following.strip() and not AFTER_PROC.match(following):
+            out.append('')
+    return out
+
+
+MODULE_CONTAINS = re.compile(r'^contains\s*$', re.I)
+MODULE_END_BLOCK = re.compile(r'^end\s*(interface\b|type\s+(\w+))', re.I)
+
+
+def separate_module_blocks(lines):
+    """the blank lines around a module-level contains and after a module-level type or interface block"""
+    out = []
+    for k, line in enumerate(lines):
+        following = lines[k + 1] if k + 1 < len(lines) else ''
+        if MODULE_CONTAINS.match(line):
+            if out and out[-1].strip():
+                out.append('')
+            out.append(line)
+            if following.strip():
+                out.append('')
+            continue
+        out.append(line)
+        m = MODULE_END_BLOCK.match(line)
+        if not m or not following.strip() or MODULE_CONTAINS.match(following):
+            continue
+        if m.group(2) and re.match(r'^\s*type\s*\(\s*' + m.group(2) + r'\s*\)', following, re.I):
+            continue
+        out.append('')
+    return out
+
+
 def proof_form(lines):
     form, quote = [], None
     for line in lines:
@@ -329,10 +434,14 @@ def restyle(text, ends_only=False, case_indent=False):
     elif ends_only:
         new = name_ends(lines)
     else:
-        new = align_declarations(name_ends(restyle_spacing(lines)))
-    if len(new) != len(lines) or proof_form(new) != proof_form(lines):
-        bad = [k + 1 for k, (a, b) in enumerate(zip(proof_form(lines), proof_form(new))) if a != b][:5]
-        raise SystemExit('internal error: tokens changed at lines ' + str(bad))
+        new = separate_module_blocks(separate_procedures(align_declarations(space_dummy_lists(
+            name_ends(restyle_spacing(lines))))))
+        new = [l if l.strip() else '' for l in new]
+    old_form = [f for f, l in zip(proof_form(lines), lines) if l.strip()]
+    new_form = [f for f, l in zip(proof_form(new), new) if l.strip()]
+    if old_form != new_form:
+        bad = [k + 1 for k, (a, b) in enumerate(zip(old_form, new_form)) if a != b][:5]
+        raise SystemExit('internal error: tokens changed at non-blank lines ' + str(bad))
     return '\n'.join(new)
 
 
@@ -341,6 +450,12 @@ def main(argv):
     ends_only = '--ends-only' in argv
     case_indent = '--case-indent' in argv
     files = [a for a in argv if not a.startswith('--')]
+    if '--tree' in argv:
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        files += sorted(os.path.relpath(os.path.join(d, f), root) for top in ('src', 'test')
+                        for d, _, names in os.walk(os.path.join(root, top))
+                        for f in names if f.endswith(('.f90', '.F90')))
+        os.chdir(root)
     if not files:
         raise SystemExit(__doc__)
     changed = 0

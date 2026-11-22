@@ -29,6 +29,14 @@ One test executable, `mlxf_test_exec`, built by every compile script unless it i
 `MLXF_CTEST_BUDGET` in `test/CMakeLists.txt` must equal the registered count or configuration fails; it
 changes only with an owner decision or a plan that names the new entry, recorded in `doc/history/`.
 
+The current process budget is **7**: areas `core`, `array`, `ops`, `linalg`, `fft`, `compile`, plus
+the `object_contracts` guard group (ten members, including invalid FFT normalizations). The compile suite also
+checks empty local handles in a two-thread OpenMP region; no live MLX work is submitted there. The operation areas compare both devices with independent Fortran
+references; `array` also runs 10,000 evaluated iterations per new operation family and checks exact
+active memory, live handles and stale releases. The compile area checks byte identity for exactly
+representable compiled/uncompiled arithmetic on each device, shapeless trace reuse and callback error
+recovery; the array area also runs 10,000 compiled calls and verifies complete closure teardown.
+
 ## 2. What a test is
 
 - It can fail, and its failure reaches the exit status (`mlxf_test_utils` assertions; `mlxf_test_exec`

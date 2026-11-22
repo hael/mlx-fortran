@@ -1,5 +1,10 @@
 # Three scientific examples for mlx-fortran
 
+Status, 2026-11-22 (after review): example 1 moved into milestone 1 (its decisions 15 to 18, Phase 5b),
+which delivers it; section 3 stays its design reference. This note is the design basis of milestone 2,
+examples 2 and 3 and the three tutorials, converted to plan form at the milestone-1 hold. The review
+(`mlxf_scientific_examples_review.md`) is applied below (decisions 9 to 11, and the marked passages).
+
 Status, 2026-11-22: design ready for review; implementation not started. Requested by Hans as a
 hermetic sandbox and public examples for the Apple Silicon GPU work. SIMPLE source pin:
 `7ec7e29720b3e57c2a56a6a7ab754e6f6c57fe35`. mlx-fortran source pin:
@@ -33,7 +38,8 @@ construction 34.96%/57.28%, and map selection/posterior reduction 10.38%/15.54%.
 must not be added to the containing refinement timer. NU filtering totals 463.56/291.71 elapsed seconds.
 Both runs use gridding; neither measures PCG. These profiles motivate scope, not GPU speedup promises.
 Their producing commit and machine are not recorded in the supplied files; they do not replace milestone
-1's pinned, same-machine production baseline. Local evidence: `~/for_claude/bench/{PorF,exp_gate}/BENCH`.
+1's pinned, same-machine production baseline. If Hans records them and they are at or after `7ec7e2972`,
+they can serve milestone 1's decision 5 (s and f) and decision 18 (the per-map CPU cost). Local evidence: `~/for_claude/bench/{PorF,exp_gate}/BENCH`.
 
 ## 2. Decisions and contract
 
@@ -64,6 +70,26 @@ Their producing commit and machine are not recorded in the supplied files; they 
    device memory and core count, and leaves no files. Use analytic inputs or a specified fixed integer
    sequence, not processor-dependent `random_number` sequences. Benchmarks alone may write requested TSVs.
 
+9. (2026-11-22, Hans) **Example 1 moves into milestone 1** (its decisions 15 to 18, Phase 5b, run
+   `mlxf_m1` on the M2 Ultra and measured on the M5 Ultra with the scoring verdict). Section 3 is the design
+   reference milestone 1 cites. This note's own phases are now examples 2 and 3 and the tutorials, and its
+   Phase 1 row is milestone 1's.
+10. (2026-11-22, review) **Scheduling.** Example work edits files milestone 1 creates or owns: the
+    `kernels` area, `src/test/mlxf_test_registry.f90`, `src/test/mlxf_test_defs.f90` and the polar
+    workspace. Under milestone 1's decision 6, a change its run did not make is a stop. So work on examples
+    2 and 3 starts after the milestone-1 hold, never while `mlxf_m1` or `mlxf_m1_m5` runs. Host-only
+    calculations outside the repository are not affected.
+11. (2026-11-22, review) **Stencil rounding in example 3.** SIMPLE's three-point Kaiser-Bessel kernel equals
+    I0(0) = 1 at its window edge, against 105 at its centre, so the interpolant jumps at half-integer
+    coordinates: 3e-3 to 1.3e-2 on a smooth field (*measured* in the review), far above the 1e-5 cap. This
+    is SIMPLE's behaviour, kept on purpose.
+    - Every sample coordinate of a fixture lies at least 1e-4 from a half-integer (*guessed*: above
+      float32 coordinate error at |t| ≤ 12), asserted on the host. The explicit boundary queries are the
+      only exception, and they use exactly representable half-integers.
+    - The device computes the stencil base as `sign(t) * floor(abs(t) + 0.5)`, Fortran's `nint` rule,
+      never a half-to-even `round`.
+    - A convention test pins ±0.5, ±1.5 and ±2.5.
+
 Defaults taken without a question: example names, fixture dimensions, provisional error caps, proposed
 sub-suite names and the order below. No existing milestone-1 acceptance rule is replaced.
 
@@ -72,6 +98,8 @@ library. Fresh implementations of the equations belong to mlx-fortran; source li
 references, not an instruction to copy SIMPLE's modules or test harness into the public library.
 
 ## 3. Example 1: polar matching and shift maps
+
+Delivered by milestone 1 (decisions 15 to 18, Phase 5b). This section is the design reference it cites.
 
 ### Fixture and mathematical contract
 
@@ -146,7 +174,9 @@ do not substitute an MLX RNG or promise GPU/CPU equality for draws arbitrarily c
 - All distance rows and all small shiftmaps match direct residuals; the zero-radius map is the dense
   unshifted row and is independent of shift direction. Compare intermediate contractions as well as poses.
 - The noise-free case recovers its known pose when the independent best/second-best margin exceeds twice
-  the error bound. Flat/tied rows use the first Fortran-order position, explicitly tested separately.
+  the error bound. Flat/tied rows use the first Fortran-order position, explicitly tested separately. A map
+  of more than one dimension is flattened with the library's Fortran-order `reshape` first, since MLX's
+  arg-minimum follows row-major order; MLX's tie rule on the GPU is established by the test, not assumed.
 - The alternating Nyquist ring has loss 0 at identity and 4 after one angular step (unit CTF, equal rings).
   A second case uses `Nrot=8`, box 16, shells 1:3, radii `[0,4,8]`, and
   `Nalpha=7`, with the tail rule requiring orders beyond both FFT axes, to catch omitted folding.
@@ -247,7 +277,8 @@ case and explicit boundary queries as separate assertions.
 
 SIMPLE's polar sample coordinates are `(k*sin(theta), -k*cos(theta), 0)`. Row vectors multiply R on the
 right, and padded coordinates are twice that result. For a coordinate t on each axis, choose
-`nint(t)+[-1,0,1]` (Fortran's half-away-from-zero rule). Compute separable three-point Kaiser-Bessel
+`nint(t)+[-1,0,1]` (Fortran's half-away-from-zero rule; decision 11 gives the device form and the fixture
+margin, as the kernel is discontinuous at half-integers). Compute separable three-point Kaiser-Bessel
 weights, normalized to sum to one **on each axis**:
 
 ```
@@ -294,7 +325,8 @@ forward gather can be completed and benchmarked before scatter is implemented.
 
 All fixture sizes above are design choices, not measured optimum sizes. Before the first GPU judgment,
 run each reference against a closed form or independent construction, then the unfused CPU-device
-implementation twice, and freeze named tolerances in the existing `mlxf_test_defs`. The existing polar
+implementation twice, and freeze named tolerances in `src/test/mlxf_test_defs.f90` (created by milestone 1's
+Phase 4). The existing polar
 calibration remains authoritative. Initial caps for the **new** cases are below; they are provisional,
 not results. A cap that cannot survive an unchanged CPU reference is a finding, not permission to widen it.
 
@@ -338,15 +370,21 @@ and `bench_fourier_projection`. Reuse milestone 1's dispatcher. No three extra d
 
 | Phase | Work and exit | Kind |
 | --- | --- | --- |
-| 0 | Pin the implementation tree after the milestone-1 work settles; Debug/Release baseline gates, source-reference check, oracle dry runs and CPU calibration. Record unmet primitives rather than calling them available. Exit: fixtures, negative controls and tolerance records are reviewable; no GPU result claimed. | Reference/tests |
-| 1 | Reuse delivered polar_table, add shiftmap construction against the full direct grid, then mode/width/evidence. Exit: both devices, layout/tail/half/lifetime cases and frozen numerical gates pass. | Test kernels plus required general operations |
+| 0 | Pin the implementation tree after the milestone-1 hold (decision 10); Debug/Release baseline gates, source-reference check, oracle dry runs and CPU calibration. Record unmet primitives rather than calling them available. Exit: fixtures, negative controls and tolerance records are reviewable; no GPU result claimed. | Reference/tests |
+| 1 | Moved to milestone 1, Phase 5b (decision 9). | - |
 | 2 | Build the reprojection gather, host G and padding/Hermitian tests. It can proceed after indexing/FFT primitives, independently of the volume solve. Exit: forward oracle and controls pass; preparation and resident timings separated. | Test kernel/general operations |
 | 3 | Add spectral filter bank/composition, then stencil-backed H and PCG. Exit: analytic attenuation, explicit matrix, Cholesky, true residual and termination gates pass on both devices. | Test kernels/general operations |
 | 4 | Add adjoint/scatter, density and packed-half duality tests. Exit: matrix and adjoint gates pass; collision and repeatability results recorded without a deterministic-scatter claim. | Test kernel/general operations |
 | 5 | Publish three tutorials pointing to the actual source and test commands; run benchmarks at bounded sizes. Exit: clean Debug/Release gates, public-API-only examples and measured results; no production SIMPLE changes. | Documentation/measurement |
 
-Primitive requirements beyond milestone 1: 2D/3D complex and real FFTs with explicit dimensions/norm;
-indexed gather and scatter-add; elementary functions/minimum-position operations needed by these formulas.
+Primitive requirements beyond milestone 1, per phase (milestone 1 delivers the real and complex FFTs along
+one and two dimensions, `mlx_logsumexp`, `minloc` and `sqrt`):
+
+- **Phase 2 (reprojection gather):** `floor`, `abs` and `sign` for the stencil base (decision 11); a gather
+  (`mlx_take` and its siblings) with 1-based indices; the 3D real FFT.
+- **Phase 3 (spectral volume):** the 3D real and complex FFTs and their inverses over given dimensions.
+- **Phase 4 (adjoint):** `mlx_scatter_add` (complex64 and float32), with its collision and repeatability
+  measurement.
 Use mlx-c's existing FFT and indexing interfaces, with Fortran dimension/index translation in the wrapper.
 Add a wrapper only when its phase needs it, together with its area test. There is no need for autodiff,
 neural-network layers, a GPU Bessel function or an MLX-provided PCG solver.
@@ -359,13 +397,12 @@ gather/scatter. Availability upstream is not availability in the present Fortran
 
 | File | Responsibility | Phase |
 | --- | --- | --- |
-| `src/test/mlxf_kernel_polar_table*.f90` | Existing milestone-1 owner and fixture; extend with candidate shiftmap workspace, not another scorer | 1 |
-| `src/test/mlxf_polar_shiftmap_tester.f90` | Direct angular oracle, physical moments and failure controls | 0,1 |
-| `src/test/mlxf_kernel_spectral_volume.f90`, `mlxf_spectral_volume_tester.f90` | Filter bank, PCG example, scalar formulas and explicit stencil/Cholesky reference | 0,3 |
-| `src/test/mlxf_kernel_fourier_projection.f90`, `mlxf_fourier_projection_tester.f90` | Forward/adjoint, independent G, Hermitian and scale tests | 0,2,4 |
+| `src/test/mlxf_kernel_polar_table_shiftmap.f90` and its tester | Example 1: owned by milestone 1 (Phase 5b); listed here for the tutorial only | - |
+| `src/test/mlxf_kernel_spectral_volume.f90`, `mlxf_kernel_spectral_volume_tester.f90` | Filter bank, PCG example, scalar formulas and explicit stencil/Cholesky reference | 0,3 |
+| `src/test/mlxf_kernel_fourier_projection.f90`, `mlxf_kernel_fourier_projection_tester.f90` | Forward/adjoint, independent G, Hermitian and scale tests | 0,2,4 |
 | `src/test/mlxf_test_dft.f90` | Shared host real64/complex(real64) DFT reference, only when the second consumer exists | 0-3 |
 | `src/test/mlxf_test_defs.f90`, `mlxf_test_registry.f90` | Frozen constants and sub-suite/benchmark registration | 0-4 |
-| `src/test/mlxf_bench_polar_table.f90`, `mlxf_bench_spectral_volume.f90`, `mlxf_bench_fourier_projection.f90` | Measure-only entries using the tested kernels | 1-5 |
+| `src/test/mlxf_bench_spectral_volume.f90`, `mlxf_bench_fourier_projection.f90` | Measure-only entries using the tested kernels (`bench_polar_table` and its `shiftmap` mode are milestone 1's) | 2-5 |
 | `src/core/fft/`, `src/core/ops/` and their area testers | Only the generic operations a phase actually needs, after milestone 1 creates these owners | 1-4 |
 | `src/core/array/` helper interfaces/submodules, `src/core/mlxf.f90`, `src/defs/mlxf_defs.f90` | Signature-class helpers and public exports/constants as needed; no ownership-model redesign | 1-4 |
 | `doc/user/examples/{polar_matching,spectral_volume,fourier_projection}.md` | Three tutorials with equations, runnable commands, interpretation and scale-up instructions | 5 |
@@ -419,3 +456,20 @@ Documentation validation: all 19 referenced SIMPLE source files and the relative
 Markdown fences and whitespace checked; `git diff --check` and mlx-fortran's `scripts/check_tree.sh`
 passed. The pre-existing history text was preserved exactly. SIMPLE remained clean. No compilation was
 needed for this documentation-only change; Debug/Release and device gates remain implementation exits.
+
+2026-11-22, review and integration (interactive):
+- The review `mlxf_scientific_examples_review.md` checked the derivations numerically and found them sound.
+  It also checked the SIMPLE conventions at `7ec7e2972` and found them faithful.
+- On Hans's ruling, example 1 moved into milestone 1 (decision 9 here; decisions 15 to 18 and Phase 5b
+  there).
+- Applied here from the review:
+  - the scheduling rule (decision 10);
+  - the stencil rounding and fixture margin (decision 11);
+  - the primitive list per phase;
+  - tester names that sit beside their modules;
+  - the Fortran-order arg-minimum note;
+  - the home of the frozen tolerances;
+  - the use of the PorF and exp_gate profiles once their commit is recorded.
+- Still open: the dry-run evidence in `/private/tmp` on the Mac is cleared by a reboot. Copy
+  `check_mlxf_toy_design.py` and its log to `~/agent_work/` or into the repository. The plan-form
+  conversion (pinned base, change type per phase, stop list, gates no ruling may waive) happens at the hold.

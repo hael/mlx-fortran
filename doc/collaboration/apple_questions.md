@@ -163,9 +163,33 @@ layout does 2.9 million pairs per second on 24 cores; the target machine is an M
     - Ask: which tools do you use to profile MLX on the M5 (Metal System Trace, `mlx_metal_start_capture`
       traces), and is there a way to attribute GPU time to the operations of a graph without Xcode?
 
+## G. FFT defaults across the interfaces
+
+19. **FFT length defaults in mlx-c and the Python `irfft` documentation.** Status: open; observed
+    2026-11-22 with mlx-c 0.8.0 / MLX 0.32.4.
+    - Ask: should mlx-c offer an optional-length form matching Python's `n=None`, or explicitly document
+      that its integer `n` must be a positive resolved length? Passing `n=-1` to `mlx_fft_fft` returns
+      "Invalid FFT output size requested (-1)". Python's binding dispatches `None` to the C++ overload
+      that infers the extent; there is no documented `-1` sentinel for `n` (the `-1` default is the axis).
+    - The published [FFT reference](https://ml-explore.github.io/mlx/build/html/python/_autosummary/mlx.core.fft.fft.html)
+      describes the input extent as its default. The published
+      [IRFFT reference](https://ml-explore.github.io/mlx/build/html/python/_autosummary/mlx.core.fft.irfft.html)
+      instead lists `a.shape[axis] // 2 + 1` as the default output length. The local C++ inference in
+      `mlx/fft.cpp` computes `2*(extent-1)`, reached by Python's `n=None` branch in `python/src/fft.cpp`.
+      Can that IRFFT documentation be corrected?
+    - Meanwhile: mlx-fortran resolves omitted lengths before calling C: the input extent for FFT/IFFT/RFFT,
+      `2*(extent-1)` for IRFFT, explicit `n` for an odd real output. Independent DFT tests assert those
+      conventions on both devices. The original `-1` assumption was our wrapper error, not an MLX defect.
+
 ## For information (not Apple's to fix)
 
 - gfortran mis-finalizes derived types in four patterns (allocatable components with defined assignment,
   function results in array constructors, scalar results assigned to whole arrays, self-assignment of types
   with finalizable components); reproducers are in `doc/compiler_issues/`. Any Fortran binding with
   reference-counted handles meets them; our API avoids the patterns, and we report them to GCC.
+
+- A fifth pattern was isolated on 2026-11-22: an allocatable array function result of a finalizable type,
+  used as an actual argument, is freed before finalization (AddressSanitizer heap-use-after-free).
+  `doc/compiler_issues/gfortran_finalize_allocatable_array_result.f90` (issue 5 of its README) has the
+  standalone reproducer and the passing explicit-output subroutine control. The owner approved checked subroutine callbacks for mlx-fortran; no upstream report
+  has been filed by this work.

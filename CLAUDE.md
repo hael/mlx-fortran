@@ -34,9 +34,11 @@ Skills live in `.claude/skills/` (a symlink to `.github/skills/`, shared with Co
 - `src/defs/`: `mlxf_defs`, the constants and vocabularies more than one module uses (`MLXF_HARD_ERROR_STATUS`,
   `MLX_DEVICES`, `MLX_DTYPES`): exported = defs, local = stay.
 - `src/core/`: the hand-written Fortran layer and its testers, in capability folders of one library target:
-  `runtime/` (libc, errors, registry, devices, memory, version) and `array/` (`mlxf_array`: the type and its
-  interfaces, implemented by submodules for lifetime, transfer, borrowing, evaluation and elementwise
-  operations); `mlxf.f90`, the user module, is the only module file installed.
+  `runtime/` (libc, errors, registry, devices, memory, version); `array/` (`mlxf_array` and submodules for
+  lifetime, transfer, borrowing, evaluation, operators, signature helpers and closure vectors); `ops/`
+  (elementwise, shape, index, reduction and scan operations); `linalg/` (batched matrix multiplication);
+  `fft/` (real and complex 1D/2D transforms); `compile/` (owned Fortran callbacks and graph compilation).
+  `mlxf.f90`, the user module, is the only module file installed.
 - `src/test/`: test-only code (assertions, the suite registry, SIMPLE-shaped kernels and benchmarks).
   It and every `*_tester.f90` compile into `mlxf_test_exec`, never into the library.
 - `test/`: `mlxf_test_exec`, the one test executable, and the CTest entries with their budget.

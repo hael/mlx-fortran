@@ -1,1 +1,1 @@
-!@descr: the hand-written Fortran layer of mlx-fortran: the user module mlxf, with array/ and runtime/ beneath it
+!@descr: the hand-written Fortran layer: mlxf with runtime/, array/, ops/, linalg/, fft/ and compile/ capability folders

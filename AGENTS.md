@@ -17,6 +17,16 @@ at the same sources.
    `doc/implementation_notes/completed/mlxf_design.md` that it cites by number. To add a wrapper of an MLX
    operation, read `.github/skills/mlxf-binding/SKILL.md`.
 
+## Structure
+
+- `src/defs/`: shared constants, vocabularies and behaviourless operation requests.
+- `src/core/`: one library target with `runtime/`, `array/`, `ops/`, `linalg/`, `fft/` and `compile/`.
+  `array/` owns handles and C-signature helpers; `ops/` owns elementwise, shape and reduction wrappers;
+  `linalg/` owns matrix multiplication; `fft/` owns transforms; `compile/` owns callbacks and compilation.
+  `src/core/mlxf.f90` is the sole user re-export module and the only installed module file.
+- `src/test/` and the capability folders' `*_tester.f90` files build only into `test/mlxf_test_exec.f90`,
+  the single test executable; `test/CMakeLists.txt` owns its process budget.
+
 ## Git
 
 Git is read-only: only `log`, `status`, `diff`, `show`, `ls-files`, `grep`, `blame`, with

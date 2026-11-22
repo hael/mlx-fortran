@@ -49,7 +49,10 @@ endfunction()
 #   (64.9 GB on a 192 GB M2 Ultra), is the sub-suite recovery_half, run by name only.
 # unit_array (above 0.5 s, the area named by the design plan): its leak gate runs 10,000 iterations of every
 #   supported form of the handle model per device.
-set(MLXF_TEST_AREAS core array)
+# ops, linalg and fft isolate the operation families and run independent CPU/GPU oracles.
+# compile isolates callback tracing, checked callback failures and shapeless reuse on both devices.
+# Cold CPU/GPU JIT compilation can put it above 0.5 s; cached invocations are much shorter.
+set(MLXF_TEST_AREAS core array ops linalg fft compile)
 foreach(_area IN LISTS MLXF_TEST_AREAS)
     mlxf_add_test(unit_${_area} fast 600 COMMAND $<TARGET_FILE:mlxf_test_exec> test=unit_${_area})
 endforeach()
@@ -58,11 +61,11 @@ endforeach()
 # object_contracts: an operation on an empty array, a stale handle used, a call inside an OpenMP region, a
 #   float64 operation built on the GPU, and the one-thread guard on the paths that touch no operand (an empty
 #   evaluation list, mlx_live_count, mlx_last_error) and on a live private copy released in a region; a
-#   separate entry because every member ends its process.
+#   invalid 1D/2D FFT normalizations; a separate entry because every member ends its process.
 mlxf_add_test(object_contracts fast 600 COMMAND $<TARGET_FILE:mlxf_test_exec> expect_aborts object_contracts)
 
 # ---- the budget ----------------------------------------------------------------------------------
-set(MLXF_CTEST_BUDGET 3)
+set(MLXF_CTEST_BUDGET 7)
 get_property(_mlxf_tests DIRECTORY PROPERTY TESTS)
 list(LENGTH _mlxf_tests _mlxf_ntests)
 if(NOT _mlxf_ntests EQUAL MLXF_CTEST_BUDGET)

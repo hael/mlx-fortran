@@ -1,6 +1,6 @@
 ---
 name: mlxf-modern-fortran
-description: Use when editing mlx-fortran's Fortran code (src/, test/): the house layout and visibility rules (taken from SIMPLE and XEMA), use-block form, naming, lifecycle, finalizers and the handle-copy restriction, C interoperability with mlx-c (bind(c) interfaces, handles by value, pointer views, callbacks that never stop), errors and the hard-error status, real comparisons, the traps that have bitten, compile-time rules, comments, threading, warnings, and the scripts that check all of it before handover.
+description: "Use when editing mlx-fortran's Fortran code (src/, test/): the house layout and visibility rules (taken from SIMPLE and XEMA), use-block form, naming, lifecycle, finalizers and the handle-copy restriction, C interoperability with mlx-c (bind(c) interfaces, handles by value, pointer views, callbacks that never stop), errors and the hard-error status, real comparisons, the traps that have bitten, compile-time rules, comments, threading, warnings, and the scripts that check all of it before handover."
 ---
 
 # Modern Fortran in mlx-fortran
@@ -12,6 +12,17 @@ holds is `doc/architecture_principles.md`; `scripts/check_tree.sh` checks what r
 
 - `use`, `implicit none`, the `public ::` block, `private` and module-level declarations sit flush left;
   only bodies under `contains` are indented, by four; inside a derived type `contains` is indented by two.
+- Separate implementation procedures under `contains` with one blank line; put one on each side of a
+  module-level `contains` and after a module-level type or interface block. Keep a type's following
+  constant declaration together with that type. Do not insert procedure separators between interface bodies.
+- Pad the dummy list in **subroutine/function declarations**, including interface bodies:
+  `subroutine apply( self, inputs, outputs, status )` and `function make( x ) result(r)`.
+  Calls keep their own form: `call apply(self, inputs, outputs, status=st)`; empty lists stay `()`.
+- Write `.not. x` and put a space after commas, including before a quoted argument:
+  `call mlxf_fail(proc, 'message')`. Preserve the tight I/O unit/format separator `write(u,'(A)')`
+  and assumed-shape declaration `(:,:)`. Blank lines contain no whitespace.
+- The full `restyle_fortran.py` pass handles these forms. The static gate checks the layout of all
+  Fortran files under `src/` and `test/` with `--check --tree`.
 - `if( cond )then` / `endif`, `end do`; `select` arms (`case`, `type is`, `class is`, `class default`) sit
   four columns inside the `select`, their bodies four more; `end type`, `end subroutine`, `end function`
   carry their names.
@@ -26,9 +37,13 @@ holds is `doc/architecture_principles.md`; `scripts/check_tree.sh` checks what r
   (SIMPLE's `opt_spec`). Exempt: the generated interfaces and `bind(c)` procedures whose signature C fixes.
 - **List arguments are arrays of handles** (`type(mlx_array), intent(in) :: arrays(:)`), never lists of
   optional arguments.
-- Before handover, on every file you touched (never tree-wide):
-  `python3 scripts/restyle_fortran.py FILE...` (token-proof; `--check`, `--case-indent`, `--ends-only`) and
-  `python3 scripts/format_use_blocks.py FILE...` (`--check`). Then `scripts/check_tree.sh`.
+- After the last Fortran edit, run `python3 scripts/restyle_fortran.py FILE...` and
+  `python3 scripts/format_use_blocks.py FILE...` on every touched file, including new/untracked files,
+  parent interfaces, submodules and testers. Use the full restyle pass: `--ends-only` and `--case-indent`
+  are limited repairs, not substitutes. Then run `scripts/check_tree.sh`, which checks both formatters
+  tree-wide without rewriting. Review the resulting diff against these conventions; a formatter pass
+  does not replace that review. Recheck after any later edit. Rewrite only touched files, never the
+  whole tree to clear an unrelated formatting finding.
 
 ## Modules and visibility
 

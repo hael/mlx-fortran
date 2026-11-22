@@ -1,6 +1,5 @@
 !@descr: evaluation: mlx_eval, mlx_async_eval, mlx_synchronize
 submodule (mlxf_array) mlxf_array_evaluation
-use mlxf_c_types,      only: mlxc_vector_array
 use mlxf_c_array,      only: mlxc_array_eval
 use mlxf_c_transforms, only: mlxc_eval, mlxc_async_eval
 use mlxf_c_vector,     only: mlxc_vector_array_new_data, mlxc_vector_array_free
@@ -53,7 +52,7 @@ contains
         call mlxf_check(ierr, 'mlx_async_eval', status)
     end subroutine async_eval_list
 
-    function vector_of( arrays, proc ) result(v)
+    module function vector_of( arrays, proc ) result(v)
         type(mlx_array),  intent(in) :: arrays(:)
         character(len=*), intent(in) :: proc
         type(mlxc_vector_array)       :: v

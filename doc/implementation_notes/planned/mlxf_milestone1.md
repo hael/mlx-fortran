@@ -1,15 +1,24 @@
-# mlx-fortran milestone 1: the Phase 1 follow-ups and the tiled polar pipeline
+# mlx-fortran milestone 1: the Phase 1 follow-ups, the tiled polar pipeline and the shift maps
 
-Status, 2026-11-22: planned, not launched. Decisions 3 to 7 ruled by Hans on 2026-11-22 as recommended.
-Phase 1 is being carried out interactively before launch (Progress); run `mlxf_m1` then starts with Phase 0
-and skips Phase 1. Base: the maintainer's commit of the working tree on top of `0d3537b`, which holds the
+Status, 2026-11-22: planned, not launched. Decisions 3 to 7 ruled by Hans on 2026-11-22 as recommended;
+widened the same day by decision 15 (the shift maps of the scientific examples' example 1, Phase 5b), and
+by decisions 19 and 20 (SIMPLE's matching shift-map benchmark; Phases 1 to 3 done interactively).
+Phases 1 to 3 are complete, done interactively (Progress; decision 20), and were reviewed on 2026-11-22. Run
+`mlxf_m1` starts at Phase 0 on the maintainer's commit of that work, with the SIMPLE pin of decision 19.
+Decision 21 records the callback ruling of Phase 3. Base: the maintainer's commit of the working tree on top of `0d3537b`, which holds the
 `findpkg` change and the split of the design plan. That commit is a launch precondition, and the run records
 its hash. Supersedes: Phases 2 to 6 of `doc/implementation_notes/completed/mlxf_design.md` ("the design
 plan" below). Depends on: the handle model and the core (validated: yes, the design plan's Phase 1, commit
 `0d3537b`); mlx-c 0.8.0 with MLX 0.32.4 as shared libraries from Homebrew (validated: yes, M2 Ultra);
 SIMPLE's production block scorer `polarft_calc%score_block_posterior` at SIMPLE
 `7ec7e29720b3e57c2a56a6a7ab754e6f6c57fe35` (validated: source read on 2026-11-21 for design decision 42;
-not built or measured on a Mac yet; Phase 0 does both); the M5 Ultra (delivery expected 2026-11-25; not
+not built or measured on a Mac yet; Phase 0 does both); SIMPLE's `polar_matching_bench suite=shiftmap`
+(decision 19; written 2026-11-22 on top of `7ec7e2972`; built and smoke-run by Hans the same day at 200
+directions, 64 particles and 4 threads, both maps 0 differing between teams; Hans's commit of it is "the SIMPLE
+pin" below. Its production code equals `7ec7e2972`'s except that `stage_trslim` became public and the
+shift map's width loop reads a per-map table of the grid's shifts instead of calling `shiftmap_shift` per
+cell and rotation. That change is byte-identical on both maps (`cmp` of the dumps below, Hans, 2026-11-22)
+and cuts the width reduction by 37 to 42 %); the M5 Ultra (delivery expected 2026-11-25; not
 validated).
 
 ## 1. Why
@@ -21,6 +30,12 @@ integration plan is worth writing (design decision 32). That pipeline is the sco
 table fill. The CPU comparator is SIMPLE's production block scorer: per SIMPLE's report on the Dell, dense
 scoring there costs 0.38 to 0.40 of the previous route and a whole bgal run is about 9 % shorter. These are
 *reported* CPU numbers, not Mac or GPU measurements.
+
+Scoring is not the largest part of the fill. In the two production profiles Hans supplied (PorF and
+exp_gate, `~/for_claude/bench/{PorF,exp_gate}/BENCH`; commit and machine not recorded), dense scoring is
+14.5 % and 8.5 % of the fill's thread-seconds, and building the polar shift maps is 35 % and 57 %. Proving
+the binding on scoring alone would leave the larger share unmeasured, so the shift maps join this
+milestone (decision 15) and the M5 Ultra session measures both.
 
 The Phase 1 run also left open items for the maintainer. One of them is a cost: the recovery gate allocates
 64.9 GB per device in every fast gate, 7.5 s of `unit_core`'s 7.8 s on the M2 Ultra (*measured*), and the
@@ -46,7 +61,8 @@ for the contract:
 ### Invariants
 
 - **A library, not a port.** No SIMPLE source, type, constant or name enters the library. SIMPLE's kernel
-  lives in test-only code that is never installed (design decision 25). SIMPLE is read-only.
+  lives in test-only code that is never installed (design decision 25). SIMPLE is read-only to the runs;
+  its benchmark driver was extended before launch (decision 19).
 - **Fortran's view.** Column-major arrays and 1-based dimensions, indices and positions. Every new operation
   translates them, and its tester asserts the translation (policy, sections on memory order and indices).
 - **Off state.** A program that links the library and calls nothing pays nothing. Every new public
@@ -82,8 +98,18 @@ for the contract:
   reproduced locally under `sandbox-exec` on 2026-11-21 (history). A run on GitHub's runners is not recorded.
 - `scripts/check_rules.py` has the `findpkg` rule, and `cmake/Dependencies.cmake` reports a missing mlx-c,
   OpenMP or Python itself. Both are uncommitted on 2026-11-22 and part of the base once committed.
-- SIMPLE could not be read from the session that wrote this plan. The SIMPLE facts below are design decision
-  42's, read at `7ec7e2972` on 2026-11-21, and Phase 0 checks them again.
+- SIMPLE could not be read from the session that wrote this plan at first. The scoring facts below are
+  design decision 42's, read at `7ec7e2972` on 2026-11-21, and Phase 0 checks them again.
+- For decision 15, SIMPLE was read at `7ec7e2972` on 2026-11-22 (the checkout had no later commit):
+  - `simple_polarft_shiftmap.f90` builds a map as decision 15 describes.
+  - `setup_shiftmaps` sets the production grid (decision 18).
+  - `prob_fill_profile` (`simple_eul_prob_tab_utils.f90`) records the maps' construction, selection and
+    reduction thread-seconds, counts and geometry in BENCH files.
+  - `polar_matching_bench` timed no maps at `7ec7e2972`; its `fills` suite runs the dense route with the
+    shift map on (`PMB_TRS` = 3 pixels) but writes no fill profile. Decision 19 adds `suite=shiftmap`.
+  - The test executable fixes a process-wide seed (`fix_test_seed`, propagated through `SIMPLE_SEED`), so
+    the calculator's FFTW plans are `FFTW_ESTIMATE` in every `polar_matching_bench` suite, `block_prod`
+    included, where production plans with `FFTW_MEASURE`.
 
 ## 3. Decisions and rulings
 
@@ -92,7 +118,7 @@ Numbered, dated, never renumbered. "Design decision N" is decision N of the desi
 1. (2026-11-22, Hans) **Scope.** This plan closes the Phase 1 follow-ups (its Phase 1) and then delivers
    milestone 1: the operations, compilation, the polar pipeline, its benchmark and the verdict (Phases 2 to
    7). It ends at the hold of design decision 32. What comes after is section 9's roadmap, rewritten into a
-   plan of its own after that hold.
+   plan of its own after that hold. Widened by decision 15: the shift maps (Phase 5b).
 2. (2026-11-22) **Which design decisions bind.** For the contract, the binding policy is the truth (design
    decisions 6 to 18, 29, 30 and 39 live there).
    - *Still binding:* design decisions 1 to 5, 19, 20 as revised by 42, 24, 25, 26 as revised by 42, 27, 29,
@@ -127,7 +153,8 @@ Numbered, dated, never renumbered. "Design decision N" is decision N of the desi
    `1 / (1 - s*f + s*f/g)` as a function of s and f (design decision 42.6). The BENCH run of design
    decision 28 (f = 0.23, s = 0.37) predates the production scorer and is context only.
 6. (2026-11-22, Hans: ruled as recommended) **Two runs.**
-   - Run `mlxf_m1` covers Phases 0 to 5 on the M2 Ultra (FWM-S116118), unattended (arun).
+   - Run `mlxf_m1` covers Phase 0 and Phases 4 to 5b on the M2 Ultra (FWM-S116118), unattended (arun).
+     Phases 1 to 3 are done interactively before it (decision 20).
    - Run `mlxf_m1_m5` covers Phases 6 and 7 on the M5 Ultra once it is set up: Homebrew GCC 16, CMake and
      mlx-c, and SIMPLE `7ec7e2972`'s build dependencies.
    - Between the runs Hans reviews and commits. That commit is Phase 6's base, and no edit reaches the
@@ -135,7 +162,7 @@ Numbered, dated, never renumbered. "Design decision N" is decision N of the desi
      `git --no-optional-locks status --short` at the start of every phase. A change it did not make is a
      stop.
    - Each run reads its rulings from arun's rulings file in the run's folder, as `mlxf_core` did.
-   - If the M5 Ultra is not ready when Phase 5 ends, run `mlxf_m1` ends with Phase 5 complete, and Phase 6
+   - If the M5 Ultra is not ready when Phase 5b ends, run `mlxf_m1` ends with Phase 5b complete, and Phase 6
      waits.
 7. (2026-11-22, Hans: confirmed) **Rule `ctorexpr`, and `ctorcall` narrowed**, in `scripts/check_rules.py`.
    - *Handle names.* A file's handle names are every name declared `type(mlx_array)` or `class(mlx_array)`
@@ -190,7 +217,8 @@ Numbered, dated, never renumbered. "Design decision N" is decision N of the desi
       `mlxf_array`'s generics, implemented in `mlxf_array_elementwise`.
 11. (2026-11-22) **CTest.** Phase 2 adds areas `ops`, `linalg` and `fft`; Phase 3 adds `compile`; Phase 4
     adds `kernels` after the calibration entry. The budget goes from 3 to 8 (design decision 37). No new
-    guard group. A new stop of the contract, if any, joins `object_contracts` as a member.
+    guard group. A new stop of the contract, if any, joins `object_contracts` as a member. The shift maps
+    (decision 15) are a sub-suite of `kernels`; the budget stays 8.
 12. (2026-11-22, from design decisions 20 and 42) **The pipeline.**
     - Formulation A comes first: one complex64 batched `matmul` over angular bins, a bin-major reference copy
       `(2 nk, R_t, P)`, batched `mlx_irfft` with `MLX_FFT_NORMS%backward`, the distances, and the draw on
@@ -220,15 +248,143 @@ Numbered, dated, never renumbered. "Design decision N" is decision N of the desi
     - The accelerated mode (`MLX_ENABLE_TF32=1`, NAX) is recorded separately and counts only if it passes
       the same frozen gates.
 
+15. (2026-11-22, Hans) **The shift maps join milestone 1.** They are example 1 of
+    `doc/implementation_notes/planned/mlxf_scientific_examples.md`; its section 3 is the design reference,
+    cited here, not copied.
+    - *What:* for a particle and an ordered list of candidate references of its half, the normalised loss
+      L(rotation, direction, radius) over a polar shift grid. It is built as SIMPLE builds it at
+      `7ec7e2972` (`simple_polarft_shiftmap.f90`): the Fourier-Bessel expansion of the shift phase, the
+      orders folded modulo the number of directions, and one 2D complex transform over (order, rotation)
+      per radius. Then, per candidate and on the device: the mode (loss, rotation, shift), the physical
+      width and the optional log evidence. Only the compact results come back.
+    - *Not in it:* the stochastic disk draws, the continuous (gradient) shift search, and the fill's
+      screen-then-window policy. The caller passes the radii, directions and shells.
+    - *Owner:* the submodule `mlxf_kernel_polar_table_shiftmap` of Phase 4's workspace owner. It uses the
+      same prepared references, halves and lifecycle; it is not another scorer.
+    - *Fixture and oracle* (the note's section 3; analytic rings, no `random_number`):
+      - full ring 24, shells 1 to 4, box 32, 5 particles, 7 references in each half;
+      - candidates `[7, 2, 5]`, then a permutation and a duplicate;
+      - radii `[0, .5, 1, 1.5]`, 16 directions;
+      - a second case for the folding: ring 8, box 16, shells 1 to 3, radii `[0, 4, 8]`, 7 directions;
+      - the oracle evaluates the residual directly at every grid point in real64, with no Bessel table and
+        no FFT.
+    - *Bessel weights:* computed on the host in real64 and rounded once. The truncation order K comes from
+      the note's derived tail bound (≤ 1e-12; checked on 2026-11-22 to be valid and tight), never from
+      observed GPU error.
+    - *Tests:* sub-suite `polar_shiftmap` of area `kernels`, tester
+      `mlxf_kernel_polar_table_shiftmap_tester.f90`. *Benchmark:* mode `shiftmap` of `bench_polar_table`.
+16. (2026-11-22, by decision 15) **Operations added to decision 8 for the shift maps.**
+    - Complex FFTs: `mlx_fft` and `mlx_ifft` along one dimension, and `mlx_fft2` and `mlx_ifft2` over two
+      given dimensions, with `n` and `norm` as decision 8's FFTs. Only the forms the formulation uses enter.
+    - `mlx_logsumexp` along a dimension.
+    - `minloc` along a dimension: 1-based, the first position on ties. A map of more than one dimension is
+      reshaped in Fortran order before it, and the tie rule is asserted on both devices.
+    - `sqrt`.
+    - Decision 8's sibling rule applies; the report lists every name.
+    - They are general operations and are delivered in Phase 2 with decision 8's (decision 20); Phase 5b
+      uses them.
+17. (2026-11-22, from the scientific examples' section 6; caps *guessed*) **The shift maps' gates.**
+    - A complete map against the direct oracle: normalised L2 error ≤ 1e-4, with the maximum error
+      recorded beside it.
+    - Log evidence, CDF and moments: absolute error ≤ 1e-4 in log or CDF units, and ≤ 1e-4 max(1, ρ_max²)
+      for the variance.
+    - Indices, padding exclusion and data movement are exact. A mode is judged only where the oracle's
+      best-to-second margin exceeds twice the map bound.
+    - Three repeated evaluations at fixed inputs give identical results (*exact*).
+    - **Phase 5b's calibration entry** confirms every cap on the CPU device (unfused, run twice) before any
+      GPU run, and freezes it in `src/test/mlxf_test_defs.f90`. A cap the CPU device does not meet is a
+      stop and a finding, never a wider cap.
+18. (2026-11-22, revised the same day by decision 19; the thresholds are a default by analogy with design
+    decision 26, which Hans may veto) **The shift maps' verdict.**
+    - *CPU:* `maps_per_s` of SIMPLE's `polar_matching_bench suite=shiftmap` at the full team, on the same
+      machine and case, at the SIMPLE pin, two invocations (decision 19).
+    - *GPU:* `maps_per_s` of `bench_polar_table suite=shiftmap` on the same case and grid, in full
+      precision, best of 3 after a warm-up, two invocations. Reference preparation and the Bessel table are
+      reported separately; per-particle work and the copy-out are inside the timing.
+    - *Verdict*, per map (window and screen), separate from decision 14's: GPU over CPU ≥ 2.0 **go**, 1.0
+      to 2.0 **lead**, < 1.0 **negative**. The report gives both maps; the screen carries most of the cost
+      in the PorF and exp_gate profiles.
+    - *Caveats stated beside the numbers:*
+      - the CPU suite plans its FFTs with `FFTW_ESTIMATE` (its `fftw_plans` column), production with
+        `FFTW_MEASURE`, so the CPU rate may be pessimistic for the 2D transform;
+      - the CPU suite builds maps back to back with warm per-thread work arrays, while production
+        interleaves them with block scoring and the shift refinement;
+      - the CPU suite computes the width for every candidate, as the GPU does, while production skips the
+        width of a candidate whose loss is above its best so far (`width_cutoff`), so the reduction column
+        is production's worst case. The width was 40 % of the screen's CPU time per map in the smoke run
+        (1,130 of 2,790 µs). So the report also gives a production-equivalent CPU cost per map,
+        `us_construct + us_select + w * us_reduce`, with w the share of maps that compute a width in a
+        production profile (`fill map widths` over `fill map selections`). That ratio is reported beside
+        the verdict, not gated.
+    - The PorF and exp_gate per-map costs are context only (machine and commit unrecorded).
+
+19. (2026-11-22, Hans: "make the benchmarks match up in the two code bases") **Matched benchmarks.**
+    - *SIMPLE side* (written interactively on 2026-11-22, committed by Hans before Phase 0):
+      `simple_test_exec test=polar_matching_bench suite=shiftmap [nspace= nstates= nptcls= nthr=]`.
+      - It runs on the same synthetic data and production calculator as `block_prod` (default 2,500
+        directions times 4 states, 2,000 particles split by halves).
+      - It builds the dense fill's two coarse maps with production's `setup_shiftmaps`: the screen over
+        the disk of three prior widths (`disk_radius_px`), and the window at a refinement stage's shift
+        limit (`stage_trslim` at `smpd_crop`, a 5.2-pixel radius here). Both grids step by `box/kscreen/4`
+        (1.45 pixels at `kscreen` 31), so the smoke run's window had 4 radii to 4.35 pixels and 14
+        directions, and its screen 11 radii to 14.5 pixels and 35 directions.
+      - It times `gen_shiftmap` and `shiftmap_mode` with the physical width for 16 candidates per
+        particle. Candidate c of particle i is `1 + mod(i-1 + (c-1)*(nrefs/16), nrefs)`.
+      - The temperatures are production's: `prob_beta * posterior_temperature(wsqsum_ptcl_band(i,
+        kscreen), pftsz)`. The prior applies on the screen only.
+      - It covers the teams the driver sweeps (all, half and one thread, one thread capped at 200
+        particles), best of 3 after a warm-up.
+      - Rows go to `./polar_shiftmap_bench.tsv` with these columns: `map`, `nspace`, `nstates`, `nrefs`,
+        `nptcls`, `ncand`, `nthr`, `pftsz`, `nrots`, `kfrom`, `kscreen`, `nrho`, `nalpha`, `norder`,
+        `rho_max_px`, `prior_w`, `load1`, `wall_s`, `wall_rep1..3`, `us_map_thread`, `maps_per_s`,
+        `us_construct`, `us_select`, `us_reduce`, `fftw_plans`.
+      - The one-thread results of 64 particles (loss, width, the mode's rotation, radius and direction) go
+        to `./polar_shiftmap_identity_<map>.bin` for comparing builds byte for byte. A team-identity line
+        compares them with the full team's (the mode draws nothing, so they must be identical).
+    - *mlx-fortran side* (Phase 5b): `bench_polar_table suite=shiftmap` on the same case.
+      - It reads the grid from SIMPLE's row: `pftsz`, `nrots`, `kfrom`, `kscreen`, `nrho`, `nalpha`,
+        `rho_max_px`, `prior_w`. The radii are `(i-1) * rho_max_px / (nrho-1)`.
+      - The candidate rule, the temperature formula and the screen-only prior are as above. The width is
+        computed for every candidate.
+      - Its rows carry the same column names for every shared quantity. `nthr` is replaced by `device` and
+        `fftw_plans` by `precision`, and its own columns follow: `norder_used`, `mlx_peak_bytes`,
+        `prep_s`, `copyout_s`.
+      - `norder` (SIMPLE's Bessel order count) and `norder_used` (the order K from decision 15's tail
+        rule) may differ. Decision 17's accuracy gate is what makes the work equivalent.
+    - *Scoring* (Phase 5): the rows of `bench_polar_table suite=time` likewise carry `polar_matching_bench`'s
+      case columns with the same names: `nspace`, `nstates`, `nrefs`, `nptcls`, `pftsz`, `nrots`, `kfrom`,
+      `kto`, `load1`, `wall_s`, `wall_rep1..3`, `pairs_per_s`. Here B and R are the GPU tile, with `device`,
+      `precision` and memory columns added. The case geometry is read from Phase 0's `block_prod` rows.
+20. (2026-11-22, Hans) **Phases 1 to 3 are done interactively, with Codex**, on the Mac: Phase 1's open exit
+    items, Phase 2 with decision 16's operations, and Phase 3. Each phase writes its Progress entry with the
+    exits as written. Run `mlxf_m1` starts at Phase 0 on the commit that holds them, and then runs Phases 4
+    to 5b.
+
+21. (2026-11-22, Hans: "Use the checked callback subroutine (recommended)") **`mlx_function` wraps a checked
+    subroutine.** This replaces design decision 30's "a Fortran function of arrays".
+    - The callback is `subroutine callback(inputs, outputs, status)`: `inputs` an array of handles,
+      `outputs` an allocatable `intent(out)` array of handles, and `status` an integer (0 on success).
+    - It uses checked operations and returns failures through `status`. It never stops.
+    - Why: gfortran 16.2 frees an allocatable array function result of a finalizable type before finalizing
+      it, a heap-use-after-free under AddressSanitizer
+      (`doc/compiler_issues/gfortran_finalize_allocatable_array_result.f90`, issue 5 of its README).
+    - The binding policy's section on closure callbacks is the living rule. No gate was relaxed.
+
 Defaults taken without a question: the folder and submodule names of decision 10, the vocabulary name
-`MLX_FFT_NORMS`, the run names of decision 6, the file name of decision 9, and the rule name `ctorexpr`.
+`MLX_FFT_NORMS`, the run names of decision 6, the file name of decision 9, the rule name `ctorexpr`, the
+submodule, tester, sub-suite and mode names of decision 15, and decision 19's candidate count (16), check
+size (64), file name and the mlx-fortran column names.
 
 ## 4. Not in this plan
 
-- Any change to SIMPLE. Its integration is a SIMPLE plan written after the hold (design decisions 32, 42).
+- Any change to SIMPLE beyond decision 19's benchmark suite, which is made before launch. SIMPLE's
+  integration is a SIMPLE plan written after the hold (design decisions 32, 42).
 - Transforms (`grad`, `vjp`, `vmap`), neural-network layers, explicit streams, IO, float16 and bfloat16,
   quantised operations, CUDA, Linux, flang, Windows, packaging and releases.
-- n-dimensional FFTs, gather and scatter, Metal kernels, packaging for consumers: section 9.
+- n-dimensional FFTs beyond the shift maps' two-dimensional transform, gather and scatter, Metal kernels,
+  packaging for consumers: section 9.
+- The shift maps' stochastic disk draws, the continuous (gradient) shift search, and the fill's
+  screen-then-window policy (decision 15).
 - GPU scoring of sparse pooled members and `geom` cones. Shared representatives are in scope (design
   decision 42.3).
 - Changes to the handle model: the registry, the lifetime submodule, the defined assignment and `final`.
@@ -239,20 +395,21 @@ Defaults taken without a question: the folder and submodule names of decision 10
 
 | Phase | Kind | Gate |
 | --- | --- | --- |
-| 0 | measurement only | base gate in Debug and Release; SIMPLE `block_prod` twice per dense case; `check`, `fills`, `neigh` |
+| 0 | measurement only | base gate in Debug and Release; SIMPLE `block_prod` twice per dense case; `check`, `fills`, `neigh`; `shiftmap` twice with its team identity |
 | 1 | tests, static gate, and the fixes `ctorexpr` asks for (an element assigned to a variable first; behaviour identical) | fast gate in Debug and Release; `recovery_half` (if decision 3 is ruled yes); `ctorexpr` and narrowed `ctorcall` plants; budget unchanged at 3 |
 | 2 | new code: operations, `matmul`, FFTs | `unit_ops`, `unit_linalg`, `unit_fft` on both devices with section 6's tolerances; leak gate unchanged; budget 6 |
 | 3 | new code: compilation | `unit_compile` on both devices; budget 7 |
 | 4 | new test code: the polar pipeline at fixture size | fixture calibration frozen before any GPU run; `unit_kernels suite=polar_table` on both devices; budget 8 |
 | 5 | new test code and measurement: the benchmark on the M2 Ultra | block calibration frozen before its GPU run; accuracy block on seed 2 within the frozen gates; schedule identity at block size; `time`, `profile`, `overlap` rows |
-| 6 | measurement: bring-up and the verdict on the M5 Ultra | fast gate there; baseline refresh there; verdict recorded with its branch |
+| 5b | new code and test code: the shift maps (decision 15) | the decision 16 operations' area tests on both devices; shift-map calibration confirmed on the CPU device before any GPU run; `unit_kernels suite=polar_shiftmap` on both devices; `bench_polar_table suite=shiftmap` rows; budget unchanged at 8 |
+| 6 | measurement: bring-up and the verdicts on the M5 Ultra | fast gate there; baseline refresh there (`block_prod` and `shiftmap`); scoring verdict and shift-map verdicts recorded with their branches (decisions 14, 18) |
 | 7 | report | the interim summary and the report exist; plan moved to `completed/` |
 
 ## 6. Acceptance
 
 Every number carries its origin: *exact*, *measured*, *derived*, *literature* or *guessed*. Correctness runs
 are in full precision. The numbers below are the design plan's section 6, frozen here. No ruling moves them,
-and the two calibrated quantities are fixed by their calibration entries (Phases 4a and 5a).
+and the calibrated quantities are fixed by their calibration entries (Phases 4a, 5a and 5b).
 
 - **Fast gate.** Every entry passes. A total over 60 s warns (*measured* in SIMPLE). Zero compiler warnings
   in Debug and Release.
@@ -319,6 +476,22 @@ and the two calibrated quantities are fixed by their calibration entries (Phases
   compilation, and both slots when overlapping are included. The verdict's configuration stays under
   decision 13's budget. Retained bytes and the observed process growth are reconciled before a go verdict;
   a gap that cannot be explained turns go into lead.
+- **The shift maps:** decision 17's gates, on both devices. The assertions are the note's section 3
+  list:
+  - every map, intermediate contractions included, against the direct oracle; the zero-radius map equals
+    the dense unshifted row and does not depend on direction;
+  - pose recovery in the noise-free case, where the margin allows it;
+  - the Nyquist ring (loss 0 at identity, 4 after one step);
+  - the folding case;
+  - evidence and width against direct host log-sum-exp and grid moments, at zero prior, flat likelihood,
+    and distinct physical and tempered temperatures;
+  - half-specific references and weights, invalidation after a reference change, candidate permutations
+    and duplicates, single-entry and non-divisible tiles, and padding never entering a reduction.
+
+  Each of the note's negative controls (Nyquist omitted, shift sign reversed, halves mixed, cell area
+  omitted, tempered temperature used for the physical width) is planted and shown to fail its assertion.
+  After 100 create/use/kill cycles of the workspace with maps, the live count and active memory return to
+  their warm values.
 - **The verdict:** decision 14. On every branch the report gives the GPU stage profile; on lead and negative
   it also gives the mechanism that limits the ratio. A synthetic scoring verdict is not a measured
   end-to-end speedup and not a scientific acceptance of anything in SIMPLE.
@@ -353,15 +526,18 @@ Stop when:
 - the base commit of the preconditions does not exist, or the working tree is not clean at launch or
   changes under the run (decision 6);
 - the dependencies are missing or not shared, or the run's session sees no GPU device;
-- SIMPLE `7ec7e2972` does not build, `suite=list` lacks `block_prod`, or its `check` or `fills` suite fails
-  in a case the verdict depends on. Record the case; never substitute `matrix_t`;
+- the SIMPLE pin does not build, `suite=list` lacks `block_prod` or `shiftmap`, its `check` or `fills` suite
+  fails in a case the verdict depends on, or `suite=shiftmap` reports a map differing between teams. Record
+  the case; never substitute `matrix_t` or a profile;
 - a phase needs to edit the handle model (section 2's invariant), or the leak gate fails;
 - MLX contradicts a decision: an operation of decision 8 missing for float32 or complex64 on the GPU,
   `irfft`'s normalisation not `backward` 1/n, or a compiled closure that cannot call back into Fortran;
 - gfortran cannot carry a decision beyond the four known defects. Stop with a reproducer;
 - a tolerance, floor or threshold would have to move, or a file outside the table needs an edit;
 - canonical scheduling cannot satisfy schedule identity, or no oracle-passing tile fits the budget. Report
-  the offending pairs or configuration and the measured memory.
+  the offending pairs or configuration and the measured memory;
+- a shift-map cap of decision 17 is not met on the CPU device at calibration, or MLX cannot give the
+  first-position tie rule of `minloc` on a device.
 
 Gates no ruling may waive: the leak, diagnosis and recovery gates; byte identity of data movement; generator
 coverage; the oracle comparisons on both devices; the frozen tolerances; schedule identity.
@@ -379,9 +555,10 @@ interactive changes once they build and gate on the Mac. The run records the has
 2. Build the base in Debug and Release from scratch (`compile_debug.sh`, `compile_clean.sh`) and keep both
    trees. Record the fast gate's per-entry times (`ctest_fast.log.timing.txt`), with `unit_core`'s recovery
    share, and the zero-warning check.
-3. Export SIMPLE `7ec7e2972` into scratch and configure it by hand: Release, tests on, `-DFORTLS=OFF`.
-   Build it, run its fast gate (record failures per case), and record the BLAS and FFTW it links. Confirm
-   `block_prod`, `check`, `fills` and `neigh` with `simple_test_exec test=polar_matching_bench suite=list`.
+3. Export the SIMPLE pin (decision 19) into scratch and configure it by hand: Release, tests on,
+   `-DFORTLS=OFF`. Build it, run its fast gate (record failures per case), and record the BLAS and FFTW it
+   links. Confirm `block_prod`, `check`, `fills`, `neigh` and `shiftmap` with `simple_test_exec
+   test=polar_matching_bench suite=list`.
 4. Run each of the four dense cases twice, all of run 1 before run 2:
    `OPENBLAS_NUM_THREADS=1 simple_test_exec test=polar_matching_bench suite=block_prod
    nspace=<1000|2500> nstates=<1|4> nptcls=2000 nthr=24`. Add a run at `nthr=16` (the performance cores).
@@ -391,13 +568,20 @@ interactive changes once they build and gate on the Mac. The run records the has
 5. `suite=check nthr=24` and `suite=fills nthr=24` once each, with default sizes and all routes.
    `suite=neigh nthr=24` twice, keeping the representative, member and cone rows apart.
 6. s and f per decision 5, or recorded as unmeasured.
+7. `simple_test_exec test=polar_matching_bench suite=shiftmap nthr=24` twice, then once at `nthr=16`
+   (decision 19). Keep both TSVs and the team-identity lines. The rows' grid columns (`kscreen`, `nrho`,
+   `nalpha`, `rho_max_px`, `prior_w`, for the window and the screen) are the geometry Phase 5b's benchmark
+   reads. Also record the per-map CPU costs of the PorF and exp_gate profiles (map construction, selection
+   and reduction thread-seconds over their map counts), labelled with their unknown machine and commit.
 
 Exit: the machine record and base hash; both base trees gate with zero warnings; the fast gate's per-entry
 times are in Progress; SIMPLE built, its fast gate recorded, `block_prod` measured twice per dense case with
 spread ≤ 5 % at the full team (*guessed*, above the 1.4 % `matrix_t` showed in the design plan's Phase 0).
 A case above 5 % is repeated once; then the exit is met with both spreads recorded, since the verdict uses
-Phase 6's baseline, not this one. `check` and `fills` pass in the verdict's cases; the `neigh` rows are kept; the polar dimensions are recorded; s and f are
-measured or marked unmeasured.
+Phase 6's baseline, not this one. `check` and `fills` pass in the verdict's cases; the `neigh` rows are
+kept; the polar dimensions are recorded; s and f are measured or marked unmeasured; `suite=shiftmap` has two
+runs per map at the full team, spread ≤ 5 % (*guessed*, as for `block_prod`, with the same repeat rule), and
+its team-identity lines show 0 maps differing; the grid and the profiles' per-map costs are in Progress.
 
 ### Phase 1, the follow-ups (run `mlxf_m1`)
 
@@ -476,10 +660,7 @@ mismatch checks pass; schedule identity holds; budget 8; zero warnings.
 
 1. `src/test/mlxf_bench_polar_table.f90`, `mlxf_test_exec test=bench_polar_table suite=<mode>`. It owns the
    outer batches and submission and appends rows to `./bench_polar_table.tsv`. Its `accuracy` mode carries
-   the 64,000-pair generator and the DFT-matrix oracle.
-2. **Phase 5a, the block calibration**, on the CPU device, before the first GPU run of `accuracy`: block
-   seed 1 gives the block's e_cpu and n_cpu, written to Progress and to `src/test/mlxf_test_defs.f90`, and
-   from then on frozen.
+   the 64,000-pair generator and the DFT-matrix oracle. Its modes:
    - `time`: the four dense cases and a shared-representative case matching Phase 0's `neigh` rows, swept
      over decision 13's grid.
    - `profile`: evaluation barriers between stages, reported separately.
@@ -488,6 +669,9 @@ mismatch checks pass; schedule identity holds; budget 8; zero warnings.
      compilation; schedule identity on the block (three repeats, two outer batch sizes, CPU teams 1 and 24,
      synchronous against two slots).
    - `overlap`: section 6's overlap measurement, including the run under a CPU memory-streaming load.
+2. **Phase 5a, the block calibration**, on the CPU device, before the first GPU run of `accuracy`: block
+   seed 1 gives the block's e_cpu and n_cpu, written to Progress and to `src/test/mlxf_test_defs.f90`, and
+   from then on frozen.
 3. Formulations B and C, and compilation of the tail, added to the pipeline's `_score` submodule after A
    passes `accuracy`. Each one passes the frozen gates before its timings count. The 30 % rule (decision 12)
    decides which stay. One that is dropped is recorded in Progress with its numbers and removed from the
@@ -500,27 +684,59 @@ for every counted formulation; schedule identity holds on the block; `time` rows
 with memory, useful and padded pairs, and precision mode; the kept formulation and canonical tile plan are
 named; the overlap rows exist; the M2 Ultra's ratio against Phase 0's `block_prod` is recorded as context.
 
+### Phase 5b, the shift maps (run `mlxf_m1`, M2 Ultra; decisions 15 to 18)
+
+1. The operations of decision 16 are delivered by Phase 2 (decision 20); this step checks that
+   `unit_fft` and `unit_ops` cover them on both devices and adds what the formulation needs beyond them,
+   with its area test (no new CTest entry).
+2. `src/test/mlxf_kernel_polar_table_shiftmap.f90`, a submodule of the workspace owner: the Bessel-weight
+   table (host real64, K from the tail rule, rounded once) prepared with the references; the shell
+   contractions, the folding modulo the directions and the 2D transform per radius; then the mode, width and
+   evidence reductions on the device. Compact results come back.
+3. `src/test/mlxf_kernel_polar_table_shiftmap_tester.f90`, sub-suite `polar_shiftmap` of `kernels`: the
+   fixtures, the direct oracle and the assertions of section 6, CPU device only until step 4's entry exists.
+4. **Phase 5b-a, the shift-map calibration**, on the CPU device: the unfused implementation run twice
+   against the oracle. Every cap of decision 17 is confirmed and frozen in `src/test/mlxf_test_defs.f90`,
+   in a Progress entry that precedes the first GPU run. Then the GPU branch of the tester. The negative
+   controls are planted and shown to fail.
+5. `bench_polar_table suite=shiftmap` on the M2 Ultra on decision 19's case, grid and columns, read from
+   Phase 0's `polar_shiftmap_bench.tsv` rows: maps per second, with preparation (references, Bessel table),
+   resident compute, output transfer and memory separate, best of 3 after a warm-up, two invocations. The
+   ratio against Phase 0's full-team `maps_per_s` is recorded per map as context (the verdict is Phase 6's).
+
+Exit: the decision 16 operations pass their area tests on both devices in Debug and Release; the Phase 5b-a
+entry precedes the first GPU run of `polar_shiftmap`; `unit_kernels suite=polar_shiftmap` passes on both
+devices with the frozen caps; every negative control fails its assertion; the 100-cycle lifecycle returns to
+baseline; the leak gate passes; the `shiftmap` rows exist with memory and precision mode; budget 8; zero
+warnings.
+
 ### Phase 6, the M5 Ultra (run `mlxf_m1_m5`)
 
 1. Record the machine and dependencies as in Phase 0 step 1, including whether NAX is present.
 2. Build Debug and Release from scratch at Phase 6's base. Run the fast gate, `recovery_half` (if
-   decision 3 is ruled yes), `unit_kernels suite=polar_table` on both devices, and `bench_polar_table
-   suite=accuracy`. The frozen bounds of Phases 4a and 5a are unchanged.
-3. Repeat Phase 0 steps 3 to 5 there: SIMPLE `7ec7e2972`, `block_prod` twice per dense case, `check`,
-   `fills` and `neigh`. Recheck the polar dimensions and half counts against Phase 0's.
+   decision 3 is ruled yes), `unit_kernels suite=polar_table` and `suite=polar_shiftmap` on both devices,
+   and `bench_polar_table suite=accuracy`. The frozen bounds of Phases 4a, 5a and 5b-a are unchanged.
+3. Repeat Phase 0 steps 3 to 5 and 7 there: the SIMPLE pin, `block_prod` twice per dense case, `check`,
+   `fills`, `neigh` and `suite=shiftmap` twice at the full team. Recheck the polar dimensions, half counts
+   and the shift-map grid against Phase 0's.
 4. `bench_polar_table` on the M5 Ultra in full precision (`time`, `accuracy`, `profile`, `overlap`), then
    `time` and `accuracy` in accelerated mode. The accelerated mode is reported, and counts only within the
    frozen gates.
 5. Memory reconciled as section 6 requires, then the verdict of decision 14 with its branch, and the
    projection of decision 5.
+6. `bench_polar_table suite=shiftmap` on the M5 Ultra in full precision, then in accelerated mode, on
+   decision 19's case and grid. The shift maps' verdict of decision 18 per map, against step 3's full-team
+   `suite=shiftmap` rows, with its caveats stated.
 
-Exit: the M5 Ultra's gates pass; its `block_prod` baseline is recorded twice per case; the verdict and its
-branch are recorded from rows that meet section 6; the accelerated mode is reported with pass or fail.
+Exit: the M5 Ultra's gates pass; its `block_prod` baseline is recorded twice per case; the scoring verdict
+and its branch are recorded from rows that meet section 6; the shift maps' verdict is recorded per map with
+its branch and caveats; the accelerated mode is reported with pass or fail.
 
 ### Phase 7, the interim summary and the report (run `mlxf_m1_m5`)
 
 1. The interim summary for the hold of design decision 32, in Progress:
-   - what milestone 1 proved, the verdict and its branch, and peak memory;
+   - what milestone 1 proved, the scoring verdict and its branch, the shift-map measurement and its verdict
+     or context ratio, and peak memory;
    - the kept formulation and the canonical tile plan;
    - numerical sensitivity per temperature, and the profile gaps;
    - what SIMPLE's integration would take: a calculator-owned workspace and a schedule split into
@@ -539,32 +755,35 @@ not exist at the base.
 | File | What | Phases |
 | --- | --- | --- |
 | `src/core/runtime/mlxf_error.f90` | the recovery gate's tester only (decision 3) | 1 |
-| `src/test/mlxf_test_registry.f90` | named-only sub-suites; areas `ops`, `linalg`, `fft`, `compile`, `kernels`; benchmark entry | 1, 2, 3, 4, 5 |
-| `src/test/mlxf_test_utils.f90` | assertions for complex values, boolean arrays, tolerance helpers | 2, 4 |
-| `src/test/mlxf_test_defs.f90` (new) | shared test tolerances and the frozen calibration constants | 4, 5 |
+| `src/test/mlxf_test_registry.f90` | named-only sub-suites; areas `ops`, `linalg`, `fft`, `compile`, `kernels`; sub-suite `polar_shiftmap`; benchmark entry | 1, 2, 3, 4, 5, 5b |
+| `src/test/mlxf_test_utils.f90` | assertions for complex values, boolean arrays, tolerance helpers | 2, 4, 5b |
+| `src/test/mlxf_test_defs.f90` (new) | shared test tolerances and the frozen calibration constants | 4, 5, 5b |
 | `test/mlxf_test_exec.f90` | `bench_<x>` dispatch | 5 |
 | `test/CMakeLists.txt` | areas, budget 3 → 8, comments | 1, 2, 3, 4 |
 | `scripts/check_rules.py` | rule `ctorexpr`, `ctorcall` narrowed; rules learned | 1, each |
 | any file under `src/` or `test/` that `ctorexpr` flags | the fix only: the element assigned to a variable first | 1 |
 | `scripts/check_tree.sh` | the rule list in its header | 1 |
-| `scripts/check_test_registry.py` | named-only sub-suites, benchmark rows; if needed for an area | 1, 2, 3, 4, 5 |
-| `scripts/gen_mlxc_bindings.py` | if a signature the new wrappers use is unmapped | 2, 3 |
+| `scripts/check_test_registry.py` | named-only sub-suites, benchmark rows; if needed for an area | 1, 2, 3, 4, 5, 5b |
+| `scripts/gen_mlxc_bindings.py` | if a signature the new wrappers use is unmapped | 2, 3, 5b |
 | `src/defs/mlxf_defs.f90` | `MLX_FFT_NORMS` and shared constants | 2 |
-| `src/core/mlxf.f90` | re-exports | 2, 3 |
+| `src/core/mlxf.f90` | re-exports | 2, 3, 5b |
 | `src/core/array/mlxf_array.f90`, `src/core/array/mlxf_array_elementwise.f90` | operator generics: `/`, unary `-`, comparisons, logicals | 2 |
-| `src/core/array/mlxf_array.f90` (tester only) | leak-gate loops for new modules | 2, 3 |
-| `src/core/ops/` (new folder: `mlxf_ops.f90`, `mlxf_ops_{elementwise,shape,reduce}.f90`, `ops.inf`) | operations | 2 |
+| `src/core/array/mlxf_array.f90` (tester only) | leak-gate loops for new modules | 2, 3, 5b |
+| `src/core/array/mlxf_array_operations.f90` (new; row added after the fact, 2026-11-22) | the operations' signature-class helpers (design decision 4.2), a submodule of `mlxf_array` | 2 |
+| `src/core/array/mlxf_array_closure.f90` (new; row added after the fact, 2026-11-22) | closure vectors to and from owned arrays, for `mlx_function` | 3 |
+| `src/core/ops/` (new folder: `mlxf_ops.f90`, `mlxf_ops_{elementwise,shape,reduce}.f90`, `ops.inf`) | operations; `mlx_logsumexp`, `minloc`, `sqrt` (decision 16) | 2, 5b |
 | `src/core/linalg/` (new folder: `mlxf_linalg.f90`, `linalg.inf`) | `matmul` | 2 |
-| `src/core/fft/` (new folder: `mlxf_fft.f90`, `fft.inf`) | FFTs | 2 |
+| `src/core/fft/` (new folder: `mlxf_fft.f90`, `fft.inf`) | FFTs; the complex FFTs of decision 16 | 2, 5b |
 | `src/core/compile/` (new folder: `mlxf_compile.f90`, `compile.inf`) | `mlx_function`, `mlx_compile` | 3 |
 | `src/core/core.inf` | the capability folders it names | 2, 3 |
-| `src/test/mlxf_kernel_polar_table.f90`, `src/test/mlxf_kernel_polar_table_{lifecycle,score}.f90` (new) | the test-only workspace and scoring | 4, 5 |
-| `src/test/mlxf_bench_polar_table.f90` (new) | the benchmark, the accuracy block's generator and oracle | 5 |
-| `doc/policies/binding_contract_policy.md` | unsupported uses 3 and 6; operations, linear algebra, FFTs, compilation | 1, 2, 3 |
-| `doc/policies/test_environment_policy.md` | named-only sub-suites; areas; the benchmark | 1, 2, 5 |
+| `src/test/mlxf_kernel_polar_table.f90`, `src/test/mlxf_kernel_polar_table_{lifecycle,score}.f90` (new) | the test-only workspace and scoring | 4, 5, 5b |
+| `src/test/mlxf_kernel_polar_table_shiftmap.f90` (new; its tester `mlxf_kernel_polar_table_shiftmap_tester.f90`) | the shift maps: submodule of the workspace, fixtures and direct oracle | 5b |
+| `src/test/mlxf_bench_polar_table.f90` (new) | the benchmark, the accuracy block's generator and oracle; mode `shiftmap` | 5, 5b |
+| `doc/policies/binding_contract_policy.md` | unsupported uses 3 and 6; operations, linear algebra, FFTs, compilation | 1, 2, 3, 5b |
+| `doc/policies/test_environment_policy.md` | named-only sub-suites; areas; the benchmark | 1, 2, 5, 5b |
 | `doc/compiler_issues/README.md` (new) | the upstream report texts | 1 |
 | `doc/how2s/how2set_up_dev.md` | the recovery gate's cost and its named-only form | 1 |
-| `.github/skills/mlxf-binding/SKILL.md` | patterns learned while wrapping | 2, 3 |
+| `.github/skills/mlxf-binding/SKILL.md` | patterns learned while wrapping | 2, 3, 5b |
 | `.github/skills/mlxf-modern-fortran/SKILL.md`, `references/testing.md` | rules learned | each |
 | `doc/architecture_principles.md` | a rule learned, with its check | each |
 | `doc/collaboration/apple_questions.md` | questions met, answers recorded | each |
@@ -572,21 +791,31 @@ not exist at the base.
 | `CLAUDE.md`, `AGENTS.md` | the Structure sections: the new capability folders | 2, 3 |
 | `README.md` | status line | 7 |
 | `doc/implementation_notes/planned/mlxf_milestone1.md` | Progress | each |
+| `doc/implementation_notes/planned/mlxf_scientific_examples.md` | its Progress: example 1 delivered here | 5b, 7 |
+
+SIMPLE (`~/src/SIMPLE`) is outside this table: the runs read it and export it into scratch, never edit it.
+Decision 19's suite touched `src/main/commanders/test/simple_polar_matching_bench.f90`,
+`src/main/commanders/test/simple_commanders_test_highlevel_matchbench.f90`,
+`src/main/ui/simple_test/simple_test_ui_highlevel.f90`, `src/utils/filter/simple_estimate_ssnr.f90` (one name
+made public) and `doc/policies/test_environment_policy.md`, before launch.
 | `doc/implementation_notes/completed/mlxf_milestone1.md`, `..._report.md` | the plan, moved; the report | 7 |
 
 ## 9. After the hold (roadmap, not phases)
 
-Hans rules the order at the hold (design decisions 32 and 38). Each item becomes a plan of its own, written
-from SIMPLE's code at a new pin:
+Hans rules the order at the hold (design decisions 32 and 38). The next plan, milestone 2, is
+`doc/implementation_notes/planned/mlxf_scientific_examples.md`, converted to plan form at the hold. Its
+examples 2 and 3 take the first items below; the rest become plans of their own, written from SIMPLE's
+code at a new pin:
 
-- **the probabilistic table's shift refinement:** the polar shift maps and the gradient shift search, 77 % of
-  the fill's thread-seconds in the BENCH run of design decision 28; re-measured against the production
-  scorer first;
-- **the master's assembly:** the PCG solves of the reconstruction and the nonuniform filter of the volume
-  assembly, 37 % of refine3D in that run;
-- **n-dimensional FFTs** of particle stacks (design decisions 21 and 23; SIMPLE uses single-threaded
-  `FFTW_ESTIMATE` plans in an OpenMP loop, per the design plan's Phase 0);
-- **gather, scatter and Metal kernels** for polarisation and insertion (design decisions 18, 22 and 33);
+- **the master's assembly** (example 2): the nonuniform filter bank and its local composition, and a PCG
+  solve with an FFT operator and a spectral preconditioner (37 % of refine3D in the BENCH run of design
+  decision 28);
+- **Fourier projection and its adjoint** (example 3): reprojection by gather, gridding by scatter-add,
+  the n-dimensional FFTs and the gather and scatter operations they need (design decisions 22 and 33);
+- **the continuous shift search** that follows the shift maps (decision 15 left it out);
+- **n-dimensional FFTs of particle stacks** (design decisions 21 and 23; SIMPLE uses single-threaded
+  `FFTW_ESTIMATE` plans in an OpenMP loop, per the design plan's Phase 0) and **Metal kernels** (design
+  decision 18), where a measured bottleneck asks for them;
 - **packaging for consumers**: a CMake package config `mlxf::mlxf` with a compiler-version check, a
   consumer project and `scripts/check_install.sh` (the design plan's Phase 5);
 - **SIMPLE's integration plan**, if the verdict is go or lead and Hans rules it.
@@ -596,7 +825,7 @@ from SIMPLE's code at a new pin:
 (One entry per phase, written by the run: date, machine, base, files changed, each exit item and how it was
 met, log paths, decisions taken under delegation, and what it means in short.)
 
-### Phase 1, the follow-ups: 2026-11-22 (interactive, before launch) - written, not yet compiled
+### Phase 1, the follow-ups: 2026-11-22 (interactive, before launch) - complete
 
 Session in the Cowork sandbox (Linux, Python 3.10, no gfortran, CMake or MLX), on `0d3537b` with the
 uncommitted `findpkg` change and the split of the design plan. Rulings of decisions 3 to 7 by Hans the same
@@ -664,3 +893,254 @@ plan.
   device. The leak form the policy called unchecked (`[a*2.0, b]`) is checked, along with its variants, and
   the generics Phase 2 makes public no longer trip `ctorcall`. The four compiler reports are written and
   pointed at existing GCC reports. Phase 1 is done once the Mac build confirms the Fortran.
+
+
+**Mac exit validation, 2026-11-22.** On `28622018de6560002ec1b0a9b8b0a3166f42b7fb`,
+Apple M3 Pro (18 GiB), GNU Fortran 16.2.0, mlx-c 0.8.0 / MLX 0.32.4:
+`./compile_debug.sh` and `./compile_clean.sh` rebuilt from scratch with
+`MLXF_WERROR=ON`; zero warnings and all three fast entries passed (Debug 2.58 s,
+Release 2.19 s wall time). `CMAKE_INSTALL_NAME_TOOL=/usr/bin/install_name_tool`
+avoids PATH selecting Anaconda's cctools and its install-time signature warning.
+Neither previously uncompiled tester needed a source correction.
+
+`test=unit_core`: 68 assertions, **0.93 s elapsed** (Debug, standalone), beside the
+earlier **7.8 s on the M2 Ultra**; these are different machines, not a speedup
+measurement. `test=unit_core suite=recovery_half`: 12 assertions passed across CPU
+and GPU (1.56 s suite time), failing at 2558 rows and recovering at 1279 rows of
+4 MiB. `test=list` lists `recovery_half` separately as named-only. The unchanged
+`unit_array` exact leak gate passed in both builds.
+
+The five decision-7 plants were rejected; all six allowed forms, including
+`[real(i),1]` and `[(max(i,2),i=1,n)]`, passed; `ctorcall` still rejects
+`[mlx_from(x),b]`. Both full static gates passed. All four README compiler
+reproducers compiled with `gfortran-16 -std=f2018 -Wall` without warnings and ran
+in a temporary directory: assignment counts 1/0/0/0/1, constructor finalization
+counts 2/0/2, scalar-to-array assignment/finalization 1/1 and 3/0, self-assignment
+id 0. These match the quoted defects. gfortran-13 is not installed. All Phase 1
+exit items above are now closed. No compiler-defect assertion was added.
+
+
+**Validation logs:** `/Users/elmlundho/for_claude/mlxf-review-2026-11-22/prior-phases-1-3/mlxf-p1-{debug,release,core,half,list,probes}.log`
+(the brace notation names six files); the originals are also in `/private/tmp/`. The README loop's
+four outputs are in `mlxf-p1-probes.log`. **What it means, in short:** the previously uncompiled
+Phase 1 changes now meet their Mac exits; this records correctness and gate cost, not performance
+against the M2 Ultra.
+
+### Phase 2, the operations: 2026-11-22 - complete
+
+**Machine and base:** Apple M3 Pro, 18 GiB, macOS 26.7.3; GNU Fortran 16.2.0,
+CMake 4.4.3, mlx-c 0.8.0 / MLX 0.32.4. Base `28622018de6560002ec1b0a9b8b0a3166f42b7fb`,
+branch `main`, with the owner's existing documentation edits preserved. This is the interactive
+bring-up of decision 20, not a timed benchmark run.
+
+**Files changed:** `src/core/ops/` (parent, elementwise/shape/reduce submodules, tester and `ops.inf`),
+`src/core/linalg/` and `src/core/fft/` (each parent, tester and `.inf`);
+`src/core/array/mlxf_array.f90`, `mlxf_array_elementwise.f90`, `mlxf_array_operations.f90`,
+`mlxf_array_evaluation.f90`, `mlxf_array_tester.f90`; `src/core/mlxf.f90`,
+`src/defs/mlxf_defs.f90`, `src/test/mlxf_test_registry.f90`, `test/CMakeLists.txt`,
+`scripts/check_rules.py`, `.github/skills/mlxf-binding/SKILL.md`, and the operation and test-budget
+sections of the binding and test policies. This Progress entry records delivery; the capability
+maps and history are updated with Phase 3 below.
+
+**Outside the original file table:** `src/core/array/mlxf_array_operations.f90` was added before
+it had a row, to keep signature-class helpers in the array family rather than duplicate handle
+ownership in capability modules. Claude subsequently added its row. The existing
+`mlxf_array_evaluation.f90` was also edited to share the checked vector builder with concatenation.
+
+
+Implemented exactly decisions 8 and 16's operation names: arithmetic `+ - * /`, unary minus,
+comparisons and boolean operators; `merge`, `max`, `exp`, `sqrt`, `real`, `aimag`, `cmplx`, `conjg`,
+`mlx_astype`; `reshape`, `transpose`, `mlx_permute`, `mlx_concatenate`, `mlx_slice`,
+`mlx_take_along_dim`; `sum`, `minval`, `minloc`, `mlx_cumsum`, `mlx_logsumexp`; `mlx_zeros`,
+`mlx_arange`; `matmul`; `mlx_fft`, `mlx_ifft`, `mlx_fft2`, `mlx_ifft2`, `mlx_rfft`, `mlx_irfft`.
+The array family owns one helper per generated C signature class; multi-option records live in defs.
+The binding skill lists those helpers. The ops parent has elementwise, shape and reduction submodules;
+linalg and fft are separate capability modules in the single library target. No sibling operation was added.
+
+Named two-device checks cover column-major/strided reshape, leading-dimension broadcasting, permutation
+order, positive/negative/empty inclusive slices, one-based gather and first-tie int32 minloc, weak real64
+scalars, independent real/complex batched matmul, FFT sign, all three normalizations, odd/even real
+transforms and explicit padding. CPU float64 uses the frozen bounds. Oracles are plain double Fortran
+and explicit DFTs. Initial FFT tests exposed that the C API does not infer lengths from -1; omitted
+lengths are now resolved before the call. Release warnings exposed impure metadata getters in logical
+expressions; these are now evaluated before the expression. No bound changed.
+
+Final clean `./compile_debug.sh` and `./compile_clean.sh`, both with `MLXF_WERROR=ON` and the system
+install-name tool: zero compiler warnings, static gates passed, all **6** fast entries passed (7.25 s
+Debug; 6.54 s Release). Explicit Release area runs: ops **339**, linalg **32**, FFT **53** assertions,
+all passing on CPU and GPU. `unit_array` now has **100** assertions, including three additional evaluated
+10,000-iteration loops per device; active memory, live handles and stale releases return exactly.
+A scratch source copy with budget **5** failed CMake with "6 CTest entries do not match the budget of 5".
+The budget at the Phase 2 exit was **6**; Phase 3 raises it to **7**. Policy sections and binding skill updated; all touched Fortran files formatted.
+The static gate warns only that the new sources are untracked, as expected under the no-commit instruction.
+
+**Final semantic review during Phase 3:** `real(a)` must return default real (float32), including
+integer and float64 inputs. A regression test first failed three assertions (CPU integer/float64,
+GPU integer); the wrapper now casts noncomplex inputs to float32 and extracts the component of
+complex64 inputs. Additional CPU float64 arithmetic, reduction and scan checks, and fractional
+matmul fixtures, exercise nonbinary values against independent double-precision expectations.
+The final ops count is **349**, linalg **32**, FFT **53**, passing on both devices in both final
+builds. No numerical bound was relaxed.
+
+**Logs:** under `/Users/elmlundho/for_claude/mlxf-review-2026-11-22/prior-phases-1-3/`, `mlxf-p2-debug-final.log`,
+`mlxf-p2-release-final.log`, `mlxf-p2-release-areas.log`, `mlxf-p2-array.log` and
+`mlxf-p2-budget5.log`; the intended failing and passing conversion regression is recorded in
+`mlxf-real-before.log` and `mlxf-real-after.log`. The final Phase 3 gates below include the correction.
+The originals are in `/private/tmp/`; `index.txt` in the log directory identifies the final results.
+These earlier logs were copied out before the review rebuilds so they remain available.
+
+**What it means, in short:** decisions 8 and 16's operations meet the Fortran conventions,
+independent numerical checks and exact lifetime gates on the CPU and GPU. These are binding
+results, not evidence of a polar-pipeline speedup.
+
+### Phase 3, compilation: 2026-11-22 - complete under the owner's callback ruling
+
+**Machine and base:** Apple M3 Pro, 18 GiB, macOS 26.7.3; GNU Fortran 16.2.0,
+CMake 4.4.3, mlx-c 0.8.0 / MLX 0.32.4. Base `28622018de6560002ec1b0a9b8b0a3166f42b7fb`,
+branch `main`, with Phase 2 and the owner's documentation edits in the working tree.
+
+**Compiler finding and ruling:** the allocatable array function-result callback encountered a
+new gfortran 16.2 defect. The standalone diagnostic
+`python3 scripts/probe_callback_array_result.py` reduces it to a finalizable derived type and a
+procedure-pointer function result, with no MLX dependency: AddressSanitizer reports a
+heap-use-after-free in finalization (return code -6). A checked subroutine producing an allocatable
+`intent(out)` array passes the same consumer and teardown (return code 0). Work stopped for the
+required ruling; Hans answered **"Use the checked callback subroutine (recommended)"**.
+The public callback is therefore `subroutine callback(inputs, outputs, status)`, with an input
+array, allocatable output array and integer output status. The callback uses checked operations
+and reports errors through status. No decision or phase text was edited and no gate was waived.
+The probe is a diagnostic, not a compiler-defect assertion in CTest; no upstream report was sent.
+
+**Implementation:** `mlx_function` owns a C closure with a procedure-pointer payload and a
+`bind(c)` trampoline. It supports construction, defined assignment, checked `apply`, idempotent
+`kill`, finalization and `trace_count`; `mlx_compile(f, shapeless)` retains the callback through
+the C closure. The existing handle registry owns function handles; no new global ledger or
+change to the registry/lifetime implementation was needed. Checked vector import/export stays
+in the array family. The trampoline returns a C status on checked callback failure or missing
+outputs; a public call with `status=` recovers without publishing outputs. User callbacks must
+also follow the documented checked-call contract. Static constructor checks now recognize
+`mlx_function`: a variable-only `[f,g]` passes and the planted `[(f),g]` is rejected.
+
+**Files changed:** `src/core/compile/` (`mlxf_compile.f90`, `mlxf_compile_tester.f90`,
+`compile.inf`), `src/core/array/mlxf_array_closure.f90`, the array parent and tester,
+`src/core/mlxf.f90`, `src/test/mlxf_test_registry.f90`, `test/CMakeLists.txt`,
+`scripts/check_rules.py`, `scripts/probe_callback_array_result.py`,
+`.github/skills/mlxf-binding/SKILL.md`, and the compilation and budget sections of the binding
+and test policies. The final Phase 2 semantic review also touched `mlxf_ops_elementwise.f90`,
+`mlxf_ops_tester.f90` and `mlxf_linalg_tester.f90`. Capability maps in `src/core/core.inf` and the
+Structure sections of `CLAUDE.md` and `AGENTS.md` now name ops, linalg, fft and compile. The public
+export list has spaces after commas. `doc/collaboration/apple_questions.md` and
+`doc/history/2026-11.md` record the findings and delivery; this plan is edited only in Progress.
+
+**Outside the original file table:** `src/core/array/mlxf_array_closure.f90` was added to keep
+closure-vector ownership and adoption inside the array family; Claude subsequently added its
+row. The standalone `scripts/probe_callback_array_result.py` was announced before creation to
+make the new compiler finding reproducible, with the approved subroutine as its control. It
+uses only the Python standard library at the repository's Python 3.7 floor. The log directory
+is an ignored build artifact, not a new source or test target.
+
+**Exits and verification:**
+
+- Clean `./compile_debug.sh` and `./compile_clean.sh`, with
+  `MLXF_CMAKE_ARGS='-DMLXF_WERROR=ON -DCMAKE_INSTALL_NAME_TOOL=/usr/bin/install_name_tool'`
+  and `CMAKE_BUILD_PARALLEL_LEVEL=12`, pass all **7/7** fast entries: **8.21 s Debug**,
+  **7.39 s Release**, zero compiler warnings. `check_tree.sh` passes. Its only notices are the
+  untracked new sources, which remain unstaged under the no-commit instruction. All touched
+  Fortran files passed through both formatting scripts.
+- `unit_compile`: **54 assertions** across CPU and GPU in each build. The compiled and uncompiled
+  two-output fixture is byte-identical and matches independent expected values. Shapeless calls
+  at shapes **(4,7)** and **(4,3)** trace **once on CPU and once on GPU**. Default shaped
+  compilation and copied-handle lifetime after the original is killed also pass.
+- Checked errors in direct and compiled callbacks return a nonzero status with an error message,
+  publish no outputs, and leave a subsequent valid compiled graph usable. Empty handles and
+  unallocated output arrays also return errors.
+- `unit_array`: **112 assertions**, including the three operation-module loops and a compiled-call
+  loop of **10,000 evaluated iterations per device**. Active bytes, live handles and stale releases
+  return exactly after the loops and after full closure teardown. The handle-model implementation
+  and the exact gate were not relaxed.
+- Explicit Release area runs pass ops **349**, linalg **32**, FFT **53**, compile **54** assertions,
+  on both devices. `test=list` lists six areas and the existing eight-member object-contract group;
+  the CTest budget is **7**. `recovery_half` remains named-only. Generated coverage remains
+  **673 + 7 = 680** declarations; no generator or C ABI change was needed.
+
+**Logs:** `/Users/elmlundho/for_claude/mlxf-review-2026-11-22/prior-phases-1-3/index.txt` indexes the results. Phase 3's logs there are
+`mlxf-p3-debug-final.log`, `mlxf-p3-release-final.log`, `mlxf-p3-debug-compile-final.log`,
+`mlxf-p3-release-areas.log`, `mlxf-p3-array.log`, `mlxf-p3-list.log` and
+`mlxf-p3-reproducer.log`. `mlxf-final-static.log` records the final tree check. Originals are
+also in `/private/tmp/`; the copies above survive clean builds.
+
+**Apple question 19:** the C FFT interface requires a positive transform length, whereas Python
+accepts `n=None` and infers it. The original `-1` assumption was our wrapper error, not an MLX
+failure. The Python `irfft` documentation also states a default-length formula different from
+the C++ implementation. The numbered question cites both and asks for clarification; meanwhile
+Fortran resolves forward lengths from the input extent and inverse-real lengths as
+`2*(extent-1)`. It records a question for discussion, not an outbound message.
+
+**What it means, in short:** Phases 1 to 3 are ready for the maintainer's review and commit,
+including usable checked Fortran callbacks and compiled graphs on both devices. Work stops
+here. Phase 4 awaits Phase 0's measured polar dimensions and the new SIMPLE benchmark pin;
+run `mlxf_m1` starts at Phase 0 on the commit that contains this work. No commit was made,
+no file in SIMPLE was edited, and no Linux/BOX or M2/M5 benchmark result is claimed.
+
+*Review note (Claude, 2026-11-22).* The ruling is recorded as decision 21. The probe now lives with the other
+reproducers as `doc/compiler_issues/gfortran_finalize_allocatable_array_result.f90`. It is one Fortran
+program with the control first, plus issue 5 of the README. `scripts/probe_callback_array_result.py` was
+removed, and the policy, the binding skill and the Apple notes point at the new file. An independent code
+review found no P1. It found two P2s to fix before commit: empty-handle guards in `mlx_function`'s
+lifetime bindings, and a concatenate test that cannot tell the axis mapping apart. It also listed P3s
+(history, 2026-11-22).
+
+
+**Review fixes and revalidation, 2026-11-22 (Codex).** On the same Apple M3 Pro, 18 GiB,
+macOS 26.7.3, GNU Fortran 16.2.0, CMake 4.4.3, mlx-c 0.8.0 / MLX 0.32.4, base
+`28622018de6560002ec1b0a9b8b0a3166f42b7fb`. Claude's updated decision 21, compiler-issue files,
+history and review note were read first and preserved. No file was added to the repository in this round.
+
+- **Required P2 fixes:** function assignment guards only when either context is associated; `kill`
+  guards only an associated context, and finalization delegates to it. Empty lifetime operations
+  never enter or initialize the runtime. Both bindings are in `ENTRY_IF_LIVE`. A two-thread test
+  copies, kills and finalizes empty local functions: it stopped with status 86 on the previous
+  implementation and passes after the fix. Static plants removing either conditional guard are rejected.
+  Rank-three concatenation now checks dimensions 1 and 3 on shape `(3,4,2)`, with exact output shape
+  and bytes; independently planted wrong mappings are rejected on both dimensions.
+- **P3 checks and contracts:** a batched `(3,4,5)` complex FFT2 over dimensions 1 and 2 matches separate
+  double DFTs for each batch. Logsumexp uses `1e-5 * max(1, abs(expected_logsumexp))`, in log units;
+  float64 `sqrt` passes `1e-12 * max(1, abs(sqrt(x)))`, so no float32 exception was needed. `minloc`
+  chooses the first tied minimum on 4097-element contiguous and strided axes on CPU and GPU.
+  The compiled fixture uses decimal inputs `i/10`; compiled/uncompiled bytes and independent expected
+  values still agree, with one shapeless trace per device over `(4,7)` and `(4,3)`.
+- `function_apply` and `invoke_callback` are recursive. Nested checked apply, both direct and during
+  compiled tracing, passes on both devices. The two FFT signature helpers validate `norm` against
+  the three `MLX_FFT_NORMS` members. Two added members of the existing guard group confirm the
+  Fortran normalization diagnostic; mlx-c already rejected these values before the explicit check.
+  Integer arrays with real32/real64 scalars give float32, with exact values. A gather index of 0 is
+  tested to wrap to the last element. The policy records this and the `x + i*y` limitation of `cmplx`
+  for non-finite imaginary parts, with host complex construction as the preserving route.
+- **Compiler issue 5:** the merged Fortran reproducer was built with exactly the header's
+  `gfortran-16 -std=f2018 -Wall -O0 -g -fsanitize=address` and run with `ASAN_OPTIONS=symbolize=0`.
+  Compilation returned 0 with no warnings. It printed the subroutine control's PASS, then reported
+  an AddressSanitizer heap-use-after-free, WRITE of size 4, and SIGABRT (subprocess return -6), before
+  the function PASS line. The header and README issue 5 now record this observed merged-program run.
+- **Files changed:** `src/core/compile/mlxf_compile.f90` and its tester;
+  `src/core/ops/mlxf_ops_tester.f90`, `src/core/fft/mlxf_fft_tester.f90`,
+  `src/core/array/mlxf_array_operations.f90`, `src/test/mlxf_test_registry.f90`,
+  `scripts/check_rules.py`, `test/CMakeLists.txt`, the binding/test policies,
+  `doc/compiler_issues/gfortran_finalize_allocatable_array_result.f90` and its README, this Progress
+  entry and `doc/history/2026-11.md`. The array lifetime/registry implementation is unchanged.
+- **Final exits:** clean Debug and Release with `MLXF_WERROR=ON` and the system install-name tool:
+  **7/7 gates**, **8.51 s Debug**, **8.08 s Release**, **zero compiler warnings**. Verbose results
+  confirm both devices: ops **371**, FFT **57**, compile **63**, linalg **32** checks. The exact array
+  lifetime gate remains **112** checks, including 10,000-iteration loops; all **10** object-contract
+  members stop with the hard-error status. Budget remains **7**. `test=list`, the static gate and
+  both formatting scripts pass. The static gate's only notice is the 13 deliberately untracked
+  sources; nothing was staged. No numerical bound was widened.
+
+**Review logs:** `/Users/elmlundho/for_claude/mlxf-review-2026-11-22/index.txt` indexes
+`debug-clean.log`, `release-clean.log`, `debug-areas.log`, `release-tests.log`, both gate timing
+files, `static.log`, `list.log`, `compiler-issue5.log` and the negative-control logs. All are outside
+`build/`; earlier phase logs were copied into `prior-phases-1-3/` before rebuilding, and their paths
+above now point to those copies.
+
+**What it means, in short:** both required review fixes and every listed P3 item are closed by
+implementation, tests or the requested policy clarification. Phases 1 to 3 are ready for review and
+commit again. No commit or SIMPLE edit was made; Phase 4 remains untouched and still awaits Phase 0.

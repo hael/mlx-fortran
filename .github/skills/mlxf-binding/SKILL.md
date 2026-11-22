@@ -1,6 +1,6 @@
 ---
 name: mlxf-binding
-description: Use when adding or changing a public wrapper of an MLX operation in mlx-fortran (src/core): when a wrapper may be added at all, finding its generated mlxc_ procedure, the helper of its C signature class, translating dimensions, indices and positions to MLX's row-major 0-based world, the registry check, weak scalars, errors, the re-export in mlxf.f90, and the two-device test it needs.
+description: "Use when adding or changing a public wrapper of an MLX operation in mlx-fortran (src/core): when a wrapper may be added at all, finding its generated mlxc_ procedure, the helper of its C signature class, translating dimensions, indices and positions to MLX's row-major 0-based world, the registry check, weak scalars, errors, the re-export in mlxf.f90, and the two-device test it needs."
 ---
 
 # Adding a wrapper to mlx-fortran
@@ -28,6 +28,13 @@ its one mapping table.
 - `int f(mlx_array* res, const mlx_array a, const mlx_stream s)`: `call mlxf_unary(r, mlxc_<name>, a, proc)`.
 - `int f(mlx_array* res, const mlx_array a, const mlx_array b, const mlx_stream s)`:
   `call mlxf_binary(r, mlxc_<name>, a, b, proc)`.
+- Added classes in `mlxf_array_operations`: `mlxf_int_op` (dtype/integer), `mlxf_vector_op` (shape or
+  axes), `mlxf_reduce_op` (dimension, removes it), `mlxf_scan_op` (inclusive forward scan),
+  `mlxf_ternary_op` (three operands), `mlxf_take_op`, `mlxf_concat_op`, `mlxf_slice_op`,
+  `mlxf_zeros_op`, `mlxf_range_op`, and `mlxf_fft_op` / `mlxf_fft2_op`. Multi-option requests use
+  the behaviourless records in `mlxf_defs`; these helpers all perform entry, validation and adoption.
+  The FFT wrappers resolve omitted lengths before calling mlx-c, whose C entry requires explicit lengths.
+  `mlxf_weak_scalar` accepts real64; real32 public operands widen into it without losing their original rounding.
 - A new class (an axis argument, an output vector, ...) gets **one** new helper beside these in the
   `mlxf_array` family (interface in the parent, implementation in the submodule of its capability), taking the generated procedure as a procedure argument whose abstract interface is
   `bind(c)` with the generated intents; every wrapper of that class uses it, and it is added to
@@ -50,7 +57,7 @@ its one mapping table.
   dimensions align with trailing MLX axes).
 - Index values and positions are 1-based for the user: subtract 1 inside the graph for arguments, add 1 to
   index results and cast them to int32.
-- Scalars are weak: build the 0-d operand with the array's kind (`weak_scalar`), so a real literal never
+- Scalars are weak: build the 0-d operand with the array's kind (`mlxf_weak_scalar`), so a real literal never
   changes the result's kind.
 
 ## 5. Errors
@@ -76,5 +83,17 @@ A stop that is the contract is a member of a guard group, not an in-process test
 
 ## 8. Before handover
 
-`python3 scripts/restyle_fortran.py` and `python3 scripts/format_use_blocks.py` on the touched files,
-`scripts/check_tree.sh`, Debug and Release builds with zero warnings and the fast gate in both.
+Follow [the modern Fortran layout and formatting steps](../mlxf-modern-fortran/SKILL.md#layout-checked-not-argued)
+after the last edit. Include the parent interfaces, signature helper, wrapper and tester, including
+new/untracked files; a wrapper-only formatting pass is incomplete. `scripts/check_tree.sh` checks both
+formatters tree-wide. Debug and Release build with zero warnings and pass the fast gate.
+
+
+## Closure callbacks
+
+`mlx_function` takes a checked subroutine `(inputs, outputs, status)`, with an allocatable output array.
+Never return an allocatable array of finalizable handles from the callback: GNU Fortran 16.2 frees that
+function result before finalization (reproducer: `doc/compiler_issues/gfortran_finalize_allocatable_array_result.f90`).
+The C trampoline imports and exports vectors through `mlxf_array_closure`, checks every status and returns
+it to C; callbacks validate their arguments and return failures, never stop. A new `mlxc_array_new()`
+output handle may have a null context until an mlx-c getter fills it; check the getter status before adoption.

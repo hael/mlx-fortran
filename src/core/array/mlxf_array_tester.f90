@@ -4,9 +4,10 @@ use, intrinsic :: iso_c_binding, only: c_bool, c_int, c_f_pointer
 use, intrinsic :: iso_fortran_env, only: int32, int64, real32, real64
 use mlxf_c_array,    only: mlxc_array_ndim, mlxc_array_shape
 use mlxf_c_ops,      only: mlxc_transpose
-use mlxf,            only: mlx_array, MLX_DEVICES, MLX_DTYPES, mlx_from, mlx_to, mlx_to_alloc, mlx_view, mlx_alloc, &
-                           mlx_eval, mlx_synchronize, mlx_clear_cache, mlx_active_memory, mlx_live_count, &
-                           mlx_last_error, mlx_default_device, mlx_set_default_device, exp
+use mlxf,            only: mlx_array, mlx_function, mlx_compile, MLX_DEVICES, MLX_DTYPES, mlx_from, mlx_to, &
+                           mlx_to_alloc, mlx_view, mlx_alloc, mlx_eval, mlx_synchronize, mlx_clear_cache, &
+                           mlx_active_memory, mlx_live_count, mlx_last_error, mlx_default_device, &
+                           mlx_set_default_device, exp, sum, sqrt, reshape, transpose, matmul, mlx_rfft, mlx_irfft
 use mlxf_registry,   only: registry_stale_releases
 use mlxf_array,      only: mlxf_handle, mlxf_unary
 use mlxf_test_utils, only: assert_true, assert_int, bits_equal, test_devices, device_name, set_fixed_seed
@@ -52,6 +53,8 @@ contains
             call test_view_survives
             call test_checked_failures
             call test_leak_gate(devs(i))
+            call test_operation_leaks
+            call test_compiled_leak
         end do
         call mlx_set_default_device(original)
         call test_zero_copy_table
@@ -502,5 +505,109 @@ contains
             call a%kill()
         end do
     end subroutine test_zero_copy_table
+
+    ! the operation modules' expressions (reductions, matmul, FFTs), evaluated 10,000 times per device,
+    ! leave the live count and active memory where they were
+    subroutine test_operation_leaks
+        type(mlx_array) :: a
+        real(real32)    :: x(4, 3)
+        integer         :: family, it, live0, stale0
+        integer(int64)  :: mem0
+        write(*,'(a)') 'test_operation_leaks'
+        x = 0.25_real32
+        a = mlx_from(x)
+        do family = 1, 3
+            call operation_leak_body(a, family)
+            call mlx_synchronize()
+            call mlx_clear_cache()
+            mem0 = mlx_active_memory()
+            live0 = mlx_live_count()
+            stale0 = registry_stale_releases()
+            do it = 1, NITER
+                call operation_leak_body(a, family)
+            end do
+            call mlx_synchronize()
+            call mlx_clear_cache()
+            call assert_true(mem0 == mlx_active_memory(), 'operation loop returns active memory exactly')
+            call assert_int(live0, mlx_live_count(), 'operation loop returns live handles exactly')
+            call assert_int(stale0, registry_stale_releases(), 'operation loop has no stale release')
+        end do
+    end subroutine test_operation_leaks
+
+    ! one evaluated expression of each operation family
+    subroutine operation_leak_body( a, family )
+        type(mlx_array), intent(in) :: a
+        integer,         intent(in) :: family
+        type(mlx_array) :: r
+        select case(family)
+            case(1)
+                r = sum(sqrt(reshape(a, [4, 3])+2._real64), dim=1)
+            case(2)
+                r = matmul(transpose(a), a)
+            case(3)
+                r = mlx_irfft(mlx_rfft(a, 1), 1)
+        end select
+        call mlx_eval(r)
+    end subroutine operation_leak_body
+
+    ! a compiled function applied 10,000 times leaks no handle, stale release or byte, closures included
+    subroutine test_compiled_leak
+        type(mlx_function) :: f, g
+        type(mlx_array)    :: a
+        real(real32)       :: x(4, 3)
+        integer            :: it, live0, stale0, entry_live, entry_stale
+        integer(int64)     :: mem0, entry_mem
+        write(*,'(a)') 'test_compiled_leak'
+        call mlx_synchronize()
+        call mlx_clear_cache()
+        entry_live = mlx_live_count()
+        entry_stale = registry_stale_releases()
+        entry_mem = mlx_active_memory()
+        x = 0.25_real32
+        a = mlx_from(x)
+        f = mlx_function(leak_callback)
+        g = mlx_compile(f, shapeless=.true.)
+        call compiled_leak_body(g, a)
+        call mlx_synchronize()
+        call mlx_clear_cache()
+        live0 = mlx_live_count()
+        stale0 = registry_stale_releases()
+        mem0 = mlx_active_memory()
+        do it = 1, NITER
+            call compiled_leak_body(g, a)
+        end do
+        call mlx_synchronize()
+        call mlx_clear_cache()
+        call assert_int(live0, mlx_live_count(), 'compiled-call loop returns live handles exactly')
+        call assert_int(stale0, registry_stale_releases(), 'compiled-call loop has no stale release')
+        call assert_true(mem0 == mlx_active_memory(), 'compiled-call loop returns active memory exactly')
+        call g%kill()
+        call f%kill()
+        call a%kill()
+        call mlx_synchronize()
+        call mlx_clear_cache()
+        call assert_int(entry_live, mlx_live_count(), 'compiled closure teardown returns live handles exactly')
+        call assert_int(entry_stale, registry_stale_releases(), 'compiled closure teardown has no stale release')
+        call assert_true(entry_mem == mlx_active_memory(), 'compiled closure teardown returns active memory exactly')
+    end subroutine test_compiled_leak
+
+    ! one compiled application, evaluated
+    subroutine compiled_leak_body( f, a )
+        type(mlx_function), intent(in) :: f
+        type(mlx_array),    intent(in) :: a
+        type(mlx_array), allocatable :: outputs(:)
+        call f%apply([a], outputs)
+        call mlx_eval(outputs)
+    end subroutine compiled_leak_body
+
+    ! the affine callback the compiled leak loop applies
+    subroutine leak_callback( inputs, outputs, status )
+        type(mlx_array), intent(in)               :: inputs(:)
+        integer,         intent(out)              :: status
+        type(mlx_array), allocatable, intent(out) :: outputs(:)
+        allocate(outputs(1))
+        outputs(1) = inputs(1)*2._real32+1._real32
+        status = 0
+    end subroutine leak_callback
 
 end module mlxf_array_tester

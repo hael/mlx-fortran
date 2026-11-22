@@ -78,8 +78,10 @@ admission rules; `doc/architecture_principles.md`, section 7).
 
 ## Before handing over
 
-- `scripts/check_tree.sh` (the static gate); the touched files through `restyle_fortran.py` and
-  `format_use_blocks.py`; then the build and the fast gate in Debug and Release.
+- After the final test edit, follow [the skill's formatting steps](../SKILL.md#layout-checked-not-argued)
+  for every touched tester and registry file, including new/untracked files. Format first, then run
+  `scripts/check_tree.sh`; its read-only tree check covers both formatters. Build and run the fast gate
+  in Debug and Release.
 - A test that comes with a fix is run on the previous tree and shown to fail there; one that passes on both
   proves nothing about the change.
 - A test that finds a defect: the fix lands in the same change and the test pins it. Deleting a test needs a
