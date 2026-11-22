@@ -4,8 +4,10 @@ A modern Fortran interface to [MLX](https://github.com/ml-explore/mlx), Apple's 
 unified CPU/GPU memory of Apple silicon, built on MLX's C API
 [mlx-c](https://github.com/ml-explore/mlx-c).
 
-**Status: scaffold.** The build, the test gate and a toolchain probe are in place; the library is
-designed in [`doc/implementation_notes/planned/mlxf_design.md`](doc/implementation_notes/planned/mlxf_design.md).
+**Status: core.** The generated C layer, the `mlx_array` type with its lifetime, data movement, evaluation
+and errors, and the test gate are in place; the operations of the first pipeline come next. The design is in
+[`doc/implementation_notes/completed/mlxf_design.md`](doc/implementation_notes/completed/mlxf_design.md), the
+next batch in [`doc/implementation_notes/planned/mlxf_milestone1.md`](doc/implementation_notes/planned/mlxf_milestone1.md).
 
 ## What it is for
 

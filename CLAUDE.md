@@ -11,7 +11,8 @@ adapted or rejected, and why.
 
 - `doc/policies/binding_contract_policy.md`: the binding contract (memory order, indices, lifetime and its
   unsupported uses, data movement, kinds, errors, devices, threads, precision). It is the truth; the design
-  plan `doc/implementation_notes/planned/mlxf_design.md` holds the decisions' history and the phases to come.
+  plan `doc/implementation_notes/completed/mlxf_design.md` holds the decisions' history (cited by number),
+  and `doc/implementation_notes/planned/mlxf_milestone1.md` the phases to come.
 - `doc/architecture_principles.md`: the house rules' origin and reasons. A disagreement between it and a
   skill is a defect fixed first.
 - `doc/policies/`: the binding, compile-time and test policies.

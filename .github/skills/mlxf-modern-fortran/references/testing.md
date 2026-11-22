@@ -65,9 +65,11 @@ admission rules; `doc/architecture_principles.md`, section 7).
 
 - `mlxf_<thing>_tester.f90` beside the module, one-line `!@descr:` naming what it tests; a `private`
   module exporting only `run_all_<thing>_tests`, which prints `**** running all <thing> tests ****`; each
-  `test_<what>` prints its name first.
+  `test_<what>` prints its name first. A form of a gate whose cost grows with the machine is a named-only
+  sub-suite (registry table `NAMED_ONLY`, run only by `suite=<name>`), and its tester also exports its entry.
 - No `stop` or `error stop` in a tester outside a guard-group member.
-- No function reference inside an array constructor of handles (rule `ctorcall`), at most five dummy
+- No function reference or operator result inside an array constructor of handles (rules `ctorcall`,
+  `ctorexpr`), at most five dummy
   arguments (rule `arity`); no test pins a compiler defect (a compiler that fixes it must not fail the
   build): accept the conforming result too, and test a diagnosis through a bypass every compiler takes.
 - Register it with a `run_suite` row in `src/test/mlxf_test_registry.f90`; a new area also needs its

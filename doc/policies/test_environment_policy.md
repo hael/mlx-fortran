@@ -94,14 +94,24 @@ changes only with an owner decision or a plan that names the new entry, recorded
   `scripts/check_test_registry.py`.
 - Fast tier only if it is hermetic (no network, no user file, no dependence on core count, load or
   clock), runs in-process on one thread, and leaves no files behind. An entry above 0.5 s in Release says
-  why in its registration comment. Never shrink a test until it fits; give it its own label instead.
+  why in its registration comment. A test that is too slow for the fast label is shrunk or optimized (a
+  smaller fixture, fewer iterations, a cheaper form of the same check), as long as it can still fail on the
+  guarantee it names.
+- **Named-only sub-suites** (owner ruling, 2026-11-22): where a gate is shrunk, a full form whose cost grows
+  with the machine (the recovery gate's half-batch evaluation allocates half the GPU's maximum buffer) may be
+  kept as a sub-suite listed in the registry's `NAMED_ONLY` table. Its area runs it only when `suite=` names
+  it, and `test=list` lists it. The fast gate keeps a form that tests the same guarantee at a fixed cost. A
+  plan names the points where the named-only form runs (a new machine, a phase exit);
+  `check_test_registry.py` holds every `NAMED_ONLY` name to a `run_suite` row. Today: `unit_core
+  suite=recovery_half`.
 - Both build types: a change to tests is verified in Debug and Release.
 
 ## 6. Testers
 
 - `mlxf_<thing>_tester.f90` beside the module it tests: a `private` module exporting only
   `run_all_<thing>_tests`, which prints `**** running all <thing> tests ****`; each `test_<what>` prints
-  its name first. No `stop` or `error stop` in a tester outside a guard-group member.
+  its name first. A tester that owns a named-only sub-suite (section 5) also exports that sub-suite's
+  `run_all_<name>_tests`. No `stop` or `error stop` in a tester outside a guard-group member.
 - A tester that needs private entities is a submodule of the module it tests; no entity is public only
   for a tester. A submodule calls no private plain procedure of its module (gfortran before 16 does not
   link it; `scripts/check_submodule_linkage.py`).

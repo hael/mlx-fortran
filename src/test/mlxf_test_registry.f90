@@ -9,7 +9,7 @@ use mlxf,                 only: mlx_array, mlx_from, mlx_eval, mlx_live_count, m
                                 MLX_DEVICES, exp
 use mlxf_array_tester,    only: run_all_array_tests
 use mlxf_device_tester,   only: run_all_device_tests
-use mlxf_error_tester,    only: run_all_error_tests
+use mlxf_error_tester,    only: run_all_error_tests, run_all_recovery_half_tests
 use mlxf_memory_tester,   only: run_all_memory_tests
 use mlxf_registry_tester, only: run_all_registry_tests
 use mlxf_version_tester,  only: run_all_version_tests
@@ -25,6 +25,8 @@ abstract interface
 end interface
 
 character(len=*), parameter :: AREAS(2) = [character(len=16) :: 'core', 'array']
+! sub-suites an area runs only when suite= names them (too costly for the fast gate)
+character(len=*), parameter :: NAMED_ONLY(1) = [character(len=32) :: 'recovery_half']
 
 type :: guard_member
     character(len=32) :: name  = ''
@@ -43,7 +45,7 @@ type(guard_member), parameter :: GUARDS(8) = [&
 
 contains
 
-    ! runs the sub-suites of one area, or only the one named by suite (empty: all)
+    ! runs the sub-suites of one area, or only the one named by suite (empty: all but the named-only ones)
     subroutine run_area( area, suite, found )
         character(len=*), intent(in)  :: area, suite
         logical,          intent(out) :: found
@@ -52,11 +54,12 @@ contains
         ran   = .false.
         select case( trim(area) )
             case('core')
-                call run_suite('version',  run_all_version_tests,  suite, ran)
-                call run_suite('device',   run_all_device_tests,   suite, ran)
-                call run_suite('memory',   run_all_memory_tests,   suite, ran)
-                call run_suite('registry', run_all_registry_tests, suite, ran)
-                call run_suite('error',    run_all_error_tests,    suite, ran)
+                call run_suite('version',       run_all_version_tests,       suite, ran)
+                call run_suite('device',        run_all_device_tests,        suite, ran)
+                call run_suite('memory',        run_all_memory_tests,        suite, ran)
+                call run_suite('registry',      run_all_registry_tests,      suite, ran)
+                call run_suite('error',         run_all_error_tests,         suite, ran)
+                call run_suite('recovery_half', run_all_recovery_half_tests, suite, ran)
             case('array')
                 call run_suite('array',    run_all_array_tests,    suite, ran)
             case default
@@ -76,13 +79,21 @@ contains
         do i = 1, size(GUARDS)
             write(*,'(A)') '    '//trim(GUARDS(i)%group)//': '//trim(GUARDS(i)%name)
         end do
+        write(*,'(A)') 'sub-suites run only when named (suite=<name>):'
+        do i = 1, size(NAMED_ONLY)
+            write(*,'(A)') '    '//trim(NAMED_ONLY(i))
+        end do
     end subroutine list_areas
 
     subroutine run_suite( name, entry, only, ran )
         character(len=*), intent(in)    :: name, only
         procedure(tester_entry)         :: entry
         logical,          intent(inout) :: ran
-        if( len_trim(only) > 0 .and. trim(only) /= name ) return
+        if( len_trim(only) > 0 )then
+            if( trim(only) /= name ) return
+        else
+            if( any(NAMED_ONLY == name) ) return
+        endif
         call begin_test_suite(name)
         call entry()
         call end_test_suite

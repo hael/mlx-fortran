@@ -89,12 +89,12 @@ holds is `doc/architecture_principles.md`; `scripts/check_tree.sh` checks what r
   No `allocate(source=)` or `mold=` on handle types; no array intrinsics (`pack`, `unpack`, `reshape`,
   `spread`, `transpose`, `merge`, `cshift`, `eoshift`) on arrays of handles.
 - **gfortran mis-finalizes three more forms** (also 13.4): never a function reference inside an array
-  constructor of handles (`[mlx_from(x), exp(a)]` leaks: rule `ctorcall` checks the repository's code; build
+  constructor of handles (`[mlx_from(x), exp(a)]` leaks: rules `ctorcall` and `ctorexpr` check the repository's code; build
   the elements into variables, `call f([a, b])` is fine); never a whole-array assignment of a function result
   to an array of handles (`v = exp(a)` leaks; assign a variable, or element by element); never a
   self-assignment of a derived type holding handles (`w = w` releases its components first). Reproducers:
   `doc/compiler_issues/`. A defined-operator result inside a constructor (`[a*2.0, b]`) leaks the same way
-  and is not checked; an overlapping section assignment of handles (`v(2:3) = v(1:2)`) stops as stale.
+  (rule `ctorexpr`: an element that refers to a handle is a bare designator); an overlapping section assignment of handles (`v(2:3) = v(1:2)`) stops as stale.
 - An `optional` dummy is present at some calls and absent at others; read `present()` once before a loop.
   Optionals are passed by keyword at call sites.
 
@@ -173,8 +173,9 @@ The tree builds with zero warnings in Debug and Release; fix the code, never sil
 ## Testers
 
 - Writing or editing a test: [references/testing.md](references/testing.md).
-- A tester is `mlxf_<thing>_tester.f90` beside the module it tests, exporting only `run_all_<thing>_tests`,
-  run from a row of `src/test/mlxf_test_registry.f90`; `scripts/check_test_registry.py` holds rows, testers
+- A tester is `mlxf_<thing>_tester.f90` beside the module it tests, exporting only `run_all_<thing>_tests`
+  (and the entry of a named-only sub-suite it owns, `NAMED_ONLY` in the registry), run from a row of
+  `src/test/mlxf_test_registry.f90`; `scripts/check_test_registry.py` holds rows, testers
   and CTest areas to each other.
 
 ## Building

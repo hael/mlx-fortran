@@ -1,5 +1,10 @@
 # mlx-fortran: a small Fortran array library, driven by SIMPLE's pipelines
 
+Status, 2026-11-22: **delivered in part, split.** Phases 0 and 1 are delivered (commit `0d3537b`; report
+beside this plan). Phase 2 continues in `doc/implementation_notes/planned/mlxf_milestone1.md`, which cites
+the decisions below by number ("design decision N") and lists which still bind; Phases 3 to 6 are a roadmap
+there, rewritten after the milestone-1 hold. The text below is the plan as it stood at the split, unchanged.
+
 Status, 2026-11-21: Phases 0 and 1 delivered (Progress); Phase 1 review fixes in the owner's working tree;
 Phase 2 planned. This revision updates the plan only; it does not start implementation or benchmark runs.
 Decision 42 adopts SIMPLE's production block scorer as the architectural template and future CPU baseline.

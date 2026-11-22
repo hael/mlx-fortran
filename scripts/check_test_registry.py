@@ -6,7 +6,8 @@ Three lists must agree, or a tester never runs and nothing reports it:
   - the areas of the registry (the AREAS table and the case() branches of src/test/mlxf_test_registry.f90),
   - the tester entries: every run_all_<x>_tests a *_tester.f90 under src/ defines is called by exactly one
     run_suite row, and every row calls an entry that exists. Sub-suite names are unique within an area
-    and at most 32 characters.
+    and at most 32 characters. Every name of the registry's NAMED_ONLY table (sub-suites run only when
+    suite= names them) is the name of a row.
 And the guard groups agree: every `expect_aborts <group>` entry of test/CMakeLists.txt names a group of the
 registry's GUARDS table, every group of the table has such an entry, and every member of the table has its
 case() branch in run_guard (and no branch lacks a member).
@@ -19,6 +20,7 @@ import re
 import sys
 
 CMAKE_AREAS_RE = re.compile(r"set\(\s*MLXF_TEST_AREAS\s+([^)]*)\)", re.IGNORECASE)
+NAMED_RE = re.compile(r"NAMED_ONLY\s*\(\s*\d+\s*\)\s*=\s*\[[^\]]*::([^\]]*)\]", re.IGNORECASE | re.DOTALL)
 TABLE_RE = re.compile(r"AREAS\s*\(\s*\d+\s*\)\s*=\s*\[[^\]]*::([^\]]*)\]", re.IGNORECASE | re.DOTALL)
 CASE_RE = re.compile(r"^\s*case\s*\(\s*'(\w+)'\s*\)", re.IGNORECASE)
 ROW_RE = re.compile(r"call\s+run_suite\s*\(\s*'([^']+)'\s*,\s*(\w+)", re.IGNORECASE)
@@ -96,6 +98,12 @@ def main():
         seen.add((area, name))
         if entry not in defined:
             problems.append("row %s/%s calls %s, which no tester defines" % (area, name, entry))
+    m = NAMED_RE.search("".join(reg))
+    if m is None and re.search(r"\bNAMED_ONLY\s*\(", "".join(reg), re.IGNORECASE):
+        problems.append("NAMED_ONLY table not read: write it as NAMED_ONLY(n) = [character(len=32) :: '...', ...]")
+    for name in (re.findall(r"'(\w+)'", m.group(1)) if m else []):
+        if not any(n == name for _, n, _ in rows):
+            problems.append("NAMED_ONLY names %s, which no run_suite row runs" % name)
     for entry, path in sorted(defined.items()):
         if called.get(entry, 0) != 1:
             problems.append("%s (%s) is called by %d registry rows, not one" % (entry, path, called.get(entry, 0)))

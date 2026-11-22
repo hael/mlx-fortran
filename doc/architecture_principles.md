@@ -54,8 +54,10 @@ is imported is how Fortran is written, built, tested, checked, documented and ha
   2026-11-21, design plan decision 39)** after Phase 1's probes found three more gfortran finalization
   defects (also in 13.4): no function reference inside an array constructor of handles, no whole-array
   assignment of a function result to an array of handles, no self-assignment of a derived type holding
-  handles. The first two leak where the registry cannot see it; `check_rules.py`, rule `ctorcall`, checks the
-  repository's own constructors, and `mlx_live_count()` lets users assert a loop leaks nothing.
+  handles. The first two leak where the registry cannot see it; `check_rules.py` checks the repository's own
+  constructors (rule `ctorcall` for library functions by name, rule `ctorexpr`, 2026-11-22, for any element
+  that refers to a handle and is not a bare designator: operator and generic results), and `mlx_live_count()`
+  lets users assert a loop leaks nothing.
 - **Adopt (XEMA): a type owns state or is a point of polymorphism**; otherwise procedures are module
   procedures named for what they act on.
 - **Adopt (both): optionals.** A dummy is `optional` only if some callers omit it; `present()` is read once
@@ -149,6 +151,9 @@ the style of the others and checked where reading can check them.
 
 - **Adopt (both): GNU Fortran only, version floor 14, fail loudly; toolchain autodetect before `project()`**
   (SIMPLE's `AutoDetectGCC.cmake`, with each candidate actually searched).
+- **Adopt (both): a missing dependency fails loudly too.** No `find_package(... REQUIRED)`: each miss (mlx-c,
+  OpenMP, Python) is tested by its `_FOUND` variable and stops with what was searched and how to install it,
+  never with CMake's list of config file names. `check_rules.py` (`findpkg`) checks it.
 - **Adopt (XEMA over SIMPLE): flags on an interface target, never forced into the cache**
   (`mlxf_build_flags`), so a consumer that embeds the project keeps its own flags. **Adopt (XEMA):
   per-library module directories** (`mlxf_add_library`): the library's modules and the test executable's
@@ -198,7 +203,7 @@ the style of the others and checked where reading can check them.
 - **Adopt (XEMA): every new rule a reading can check gets its check, with a planted violation shown to fail**
   (SIMPLE's plan standard says the same). Phase 1 added `arity`, `ctorcall` and, under `reexport`, the user
   module naming no `mlxc_` entity; `check_test_registry.py` also holds the guard groups to their CTest
-  entries.
+  entries and the named-only sub-suites to their rows. The milestone-1 follow-ups added `ctorexpr`.
 
 ## 9. Documentation and records
 

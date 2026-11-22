@@ -70,7 +70,8 @@ In the area's tester (`mlxf_<module>_tester.f90`, a `run_suite` row of `src/test
 for each device of `test_devices(devs)` (`mlx_set_default_device`), against a plain Fortran evaluation in
 double precision with the tolerance of the plan's section 6, asserting the convention it translates
 (dimension numbering, index base, sign, normalisation). float64 on the CPU device only. Never a function
-reference inside an array constructor of handles (rule `ctorcall`): build the elements into variables.
+reference or operator result inside an array constructor of handles (rules `ctorcall`, `ctorexpr`): build
+the elements into variables.
 A stop that is the contract is a member of a guard group, not an in-process test.
 
 ## 8. Before handover

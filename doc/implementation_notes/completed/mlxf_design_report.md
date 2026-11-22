@@ -1,5 +1,10 @@
 # Report: run `mlxf_core`, Phases 0 and 1 of the design plan
 
+Status, 2026-11-22: moved to `completed/` with the plan when it was split. Phase 1 was committed as `0d3537b`
+together with the owner's second review. The open items of section 5 are taken up by
+`doc/implementation_notes/planned/mlxf_milestone1.md` (its Phase 1 and its rulings), except the CI run on
+GitHub's runners, which only the maintainer can observe.
+
 Run `mlxf_core` (arun, unattended) on FWM-S116118, an M2 Ultra (16 performance and 8 efficiency cores, 76-core
 GPU, 192 GB, macOS 26.7.3); base `86a43fae2`, the scaffold; 2026-11-20 to 2026-11-21. The plan
 (`mlxf_design.md`, beside this report) holds the detail in its Progress section; this is the summary for the

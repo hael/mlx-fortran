@@ -3,7 +3,7 @@
 How mlx-fortran binds MLX's C API (mlx-c) and what it promises its users: memory order, indices,
 lifetime, data movement, kinds, errors, devices, threading, precision, evaluation, memory and growth. It
 takes over from decisions 6 to 18, 29, 30 and 39 of the design plan
-(`doc/implementation_notes/planned/mlxf_design.md`), which keep their history; from now on this policy is the
+(`doc/implementation_notes/completed/mlxf_design.md`), which keep their history; from now on this policy is the
 truth. How to add a wrapper is the skill `.github/skills/mlxf-binding/SKILL.md`; how the Fortran is
 written, the skill `mlxf-modern-fortran`.
 
@@ -95,10 +95,13 @@ written, the skill `mlxf-modern-fortran`.
   6. an overlapping section assignment of an array of handles, `v(2:3) = v(1:2)`: the compiler copies the
      right side into a temporary without the defined assignment, and the first element's assignment frees
      the object the second then names, so it stops as stale (no double free). Assign element by element in a
-     safe order, or through a second array.
-  The registry cannot see leaks 3 and 4: `mlx_live_count()` grows. Rule `ctorcall` checks function references
-  by name; a defined-operator result inside a constructor (`[a*2.0, b]`) has the same defect and is not
-  checked.
+     safe order, or through a second array. It stays unsupported by owner ruling (2026-11-22): making it work
+     would need a second assignment path that retains every element before releasing any, for a form a user
+     avoids by assigning element by element.
+  The registry cannot see leaks 3 and 4: `mlx_live_count()` grows. In this repository's code two rules of
+  `check_rules.py` keep use 3 out: `ctorcall` (a library function, `mlx_*` or `mlxf_*`, referenced inside a
+  constructor) and `ctorexpr` (an element that refers to a handle and is not a bare designator: `[a*2.0, b]`,
+  `[-a, b]`, `[(a), b]`, `[exp(a), b]`).
 - **The assignment pattern** for a derived type with allocatable handle components: a type-bound defined
   assignment that copies them element by element.
 
@@ -187,7 +190,8 @@ written, the skill `mlxf-modern-fortran`.
   could not be allocated", and the allocatable unallocated.
 - **Recovery.** After a failed evaluation the library and MLX stay usable: an evaluation that needs one
   buffer beyond the device's `max_buffer_length` returns a status whose message names the allocation, and the
-  same graph at half the batch evaluates. Over-subscribing unified memory does not fail, it pages: size work
+  same graph at a batch that fits evaluates (1 GiB in the fast gate; half the failing batch in the sub-suite
+  `recovery_half` of `unit_core`, run by name). Over-subscribing unified memory does not fail, it pages: size work
   from `mlx_peak_memory()` and a budget, not by catching failures.
 - A procedure C++ calls (the error handler, a deleter, a closure trampoline) never stops; it records and
   returns.

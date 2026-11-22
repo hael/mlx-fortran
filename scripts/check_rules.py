@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """The rules of CLAUDE.md, the skills and doc/architecture_principles.md that a compiler does not check,
-over src/ and test/. Adapted from XEMA's scripts/check_rules.py.
+over src/, test/ and the CMake files. Adapted from XEMA's scripts/check_rules.py.
 
     scripts/check_rules.py            report every finding, exit 1 if any
     scripts/check_rules.py --list     also print each rule with the ledger it allows
@@ -32,9 +32,19 @@ Rules:
   arity      no procedure has more than five dummy arguments; one that needs more takes a spec type.
              Exempt: every bind(c) procedure and interface (the generated layer's, and callbacks whose
              signature C fixes; a bind(c) procedure written for any other reason is a review finding)
-  ctorcall   no array constructor holds a reference to a function of the public API (the names of
-             src/core/mlxf.f90's public statements): gfortran never finalizes such a result, so a handle in it
-             leaks (doc/compiler_issues/gfortran_finalize_ctor_function_results.f90)
+  ctorcall   no array constructor holds a reference to a library function by name: the mlx_* and mlxf_*
+             names of src/core/mlxf.f90's public statements (the generics that keep an intrinsic's name,
+             real, max, sum, ..., are left to ctorexpr, as plain Fortran uses them in constructors too):
+             gfortran never finalizes such a result, so a handle in it leaks
+             (doc/compiler_issues/gfortran_finalize_ctor_function_results.f90)
+  ctorexpr   an element of an array constructor that refers to a handle is a bare designator (a, v(i),
+             w%r, w%r(i)): an operator result or a generic's result there ([a*2.0, b], [-a, b], [(a), b],
+             [exp(a), b]) is never finalized either. The handles of a file are the names and components it
+             declares type(mlx_array) or class(mlx_array), anywhere in it; the getters a%shape(), %ndim(),
+             %size(), %kind(), a keyword name and the argument of an inquiry intrinsic (size, lbound, ubound,
+             shape, rank, allocated, present, storage_size, ...) are not references; an implied-do is checked
+             through its items; a call of a function the file defines or declares with a handle result counts
+             as a reference (it is never bare)
   entry      every procedure that implements a name of the user API (the public block of src/core/mlxf.f90:
              its procedures, the specifics of its generics, the bindings of its types except final) opens with
              an entry call (mlxf_enter, mlxf_guard_thread, mlxf_require_device) or a call to a guarded helper
@@ -48,6 +58,9 @@ Rules:
              layer and the intrinsic modules, writes no public statement or
              attribute and no bare private (public by default, as XEMA's defs modules), and lists every name
              it imports in a `private ::` statement, so that an installed .mod re-exports nothing it imports
+  findpkg    no `find_package(... REQUIRED ...)` in the CMake files (CMakeLists.txt, cmake/*.cmake): a missing
+             dependency is tested by its _FOUND variable and fails with a FATAL_ERROR that says what was
+             searched and how to install it (SIMPLE's and XEMA's policy), never with CMake's own message
 
 Python 3.7 or newer, standard library only; it runs before the compile.
 """
@@ -86,6 +99,13 @@ ENTRY_EXEMPT = {
     'mlxf_build_description': 'pure: returns build constants, touches no state and calls no MLX function',
 }
 USER_MODULE = CORE + 'mlxf.f90'
+HANDLE_TYPES = ('mlx_array',)
+HANDLE_DECL = re.compile(r'^(type|class)\s*\(\s*(' + '|'.join(HANDLE_TYPES) + r')\s*\)(.*)$', re.I)
+HANDLE_PREFIX = re.compile(r'\b(type|class)\s*\(\s*(' + '|'.join(HANDLE_TYPES) + r')\s*\)', re.I)
+HANDLE_GETTERS = ('shape', 'ndim', 'size', 'kind')
+INQUIRY = re.compile(r'(?<![%\w])(size|lbound|ubound|shape|rank|allocated|present|storage_size|is_contiguous|'
+                     r'same_type_as|extends_type_of)\s*\(', re.I)
+FIND_PACKAGE = re.compile(r'\bfind_package\s*\(([^)]*)\)', re.I)
 
 
 def sources(root):
@@ -160,10 +180,13 @@ def raw_code(line):
 
 
 def logical_lines(codes):
-    """(first line number, joined statement) over `&` continuations"""
+    """(first line number, joined statement) over `&` continuations; a blank, comment-only or preprocessor
+    line inside a continuation is skipped, as the compiler skips it"""
     out, buf, start = [], '', None
     for n, code in enumerate(codes, 1):
         part = code.rstrip()
+        if buf and (not part.strip() or part.lstrip().startswith('#')):
+            continue
         if buf:
             part = part.lstrip()
             if part.startswith('&'):
@@ -406,13 +429,195 @@ def constructors(stmt):
     return out
 
 
+def library_functions(api):
+    """the public names ctorcall matches: the library's own, not the generics named after intrinsics"""
+    return set(n for n in api if n.startswith(('mlx_', 'mlxf_')))
+
+
 def check_ctorcall(rel, lines, api, out):
+    names = library_functions(api)
     for start, stmt in logical_lines([code_of(l) for l in lines]):
         for body in constructors(stmt):
             for m in re.finditer(r'(?<![%\w])([a-z_]\w*)\s*\(', body, re.I):
-                if m.group(1).lower() in api:
+                if m.group(1).lower() in names:
                     out.append('%s:%d: ctorcall: %s(...) inside an array constructor (a function result there is '
                                'never finalized: assign it to a variable first)' % (rel, start, m.group(1)))
+
+
+def split_top(text):
+    """text split at the commas outside parentheses and brackets"""
+    parts, depth, cur = [], 0, []
+    for c in text:
+        if c in '([':
+            depth += 1
+        elif c in ')]':
+            depth -= 1
+        if c == ',' and depth == 0:
+            parts.append(''.join(cur))
+            cur = []
+        else:
+            cur.append(c)
+    parts.append(''.join(cur))
+    return parts
+
+
+def matching(text, i):
+    """the index of the bracket closing the one at text[i], or -1"""
+    depth = 0
+    for j in range(i, len(text)):
+        if text[j] in '([':
+            depth += 1
+        elif text[j] in ')]':
+            depth -= 1
+            if depth == 0:
+                return j
+    return -1
+
+
+def handle_names(lines):
+    """the lower-case names a file declares of a handle type: variables, dummies and components"""
+    names = set()
+    for s in statements(lines):
+        m = HANDLE_DECL.match(s)
+        if not m:
+            continue
+        rest = m.group(3)
+        if re.match(r'\s*(function|subroutine|pure|impure|elemental|recursive|module)\b', rest, re.I):
+            continue
+        if '::' in rest:
+            rest = rest.split('::', 1)[1]
+        elif rest.lstrip().startswith(','):
+            continue
+        for ent in split_top(rest):
+            n = re.match(r'\s*([a-z_]\w*)', ent, re.I)
+            if n:
+                names.add(n.group(1).lower())
+    return names
+
+
+def handle_functions(lines, handles):
+    """the lower-case names of the functions a file defines or declares whose result is a handle"""
+    names = set()
+    for s in statements(lines):
+        m = PROC_HEAD.match(s)
+        if not m or m.group(1).lower() != 'function':
+            continue
+        name = m.group(2).lower()
+        r = re.search(r'\bresult\s*\(\s*(\w+)\s*\)', s, re.I)
+        result = r.group(1).lower() if r else name
+        if HANDLE_PREFIX.search(s[:m.start(1)]) or result in handles:
+            names.add(name)
+    return names
+
+
+def blank_inquiries(expr):
+    """expr with the argument lists of inquiry intrinsics blanked (their result is an integer or logical)"""
+    out = expr
+    for m in INQUIRY.finditer(expr):
+        j = matching(expr, m.end() - 1)
+        if j > 0:
+            out = out[:m.end()] + ' ' * (j - m.end()) + out[j:]
+    return out
+
+
+def handle_refs(expr, handles, functions=()):
+    """the identifiers of expr that refer to a handle, or call a function whose result is one"""
+    expr = blank_inquiries(expr)
+    refs = []
+    for m in re.finditer(r'[a-z_]\w*', expr, re.I):
+        k = m.start()
+        if k > 0 and (expr[k - 1].isalnum() or expr[k - 1] == '_'):
+            continue
+        if k > 1 and expr[k - 1] == '.' and expr[k - 2].isdigit():
+            continue
+        name = m.group(0).lower()
+        if name not in handles and name not in functions:
+            continue
+        after = expr[m.end():]
+        if re.match(r'\s*=(?!=)', after):
+            continue
+        rest = after.lstrip()
+        if rest.startswith('('):
+            j = matching(rest, 0)
+            rest = rest[j + 1:] if j > 0 else rest
+        g = re.match(r'\s*%\s*([a-z_]\w*)\s*\(', rest, re.I)
+        if g and g.group(1).lower() in HANDLE_GETTERS:
+            continue
+        refs.append(m.group(0))
+    return refs
+
+
+def designator_parts(expr):
+    """[(name, subscripts), ...] of a designator name[(...)][%name[(...)]]..., or None"""
+    e, parts = expr.strip(), []
+    while True:
+        m = re.match(r'([a-z_]\w*)\s*', e, re.I)
+        if not m:
+            return None
+        e, sub = e[m.end():], ''
+        if e.startswith('('):
+            j = matching(e, 0)
+            if j < 0:
+                return None
+            e, sub = e[j + 1:].lstrip(), e[1:j]
+        parts.append((m.group(1).lower(), sub))
+        if not e:
+            return parts
+        if not e.startswith('%'):
+            return None
+        e = e[1:].lstrip()
+
+
+def implied_do_items(elem):
+    """the items of an implied-do (items, i = a, b), or None when elem is not one"""
+    e = elem.strip()
+    if not e.startswith('(') or matching(e, 0) != len(e) - 1:
+        return None
+    inner = split_top(e[1:-1])
+    for k, part in enumerate(inner):
+        if k > 0 and re.match(r'\s*[a-z_]\w*\s*=(?!=)', part, re.I):
+            return inner[:k]
+    return None
+
+
+def ctor_violations(body, handles, functions=()):
+    """the elements of a constructor body that refer to a handle without being a bare designator"""
+    body = body.strip()
+    if body.startswith('/'):
+        body = body[1:]
+    top = split_top(body)
+    if top and '::' in top[0]:
+        top[0] = top[0].split('::', 1)[1]
+    bad = []
+    for elem in top:
+        e = elem.strip()
+        items = implied_do_items(e)
+        if items is not None:
+            bad += ctor_violations(','.join(items), handles, functions)
+            continue
+        if e.startswith('[') and matching(e, 0) == len(e) - 1:
+            bad += ctor_violations(e[1:-1], handles, functions)
+            continue
+        if not handle_refs(e, handles, functions):
+            continue
+        parts = designator_parts(e)
+        if parts and parts[-1][0] in handles and parts[-1][0] not in functions and \
+                not any(handle_refs(sub, handles, functions) for _, sub in parts):
+            continue
+        bad.append(e)
+    return bad
+
+
+def check_ctorexpr(rel, lines, out):
+    handles = handle_names(lines)
+    if not handles:
+        return
+    functions = handle_functions(lines, handles)
+    for start, stmt in logical_lines([code_of(l) for l in lines]):
+        for body in constructors(stmt):
+            for e in ctor_violations(body, handles, functions):
+                out.append('%s:%d: ctorexpr: %s inside an array constructor refers to a handle and is not a bare '
+                           'designator (its result is never finalized: assign it to a variable first)' % (rel, start, e))
 
 
 def check_reexport_mlxc(root, out):
@@ -612,6 +817,28 @@ def check_entry(root, files, api, out):
                        'operand is touched)' % (rel, line, name, public))
 
 
+def cmake_files(root):
+    out = []
+    for d, dirs, files in os.walk(root):
+        rel_d = os.path.relpath(d, root).replace(os.sep, '/')
+        dirs[:] = sorted(x for x in dirs if not x.startswith('.') and not (rel_d == '.' and x.startswith('build')))
+        for f in sorted(files):
+            if f == 'CMakeLists.txt' or (rel_d == 'cmake' and f.endswith('.cmake')):
+                out.append(os.path.relpath(os.path.join(d, f), root).replace(os.sep, '/'))
+    return out
+
+
+def check_findpkg(root, out):
+    for rel in cmake_files(root):
+        text = '\n'.join(re.sub(r'#.*', '', l) for l in read(root, rel).split('\n'))
+        for m in FIND_PACKAGE.finditer(text):
+            if re.search(r'\bREQUIRED\b', m.group(1)):
+                n = text.count('\n', 0, m.start()) + 1
+                out.append('%s:%d: findpkg: find_package(... REQUIRED) (test its _FOUND variable and fail with '
+                           'a FATAL_ERROR that says how to install it)' % (rel, n))
+    return out
+
+
 def ledger_check(rule, counts, ledger, out):
     for rel, n in sorted(counts.items()):
         if rel not in ledger:
@@ -642,6 +869,7 @@ def main():
         check_cbstop(rel, lines, out)
         check_arity(rel, lines, out)
         check_ctorcall(rel, lines, api, out)
+        check_ctorexpr(rel, lines, out)
         n = sum(1 for r in raws if BIND_MLX.search(r))
         if n:
             cbind[rel] = n
@@ -663,6 +891,7 @@ def main():
     check_inf(root, files, out)
     check_defs(root, files, out)
     check_entry(root, files, api, out)
+    check_findpkg(root, out)
     ledger_check('cbind', cbind, CBIND_LEDGER, out)
     ledger_check('libc', libc, LIBC_LEDGER, out)
     ledger_check('prints', prints, PRINT_LEDGER, out)

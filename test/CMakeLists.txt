@@ -44,8 +44,9 @@ endfunction()
 
 # ---- the fast gate: one entry per area suite -------------------------------------------------------
 # An explicit TIMEOUT overrides ctest --timeout; keep it in sync with scripts/run_fast_gate.sh.
-# unit_core (above 0.5 s): its recovery gate evaluates, per device, a graph needing half the GPU's maximum
-#   buffer length (64.9 GB on a 192 GB M2 Ultra), the least that shows a failed batch recovering at half size.
+# unit_core: its recovery gate fails, per device, a graph one buffer beyond the GPU's maximum (refused before
+#   allocating) and evaluates the same graph at 1 GiB; the half-batch form, half the GPU's maximum buffer
+#   (64.9 GB on a 192 GB M2 Ultra), is the sub-suite recovery_half, run by name only.
 # unit_array (above 0.5 s, the area named by the design plan): its leak gate runs 10,000 iterations of every
 #   supported form of the handle model per device.
 set(MLXF_TEST_AREAS core array)

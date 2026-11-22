@@ -12,9 +12,10 @@ at the same sources.
 2. Read `CLAUDE.md` and `doc/architecture_principles.md`.
 3. For Fortran changes read `.github/skills/mlxf-modern-fortran/SKILL.md`; for tests also its
    `references/testing.md`.
-4. Read `doc/policies/binding_contract_policy.md` (the binding contract) and the design plan
-   `doc/implementation_notes/planned/mlxf_design.md` (its decisions block and the phases to come). To add a
-   wrapper of an MLX operation, read `.github/skills/mlxf-binding/SKILL.md`.
+4. Read `doc/policies/binding_contract_policy.md` (the binding contract), the plan in progress
+   `doc/implementation_notes/planned/mlxf_milestone1.md`, and the decisions block of the design plan
+   `doc/implementation_notes/completed/mlxf_design.md` that it cites by number. To add a wrapper of an MLX
+   operation, read `.github/skills/mlxf-binding/SKILL.md`.
 
 ## Git
 
