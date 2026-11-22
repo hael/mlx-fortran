@@ -1,7 +1,9 @@
 # Codex beside run `mlxf_m1`: CI, the M5 Ultra bring-up, the gfortran reports, a fair FFTW comparator
 
-Status, 2026-11-22: planned. Base: the maintainer's commit that adds this plan, on top of `0a1eec2`. SIMPLE pin:
-`3a595f42f928a366744094a28b62aeb6020099e4`. Supersedes: none.
+Status, 2026-11-22: planned. Decision 6 was ruled by Hans the same day (Phase 4 goes ahead) and decision 2
+was revised by him (he pushes Codex's work to GitHub). Base: the maintainer's commit that adds this plan, on
+top of `0a1eec2`. SIMPLE pin: `3a595f42f928a366744094a28b62aeb6020099e4`, a working point for now
+(decision 6). Supersedes: none.
 
 Depends on:
 
@@ -38,7 +40,8 @@ This plan does those four, so that they are ready before run `mlxf_m1_m5`.
 
 - **The run is not disturbed** (milestone decision 6). Codex edits no file the run may edit (section 4).
   It runs nothing on the M2 Ultra: no ssh, no job, no build, since the run's timed benchmarks need that
-  machine idle. Nothing Codex produces reaches `main` while a phase of the run is open.
+  machine idle. Codex's files are disjoint from the run's, so Hans's pushes of Codex's work during the run
+  touch nothing the run edits (decision 2).
 - **The house rules hold:** `AGENTS.md`, `CLAUDE.md`, `doc/architecture_principles.md`, and the skill
   `mlxf-modern-fortran` for any Fortran. In SIMPLE, they are SIMPLE's `AGENTS.md`/`CLAUDE.md` and its skills.
 - **The pins hold:**
@@ -50,13 +53,17 @@ This plan does those four, so that they are ready before run `mlxf_m1_m5`.
 
 ## 3. Decisions and rulings
 
-1. (2026-11-22) **Window and order.** Phases 0 to 3 run while run `mlxf_m1` runs, in this order. Phase 2 is
-   due before 2026-11-25, the M5 Ultra's expected delivery. Phase 4 runs only after decision 6's ruling.
-2. (2026-11-22) **Git.** No commit, no push, no branch creation, no state-changing git command (the house
-   rule). Read-only git carries `--no-optional-locks`. Hans commits and pushes.
-   - Phase 1's fix needs a GitHub run to prove it. Hans pushes it as branch `codex/ci`, never to `main`,
-     during the run.
-   - Codex's mlx-fortran changes are committed only after Hans has committed the run's diff.
+1. (2026-11-22) **Window and order.** Phases 0 to 4 run while run `mlxf_m1` runs, in this order. Phase 2 is
+   due before 2026-11-25, the M5 Ultra's expected delivery. Phase 4's timed runs wait until the Codex machine
+   is otherwise idle.
+2. (2026-11-22, revised by Hans the same day: "I will push to GitHub") **Git.**
+   - Codex makes no commit, push, branch or other state-changing git command (the house rule). Read-only
+     git carries `--no-optional-locks`.
+   - Hans commits Codex's work and pushes it to GitHub himself, as each phase is done, during the run
+     included. Its files are disjoint from the run's (section 4). The run works on a copy made at launch, so
+     it never sees these commits, and its diff still applies on top of them. This narrows milestone decision
+     6's "no edit reaches the repository while a phase runs" to the run's own files (ruling R1 of the run).
+   - Phase 1's GitHub run is the run of Hans's push.
 3. (2026-11-22) **History.** `doc/history/2026-11.md` belongs to the run's file table, so Codex does not
    edit it. Each Progress entry of this plan carries a one-paragraph history text, which Hans adds when he
    commits.
@@ -67,16 +74,21 @@ This plan does those four, so that they are ready before run `mlxf_m1_m5`.
    - Moving to a newer pair is Hans's ruling, never a default. It would change the milestone's dependency
      and need a revalidation of Phases 1 to 3.
 5. (2026-11-22) **Bugzilla.** Codex reads it and files nothing (milestone decision 9).
-6. (2026-11-22, **open: Hans rules before Phase 4**) **A measured planner in SIMPLE's benchmark.**
-   - What Phase 4 adds: a test-UI key `fftw_plans=estimate|measure` for `polar_matching_bench`'s
-     `block_prod` and `shiftmap` suites (default `estimate`, unchanged), on a SIMPLE branch from the pin.
-   - What it measures: the ratio on the Codex machine.
-   - If Hans adopts it for Phase 6, that is a new SIMPLE pin and a decision in `mlxf_milestone1.md`. This
-     plan writes neither.
-   - If Hans rules no, Phase 4 is skipped and the caveat stays as decision 18 words it.
+6. (2026-11-22, Hans: "No point of pinning. SIMPLE will change most likely and we will have to adopt. We can
+   pin for now and go ahead with phase 4.") **A measured planner in SIMPLE's benchmark: Phase 4 goes ahead.**
+   - *Pins.* A pin is a working point, not a commitment: SIMPLE will move, and mlx-fortran's comparator
+     follows it. For now Phase 4 works from the pin `3a595f42f`, so that its numbers compare with run
+     `mlxf_m1`'s Phase 0.
+   - *What Phase 4 adds:* a test-UI key `fftw_plans=estimate|measure` for `polar_matching_bench`'s
+     `block_prod` and `shiftmap` suites (default `estimate`, unchanged). It lives on a SIMPLE branch from
+     the pin, which Hans creates, commits and pushes.
+   - *What it measures:* the ratio on the Codex machine.
+   - *Phase 6:* whether it measures with `fftw_plans=measure`, and at which SIMPLE commit, is decided when
+     run `mlxf_m1_m5`'s spec is written, from Phase 4's numbers. This plan writes no decision into
+     `mlxf_milestone1.md`.
 
-Defaults taken without a question: the plan's name; the branch name `codex/ci`; the section name in
-`how2set_up_dev.md` ("New Mac for a run"); the key name `fftw_plans`.
+Defaults taken without a question: the plan's name; the section name in `how2set_up_dev.md` ("New Mac for
+a run"); the key name `fftw_plans`.
 
 ## 4. Not in this plan
 
@@ -106,10 +118,10 @@ Defaults taken without a question: the plan's name; the branch name `codex/ci`; 
 | Phase | Kind | Gate |
 | --- | --- | --- |
 | 0 | measurement only | Debug and Release from scratch on the Codex machine, zero warnings, fast gate |
-| 1 | CI workflow (dependency discovery if needed); library behaviour identical | a green GitHub run of both matrix entries on `codex/ci`; the local headless gate |
+| 1 | CI workflow (dependency discovery if needed); library behaviour identical | a green GitHub run of both matrix entries for Hans's push of the fix; the local headless gate |
 | 2 | documentation | every version and command in the section from a recorded command output; the pinned pair's installability established |
 | 3 | documentation | each issue classified against the PRs it cites; each reproducer run on gfortran trunk with the revision recorded |
-| 4 | SIMPLE test code, behind its ruling | default `estimate` byte-identical to the pin; `measure` timed twice per case; production path unchanged |
+| 4 | SIMPLE test code (decision 6) | default `estimate` byte-identical to the pin; `measure` timed twice per case; production path unchanged |
 
 ## 6. Acceptance
 
@@ -119,7 +131,7 @@ Every number carries its origin: *exact*, *measured*, *derived* or *guessed*.
   - Zero compiler warnings, *exact*.
   - The fast gate's seven entries pass, *exact*; the count is seven at `0a1eec2`.
 - **Phase 1.**
-  - Both matrix entries (debug, release) green on GitHub, *exact*.
+  - Both matrix entries (debug, release) green on GitHub for the pushed fix, *exact*.
   - The runner's installed `gcc`, `cmake`, `mlx` and `mlx-c` versions recorded from the run log.
   - Whether the runner opened a Metal device: `unit_core`'s device count or skip line, recorded.
   - The headless gate on the Codex machine: `sandbox-exec -p "(version 1)(allow default)(deny iokit-open)"`
@@ -203,10 +215,10 @@ Exit: the machine record; both trees with zero warnings and seven passing entrie
      Homebrew;
    - ensure `install_name_tool` is the system one (the M3 Pro needed
      `-DCMAKE_INSTALL_NAME_TOOL=/usr/bin/install_name_tool`).
-4. Hans pushes the branch `codex/ci` (decision 2), and the run is read back.
+4. Hans commits and pushes the fix (decision 2), and its GitHub run is read back.
 
-Exit: a green run of both matrix entries on `codex/ci`, its URL in Progress, with the runner's versions and
-Metal line; the headless gate passes locally; the changed files listed. If every run was already green:
+Exit: a green run of both matrix entries for the pushed fix, its URL in Progress, with the runner's versions
+and Metal line; the headless gate passes locally; the changed files listed. If every run was already green:
 the URLs and versions, and no change.
 
 ### Phase 2, the M5 Ultra bring-up kit (due 2026-11-25)
@@ -256,10 +268,10 @@ each relevant change, or says "none", per item of step 3.
 Exit: five classifications with citations; five trunk outputs quoted; the README ready for Hans to file;
 the static gate passes.
 
-### Phase 4, a measured planner in SIMPLE's benchmark (only after decision 6's ruling)
+### Phase 4, a measured planner in SIMPLE's benchmark (decision 6)
 
-1. In a SIMPLE checkout at the pin, on a branch Hans creates from `3a595f42f`, read SIMPLE's agent
-   instructions and the skills they route to for test commanders.
+1. In a SIMPLE checkout on a branch Hans creates from the pin `3a595f42f`, read SIMPLE's agent instructions
+   and the skills they route to for test commanders.
 2. Add `fftw_plans=estimate|measure` to the test UI of `polar_matching_bench` for the suites `block_prod`
    and `shiftmap`. `measure` gives the calculator and the shift maps `FFTW_MEASURE` plans under the test
    executable's fixed seed. It does not import or write a wisdom file. The default keeps every byte of the
