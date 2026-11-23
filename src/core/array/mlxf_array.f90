@@ -4,7 +4,7 @@
 ! derived type, allocate(source=), an array intrinsic) is detected through the registry and stops at its next
 ! use. One type and one ownership implementation; the submodules share only what this interface declares.
 module mlxf_array
-use, intrinsic :: iso_c_binding, only: c_bool, c_int, c_ptr, c_size_t, c_double
+use, intrinsic :: iso_c_binding,   only: c_bool, c_int, c_ptr, c_size_t, c_double
 use, intrinsic :: iso_fortran_env, only: int32, int64, real32, real64
 use mlxf_c_types, only: mlxc_array, mlxc_stream, mlxc_vector_array, mlxc_optional_dtype
 use mlxf_defs,    only: mlxf_slice_spec, mlxf_fft_spec, mlxf_range_spec

@@ -219,6 +219,13 @@ Decisions 1 to 4 were ruled by Hans on 2026-11-23, each as recommended. None is 
     brought up to that release in a later change. The release is read from Homebrew's Cellar path, the
     package config beside the headers, or the build's record. When none says, the build's record (0.8.0) is
     assumed and differences fail. CMake's version warning is unchanged.
+25. (2026-11-23, Hans: "Run now, overlap OK"; "Parity Phases 1–3"; fast mode off) **Phases 1 to 3 run now**
+    as arun `mlxf_parity` on the M2 Ultra, on base `4706ecb`. This replaces decision 3's "after milestone 1
+    closes" for these three phases. Run `mlxf_m1_m5` measures `4706ecb` on the M5 independently and edits
+    no source. The two diffs meet only in `README.md` and the history, merged by hand at review. The run
+    ends at Phase 3's hold. Phases 4 to 9 keep decision 3. Phase 1 opens with the base measurements that
+    decision 23 moved there. The file table lists phases one by one, because the run's fence reads only
+    the numbers written.
 
 Defaults taken without a question (cheap to veto): the ledger's path and format; the record names
 `mlxf_conv_spec` and `mlx_metal_kernel_spec`; the new type names `mlx_grad_function`, `mlx_imported_function`,
@@ -377,28 +384,29 @@ times against Phase 0. Exit: the report exists; `check_tree.sh` passes.
 
 | File | What | Phases |
 | --- | --- | --- |
-| `scripts/mlxc_parity.txt` | the ledger (new) | 0 to 8 |
-| `scripts/check_rules.py` | rule `parity`; `ENTRY_HELPERS` for new helpers | 0 to 8 |
+| `scripts/mlxc_parity.txt` | the ledger (new) | 0, 1, 2, 3, 4, 5, 6, 7, 8 |
+| `scripts/check_rules.py` | rule `parity`; `ENTRY_HELPERS` for new helpers | 0, 1, 2, 3, 4, 5, 6, 7, 8 |
 | `scripts/probes/mlx_behaviour_probe.c` (new) | Phase 0's probes of MLX behaviour, re-run on a new MLX release or Mac; Phase 4 adds the linalg functions left unprobed | 0, 4 |
 | `.github/skills/mlxf-binding/SKILL.md`, `CLAUDE.md`, `doc/architecture_principles.md` | decision 1 | 0 |
-| `src/core/array/mlxf_array.f90`, `mlxf_array_operations.f90` | interfaces and new signature helpers | 1 to 8 |
+| `src/core/array/mlxf_array.f90`, `mlxf_array_operations.f90` | interfaces and new signature helpers | 1, 2, 3, 4, 5, 6, 7, 8 |
 | `src/core/array/mlxf_array_transfer.f90`, `mlxf_array_tester.f90` | decision 13 | 3 |
-| `src/core/ops/*` (existing and new submodules `mlxf_ops_math`, `mlxf_ops_index`, `mlxf_ops_sort`) | operations | 1 to 4 |
+| `src/core/ops/*` (existing and new submodules `mlxf_ops_math`, `mlxf_ops_index`, `mlxf_ops_sort`) | operations | 1, 2, 3, 4 |
 | `src/core/linalg/*` | linear algebra, products, convolutions | 4 |
 | `src/core/fft/*` | FFTs | 5 |
 | `src/core/random/*` (new) | random | 5 |
 | `src/core/transforms/*` (new), `src/core/compile/*` | transforms, compile controls, export | 6 |
 | `src/core/fast/*` (new) | fast, Metal kernels | 7 |
 | `src/core/io/*`, `src/core/distributed/*` (new), `src/core/runtime/mlxf_stream.f90` (new), `src/core/runtime/mlxf_device.f90`, `mlxf_memory.f90`, `mlxf_libc.f90` | decisions 14, 15, 18, 19 | 8 |
-| `src/core/<dir>/<dir>.inf` | per new or changed folder | 1 to 8 |
-| `src/defs/mlxf_defs.f90` | spec records, vocabularies | 1 to 8 |
-| `src/core/mlxf.f90` | re-exports | 1 to 8 |
-| `src/test/mlxf_test_registry.f90`, `test/CMakeLists.txt`, `scripts/run_fast_gate.sh` (if needed) | areas, budget | 1 to 8 |
-| `doc/policies/binding_contract_policy.md`, `doc/policies/test_environment_policy.md` (if needed) | the contract | 1 to 8 |
-| `README.md` | API table | 1 to 8 |
-| `doc/collaboration/apple_questions.md` | decision 22 | 0 to 8 |
-| `doc/history/2026-11.md` (or the month's file) | delivered batches | 0 to 9 |
-| this plan (Progress), `mlxf_mlxc_parity_report.md` (new) | record | 0 to 9 |
+| `src/core/<dir>/<dir>.inf` | per new or changed folder | 1, 2, 3, 4, 5, 6, 7, 8 |
+| `src/defs/mlxf_defs.f90` | spec records, vocabularies | 1, 2, 3, 4, 5, 6, 7, 8 |
+| `src/core/mlxf.f90` | re-exports | 1, 2, 3, 4, 5, 6, 7, 8 |
+| `src/test/mlxf_test_utils.f90`, `src/test/mlxf_test_defs.f90` (if needed) | assertions for the table-driven testers; frozen tolerances | 1, 2, 3, 4, 5, 6, 7, 8 |
+| `src/test/mlxf_test_registry.f90`, `test/CMakeLists.txt`, `scripts/run_fast_gate.sh` (if needed) | areas, budget | 1, 2, 3, 4, 5, 6, 7, 8 |
+| `doc/policies/binding_contract_policy.md`, `doc/policies/test_environment_policy.md` (if needed) | the contract | 1, 2, 3, 4, 5, 6, 7, 8 |
+| `README.md` | API table | 1, 2, 3, 4, 5, 6, 7, 8 |
+| `doc/collaboration/apple_questions.md` | decision 22 | 0, 1, 2, 3, 4, 5, 6, 7, 8 |
+| `doc/history/2026-11.md`, `doc/history/2026-12.md` | delivered batches | 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 |
+| this plan (Progress), `mlxf_mlxc_parity_report.md` (new) | record | 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 |
 
 ## Progress
 

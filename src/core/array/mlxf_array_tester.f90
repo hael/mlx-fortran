@@ -1,6 +1,6 @@
 !@descr: tests of mlxf_array: the leak gate, byte identity of data movement, memory order, views, the zero-copy table
 module mlxf_array_tester
-use, intrinsic :: iso_c_binding, only: c_bool, c_int, c_f_pointer
+use, intrinsic :: iso_c_binding,   only: c_bool, c_int, c_f_pointer
 use, intrinsic :: iso_fortran_env, only: int32, int64, real32, real64
 use mlxf_c_array,    only: mlxc_array_ndim, mlxc_array_shape
 use mlxf_c_ops,      only: mlxc_transpose
