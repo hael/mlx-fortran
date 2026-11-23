@@ -2,7 +2,7 @@
 ! The first public call installs the error handler. A GPU is present when MLX can open one; without one a
 ! Metal build of MLX cannot allocate on either device, and the first operation that would allocate stops.
 module mlxf_device
-use, intrinsic :: iso_c_binding, only: c_bool, c_int, c_null_char, c_ptr, c_size_t
+use, intrinsic :: iso_c_binding,   only: c_bool, c_int, c_null_char, c_ptr, c_size_t
 use, intrinsic :: iso_fortran_env, only: int64
 use mlxf_c_types,  only: mlxc_device, mlxc_device_info, mlxc_stream, MLXC_CPU, MLXC_GPU
 use mlxf_c_device, only: mlxc_device_new, mlxc_device_new_type, mlxc_device_free, mlxc_get_default_device, &

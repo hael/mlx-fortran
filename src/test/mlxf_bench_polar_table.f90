@@ -6,7 +6,7 @@
 ! and the frozen bounds; the other modes append measure-only rows to ./bench_polar_table*.tsv.
 module mlxf_bench_polar_table
 use, intrinsic :: iso_fortran_env, only: int64, real32, real64
-use, intrinsic :: iso_c_binding, only: c_int, c_double
+use, intrinsic :: iso_c_binding,   only: c_int, c_double
 !$ use omp_lib,               only: omp_get_max_threads
 use mlxf,                     only: mlx_set_default_device, mlx_default_device, mlx_peak_memory, mlx_reset_peak_memory, &
                                     mlx_synchronize, mlx_clear_cache, mlx_device_info_size, MLX_DEVICES, &

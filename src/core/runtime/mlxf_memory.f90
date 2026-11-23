@@ -2,7 +2,7 @@
 ! Unified memory pages rather than failing when over-subscribed: callers size their work from the peak
 ! memory and a budget, and set_memory_limit makes evaluation wait and release cached buffers.
 module mlxf_memory
-use, intrinsic :: iso_c_binding, only: c_int, c_size_t
+use, intrinsic :: iso_c_binding,   only: c_int, c_size_t
 use, intrinsic :: iso_fortran_env, only: int64
 use mlxf_c_memory, only: mlxc_get_active_memory, mlxc_get_peak_memory, mlxc_reset_peak_memory, mlxc_get_cache_memory, &
                          mlxc_clear_cache, mlxc_set_memory_limit, mlxc_set_cache_limit

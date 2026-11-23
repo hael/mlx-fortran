@@ -60,9 +60,10 @@ holds is `doc/architecture_principles.md`; `scripts/check_tree.sh` checks what r
 - **Every library module (src/core) restricts:** one `public ::` block at the top followed by bare
   `private`; never a `public` attribute on a declaration. Only `mlxf.mod` is installed; the restriction keeps the internal surface explicit.
   (XEMA's visibility by majority is not used here; test code may use either form.)
-- `use` blocks have one form: `only:` in one column, continuation under the first name, one statement per
-  module per run, module-scope runs ordered by layer: intrinsic, the generated `mlxf_c_*`, `src/defs`,
-  `src/core`, `src/test`.
+- `use` blocks have one form: `only:` in one column (intrinsic statements whose heads reach past it share a
+  column of their own), continuation under the first name, one statement per module per run, module-scope
+  runs ordered by layer: intrinsic, the generated `mlxf_c_*`, `src/defs`, `src/core`, `src/test`.
+  `scripts/format_use_blocks.py` writes the form and checks it in the static gate.
 - **Exported = defs, local = stay** (SIMPLE's and XEMA's rule): a named constant, a vocabulary or a
   behaviourless record that another module imports is declared in `src/defs/mlxf_defs.f90`; one used only in
   its module stays there. Move it when the second module needs it, not before. The defs module is public by

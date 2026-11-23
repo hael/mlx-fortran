@@ -1,7 +1,7 @@
 !@descr: owned Fortran callbacks as MLX closures and compiled functions
 module mlxf_compile
-use, intrinsic :: iso_c_binding, only: c_ptr, c_int, c_bool, c_intptr_t, c_null_ptr, c_associated, c_loc, c_f_pointer, &
-                                       c_funloc
+use, intrinsic :: iso_c_binding,   only: c_ptr, c_int, c_bool, c_intptr_t, c_null_ptr, c_associated, c_loc, &
+                                         c_f_pointer, c_funloc
 use, intrinsic :: iso_fortran_env, only: int64
 use mlxf_c_types,   only: mlxc_closure, mlxc_vector_array
 use mlxf_c_closure, only: mlxc_closure_new, mlxc_closure_new_func_payload, mlxc_closure_free, mlxc_closure_apply

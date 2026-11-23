@@ -3,7 +3,7 @@
 ! procedures (evaluation, data movement) return a status when the caller passes one. Every stop the library
 ! makes is error stop MLXF_HARD_ERROR_STATUS, so that a test can tell it from a runtime failure.
 module mlxf_error
-use, intrinsic :: iso_c_binding, only: c_char, c_int, c_ptr, c_funloc, c_null_ptr, c_null_funptr
+use, intrinsic :: iso_c_binding,   only: c_char, c_int, c_ptr, c_funloc, c_null_ptr, c_null_funptr
 use, intrinsic :: iso_fortran_env, only: error_unit
 use mlxf_c_error, only: mlxc_set_error_handler
 use mlxf_defs,    only: MLXF_HARD_ERROR_STATUS

@@ -1,7 +1,7 @@
 !@descr: independent two-device checks of ops values and Fortran conventions
 module mlxf_ops_tester
 use, intrinsic :: iso_fortran_env, only: real32, real64, int32, int64
-use, intrinsic :: iso_c_binding, only: c_bool
+use, intrinsic :: iso_c_binding,   only: c_bool
 use mlxf,            only: mlx_array, mlx_from, mlx_to, mlx_set_default_device, mlx_default_device, MLX_DEVICES, &
                            MLX_DTYPES, exp, sqrt, real, aimag, conjg, cmplx, merge, max, reshape, transpose, sum, &
                            minval, minloc, mlx_astype, mlx_permute, mlx_slice, mlx_concatenate, mlx_take_along_dim, &

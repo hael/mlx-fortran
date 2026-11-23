@@ -7,6 +7,7 @@
 
 The form (skill mlxf-modern-fortran; lifted from XEMA):
   - within a run of consecutive use statements, `only:` sits in one column;
+    intrinsic statements whose heads reach past it share a column of their own;
   - a statement wider than WIDTH continues with its names aligned under the
     first imported name;
   - a module used twice in one run is one statement;
@@ -134,13 +135,17 @@ def emit(run, drop):
             if not u.names:
                 continue
         kept.append(u)
+    # head, comma, one space; intrinsic statements whose heads reach past that column share one of their own
     plain = [len(u.head()) for u in kept if u.names is not None and not u.intrinsic and not u.omp]
-    col = (max(plain) if plain else 0) + 2          # head, comma, one space
+    intrinsic = [len(u.head()) for u in kept if u.names is not None and u.intrinsic and not u.omp]
+    col_plain = (max(plain) if plain else 0) + 2
+    col_intrinsic = max([col_plain] + [n + 2 for n in intrinsic])
     out = []
     for u in kept:
         if u.names is None:
             out.append(indent + u.head())
             continue
+        col = col_intrinsic if (u.intrinsic and not u.omp) else col_plain
         lead = indent + (u.head() + ', ').ljust(col) + 'only: '
         cont = ' ' * len(lead)
         if u.omp:
