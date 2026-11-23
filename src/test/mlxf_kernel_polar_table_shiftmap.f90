@@ -1,18 +1,15 @@
-!@descr: the polar table workspace's shift maps: particle tiles of order-expanded spectra, one GEMM per tile, mode, width, evidence
-! For a particle and a candidate reference of its half, the normalised loss L(direction, rotation, radius) over a
-! polar shift grid, from the shell sums G_n[m, rho] = sum_k w_k J_n(2 pi k rho / box) R^_k[m - n] Y^_k[m] of the
-! full-ring spectra (reference R^, conjugated particle times CTF Y^). The order's shift sits on the particle:
-! per particle once, Z[(n, rho), k, m'] = w_k J_n Y^_k[m' + n]; per tile of particles, one batched contraction
-! over the shells against every candidate's R^_k[m'] gives G_n[m' + n, rho]; then the forward transform over m'
-! and, per rotation, the orders' transform onto the directions with the phase of the order's shift. On the
-! device too: the mode, the width at the physical temperature and the log evidence. Only the compact results
-! come back (the maps when asked).
+!@descr: particle-reusing shift-map contractions, complex/real direction transforms and requested posterior outputs
+! The particle carries the order shift Y[m'+n], shared across candidates. Shell sums use either weighted
+! particle spectra or interleaved shell products contracted with real Bessel weights over active radii.
+! The ring FFT needs the phase exp(-2 pi i n r/nrots); folded orders then sample the original direction grid.
+! Mode selection uses tempered temperature, physical moments may be cut off, and evidence is optional.
 submodule (mlxf_kernel_polar_table) mlxf_kernel_polar_table_shiftmap
 use, intrinsic :: iso_fortran_env, only: int32
 use mlxf,           only: mlx_compile, mlx_from, mlx_to, mlx_eval, mlx_permute, reshape, matmul, mlx_irfft, mlx_fft, &
                           mlx_concatenate, mlx_slice, mlx_take_along_dim, mlx_take, mlx_bitcast, MLX_DTYPES, merge, &
-                          minval, minloc, sum, sqrt, exp, real, aimag, cmplx, mlx_logsumexp, max
-use mlxf_test_defs, only: POLAR_BESSEL_JTOL, POLAR_MAP_LOG_CUT
+                          minval, minloc, sum, sqrt, exp, real, aimag, cmplx, mlx_logsumexp, max, mlx_zeros, conjg, &
+                          MLX_FFT_NORMS
+use mlxf_test_defs, only: POLAR_BESSEL_JTOL, POLAR_MAP_LOG_CUT, POLAR_MAP_FORMS
 implicit none
 
 ! the device arrays every tile of a block shares: the particles' full-ring spectra, real parts then imaginary
@@ -150,12 +147,15 @@ contains
         self%map_select = mlx_compile(ftail, shapeless=.false.)
         ftail           = mlx_function(map_reduce_callback)
         self%map_reduce = mlx_compile(ftail, shapeless=.false.)
+        ftail           = mlx_function(map_evidence_callback)
+        self%map_evidence = mlx_compile(ftail, shapeless=.false.)
         self%map_nkb       = nkb
         self%map_nrho      = nrho
         self%map_nalpha    = nalpha
         self%map_norder    = norder
         self%map_lse_prior = lmax + log(s)
         self%map_rho       = spec%rho
+        self%map_nharm     = nharm
         self%maps_ready    = .true.
         status             = 0
     end subroutine polar_table_prepare_maps
@@ -240,6 +240,25 @@ contains
         class(polar_table), intent(in) :: self
         map_order = self%map_norder
     end function map_order
+
+    pure module function map_term_counts( self, mblk ) result(counts)
+        class(polar_table),    intent(in) :: self
+        type(polar_map_block), intent(in) :: mblk
+        integer(int64) :: counts(2)
+        integer        :: first, last, ir
+        counts = 0_int64
+        if( .not. self%maps_ready ) return
+        counts(1) = sum(int(self%map_nharm + 1, int64))
+        counts(2) = int(self%map_norder + 1, int64) * int(self%map_nrho, int64)
+        if( mblk%contraction /= POLAR_MAP_FORMS%real_weights .or. .not. mblk%compact_radii ) return
+        counts(2) = 0_int64
+        if( mblk%order_tile < 1 ) return
+        do first = 0, self%map_norder, mblk%order_tile
+            last = min(self%map_norder, first + mblk%order_tile - 1)
+            ir = findloc(self%map_nharm >= first, .true., dim=1)
+            counts(2) = counts(2) + int(last-first+1, int64)*int(self%map_nrho-ir+1, int64)
+        end do
+    end function map_term_counts
 
     pure module function map_seconds( self ) result(t)
         class(polar_table), intent(in) :: self
@@ -358,6 +377,11 @@ contains
             msg = 'polar_table%score_maps: refused: the block''s reference generation differs from the prepared one'
         else if( mblk%half /= self%half )then
             msg = 'polar_table%score_maps: refused: the block''s half differs from the prepared one'
+        else if( mblk%contraction /= POLAR_MAP_FORMS%weighted_particle .and. &
+            &mblk%contraction /= POLAR_MAP_FORMS%real_weights )then
+            msg = 'polar_table%score_maps: refused: unknown contraction'
+        else if( mblk%order_tile < 1 .or. mblk%cand_tile < 1 )then
+            msg = 'polar_table%score_maps: refused: order and candidate tiles must be positive'
         else if( mblk%ptcl_tile < 1 )then
             msg = 'polar_table%score_maps: refused: a tile holds at least one particle'
         else if( .not. allocated(mblk%ptcl_ids) .or. .not. allocated(mblk%cands) .or. .not. allocated(mblk%ctf2) &
@@ -378,6 +402,11 @@ contains
             msg = 'polar_table%score_maps: refused: a particle''s weighted square sum is not positive'
         else if( .not. all_prepared(mblk%cands, self%ids) )then
             msg = 'polar_table%score_maps: refused: a candidate is not among the prepared references'
+        endif
+        if( len(msg) > 0 ) return
+        if( allocated(mblk%width_cutoff) )then
+            if( any(shape(mblk%width_cutoff) /= shape(mblk%cands)) ) &
+                &msg = 'polar_table%score_maps: refused: width cutoffs must match the candidate lists'
         endif
     end subroutine check_map_block
 
@@ -404,11 +433,12 @@ contains
         integer,               intent(out)   :: status
         type(mlx_array)              :: iref, iptcl, itile, icand, y, ysh, z, bref, gpk, gp, f, h, d, gout, c2, r2, cr, rp
         type(mlx_array)              :: pp, tt, tp, br, bi, top, bot, parts(2)
-        type(mlx_array)              :: lp, idx, loss, sdev, logz, lse
+        type(mlx_array)              :: lp, idx, loss, sdev, logz, lse, width_maps, active_idx
         type(mlx_array), allocatable :: outs(:)
-        real(real32),    allocatable :: pw(:), t(:), tph(:)
+        real(real32),    allocatable :: pw(:), t(:), tph(:), widths(:), cuts(:)
+        integer, allocatable         :: active(:)
         real(real64)                 :: t0
-        integer                      :: np, pt, ncand, nrots, nalpha, nrho, nkb, nord, nq, q, b
+        integer                      :: np, pt, ncand, nrots, nalpha, nrho, nkb, nord, b, nactive
         np     = size(tl%pref)
         pt     = size(tl%ptcls)
         ncand  = size(tl%cands, 1)
@@ -428,41 +458,45 @@ contains
         iptcl = mlx_from(reshape(int(tl%pptcl, int32), [1, 1, np]))
         itile = mlx_from(int(tl%ptcls, int32))
         icand = mlx_from(int(tl%cands, int32))
-        ! per particle once: Z[(k, t), (n, rho), m'] = w_k J_n Y^_k[m' + n], the real parts (t = 1) then the
-        ! imaginary parts along the shells (the weights are real), (2 nkb, nord nrho, nrots, pt)
-        y    = mlx_take(sh%ydev, itile, 3)
-        ysh  = mlx_take_along_dim(reshape(y, [nrots, 2 * nkb, pt, 1]), sh%shiftidx, 1)
-        z    = reshape(self%wfold * reshape(mlx_permute(ysh, [2, 4, 1, 3]), [nkb, 2, nord, 1, nrots, pt]), &
-            &[2 * nkb, nord * nrho, nrots, pt])
-        ! per tile one real contraction over the shells against every candidate, batched over (m', particle):
-        ! row (s, c) of the left operand is [Re R_c, -Im R_c] for s = 1 and [Im R_c, Re R_c] for s = 2, so that
-        ! the product's rows alternate the real and the imaginary parts of G'_n[m', rho] = sum_k R^_k[m'] Z =
-        ! G_n[m' + n, rho]: read as complex64 without a copy, (ncand, nord nrho, nrots, pt)
-        bref     = mlx_take(self%rfull, icand, 3)
-        br       = reshape(mlx_permute(real(bref), [3, 1, 2, 4]), [1, ncand, nkb, 1, nrots, pt])
-        bi       = reshape(mlx_permute(aimag(bref), [3, 1, 2, 4]), [1, ncand, nkb, 1, nrots, pt])
-        parts(1) = br
-        parts(2) = -bi
-        top      = mlx_concatenate(parts, 4)
-        parts(1) = bi
-        parts(2) = br
-        bot      = mlx_concatenate(parts, 4)
-        parts(1) = top
-        parts(2) = bot
-        gpk      = matmul(reshape(mlx_concatenate(parts, 1), [2 * ncand, 2 * nkb, nrots, pt]), z)
-        gp       = mlx_bitcast(gpk, MLX_DTYPES%complex64)
-        ! the forward transform over m' and the phase of the order's shift, H_n[r] = exp(-2 pi i n r / nrots)
-        ! FFT(G'_n)[r]; then the orders onto the directions, D[a, r] = sum_n exp(-2 pi i n a / nalpha) H_n[r]:
-        ! the orders folded modulo nalpha, as the sum of the transforms of each run of nalpha orders (the last
-        ! one zero-padded by the transform)
-        f  = mlx_fft(gp, 3)
-        h  = reshape(f, [ncand, nord, nrho, nrots, pt]) * self%ffold
-        nq = (nord + nalpha - 1) / nalpha
-        d  = mlx_fft(mlx_slice(h, [1, 1, 1, 1, 1], [ncand, min(nalpha, nord), nrho, nrots, pt]), 2, n=nalpha)
-        do q = 2, nq
-            d = d + mlx_fft(mlx_slice(h, [1, (q - 1) * nalpha + 1, 1, 1, 1], [ncand, min(q * nalpha, nord), nrho, &
-                &nrots, pt]), 2, n=nalpha)
-        end do
+        y = mlx_take(sh%ydev, itile, 3)
+        bref = mlx_take(self%rfull, icand, 3)
+        if( mblk%contraction == POLAR_MAP_FORMS%real_weights )then
+            call mlx_eval([bref])
+            h = active_orders(self, mblk, y, bref, sh%shiftidx)
+        else
+            ! per particle once: Z[(k, t), (n, rho), m'] = w_k J_n Y^_k[m' + n], the real parts (t = 1) then the
+            ! imaginary parts along the shells (the weights are real), (2 nkb, nord nrho, nrots, pt)
+            ysh  = mlx_take_along_dim(reshape(y, [nrots, 2 * nkb, pt, 1]), sh%shiftidx, 1)
+            z    = reshape(self%wfold * reshape(mlx_permute(ysh, [2, 4, 1, 3]), [nkb, 2, nord, 1, nrots, pt]), &
+                &[2 * nkb, nord * nrho, nrots, pt])
+            ! per tile one real contraction over the shells against every candidate, batched over (m', particle):
+            ! row (s, c) of the left operand is [Re R_c, -Im R_c] for s = 1 and [Im R_c, Re R_c] for s = 2, so that
+            ! the product's rows alternate the real and the imaginary parts of G'_n[m', rho] = sum_k R^_k[m'] Z =
+            ! G_n[m' + n, rho]: read as complex64 without a copy, (ncand, nord nrho, nrots, pt)
+            br       = reshape(mlx_permute(real(bref), [3, 1, 2, 4]), [1, ncand, nkb, 1, nrots, pt])
+            bi       = reshape(mlx_permute(aimag(bref), [3, 1, 2, 4]), [1, ncand, nkb, 1, nrots, pt])
+            parts(1) = br
+            parts(2) = -bi
+            top      = mlx_concatenate(parts, 4)
+            parts(1) = bi
+            parts(2) = br
+            bot      = mlx_concatenate(parts, 4)
+            parts(1) = top
+            parts(2) = bot
+            gpk      = matmul(reshape(mlx_concatenate(parts, 1), [2 * ncand, 2 * nkb, nrots, pt]), z)
+            gp       = mlx_bitcast(gpk, MLX_DTYPES%complex64)
+            ! the forward transform over m' and the phase of the order's shift, H_n[r] = exp(-2 pi i n r / nrots)
+            ! FFT(G'_n)[r]; then the orders onto the directions, D[a, r] = sum_n exp(-2 pi i n a / nalpha) H_n[r]:
+            ! the orders folded modulo nalpha, as the sum of the transforms of each run of nalpha orders (the last
+            ! one zero-padded by the transform)
+            f  = mlx_fft(gp, 3)
+            h  = reshape(f, [ncand, nord, nrho, nrots, pt]) * self%ffold
+        endif
+        if( mblk%hermitian )then
+            d = real_directions(h, nalpha)
+        else
+            d = complex_directions(h, nalpha)
+        endif
         ! (direction, rotation, radius, pair), pairs candidate fastest
         gout = reshape(mlx_permute(real(d), [2, 4, 3, 1, 5]), [nalpha, nrots, nrho, np])
         ! the reference's weighted power under the rotated CTF, half ring: the inverse real transform over 2
@@ -485,23 +519,56 @@ contains
         loss = outs(2)
         if( mblk%profile ) call map_stage_done(self, 2, t0, [idx, loss])
         t0   = clock_s()
-        ! the width at the physical temperature and the log evidence
-        tp   = mlx_from(reshape(tph, [1, 1, 1, np]))
-        lse  = mlx_from(real(self%map_lse_prior, real32))
-        call self%map_reduce%apply([lp, tt, tp, self%cellprior, self%cellx, self%celly, self%cellr2, sh%cosr, sh%sinr, lse], &
-            &outs, status)
-        if( status /= 0 )then
-            self%msg = 'polar_table%score_maps: a tile''s reduction could not be built'
-            return
-        endif
-        sdev = outs(1)
-        logz = outs(2)
-        if( mblk%profile ) call map_stage_done(self, 3, t0, [sdev, logz])
-        t0 = clock_s()
         allocate(tl%idx(np), tl%loss(np), tl%sdev(np), tl%logz(np))
-        call mlx_to(tl%idx, idx, status=status)
-        if( status == 0 ) call mlx_to(tl%loss, loss, status=status)
-        if( status == 0 ) call mlx_to(tl%sdev, sdev, status=status)
+        active = [(b, b = 1, np)]
+        if( allocated(mblk%width_cutoff) )then
+            ! One synchronization per tile supplies every cutoff decision; no moment graph for rejected pairs.
+            call mlx_to(tl%idx, idx, status=status)
+            if( status == 0 ) call mlx_to(tl%loss, loss, status=status)
+            if( status /= 0 ) return
+            cuts = reshape(mblk%width_cutoff(:, tl%ptcls), [np])
+            active = pack(active, tl%loss <= cuts)
+        endif
+        nactive = size(active)
+        if( nactive > 0 )then
+            width_maps = lp
+            if( nactive < np )then
+                active_idx = mlx_from(int(active, int32))
+                width_maps = mlx_take(lp, active_idx, 4)
+            endif
+            tp = mlx_from(reshape(tph(active), [1, 1, 1, nactive]))
+            call self%map_reduce%apply([width_maps, tp, self%cellprior, self%cellx, self%celly, self%cellr2, &
+                &sh%cosr, sh%sinr], outs, status)
+            if( status /= 0 )then
+                self%msg = 'polar_table%score_maps: a tile''s width reduction could not be built'
+                return
+            endif
+            sdev = outs(1)
+            if( mblk%profile ) call mlx_eval([sdev])
+        endif
+        ! Separate compiled graphs ensure unrequested evidence is never evaluated with the width.
+        if( mblk%evidence )then
+            lse = mlx_from(real(self%map_lse_prior, real32))
+            call self%map_evidence%apply([lp, tt, self%cellprior, lse], outs, status)
+            if( status /= 0 )then
+                self%msg = 'polar_table%score_maps: a tile''s evidence reduction could not be built'
+                return
+            endif
+            logz = outs(1)
+            if( mblk%profile ) call mlx_eval([logz])
+        endif
+        if( mblk%profile ) self%mstage_s(3) = self%mstage_s(3) + clock_s() - t0
+        t0 = clock_s()
+        if( .not. allocated(mblk%width_cutoff) )then
+            call mlx_to(tl%idx, idx, status=status)
+            if( status == 0 ) call mlx_to(tl%loss, loss, status=status)
+        endif
+        tl%sdev = -1._real32
+        if( status == 0 .and. nactive > 0 )then
+            allocate(widths(nactive))
+            call mlx_to(widths, sdev, status=status)
+            tl%sdev(active) = widths
+        endif
         if( status == 0 .and. mblk%evidence ) call mlx_to(tl%logz, logz, status=status)
         if( status == 0 .and. mblk%maps )then
             allocate(tl%maps(nalpha, nrots, nrho, np))
@@ -511,6 +578,104 @@ contains
         ! profiled, every result is evaluated before the copies: their seconds are the transfer's
         if( mblk%profile ) self%mstage_s(4) = self%mstage_s(4) + (clock_s() - t0)
     end subroutine tile_maps
+
+    ! Shift each particle once per order tile, then share it across candidate tiles. Evaluate completed
+    ! chunks so the shell-product intermediates do not accumulate in the final folded-map graph.
+    function active_orders( self, mb, y, refs, indices ) result(h)
+        class(polar_table),    intent(in) :: self
+        type(polar_map_block), intent(in) :: mb
+        type(mlx_array),       intent(in) :: y, refs, indices
+        type(mlx_array) :: h, ys, yc, ix, weights, prod, realprod, g, part, chunk, phase, rr, pairs(2)
+        integer         :: shp(4), nk, nr, np, nc, nord, n0, n1, nt, c0, c1, ct, ir, na
+        shp = refs%shape()
+        nk = shp(1)
+        nr = shp(2)
+        nc = shp(3)
+        np = shp(4)
+        nord = self%map_norder + 1
+        do n0 = 1, nord, mb%order_tile
+            n1 = min(nord, n0+mb%order_tile-1)
+            nt = n1-n0+1
+            ir = 1
+            if( mb%compact_radii ) ir = findloc(self%map_nharm >= n0-1, .true., dim=1)
+            na = self%map_nrho-ir+1
+            ix = mlx_slice(indices, [1, 1, 1, n0], [nr, 1, 1, n1])
+            ys = mlx_take_along_dim(reshape(y, [nr, 2*nk, np, 1]), ix, 1)
+            yc = cmplx(mlx_slice(ys, [1, 1, 1, 1], [nr, nk, np, nt]), &
+                &mlx_slice(ys, [1, nk+1, 1, 1], [nr, 2*nk, np, nt]))
+            call mlx_eval([yc])
+            weights = mlx_permute(reshape(mlx_slice(self%wfold, [1, 1, n0, ir, 1, 1], &
+                &[nk, 1, n1, self%map_nrho, 1, 1]), [nk, nt, na]), [1, 3, 2])
+            phase = mlx_slice(self%ffold, [1, n0, 1, 1, 1], [1, n1, 1, nr, 1])
+            do c0 = 1, nc, mb%cand_tile
+                c1 = min(nc, c0+mb%cand_tile-1)
+                ct = c1-c0+1
+                rr = mlx_permute(mlx_slice(refs, [1, 1, c0, 1], [nk, nr, c1, np]), [2, 1, 3, 4])
+                prod = reshape(rr, [nr, nk, ct, np, 1])*reshape(yc, [nr, nk, 1, np, nt])
+                realprod = mlx_bitcast(reshape(mlx_permute(prod, [3, 1, 4, 2, 5]), [ct*nr*np, nk, nt]), MLX_DTYPES%float32)
+                g = mlx_bitcast(matmul(realprod, weights), MLX_DTYPES%complex64)
+                part = mlx_permute(reshape(g, [ct, nr, np, na, nt]), [1, 5, 4, 2, 3])
+                part = mlx_fft(part, 4)*phase
+                if( ir > 1 )then
+                    pairs(1) = mlx_zeros([ct, nt, ir-1, nr, np], MLX_DTYPES%complex64)
+                    pairs(2) = part
+                    part = mlx_concatenate(pairs, 3)
+                endif
+                call mlx_eval([part])
+                if( c0 == 1 )then
+                    chunk = part
+                else
+                    pairs(1) = chunk
+                    pairs(2) = part
+                    chunk = mlx_concatenate(pairs, 1)
+                endif
+            end do
+            call mlx_eval([chunk])
+            if( n0 == 1 )then
+                h = chunk
+            else
+                pairs(1) = h
+                pairs(2) = chunk
+                h = mlx_concatenate(pairs, 2)
+            endif
+        end do
+    end function active_orders
+
+    function complex_directions( h, nalpha ) result(d)
+        type(mlx_array), intent(in) :: h
+        integer,         intent(in) :: nalpha
+        type(mlx_array) :: d
+        integer         :: shp(5), q, nq
+        shp = h%shape()
+        nq = (shp(2) + nalpha - 1) / nalpha
+        d = mlx_fft(mlx_slice(h, [1, 1, 1, 1, 1], [shp(1), min(nalpha, shp(2)), shp(3), shp(4), shp(5)]), 2, n=nalpha)
+        do q = 2, nq
+            d = d + mlx_fft(mlx_slice(h, [1, (q-1)*nalpha+1, 1, 1, 1], &
+                &[shp(1), min(q*nalpha, shp(2)), shp(3), shp(4), shp(5)]), 2, n=nalpha)
+        end do
+    end function complex_directions
+
+    ! Fold the positive orders first. Hermitian coefficients turn the real forward sum into an unscaled irfft.
+    function real_directions( h, nalpha ) result(d)
+        type(mlx_array), intent(in) :: h
+        integer,         intent(in) :: nalpha
+        type(mlx_array) :: d, folded, padded, parts(2), half, pos, neg
+        integer         :: shp(5), nq, n, nhalf
+        shp = h%shape()
+        nq = (shp(2) + nalpha - 1) / nalpha
+        padded = h
+        if( nq * nalpha > shp(2) )then
+            parts(1) = h
+            parts(2) = mlx_zeros([shp(1), nq * nalpha - shp(2), shp(3), shp(4), shp(5)], MLX_DTYPES%complex64)
+            padded = mlx_concatenate(parts, 2)
+        endif
+        folded = sum(reshape(padded, [shp(1), nalpha, nq, shp(3), shp(4), shp(5)]), 3)
+        nhalf = nalpha / 2 + 1
+        pos = mlx_from([(int(n + 1, int32), n = 0, nhalf - 1)])
+        neg = mlx_from([(int(modulo(-n, nalpha) + 1, int32), n = 0, nhalf - 1)])
+        half = (conjg(mlx_take(folded, pos, 2)) + mlx_take(folded, neg, 2)) * 0.5_real32
+        d = mlx_irfft(half, 2, n=nalpha, norm=MLX_FFT_NORMS%forward)
+    end function real_directions
 
     ! the compiled selection: inputs (the maps L (nalpha, nrots, nrho, np), the tempered inverse temperatures
     ! (1, 1, 1, np), the cells' prior with the log area (1, 1, nrho, 1)); outputs (the flat index of the mode, the
@@ -534,11 +699,8 @@ contains
         status = 0
     end subroutine map_select_callback
 
-    ! the compiled reduction: inputs (the maps L, the tempered and the physical inverse temperatures, the cells'
-    ! prior, shift components (nalpha, 1, nrho, 1) and squared radius (1, 1, nrho, 1), the rotations' cosines and
-    ! sines (nrots, 1), the prior's log normaliser (0-d)); outputs (the width at the physical temperature, the
-    ! moments of the cells' shifts with weights exp(lphys - max) above the cut, each rotation's turned by +theta
-    ! into the particle's axes; and the log evidence), each (np)
+    ! Width inputs: maps, physical inverse temperatures, prior, shift x/y/radius squared and rotation cos/sin.
+    ! The moments rotate each cell into the particle frame; negligible mass is cut before summing.
     subroutine map_reduce_callback( inputs, outputs, status )
         type(mlx_array),              intent(in)  :: inputs(:)
         type(mlx_array), allocatable, intent(out) :: outputs(:)
@@ -546,27 +708,42 @@ contains
         type(mlx_array) :: lph, mp, a, w, w0, w1x, w1y, mx, my, w2, var, zero
         integer         :: shp(4), ncell, np
         status = 1
-        if( size(inputs) /= 10 ) return
+        if( size(inputs) /= 8 ) return
         shp   = inputs(1)%shape()
         ncell = shp(1) * shp(2) * shp(3)
         np    = shp(4)
-        lph   = inputs(4) - inputs(1) * inputs(3)
+        lph   = inputs(3) - inputs(1) * inputs(2)
         mp    = reshape(-minval(reshape(-lph, [ncell, np]), 1), [1, 1, 1, np])
         a     = lph - mp
         zero  = mlx_from(0._real32)
         w     = merge(exp(a), zero, a > real(POLAR_MAP_LOG_CUT, real32))
         w0    = sum(reshape(w, [ncell, np]), 1)
-        w1x   = sum(sum(w * inputs(5), 3), 1)
-        w1y   = sum(sum(w * inputs(6), 3), 1)
-        mx    = sum(w1x * inputs(8) - w1y * inputs(9), 1)
-        my    = sum(w1x * inputs(9) + w1y * inputs(8), 1)
-        w2    = sum(reshape(w * inputs(7), [ncell, np]), 1)
+        w1x   = sum(sum(w * inputs(4), 3), 1)
+        w1y   = sum(sum(w * inputs(5), 3), 1)
+        mx    = sum(w1x * inputs(7) - w1y * inputs(8), 1)
+        my    = sum(w1x * inputs(8) + w1y * inputs(7), 1)
+        w2    = sum(reshape(w * inputs(6), [ncell, np]), 1)
         var   = (w2 - (mx * mx + my * my) / w0) / w0
-        allocate(outputs(2))
+        allocate(outputs(1))
         outputs(1) = sqrt(max(var, 0._real32))
-        outputs(2) = mlx_logsumexp(reshape(inputs(4) - inputs(1) * inputs(2), [ncell, np]), 1) - inputs(10)
         status = 0
     end subroutine map_reduce_callback
+
+    ! Evidence uses the tempered temperature and the prior normalizer, independently of the width graph.
+    subroutine map_evidence_callback( inputs, outputs, status )
+        type(mlx_array),              intent(in)  :: inputs(:)
+        type(mlx_array), allocatable, intent(out) :: outputs(:)
+        integer,                      intent(out) :: status
+        integer :: shp(4), ncell
+        status = 1
+        if( size(inputs) /= 4 ) return
+        shp = inputs(1)%shape()
+        ncell = product(shp(1:3))
+        allocate(outputs(1))
+        outputs(1) = mlx_logsumexp(reshape(inputs(3) - inputs(1) * inputs(2), [ncell, shp(4)]), 1) - inputs(4)
+        status = 0
+    end subroutine map_evidence_callback
+
 
     real(real64) function clock_s()
         integer(int64) :: count, rate

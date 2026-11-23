@@ -162,12 +162,14 @@ written, the skill `mlxf-modern-fortran`.
   16 KiB pages, handed to MLX without a copy when Metal accepts it (`zero_copy` says whether it did), else
   copied once, after which `view` points at MLX's copy. Writes through `view` are allowed only until `a` is
   first passed to any library procedure; from then on the storage is read-only, because a lazy graph may read
-  it at any later evaluation.
+  it at any later evaluation. A shape whose size in bytes does not fit `c_size_t` is refused before anything
+  is allocated.
 - **Read-only borrowing.** `mlx_view(a, p[, status])` evaluates `a` and points `p` at its storage when `a` is
   row-contiguous (Fortran order) and of `p`'s kind and rank; a strided view returns a status. `p` is valid
   until the next statement that assigns to, kills or ends the scope of `a` (including `a = f(a)`, after
   which MLX may reuse the buffer) and is never written through. A view survives unrelated evaluations (MLX
-  donates only buffers no live array references).
+  donates only buffers no live array references). After any refused `mlx_view` or `mlx_alloc` the pointer is
+  disassociated, a pointer of rank above 7 included.
 
 ## 5. Kinds and scalars
 
@@ -192,7 +194,8 @@ written, the skill `mlxf-modern-fortran`.
   is a program error). Every stop is `error stop MLXF_HARD_ERROR_STATUS` (86).
 - **Checked procedures** take an optional `integer, intent(out) :: status` and leave the message in
   `mlx_last_error()`: `mlx_eval`, `mlx_async_eval`, `mlx_synchronize`, `mlx_to`, `mlx_to_alloc`, `mlx_view`,
-  `mlx_alloc`, `mlx_set_default_device`, `mlx_set_memory_limit`. Without `status` they stop. A failure the
+  `mlx_alloc`, `mlx_set_default_device`, `mlx_set_memory_limit`, `mlx_device_info_size`,
+  `mlx_device_info_string`. Without `status` they stop. A failure the
   library finds itself is reported the same way (`mlxf_report`): `mlx_to_alloc` allocates its destination
   with `stat=`, and a destination that cannot be allocated returns a status, the message "the destination
   could not be allocated", and the allocatable unallocated.
@@ -202,7 +205,11 @@ written, the skill `mlxf-modern-fortran`.
   `recovery_half` of `unit_core`, run by name). Over-subscribing unified memory does not fail, it pages: size work
   from `mlx_peak_memory()` and a budget, not by catching failures.
 - A procedure C++ calls (the error handler, a deleter, a closure trampoline) never stops; it records and
-  returns.
+  returns. That holds for the trampoline's own work too: importing its inputs (mlx-c, the registry, an
+  allocation) and exporting its outputs report a status.
+- A device type other than `MLX_DEVICES%cpu` or `%gpu` is refused before it reaches mlx-c, which indexes a
+  table with it. The device information is -1 (or empty) with status 0 when the device or the key is absent;
+  a failure inside MLX is an error, never that value alone.
 
 ## 7. Devices, threads, precision
 

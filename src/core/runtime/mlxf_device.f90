@@ -4,7 +4,7 @@
 module mlxf_device
 use, intrinsic :: iso_c_binding, only: c_bool, c_int, c_null_char, c_ptr, c_size_t
 use, intrinsic :: iso_fortran_env, only: int64
-use mlxf_c_types,  only: mlxc_device, mlxc_device_info, mlxc_stream, MLXC_GPU
+use mlxf_c_types,  only: mlxc_device, mlxc_device_info, mlxc_stream, MLXC_CPU, MLXC_GPU
 use mlxf_c_device, only: mlxc_device_new, mlxc_device_new_type, mlxc_device_free, mlxc_get_default_device, &
                          mlxc_set_default_device, mlxc_device_get_type, mlxc_device_count, mlxc_device_info_new, &
                          mlxc_device_info_get, mlxc_device_info_free, mlxc_device_info_get_size, &
@@ -12,7 +12,7 @@ use mlxf_c_device, only: mlxc_device_new, mlxc_device_new_type, mlxc_device_free
 use mlxf_c_metal,  only: mlxc_metal_is_available
 use mlxf_c_stream, only: mlxc_stream_new, mlxc_get_default_stream, mlxc_stream_free, mlxc_synchronize
 use mlxf_libc,     only: c_string_copy
-use mlxf_error,    only: mlxf_check, mlxf_fail, mlxf_install_error_handler, mlxf_guard_thread
+use mlxf_error,    only: mlxf_check, mlxf_fail, mlxf_report, mlxf_install_error_handler, mlxf_guard_thread
 implicit none
 
 public :: mlx_device_count, mlx_default_device, mlx_set_default_device, mlx_device_info_size
@@ -56,6 +56,8 @@ contains
         integer, intent(in) :: device_type
         integer(c_int) :: n
         call mlxf_enter('mlx_device_count')
+        mlx_device_count = 0
+        if( .not. known_device(device_type, 'mlx_device_count') ) return
         n = 0
         call mlxf_check(mlxc_device_count(n, int(device_type, c_int)), 'mlx_device_count')
         mlx_device_count = int(n)
@@ -81,61 +83,108 @@ contains
         type(mlxc_device) :: dev
         integer(c_int)    :: ierr
         call mlxf_enter('mlx_set_default_device')
+        if( .not. known_device(device_type, 'mlx_set_default_device', status) ) return
         dev  = mlxc_device_new_type(int(device_type, c_int), 0_c_int)
         ierr = mlxc_set_default_device(dev)
         call mlxf_check(mlxc_device_free(dev), 'mlx_set_default_device')
         call mlxf_check(ierr, 'mlx_set_default_device', status)
     end subroutine mlx_set_default_device
 
-    ! a size MLX reports for a device (max_buffer_length, memory_size, ...); -1 when the key is absent
-    function mlx_device_info_size( device_type, key ) result(n)
-        integer,          intent(in) :: device_type
-        character(len=*), intent(in) :: key
+    ! a size MLX reports for a device (max_buffer_length, memory_size, ...); -1 with status 0 when the device or
+    ! the key is absent. A failure inside MLX is an error, never a -1 alone: the status, or a stop without one
+    function mlx_device_info_size( device_type, key, status ) result(n)
+        integer,           intent(in)  :: device_type
+        character(len=*),  intent(in)  :: key
+        integer, optional, intent(out) :: status
         integer(int64)         :: n
         type(mlxc_device_info) :: info
         integer(c_size_t)      :: v
+        integer(c_int)         :: ierr
+        logical                :: has
         call mlxf_enter('mlx_device_info_size')
         n = -1_int64
-        if( .not. info_of(device_type, key, info, 'mlx_device_info_size') ) return
-        v = 0
-        if( mlxc_device_info_get_size(v, info, trim(key)//c_null_char) == 0 ) n = int(v, int64)
-        call mlxf_check(mlxc_device_info_free(info), 'mlx_device_info_size')
+        if( .not. known_device(device_type, 'mlx_device_info_size', status) ) return
+        call info_of(device_type, key, info, has, ierr)
+        if( has )then
+            v    = 0
+            ierr = mlxc_device_info_get_size(v, info, trim(key)//c_null_char)
+            if( ierr == 0 ) n = int(v, int64)
+            call free_info(info, ierr)
+        endif
+        call mlxf_check(ierr, 'mlx_device_info_size', status)
     end function mlx_device_info_size
 
-    ! a string MLX reports for a device (device_name, architecture, ...); empty when the key is absent
-    function mlx_device_info_string( device_type, key ) result(s)
-        integer,          intent(in) :: device_type
-        character(len=*), intent(in) :: key
+    ! a string MLX reports for a device (device_name, architecture, ...); empty with status 0 when the device or
+    ! the key is absent. A failure inside MLX is an error, never an empty string alone: the status, or a stop
+    function mlx_device_info_string( device_type, key, status ) result(s)
+        integer,           intent(in)  :: device_type
+        character(len=*),  intent(in)  :: key
+        integer, optional, intent(out) :: status
         character(len=:), allocatable :: s
         type(mlxc_device_info)        :: info
         type(c_ptr)                   :: p
+        integer(c_int)                :: ierr
+        logical                       :: has
         call mlxf_enter('mlx_device_info_string')
         s = ''
-        if( .not. info_of(device_type, key, info, 'mlx_device_info_string') ) return
-        if( mlxc_device_info_get_string(p, info, trim(key)//c_null_char) == 0 ) s = c_string_copy(p)
-        call mlxf_check(mlxc_device_info_free(info), 'mlx_device_info_string')
+        if( .not. known_device(device_type, 'mlx_device_info_string', status) ) return
+        call info_of(device_type, key, info, has, ierr)
+        if( has )then
+            ierr = mlxc_device_info_get_string(p, info, trim(key)//c_null_char)
+            if( ierr == 0 ) s = c_string_copy(p)
+            call free_info(info, ierr)
+        endif
+        call mlxf_check(ierr, 'mlx_device_info_string', status)
     end function mlx_device_info_string
 
-    ! the information of a device that holds key; false (nothing to free) otherwise
-    logical function info_of( device_type, key, info, proc )
+    ! the information of a device and whether it holds key; has is true only on success, and then the caller
+    ! frees info. ierr is MLX's first failure (0 for an absent device or key), and a failure leaves nothing to free
+    subroutine info_of( device_type, key, info, has, ierr )
         integer,                intent(in)    :: device_type
-        character(len=*),       intent(in)    :: key, proc
+        character(len=*),       intent(in)    :: key
         type(mlxc_device_info), intent(inout) :: info
+        logical,                intent(out)   :: has
+        integer(c_int),         intent(out)   :: ierr
         type(mlxc_device) :: dev
-        logical(c_bool)   :: has
-        integer(c_int)    :: ierr
-        call mlxf_enter(proc)
-        info_of = .false.
-        if( mlx_device_count(device_type) == 0 ) return
-        dev  = mlxc_device_new_type(int(device_type, c_int), 0_c_int)
-        info = mlxc_device_info_new()
-        ierr = mlxc_device_info_get(info, dev)
-        call mlxf_check(mlxc_device_free(dev), proc)
-        has = .false.
-        if( ierr == 0 ) ierr = mlxc_device_info_has_key(has, info, trim(key)//c_null_char)
-        info_of = ierr == 0 .and. logical(has)
-        if( .not. info_of ) call mlxf_check(mlxc_device_info_free(info), proc)
-    end function info_of
+        logical(c_bool)   :: has_key
+        integer(c_int)    :: ndev, ierr_free
+        has  = .false.
+        ndev = 0
+        ierr = mlxc_device_count(ndev, int(device_type, c_int))
+        if( ierr /= 0 .or. ndev == 0 ) return
+        dev       = mlxc_device_new_type(int(device_type, c_int), 0_c_int)
+        info      = mlxc_device_info_new()
+        ierr      = mlxc_device_info_get(info, dev)
+        ierr_free = mlxc_device_free(dev)
+        if( ierr == 0 ) ierr = ierr_free
+        has_key = .false.
+        if( ierr == 0 ) ierr = mlxc_device_info_has_key(has_key, info, trim(key)//c_null_char)
+        has = ierr == 0 .and. logical(has_key)
+        if( .not. has ) call free_info(info, ierr)
+    end subroutine info_of
+
+    ! whether device_type is MLX_DEVICES%cpu or %gpu; another value is reported (the status, or a stop), since
+    ! mlx-c indexes a table with it unchecked
+    logical function known_device( device_type, proc, status )
+        integer,           intent(in)  :: device_type
+        character(len=*),  intent(in)  :: proc
+        integer, optional, intent(out) :: status
+        known_device = device_type == int(MLXC_CPU) .or. device_type == int(MLXC_GPU)
+        if( known_device )then
+            if( present(status) ) status = 0
+        else
+            call mlxf_report(proc, 'an unknown device type (MLX_DEVICES%cpu or %gpu)', status)
+        endif
+    end function known_device
+
+    ! frees device information, keeping the first failure in ierr
+    subroutine free_info( info, ierr )
+        type(mlxc_device_info), intent(inout) :: info
+        integer(c_int),         intent(inout) :: ierr
+        integer(c_int) :: ierr_free
+        ierr_free = mlxc_device_info_free(info)
+        if( ierr == 0 ) ierr = ierr_free
+    end subroutine free_info
 
     ! the default stream of the default device; the caller frees it with mlxc_stream_free
     function mlxf_default_stream( proc ) result(s)

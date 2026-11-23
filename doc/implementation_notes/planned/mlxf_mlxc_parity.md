@@ -1,7 +1,7 @@
 # mlx-fortran: parity with mlx-c
 
-Status, 2026-11-23: planned, not launched. Decisions 1 to 4 ruled by Hans on 2026-11-23 as recommended. The
-run waits for its base, the maintainer's commit that closes milestone 1 (Phase 7 of `mlxf_milestone1.md`, run `mlxf_m1_m5`), and the run
+Status, 2026-11-23: Phase 0 complete (interactive, decision 23); Phases 1 to 9 planned, not launched.
+Decisions 1 to 4 ruled by Hans on 2026-11-23 as recommended. The run waits for its base, the maintainer's commit that closes milestone 1 (Phase 7 of `mlxf_milestone1.md`, run `mlxf_m1_m5`), and the run
 records its hash. Written against `309807c` plus the unstaged review of run `mlxf_m1` (2026-11-23), and
 against mlx-c `v0.8.0` (`a26f2d5`, `~/src/mlx-c`) with MLX 0.32.4. Supersedes: none. Depends on: the handle
 model and the generated C layer (validated: yes, design plan Phase 1 and milestone 1 Phases 1 to 3); the
@@ -205,6 +205,20 @@ Decisions 1 to 4 were ruled by Hans on 2026-11-23, each as recommended. None is 
 22. **Upstream defects.** A function that crashes, throws through C, or disagrees with its documentation
     gets a numbered entry in `doc/collaboration/apple_questions.md` and a ledger line `excluded upstream
     defect, question <n>`. The phase continues. More than three such lines in one phase is a stop.
+23. (2026-11-23, Hans: "Happy to do 1 & 2") **Phase 0 runs early and interactively**, while Codex carries out
+    milestone 1's Phase 5c, on files disjoint from Phase 5c's table. Phase 0 adds checks and documents only.
+    Phases 1 to 8 keep decisions 3 and 4: they run as arun on the M2 Ultra after milestone 1 closes.
+    - Phase 0's build and gate measurements (per-area gate times, the Release clean build time twice) move to
+      the start of Phase 1, at the run's base. Phase 5c's tree is in flux, so they would judge nothing.
+    - Decision 5's classes gain `internal`: a C-level helper (vectors, maps, strings, closures, kernel
+      configs, setters) with no Fortran counterpart and no call from the library yet. `plumbing` stays for
+      functions the library calls. Rule `parity` keeps the two apart.
+24. (2026-11-23, Hans: "a minimum version requirement without a hard fail") **mlx-c 0.8.0 is the ledger's
+    minimum, not a pin.** Rule `parity` fails on headers of an older release. A newer release (CI's unpinned
+    `brew install mlx-c`, for one) prints its added and removed names as warnings and passes. The ledger is
+    brought up to that release in a later change. The release is read from Homebrew's Cellar path, the
+    package config beside the headers, or the build's record. When none says, the build's record (0.8.0) is
+    assumed and differences fail. CMake's version warning is unchanged.
 
 Defaults taken without a question (cheap to veto): the ledger's path and format; the record names
 `mlxf_conv_spec` and `mlx_metal_kernel_spec`; the new type names `mlx_grad_function`, `mlx_imported_function`,
@@ -365,6 +379,7 @@ times against Phase 0. Exit: the report exists; `check_tree.sh` passes.
 | --- | --- | --- |
 | `scripts/mlxc_parity.txt` | the ledger (new) | 0 to 8 |
 | `scripts/check_rules.py` | rule `parity`; `ENTRY_HELPERS` for new helpers | 0 to 8 |
+| `scripts/probes/mlx_behaviour_probe.c` (new) | Phase 0's probes of MLX behaviour, re-run on a new MLX release or Mac; Phase 4 adds the linalg functions left unprobed | 0, 4 |
 | `.github/skills/mlxf-binding/SKILL.md`, `CLAUDE.md`, `doc/architecture_principles.md` | decision 1 | 0 |
 | `src/core/array/mlxf_array.f90`, `mlxf_array_operations.f90` | interfaces and new signature helpers | 1 to 8 |
 | `src/core/array/mlxf_array_transfer.f90`, `mlxf_array_tester.f90` | decision 13 | 3 |
@@ -394,3 +409,61 @@ met, frozen numbers, log paths, decisions taken under delegation, what it means 
 entered the library early, with milestone 1's decision 26, for the shift maps. They follow this plan's
 conventions: decision 6's name, and decision 8's one-based, unchecked indices. Phase 0's ledger lists both as
 `public`; Phases 1 and 3 have nothing left to do for them.
+
+### Phase 0, the ledger, rule `parity` and the probes: 2026-11-23 (interactive, Claude; decision 23) - complete
+
+- *Machine and base.* The M2 Ultra through the build bridge, for the probes only. Working tree on `c93ee0d`
+  with Codex's Phase 5c edits in progress (milestone plan, fusing note, history). Phase 0 touched none of them.
+  MLX 0.32.4, mlx-c 0.8.0 (Homebrew), headers also read from the `v0.8.0` clone (`a26f2d5`).
+- *Files.* `scripts/mlxc_parity.txt` (new), `scripts/check_rules.py` (rule `parity`), `scripts/check_tree.sh`
+  (rule list), `.github/skills/mlxf-binding/SKILL.md` (section 1), `CLAUDE.md` (the growth sentence),
+  `doc/architecture_principles.md` (section 4), this plan (decision 23, Progress). No Fortran file.
+- *The ledger.* 680 lines, one per prototype: 60 `public`, 46 `plumbing`, 147 `internal`, 88 `excluded`,
+  339 `pending`. Pending lines by phase: 1: 65, 2: 111, 3: 35, 4: 40, 5: 29, 6: 16, 7: 9, 8: 34.
+  `PARITY_PENDING = 339`. The excluded reasons are decision 2 (8 quantised and fp8 functions), CUDA (14),
+  `detail_` (6, vmap among them), vmap closures (6), keyword-argument closures and exports (9), reader/writer
+  vtables (12), float16/bfloat16 and unsigned scalars (12), GGUF metadata (9), thread-local and
+  thread-unsafe streams (6), stream registry management (2), custom distributed backends (2), metallib paths (2).
+- *Rule `parity`.* It compares the ledger with the headers it finds (MLXC_ROOT, `.deps/install`, Homebrew)
+  or the build's `build/gen/mlxc_prototypes.txt`. Checks: classes, a public name in `mlxf.f90`'s public
+  block (the type for `T%b`), public/plumbing exactly when the library calls the function, pending lines
+  only in phases Progress has not closed, and the pending ratchet. Seven plants on a scratch copy, each
+  failing with its own message and the restored copy passing: a missing name, an extra name, a public name
+  not exported, a pending line in a closed phase, a grown pending count, a called function classed
+  `internal`, and a `plumbing` function the library does not call. `scripts/check_tree.sh` passes on the
+  working tree, against the build's list and against the `v0.8.0` headers.
+  Decision 24's version handling was tested on copies of the `v0.8.0` headers with one added prototype. In
+  a Cellar-style `mlx-c/0.9.0` path it gives a warning and passes. In `mlx-c/0.7.0` it fails as older than the
+  minimum. In a path that names no release, the build's 0.8.0 record applies and the difference fails.
+- *Decision 1 applied.* The skill's section 1, `CLAUDE.md` and the register's section 4 say the ledger is the
+  need for its pending functions; outside it, no need, no wrapper. `check_guide_imports.py` passes.
+- *Probes* (`scripts/probes/mlx_behaviour_probe.c`, C against Homebrew's mlx-c, both streams; bridge jobs
+  `20261123-141715` and `20261123-142501`, `-Wall` clean; its header has the build line):
+  - `remainder` takes the divisor's sign on both devices, float32 and int32: `[-7, 7, -7, 7] % [3, -3, -3, 3] =
+    [2, -2, -1, 1]`. That is Fortran's `modulo`, so decision 6's name holds.
+  - `round` rounds half to even: `[.5, 1.5, 2.5, -.5, -1.5] -> [0, 2, 2, -0, -2]`. `mlx_round` holds;
+    `anint` would differ.
+  - `vecdot` conjugates its first operand (`[i]·[i] = 1`); `inner` does not (`-1`). So `vecdot` along one
+    dimension is Fortran's `dot_product`. *Finding for Phase 4:* rank-1 `dot_product(a, b)` can map to
+    `mlx_vecdot` under decision 6's rule, with `mlx_vecdot(a, b, dim)` for the batched form. The ledger keeps
+    `mlx_vecdot` until Phase 4 decides.
+  - `argsort` is stable on both devices: `[1,0,1,0,1,0] -> [1,3,5,0,2,4]`, and 4,096 alternating ties stay in
+    order. Larger sizes are not probed; Phase 2 tests stability at its own sizes before the policy claims it.
+  - `searchsorted` sides are NumPy's: left `[0,1,4]`, right `[0,3,4]` for `[1,2,2,3]` and `[0,2,4]`. Plus 1
+    gives decision 8's positions 1 to n+1.
+  - *Linear algebra on the GPU stream:* every `linalg` function probed refuses it ("not yet supported on the
+    GPU. Explicitly pass a CPU stream"): inv, pinv, cholesky, cholesky_inv, tri_inv, qr, eigh, eigvalsh, eig,
+    eigvals, lu, lu_factor, solve, solve_triangular, det, slogdet, svd. `norm_l2` runs on the GPU;
+    `norm`, `norm_matrix` and `cross` were not probed. All run on the CPU stream. Decision 9's CPU-stream rule
+    therefore covers every factorisation and solve; Phase 4 probes the three left before it relies on them.
+  - `mlx_distributed_init(strict=false, no backend)` gives a singleton group, size 1, rank 0, and
+    `mlx_distributed_is_available(NULL)` is true. Decision 18's gated test of the singleton group holds.
+- *Not done here (decision 23):* the base build and gate measurements move to Phase 1.
+- *History.* The entry is left to Hans's next history edit: Codex is editing `doc/history/2026-11.md` for
+  Phase 5c, and two writers on one file would race. The text: "Parity Phase 0 (Claude, interactive): ledger of
+  680 mlx-c functions with rule `parity` (7 plants), decision 1 applied to the skill, `CLAUDE.md` and the
+  register; probes: modulo, half-to-even, vecdot conjugates, stable argsort, NumPy searchsorted, linalg
+  CPU-only except norm, singleton distributed group."
+- *What it means, in short:* the parity plan now has a checked inventory. Every later phase is measured by
+  pending lines going to zero under a gate, and the probes settled the open semantic questions of decisions 6,
+  8, 9 and 18 before any wrapper is written.

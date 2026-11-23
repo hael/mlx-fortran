@@ -1,4 +1,4 @@
-name: Build and fast gate (macOS)
+name: Build-only CI (macOS, no Metal device)
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    name: ${{ matrix.build }} build
+    name: ${{ matrix.build }} build (device tests skip)
     runs-on: macos-latest
     strategy:
       fail-fast: false
@@ -21,14 +21,26 @@ jobs:
           brew install gcc cmake mlx-c
           brew list --versions gcc cmake mlx mlx-c
 
-      # The runners are virtual machines and may open no Metal device; a Metal build of MLX then cannot
-      # allocate arrays on either device. The gate's tests that need a device report a skip there
-      # (MLXF_REQUIRE_GPU=OFF); the build, with warnings as errors, and the source checks run.
+      # The runners are virtual machines and open no Metal device; a Metal build of MLX then cannot allocate
+      # arrays on either device. The gate's tests that need a device report a skip (MLXF_REQUIRE_GPU=OFF); the
+      # build, with warnings as errors, and the source checks run. This job does not gate a release: that is
+      # scripts/release_gate.sh on an Apple-silicon Mac, which fails on any skip.
       - name: Build, fast gate, install
         env:
           MLXF_CMAKE_ARGS: -DMLXF_REQUIRE_GPU=OFF -DMLXF_WERROR=ON
         run: |
           if [ "${{ matrix.build }}" = debug ]; then ./compile_debug.sh; else ./compile_clean.sh; fi
 
-      - name: Report device availability
-        run: ctest --test-dir build -R '^unit_core$' -V
+      - name: Report device availability and skipped tests
+        if: always()
+        run: |
+          T=build/Testing/Temporary/LastTest.log
+          nskip=0
+          [ -f "$T" ] && nskip=$(grep -c 'SKIP' "$T" || true)
+          grep -h -m 1 -E 'GPU devices' "$T" || true
+          {
+            echo "### ${{ matrix.build }}: build-only run"
+            echo ""
+            echo "Tests that reported a skip for lack of a Metal device: **${nskip}**."
+            echo "A green run here does not cover the device tests; releases need scripts/release_gate.sh on Apple silicon."
+          } >> "$GITHUB_STEP_SUMMARY"

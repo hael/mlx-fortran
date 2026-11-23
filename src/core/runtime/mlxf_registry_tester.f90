@@ -1,8 +1,9 @@
 !@descr: tests of mlxf_registry: reference counts, serials, the diagnosis of copies made without the defined assignment
 module mlxf_registry_tester
 use, intrinsic :: iso_fortran_env, only: int64, real32, real64
-use mlxf,            only: mlx_array, mlx_from, mlx_is_live, mlx_live_count, mlx_default_device, mlx_set_default_device
-use mlxf_registry,   only: registry_stale_releases
+use mlxf,            only: mlx_array, mlx_from, mlx_is_live, mlx_live_count, mlx_default_device, &
+                           mlx_set_default_device, mlx_last_error
+use mlxf_registry,   only: registry_stale_releases, registry_add
 use mlxf_array,      only: mlxf_handle
 use mlxf_test_utils, only: assert_true, assert_int, test_devices, device_name
 implicit none
@@ -29,6 +30,7 @@ contains
             call mlx_set_default_device(devs(i))
             call test_counts
             call test_serials
+            call test_add_failure
             call test_diagnosis_component
             call test_diagnosis_source
         end do
@@ -57,6 +59,29 @@ contains
         call b%kill()
         call assert_int(live0, mlx_live_count(), 'kill is idempotent')
     end subroutine test_counts
+
+    ! registering an object twice is a failure; with a status (the closure trampolines' path) it returns serial
+    ! 0 and a message and leaves the table as it was, instead of stopping
+    subroutine test_add_failure
+        real(real32)                  :: x(3)
+        type(mlx_array)               :: a
+        character(len=:), allocatable :: msg
+        integer(int64)                :: key, serial
+        integer                       :: live0, st
+        write(*,'(A)') 'test_add_failure'
+        x      = 3.0_real32
+        a      = mlx_from(x)
+        live0  = mlx_live_count()
+        key    = transfer(mlxf_handle(a, 'test_add_failure'), 0_int64)
+        serial = registry_add(key, status=st)
+        msg    = mlx_last_error()
+        call assert_true(st /= 0 .and. serial == 0_int64 .and. index(msg, 'registered twice') > 0, &
+            &'registering a live object again returns a status, serial 0 and a message')
+        call assert_int(live0, mlx_live_count(), 'the failed registration leaves the live count as it was')
+        call assert_true(mlx_is_live(a), 'the object registered first is still live')
+        call a%kill()
+        call assert_int(live0 - 1, mlx_live_count(), 'the object is released once, as registered once')
+    end subroutine test_add_failure
 
     ! a stale copy keeps naming its object's address; a new object at that address has a new serial
     subroutine test_serials

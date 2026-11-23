@@ -168,7 +168,9 @@ contains
         call self%cellprior%kill()
         call self%map_select%kill()
         call self%map_reduce%kill()
+        call self%map_evidence%kill()
         if( allocated(self%map_rho) ) deallocate(self%map_rho)
+        if( allocated(self%map_nharm) ) deallocate(self%map_nharm)
         self%maps_ready    = .false.
         self%map_nkb       = 0
         self%map_nrho      = 0

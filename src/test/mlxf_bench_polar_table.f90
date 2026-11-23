@@ -9,13 +9,14 @@ use, intrinsic :: iso_fortran_env, only: int64, real32, real64
 use, intrinsic :: iso_c_binding, only: c_int, c_double
 !$ use omp_lib,               only: omp_get_max_threads
 use mlxf,                     only: mlx_set_default_device, mlx_default_device, mlx_peak_memory, mlx_reset_peak_memory, &
-                                    mlx_synchronize, mlx_clear_cache, mlx_device_info_size, MLX_DEVICES
-use mlxf_test_defs,           only: POLAR_FORMS, POLAR_ROW_FACTOR, POLAR_BLOCK_ERR_CPU, POLAR_BLOCK_ROT_CPU, &
-                                    POLAR_BLOCK_ROT_Q, POLAR_SEED_CALIBRATION, POLAR_SEED_JUDGED, POLAR_GRID_B, &
-                                    POLAR_GRID_R, POLAR_BUDGET_SHARE, POLAR_CANON_BT, POLAR_CANON_RT, POLAR_BLOCK_BT, &
-                                    POLAR_BLOCK_RT, POLAR_PROB_BETA, polar_table_refs, polar_table_block, &
-                                    polar_table_entries, polar_map_spec, polar_map_block, polar_map_results, &
-                                    polar_row_check
+                                    mlx_synchronize, mlx_clear_cache, mlx_device_info_size, MLX_DEVICES, &
+                                    mlx_active_memory
+use mlxf_test_defs,           only: POLAR_FORMS, POLAR_MAP_FORMS, POLAR_ROW_FACTOR, POLAR_BLOCK_ERR_CPU, &
+                                    POLAR_BLOCK_ROT_CPU, POLAR_BLOCK_ROT_Q, POLAR_SEED_CALIBRATION, POLAR_SEED_JUDGED, &
+                                    POLAR_GRID_B, POLAR_GRID_R, POLAR_BUDGET_SHARE, POLAR_CANON_BT, POLAR_CANON_RT, &
+                                    POLAR_BLOCK_BT, POLAR_BLOCK_RT, POLAR_PROB_BETA, polar_table_refs, &
+                                    polar_table_block, polar_table_entries, polar_map_spec, polar_map_block, &
+                                    polar_map_results, polar_row_check
 use mlxf_kernel_polar_table,  only: polar_table
 use mlxf_kernel_polar_oracle, only: polar_dft_matrix, polar_keyed_u, polar_compare_rows, polar_draws_off, &
                                     polar_report_draws, polar_memo_rows
@@ -63,21 +64,26 @@ type :: bench_map
     real(real64)      :: rho_max = 0._real64
     real(real64)      :: prior_w = 0._real64
     real(real64)      :: cpu_maps_per_s(2) = -1._real64
+    character(len=64) :: simple_commit = 'unknown'
+    character(len=16) :: fftw_plans = 'unknown'
 end type bench_map
 
 ! one shift-map configuration: the particles of a tile (each with all its candidates), the walls of the 3 repeats, the preparation of the
 ! references and of the maps, the profiled pass's wall and stages (construction, mode, width, copy-out), the
 ! MLX peak, the estimate checked against the budget, the load, the Bessel order used and the status
 type :: map_timing
-    integer                       :: ptcl_tile   = 0
-    integer                       :: norder_used = 0
-    real(real64)                  :: walls(3)    = -1._real64
-    real(real64)                  :: prep(2)     = -1._real64
-    real(real64)                  :: pwall       = -1._real64
-    real(real64)                  :: stages(4)   = 0._real64
-    real(real64)                  :: peak        = -1._real64
-    real(real64)                  :: est         = -1._real64
-    real                          :: load1       = -1.
+    integer        :: ptcl_tile   = 0
+    integer        :: norder_used = 0
+    real(real64)   :: walls(3)    = -1._real64
+    real(real64)   :: prep(2)     = -1._real64
+    real(real64)   :: pwall       = -1._real64
+    real(real64)   :: stages(4)   = 0._real64
+    real(real64)   :: peak        = -1._real64
+    real(real64)   :: est         = -1._real64
+    real           :: load1       = -1.
+    integer(int64) :: terms(2) = 0_int64
+    integer        :: width_pairs = 0
+    real(real64)   :: cold = -1._real64, resident = -1._real64, host_bytes = -1._real64, tile_bytes = -1._real64
     character(len=:), allocatable :: status
 end type map_timing
 
@@ -1168,7 +1174,7 @@ contains
         write(*,'(a,f0.1,a)') '    memory budget ', budget_bytes() / 1.e9_real64, ' GB (a share of the GPU''s memory_size)'
         call mlx_set_default_device(device_of_arg())
         cs     = read_case(arg_str('cases', 'polar_case.txt'), arg_str('case', '2500_4'))
-        d      = make_data(cs, POLAR_SEED_JUDGED)
+        d%cs   = cs
         grid   = arg_str('grid', 'shiftmap_grid.txt')
         names  = arg_str('maps', 'window,screen')
         ptiles = int_list(arg_str('ptiles', '16'))
@@ -1252,6 +1258,10 @@ contains
                     read(val, *) mp%rho_max
                 case( 'prior_w' )
                     read(val, *) mp%prior_w
+                case( 'simple_commit' )
+                    mp%simple_commit = trim(val)
+                case( 'fftw_plans' )
+                    mp%fftw_plans = trim(val)
                 case( 'maps_per_s_t24' )
                     read(val, *) mp%cpu_maps_per_s
             end select
@@ -1351,7 +1361,30 @@ contains
         type(map_timing)        :: tm
         real(real64)            :: t0, st0(4)
         integer                 :: h, ip, rep, st
+        logical                 :: fits
+        real(real64)            :: trial_bytes, budget
         call check_map_case(d%cs, mp)
+        do h = 1, 2
+            call map_execution_args(mb(h))
+        end do
+        fits = .false.
+        budget = budget_bytes()
+        do ip = 1, size(ptiles)
+            if( ptiles(ip) < 1 ) error stop 'bench_polar_table: particle tiles must be positive'
+            trial_bytes = map_estimate_bytes(d%cs, mp, ptiles(ip), mp%norder, mb(1))
+            fits = fits .or. trial_bytes <= budget
+        end do
+        if( .not. fits )then
+            do ip = 1, size(ptiles)
+                tm%ptcl_tile = ptiles(ip)
+                tm%est = map_estimate_bytes(d%cs, mp, ptiles(ip), mp%norder, mb(1))
+                tm%status = budget_status()
+                call write_map_row(d, mp, tm)
+            end do
+            return
+        endif
+        ! The recorded grid order allows rejecting an impossible sweep before staging even the host memos.
+        if( .not. allocated(d%xctf) ) d = make_data(d%cs, POLAR_SEED_JUDGED)
         t0 = clock_s()
         do h = 1, 2
             call prepare(ws(h), d, h, bench_config(bt=POLAR_CANON_BT, rt=POLAR_CANON_RT))
@@ -1364,14 +1397,20 @@ contains
             call assert_int(0, st, 'bench_polar_table: a half''s maps are prepared: '//ws(h)%message())
             if( st /= 0 ) return
             mb(h) = map_block(d, mp, h)
+            call map_execution_args(mb(h))
+            call set_width_mode(mb(h), arg_str('widths', 'all'))
         end do
         call mlx_synchronize()
         tm%prep(2)     = clock_s() - t0
         tm%norder_used = ws(1)%map_order()
+        tm%terms = ws(1)%map_term_counts(mb(1))
+        tm%resident = real(mlx_active_memory(), real64)
+        tm%host_bytes = map_host_bytes(d, mb)
         do ip = 1, size(ptiles)
             tm%ptcl_tile  = ptiles(ip)
             tm%load1      = load_average()
-            tm%est        = map_estimate_bytes(d%cs, mp, ptiles(ip), tm%norder_used)
+            tm%est        = map_estimate_bytes(d%cs, mp, ptiles(ip), tm%norder_used, mb(1))
+            tm%tile_bytes = tm%est - map_estimate_bytes(d%cs, mp, 0, tm%norder_used, mb(1))
             tm%walls      = -1._real64
             tm%pwall      = -1._real64
             tm%peak       = -1._real64
@@ -1384,8 +1423,10 @@ contains
             endif
             mb(:)%ptcl_tile = ptiles(ip)
             mb(:)%profile = .false.
+            t0 = clock_s()
             call score_maps_pass(ws, mb, res)
             call mlx_synchronize()
+            tm%cold = clock_s() - t0
             call mlx_reset_peak_memory()
             do rep = 1, 3
                 t0 = clock_s()
@@ -1399,6 +1440,7 @@ contains
             call score_maps_pass(ws, mb, res)
             tm%pwall  = clock_s() - t0
             tm%stages = ws(1)%map_seconds() + ws(2)%map_seconds() - st0
+            tm%width_pairs = count(res(1)%sdev >= 0._real32) + count(res(2)%sdev >= 0._real32)
             do h = 1, 2
                 call assert_true(results_in_range(res(h), mp), 'bench_polar_table: every '//trim(mp%name)//&
                     &' result is finite and on the grid')
@@ -1417,10 +1459,12 @@ contains
     ! weighted spectra (complex), its candidates' spectra, the contraction's output with its transform and their
     ! reordered copy, the directions' transform with its reordered copy, and the cell-sized temporaries of the
     ! reductions per pair; counted twice: the tile in use and the previous tile's buffers MLX's cache keeps
-    real(real64) function map_estimate_bytes( cs, mp, ptcl_tile, norder )
-        type(bench_case), intent(in) :: cs
-        type(bench_map),  intent(in) :: mp
-        integer,          intent(in) :: ptcl_tile, norder
+    real(real64) function map_estimate_bytes( cs, mp, ptcl_tile, norder, mb )
+        type(bench_case),      intent(in) :: cs
+        type(bench_map),       intent(in) :: mp
+        integer,               intent(in) :: ptcl_tile, norder
+        type(polar_map_block), intent(in) :: mb
+        real(real64) :: ct, nt
         real(real64) :: nrots, nkb, nrefs, nord, nrho, nalpha, ncand, cells, resident, per_ptcl
         nrots    = real(mp%nrots, real64)
         nkb      = real(mp%kscreen - mp%kfrom + 1, real64)
@@ -1435,13 +1479,69 @@ contains
         per_ptcl = 8._real64 * (nord * nrho * nkb * nrots + 2._real64 * nord * nkb * nrots + nkb * ncand * nrots + &
             &3._real64 * nord * nrho * ncand * nrots + 2._real64 * nalpha * nrho * ncand * nrots) + &
             &4._real64 * 10._real64 * cells * ncand
+        if( mb%contraction == POLAR_MAP_FORMS%real_weights )then
+            ct = real(min(mp%ncand, mb%cand_tile), real64)
+            nt = real(min(norder+1, mb%order_tile), real64)
+            per_ptcl = 8._real64 * (2._real64*nt*nkb*nrots + nkb*ncand*nrots + &
+                &2._real64*ct*nt*nkb*nrots + 2._real64*ct*nt*nrho*nrots + &
+                &3._real64*nord*nrho*ncand*nrots + 2._real64*nalpha*nrho*ncand*nrots) + &
+                &4._real64*10._real64*cells*ncand
+        endif
         map_estimate_bytes = resident + 2._real64 * real(ptcl_tile, real64) * per_ptcl
     end function map_estimate_bytes
+
+    subroutine map_execution_args( mb )
+        type(polar_map_block), intent(inout) :: mb
+        mb%contraction = arg_int('contraction', POLAR_MAP_FORMS%weighted_particle)
+        mb%cand_tile = arg_int('ctile', 16)
+        mb%order_tile = arg_int('otile', 4)
+        mb%compact_radii = arg_int('compact', 1) /= 0
+        mb%hermitian = arg_int('hermitian', 0) /= 0
+        mb%evidence = arg_int('evidence', 0) /= 0
+        if( mb%cand_tile < 1 .or. mb%order_tile < 1 ) error stop 'bench_polar_table: ctile and otile must be positive'
+        if( mb%contraction /= POLAR_MAP_FORMS%weighted_particle .and. &
+            &mb%contraction /= POLAR_MAP_FORMS%real_weights ) error stop 'bench_polar_table: contraction=1|2'
+    end subroutine map_execution_args
+
+    ! Synthetic sensitivity modes: predetermined survivors, not a production best-so-far shortlist.
+    subroutine set_width_mode( mb, mode )
+        type(polar_map_block), intent(inout) :: mb
+        character(len=*),      intent(in)    :: mode
+        integer :: c
+        select case(mode)
+            case('all')
+                return
+            case('none', 'quarter')
+                allocate(mb%width_cutoff(size(mb%cands, 1), size(mb%cands, 2)))
+                mb%width_cutoff = -huge(1._real32)
+                if( mode == 'quarter' )then
+                    do c = 4, size(mb%cands, 1), 4
+                        mb%width_cutoff(c, :) = huge(1._real32)
+                    end do
+                endif
+            case default
+                error stop 'bench_polar_table: widths=all|none|quarter'
+        end select
+    end subroutine set_width_mode
+
+    real(real64) function map_host_bytes( d, mb ) result(bytes)
+        type(bench_data),      intent(in) :: d
+        type(polar_map_block), intent(in) :: mb(2)
+        integer :: h
+        bytes = real(8_int64 * (size(d%ctf2, kind=int64) + size(d%xctf, kind=int64) + &
+            &size(d%wsq, kind=int64) + size(d%psq, kind=int64)) + 4_int64 * &
+            &(size(d%w, kind=int64) + size(d%temps, kind=int64)), real64)
+        do h = 1, 2
+            bytes = bytes + real(8_int64 * (size(d%refs(h)%ft_ref, kind=int64) + &
+                &size(d%refs(h)%ft_ref2, kind=int64) + size(mb(h)%ctf2, kind=int64) + &
+                &size(mb(h)%xctf, kind=int64) + size(mb(h)%ptclpow, kind=int64)), real64)
+        end do
+    end function map_host_bytes
 
     logical function results_in_range( res, mp )
         type(polar_map_results), intent(in) :: res
         type(bench_map),         intent(in) :: mp
-        results_in_range = all(abs(res%loss) < huge(1._real32)) .and. all(res%sdev >= 0._real32) .and. &
+        results_in_range = all(abs(res%loss) < huge(1._real32)) .and. all(res%sdev >= 0._real32 .or. bits_equal(res%sdev, -1._real32)) .and. &
             &all(res%sdev < huge(1._real32)) .and. all(res%irot >= 1 .and. res%irot <= mp%nrots) .and. &
             &all(res%irho >= 1 .and. res%irho <= mp%nrho) .and. all(res%ialpha >= 1 .and. res%ialpha <= mp%nalpha)
     end function results_in_range
@@ -1459,15 +1559,20 @@ contains
             &'es12.5,3(a,f10.3),a,a,a,i0,a,es12.5,2(a,f10.4),a,i0,2(a,f10.4),2(a,f10.3),a,f10.4,a,es12.5,a,f8.3,a,'//&
             &'es12.5,a,a)'
         character(len=1), parameter :: T = achar(9)
-        real(real64)                :: wall, nmaps, us(4), cpu, rate
+        real(real64)                :: wall, nmaps, us(4), cpu, rate, ratio
         integer                     :: u
-        logical                     :: l_new
+        logical                     :: l_new, matched
         nmaps = real(mp%nptcls, real64) * real(mp%ncand, real64)
         wall  = minval(tm%walls)
         us    = tm%stages * 1.e6_real64 / nmaps
         cpu   = maxval(mp%cpu_maps_per_s)
         rate  = -1._real64
         if( wall > 0._real64 ) rate = nmaps / wall
+        ratio = -1._real64
+        matched = arg_str('widths', 'all') == 'all'
+        matched = arg_int('evidence', 0) == 0 .and. matched
+        matched = matched .and. mp%simple_commit /= 'unknown' .and. mp%fftw_plans == 'measure'
+        if( cpu > 0._real64 .and. matched ) ratio = rate / cpu
         inquire(file=TSV, exist=l_new)
         l_new = .not. l_new
         open(newunit=u, file=TSV, position='append', action='write', status='unknown')
@@ -1477,19 +1582,27 @@ contains
             &T//'us_map_thread'//T//'maps_per_s'//T//'us_construct'//T//'us_select'//T//'us_reduce'//T//&
             &'precision'//T//'norder_used'//T//'mlx_peak_bytes'//T//'prep_s'//T//'copyout_s'//T//'ptcl_tile'//T//&
             &'prep_refs_s'//T//'prep_maps_s'//T//'us_copyout'//T//'us_host'//T//'profile_wall_s'//T//&
-            &'cpu_maps_per_s'//T//'ratio_cpu'//T//'est_bytes'//T//'status'
-        write(u,FMT) trim(mp%name), T, &
+            &'cpu_maps_per_s'//T//'ratio_cpu'//T//'est_bytes'//T//'status'//T//'mlx_revision'//T//'simple_commit'//T//&
+            &'fftw_plans'//T//'width_mode'//T//'evidence'//T//'width_pairs'//T//'active_radius_orders'//T//&
+            &'executed_radius_orders'//T//'cold_s'//T//'prepared_device_bytes'//T//'host_bytes'//T//'tile_cache_est_bytes'//T//&
+            &'contraction'//T//'hermitian'//T//'candidate_tile'//T//'order_tile'//T//'compact_radii'
+        write(u,FMT, advance='no') trim(mp%name), T, &
             &d%cs%nspace, T, d%cs%nstates, T, d%cs%nrefs, T, d%cs%nptcls, T, mp%ncand, T, &
             &device_name(mlx_default_device()), T, mp%pftsz, T, mp%nrots, T, mp%kfrom, T, mp%kscreen, T, mp%nrho, &
             &T, mp%nalpha, T, mp%norder, T, mp%rho_max, T, mp%prior_w, T, tm%load1, T, wall, T, tm%walls(1), T, &
             &tm%walls(2), T, tm%walls(3), T, wall * 1.e6_real64 / nmaps, T, rate, T, us(1), T, us(2), T, &
             &us(3), T, precision_mode(), T, tm%norder_used, T, tm%peak, T, sum(tm%prep), T, tm%stages(4), T, &
             &tm%ptcl_tile, T, tm%prep(1), T, tm%prep(2), T, us(4), T, (tm%pwall - sum(tm%stages)) * 1.e6_real64 / nmaps, &
-            &T, tm%pwall, T, cpu, T, rate / cpu, T, tm%est, T, tm%status
+            &T, tm%pwall, T, cpu, T, ratio, T, tm%est, T, tm%status
+        write(u,'(8a,4(a,i0),4(a,es16.8),5(a,i0))') T, arg_str('revision', 'working-tree'), T, trim(mp%simple_commit), &
+            &T, trim(mp%fftw_plans), T, arg_str('widths', 'all'), T, arg_int('evidence', 0), T, tm%width_pairs, &
+            &T, tm%terms(1), T, tm%terms(2), T, tm%cold, T, tm%resident, T, tm%host_bytes, T, tm%tile_bytes, &
+            &T, arg_int('contraction', POLAR_MAP_FORMS%weighted_particle), T, arg_int('hermitian', 0), T, arg_int('ctile', 16), &
+            &T, arg_int('otile', 4), T, arg_int('compact', 1)
         close(u)
         write(*,'(a,i0,a,i0,a,f9.4,a,es11.4,a,f7.3,a,es10.3,a,f8.3,a,f8.3,a)') '    shiftmap '//trim(mp%name)//&
             &' ptcl_tile=', tm%ptcl_tile, ' norder_used=', tm%norder_used, ' wall=', wall, ' s, ', rate, &
-            &' maps/s (x', rate / cpu, ' SIMPLE full team), peak ', tm%peak, ' B, prep ', sum(tm%prep), &
+            &' maps/s (x', ratio, ' SIMPLE full team), peak ', tm%peak, ' B, prep ', sum(tm%prep), &
             &' s, copy-out ', tm%stages(4), ' s: '//tm%status
     end subroutine write_map_row
 

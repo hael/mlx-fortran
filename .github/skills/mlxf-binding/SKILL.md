@@ -11,8 +11,12 @@ The contract is `doc/policies/binding_contract_policy.md`; how the Fortran is wr
 ## 1. Is it wanted?
 
 A public procedure enters only when a pipeline step of the current plan uses it, or a test of such a step
-needs its sibling (`cumsum` for a draw, `sum` to test it). The generated layer exposes everything; wrapping
-by hand is not free (API, tests, docs). No need, no wrapper.
+needs its sibling (`cumsum` for a draw, `sum` to test it), or the parity ledger `scripts/mlxc_parity.txt`
+lists its mlx-c function as `pending` (parity with mlx-c is a goal; MLX's documented API is the need). Use
+the ledger's planned Fortran name, and change its line to `public` (or `plumbing`) in the same change:
+rule `parity` fails until the line and the code agree, and the pending count only shrinks. The generated
+layer exposes everything; wrapping by hand is not free (API, tests, docs). Outside the ledger: no need, no
+wrapper.
 
 ## 2. Find the generated procedure
 

@@ -1,6 +1,12 @@
 # mlx-fortran milestone 1: the Phase 1 follow-ups, the tiled polar pipeline and the shift maps
 
-Status, 2026-11-22: planned, not launched. Decisions 3 to 7 ruled by Hans on 2026-11-22 as recommended;
+Status, 2026-11-23: Phases 0 to 5b and the review fixes are delivered. Phase 5c's implementation and
+correctness validation are delivered; benchmarking and the retention decision are deferred at the owner's
+request. Phases 6 and 7 remain open. Review base: mlx-fortran `c93ee0d602fcd9d3f9d1c422c4d448a26f4f6f26`;
+SIMPLE `0a8b0903eee151700305399e8e3ff53c2c21caae`. Decision 27 brings SIMPLE's committed shift-map
+optimizations into the GPU model. No new throughput result is claimed.
+
+Original launch record, 2026-11-22: Decisions 3 to 7 ruled by Hans as recommended;
 widened the same day by decision 15 (the shift maps of the scientific examples' example 1, Phase 5b), and
 by decisions 19 and 20 (SIMPLE's matching shift-map benchmark; Phases 1 to 3 done interactively).
 Phases 1 to 3 are complete, done interactively (Progress; decision 20), and were reviewed on 2026-11-22. Run
@@ -438,6 +444,7 @@ Numbered, dated, never renumbered. "Design decision N" is decision N of the desi
     - *Judged:* decision 17's frozen caps judge the new form, and the run's formulation is gone.
     - *For SIMPLE:* the same decomposition, a per-particle Z reused across the candidates through one small
       GEMM per ring position, is the candidate for SIMPLE's CPU code once the re-timing confirms it.
+      Superseded by decision 27: SIMPLE adopted the per-order real-weight contraction, not this Z formulation.
 
 26. (2026-11-23, Hans: "Yes, do it") **`mlx_take` and `mlx_bitcast` enter now, ahead of the parity plan.**
     Both are on the parity ledger (`mlxf_mlxc_parity.md`, its decision 6 for `mlx_bitcast`, its Phase 3 for
@@ -452,7 +459,56 @@ Numbered, dated, never renumbered. "Design decision N" is decision N of the desi
       - the particles' and the candidates' spectra are gathered as slabs.
     - *The policy:* section 10 of the binding policy carries both conventions.
 
-Defaults taken without a question: the folder and submodule names of decision 10, the vocabulary name
+27. (2026-11-23, Hans: the recent SIMPLE shift-map optimizations "need to become part of our toy modeling
+    efforts"; Codex's review and proposed execution order) **Model the committed CPU optimizations before
+    making custom Metal the next step.** Phase 5c is the graph-based follow-up, in this living plan.
+    - *Baseline:* SIMPLE `0a8b0903eee151700305399e8e3ff53c2c21caae` replaces decision 22's
+      `67c6a05e2` for future comparisons, including Phase 6. Keep the earlier measurements labelled by
+      their actual pin. The CPU prototype's ratios in the fusing note are not results against this commit.
+      Rebuild and measure `block_prod` and `shiftmap` with measured FFTW plans on the same Mac as the GPU.
+    - *What transfers:* `gen_shiftmap_kernel` now contracts the complex shell products, viewed as
+      interleaved reals, against real Bessel weights; it caches those weights, contracts only radii that
+      retain an order, and packs the folded Hermitian half without a whole-map `gin` intermediate.
+      `nharm` and the active-radius ranges are prepared once. SIMPLE's `shell_sums` row bound
+      `SGEMM_ONE_THREAD_MNK=124999` is an OpenBLAS threading/identity constraint, not a GPU tile size.
+    - *Keep particle reuse:* decision 25's shifted particle spectra remain reusable across candidates.
+      Compare the current weighted-Z formulation with a bounded per-order formulation: gather
+      `Y^[m'+n]` once per particle/order tile; form `R^[m'] Y^[m'+n]` in a candidate tile; contract its
+      interleaved real/imaginary rows over shells against the real weights of the active radii. Stream
+      order/candidate tiles instead of retaining a block-wide pair-by-order product. Preserve the
+      `exp(-2 pi i n r / nrots)` correction after the m' transform. This is a measured alternative,
+      not an assumption that the CPU's contraction wins on GPU matrix units.
+    - *Do not equate zero weights with skipped work:* the current Z/GEMM spans every order/radius slot,
+      including weights zeroed above `nharm(rho)`. Compare compact active ranges or groups with padding;
+      report useful and executed order/radius slots and bytes. Retain padding only where it measures
+      better. Decision 23's numerical truncation and the oracle caps stay fixed.
+    - *Transform experiment using existing operations:* after the ring FFT and its phase correction,
+      fold orders modulo `nalpha` in coefficient space. For the resulting F(n,r,rho), construct
+      `H(n) = (conjg(F(n)) + F((-n) modulo nalpha))/2` for `0 <= n <= floor(nalpha/2)`, at each
+      rotation/radius/pair. `mlx_irfft(H, direction_dim, n=nalpha, norm=MLX_FFT_NORMS%forward)` then
+      gives the unscaled real forward direction transform. The zero-order half factor is already in
+      the weights; do not apply it twice. This models SIMPLE's Hermitian packing without requiring
+      an unimplemented 2D real-transform wrapper. Compare it with the current complex direction FFTs.
+    - *Ownership:* all prepared tables and any active-range metadata belong to `polar_table` and its
+      submodules. Weights already persist across `score_maps`; keep that reuse. A changed half, band,
+      box/grid or shell-weight content must rebuild the dependent tables. Reference generations retain
+      their existing checks. No module globals, SIMPLE types in the library or second resource owner.
+    - *Requested work:* first correct profiling so `evidence=.false.` does not explicitly evaluate log
+      evidence. Check the compiled graph's actual work too; copying fewer outputs alone is not proof.
+      Keep the matched all-width/no-evidence benchmark. Also model SIMPLE's optional `width_cutoff`:
+      loss strictly above the cutoff returns width -1 and skips moments; equality computes the width.
+      Treat a supplied per-pair cutoff as an input, keep selection unchanged and report the survivor
+      fraction. A synthetic cutoff experiment does not reproduce production's sequential best-so-far
+      dependency or establish its width frequency. No per-pair host synchronization to decide the mask.
+    - *Gates and verdict:* decision 17's fixed map/loss/evidence/variance bounds and exact lifecycle gates
+      apply. Preserve canonical-schedule identity; changed tile shapes are judged by those bounds and
+      clear-margin modes, not CPU/GPU byte identity. Retain a second computation path only under the
+      existing measured gain above 30 percent rule; record losing experiments and remove their paths.
+      Decisions 14 and 18 keep their 2.0-times CPU/GPU go thresholds. Metal remains separate follow-up
+      work after the generic wrapper and fresh profiles justify it; the milestone verdict uses MLX ops.
+
+Defaults taken without a question: Phase 5c's name and experiment order (reorder from its measured profile),
+the folder and submodule names of decision 10, the vocabulary name
 `MLX_FFT_NORMS`, the run names of decision 6, the file name of decision 9, the rule name `ctorexpr`, the
 submodule, tester, sub-suite and mode names of decision 15, and decision 19's candidate count (16), check
 size (64), file name and the mlx-fortran column names.
@@ -484,6 +540,7 @@ size (64), file name and the mlx-fortran column names.
 | 4 | new test code: the polar pipeline at fixture size | fixture calibration frozen before any GPU run; `unit_kernels suite=polar_table` on both devices; budget 8 |
 | 5 | new test code and measurement: the benchmark on the M2 Ultra | block calibration frozen before its GPU run; accuracy block on seed 2 within the frozen gates; schedule identity at block size; `time`, `profile`, `overlap` rows |
 | 5b | new code and test code: the shift maps (decision 15) | the decision 16 operations' area tests on both devices; shift-map calibration confirmed on the CPU device before any GPU run; `unit_kernels suite=polar_shiftmap` on both devices; `bench_polar_table suite=shiftmap` rows; budget unchanged at 8 |
+| 5c | test-model optimization; rounding may change | decision 27: unchanged oracle caps, requested-output and cache/refusal checks, matched baseline at SIMPLE `0a8b0903e`, graph experiments and two-invocation timings; budget 8 |
 | 6 | measurement: bring-up and the verdicts on the M5 Ultra | fast gate there; baseline refresh there (`block_prod` and `shiftmap`); scoring verdict and shift-map verdicts recorded with their branches (decisions 14, 18) |
 | 7 | report | the interim summary and the report exist; plan moved to `completed/` |
 
@@ -794,6 +851,47 @@ devices with the frozen caps; every negative control fails its assertion; the 10
 baseline; the leak gate passes; the `shiftmap` rows exist with memory and precision mode; budget 8; zero
 warnings.
 
+### Phase 5c, SIMPLE's optimized shift maps in the GPU model (decision 27; implementation/validation)
+
+Owner update, 2026-11-23: implement and validate now; defer all benchmarking until the machine is available.
+The alternative graphs remain explicitly selected test-model experiments, with the weighted-particle/complex
+FFT graph as the default control. This temporarily holds the measured-gain retention decision open; it does
+not adopt either alternative or satisfy the performance exit. Preserve the benchmark commands and provenance
+requirements below for the resumed measurements. No M2 or M5 performance conclusion follows from validation.
+
+1. Freeze the source snapshots and artifacts: this review's mlx-fortran base, SIMPLE at decision 27's pin,
+   compiler/MLX versions, machine, precision, case, grid, cutoff/evidence modes and tile dimensions.
+   Run the base's Debug/Release fast gates and 64,000-pair accuracy gate. Fix the profiling mismatch before
+   profiling alternatives, proving profile on/off returns the same requested results. Time the unchanged
+   graph and refreshed SIMPLE baseline twice, with measured FFTW plans and preparation outside the warm loop.
+2. Add the contract cases to `polar_shiftmap`, including changed shell weights with unchanged references,
+   changed grid/band and half, zero radius, odd/even direction counts, Nyquist, orders wrapping beyond both
+   ring and directions, duplicate/permuted candidates and partial tiles. The toy accepts ascending radii;
+   test refusal of an unsorted list rather than silently assuming SIMPLE's broader contract. Use a compact
+   direct-oracle sample at the actual benchmark shell/grid geometry as well as the small analytic fixtures;
+   the expensive sample belongs to a manual accuracy mode of the same executable, not a new fast entry.
+3. Measure the two contraction forms and the Hermitian direction transform separately and together.
+   Start with particle tiles 4/16/64 (measured earlier), candidate tiles 4/8/16 and order tiles 1/4/8
+   (guessed search grid, not an optimum); prune from the existing quarter-memory budget before allocation.
+   Report host staging, prepared weights/references, live intermediates, MLX peak and process peak, as well
+   as time. Do not replace the ring's 364-point transform with a padded transform without proving that the
+   original rotation grid and normalization are recovered: padding alone changes the sampled problem.
+4. Add the optional cutoff to the test-only request and oracle. Test disabled, none/some/all survivors,
+   strict boundary equality and sentinel -1; preserve the tempered mode and physical-temperature moments.
+   Benchmark all-width/no-evidence for the matched verdict, and cutoff/evidence cases separately. A CPU
+   cutoff throughput ratio requires the same cutoff inputs and outputs on both sides; otherwise report GPU
+   sensitivity and the production-profile width fraction as unmeasured, not as an equivalent-work speedup.
+5. On the same Mac, warm up, best of three, two invocations, load recorded, full precision; interleave the
+   candidate and incumbent. Include input construction, evaluation and copy-out, report preparation/cold
+   compilation separately. Keep only justified paths, archive negative results and refresh the fusing note
+   from the final requested-output profile. The current graph is the control; no assumed Metal speedup.
+
+Exit: Debug and Release fast gates, 64,000-pair accuracy and the expanded shift-map suite pass on CPU/GPU;
+negative controls fail for phase sign, omitted Nyquist/folding contribution, zero returned loss, stale
+weights and wrong cutoff inequality; no caps relaxed, lifecycle exact, budget 8, zero warnings. Baseline
+and candidate rows identify both commits and work modes, include both maps and the two runs, and obey the
+memory budget. Record a measured winner or a negative result. Phase 6 repeats against this SIMPLE pin.
+
 ### Phase 6, the M5 Ultra (run `mlxf_m1_m5`)
 
 1. Record the machine and dependencies as in Phase 0 step 1, with the GPU's `architecture` as
@@ -803,7 +901,7 @@ warnings.
 2. Build Debug and Release from scratch at Phase 6's base. Run the fast gate, `recovery_half` (if
    decision 3 is ruled yes), `unit_kernels suite=polar_table` and `suite=polar_shiftmap` on both devices,
    and `bench_polar_table suite=accuracy`. The frozen bounds of Phases 4a, 5a and 5b-a are unchanged.
-3. Repeat Phase 0 steps 3 to 5 and 7 there: the SIMPLE pin (decision 22), `block_prod` twice per dense
+3. Repeat Phase 0 steps 3 to 5 and 7 there: the SIMPLE pin (decision 27), `block_prod` twice per dense
    case, `check`, `fills`, `neigh` and `suite=shiftmap` twice at the full team, both suites with measured
    plans. Recheck the polar dimensions, half counts and the shift-map grid against Phase 0's.
 4. `bench_polar_table` on the M5 Ultra in full precision (`time`, `accuracy`, `profile`, `overlap`), then
@@ -883,6 +981,10 @@ not exist at the base.
 | `README.md` | status line | 7 |
 | `doc/implementation_notes/planned/mlxf_milestone1.md` | Progress | each |
 | `doc/implementation_notes/planned/mlxf_scientific_examples.md` | its Progress: example 1 delivered here | 5b, 7 |
+| `src/test/mlxf_kernel_polar_table.f90`, `src/test/mlxf_kernel_polar_table_lifecycle.f90`, `src/test/mlxf_kernel_polar_table_shiftmap.f90`, `src/test/mlxf_kernel_polar_table_shiftmap_tester.f90` | decision 27: owned active-range metadata, graph experiments, requested outputs/cutoff, independent tests | 5c |
+| `src/test/mlxf_test_defs.f90`, `src/test/mlxf_bench_polar_table.f90`, `src/test/mlxf_test_registry.f90` | decision 27: test-only requests/tunables, benchmark provenance and work counts, manual accuracy dispatch if needed | 5c |
+| `doc/policies/test_environment_policy.md` | decision 27's manual accuracy and work modes; no new CTest entry | 5c |
+| `doc/implementation_notes/planned/mlxf_fusing_note.md` | fresh profile and remaining kernel candidates; roadmap only | 5c |
 
 SIMPLE (`~/src/SIMPLE`) is outside this table: the runs read it and export it into scratch, never edit it.
 Decision 19's suite touched `src/main/commanders/test/simple_polar_matching_bench.f90`,
@@ -2285,3 +2387,122 @@ candidates, through one real GEMM, makes the GPU maps about 1.7 times (window) a
 faster than the run's form, on a loaded machine. The decomposition is the candidate to carry into SIMPLE's
 CPU code. The numbers become measurements at the re-timing.
 
+### Review and next modeling step: 2026-11-23 (Codex; documentation only)
+
+Reviewed mlx-fortran `0882700` and `c93ee0d` on top of `309807c`, and SIMPLE's shift-map changes in
+`0a8b0903eee151700305399e8e3ff53c2c21caae`. The owner's pending edits to history and the fusing note were
+present at the start and preserved in this update. No numerical source or SIMPLE file changed here.
+
+- The four earlier findings are addressed in source and tests: returned-loss oracle checks, failed-map
+  invalidation, reference-memo geometry/shape validation and physically translated seed banks. The frozen
+  tile constants now live in test defs, and Bessel truncation matches SIMPLE per radius.
+- The current particle-tile graph retains the correct m' shift phase and reuses shifted particle data
+  across candidates. It still materializes weighted Z for inactive order/radius slots and uses complex
+  direction transforms. SIMPLE now contracts active radii with real weights and writes a Hermitian half.
+  These are graph experiments to measure, not evidence that either contraction must win on a GPU.
+- New review finding: `tile_maps` profiles `[sdev, logz]` unconditionally, while the benchmark's request has
+  `evidence=.false.`. That explicitly includes an unrequested reduction in the stage measurement. The
+  compiled callback also returns both outputs; its actual evaluation needs checking before attributing
+  savings. Phase 5c starts by aligning profiling with requested work.
+- SIMPLE's final record reports screen/window throughput gains of 1.28/1.16 over its previous kernel.
+  Those are recorded CPU measurements, not rerun here and not fresh GPU/CPU ratios. Its row blocking is
+  for CPU serial/team identity; its broader unsorted-radius contract is not silently imported into the toy.
+- Validation on the reviewed mlx-fortran tree: Debug and Release rebuilt in isolated scratch trees with
+  warnings as errors; fast gate 8/8 in both, CPU and Metal GPU observed. `polar_table` 231 checks,
+  `polar_shiftmap` 594, `unit_ops` 389. The Release 64,000-pair accuracy mode passes 192 checks on both
+  devices, GPU row error 1.161e-6 and zero minimising-rotation disagreements. Logs:
+  `/private/tmp/mlxf-latest-{debug,release}-{build,tests}.log` and `/private/tmp/mlxf-latest-accuracy.log`.
+  `scripts/check_tree.sh` and `git diff --check` pass. An independent direct-DFT check of decision 27's
+  folded Hermitian direction-transform identity covers odd/even lengths and wrapped orders (maximum
+  absolute error 5.42e-14 in real64); this checks the proposed algebra, not a new GPU implementation.
+- Decision 27 and Phase 5c are planned, not implemented or timed. They supersede decision 25's proposed
+  CPU transfer and the fusing note's Metal-first ordering. The existing caps, memory budget, verdict
+  thresholds and milestone hold remain. No SIMPLE tests, production workflow or new performance runs
+  are claimed by this review.
+
+
+
+### Phase 5c implementation and validation; timing deferred, 2026-11-23 (Codex)
+
+Owner instruction: implement Phase 5c, starting with profiling; preserve particle-shift reuse and compare
+against updated SIMPLE. During implementation Hans explicitly deferred benchmarks: "Now is not a good time
+to do benchmarking on this machine. Can we do the implementation and validation and defer benchmarks for
+later". The waiting timing driver was stopped as its first run started; no completed result is accepted or
+reported. This entry delivers implementation/validation only. The performance exit and measured-gain
+retention ruling remain open, including the choice of canonical tiles.
+
+- **Profiling/requested outputs.** The compiled physical-moment reduction now has one output. Evidence has
+  a separate owned compiled closure, called only when requested. Profile barriers evaluate only the requested
+  graphs; this removes the hidden multi-output evaluation as well as the explicit evidence barrier. Profile
+  on/off equality and optional result allocation are checked for all four contraction/transform combinations.
+  These are correctness checks, not a performance regression threshold; the fresh profile is deferred.
+- **Contractions and transforms.** The default remains the weighted-particle graph and complex direction
+  FFT. The selectable real-weight experiment gathers each particle/order tile once, shares it across
+  candidate tiles, forms interleaved real shell products, and contracts against the real Bessel weights.
+  Active radii use the first retained radius in an order tile, with zero-padded columns within that tile;
+  `compact=0` retains every radius for the comparison. Completed chunks are evaluated to bound intermediate
+  lifetimes. This is a GPU tile schedule, with no transplant of SIMPLE's single-thread SGEMM row threshold.
+  The independent Hermitian option folds orders first, forms the half spectrum and uses unscaled `mlx_irfft`;
+  the zeroth-order half weight is applied once. The 364-point rotation grid is unchanged.
+- **Ownership/cache.** Reference spectra, real weights, per-radius harmonic limits, phase and cell metadata
+  remain owned by `polar_table`. A replacement rebuilds from the supplied weights/grid/band and leaves no
+  maps on refusal. Tests replace weights with unchanged references/generation, change the band and grid,
+  exercise both halves, and refuse unsorted radii. Every compiled closure and cached allocation is released
+  by the existing map teardown; 100 cycles cover all four graph combinations with exact live-count and
+  active-memory recovery.
+- **Cutoff.** Optional `polar_map_block%width_cutoff(candidate,particle)` implements the strict SIMPLE rule:
+  loss above cutoff gives width -1, equality computes width. One selection readback per particle tile builds
+  the survivor list; only those pairs enter the moment graph. There is no per-pair readback. Tempered mode
+  and evidence are preserved, while widths retain physical temperatures. Disabled, all/partial/no survivors,
+  equality, sentinel and shape refusal are tested for every graph combination.
+- **Validation.** Debug and Release builds with `MLXF_WERROR=ON` complete without warnings. Both fast gates
+  pass 8/8 with CPU and Metal observed; `polar_shiftmap` has 1,308 assertions. The named-only
+  `unit_kernels suite=polar_shiftmap_accuracy` passes 144 assertions on CPU/GPU, checking direct residuals
+  at 64 cells per pair and the selected loss, for both halves and all four graph combinations at 364 rotations,
+  shells 2..31, box 180, and the benchmark window/screen grids. It is a sampled map check, not a full-map
+  production-size mode proof. The existing 64,000-pair accuracy gate passes 192 assertions with unchanged
+  bounds. No CTest process was added. Static gate passes via `bash scripts/check_tree.sh` (the concurrently
+  edited script currently lacks execute permission); source formatting and whitespace checks pass.
+- **Negative controls.** Six scratch submodule mutations, relinked against the Debug test executable, each
+  exit 1 through assertions: phase sign (90 failures), omitted reference Nyquist (41), omitted wrapped fold
+  contributions (17), zero returned loss (23), weight cache keyed only by geometry (2), and `<` in place of
+  `<=` for width survivors (4). Each run uses the CPU device and evaluates 654 assertions. Mutations do not
+  enter the worktree.
+- **SIMPLE comparator.** A scratch copy of tracked SIMPLE `0a8b0903e` was built in Release with its cached
+  OpenBLAS dependency and gfortran 16.2.0; its `polar shift map kernel` suite passes 145/145 checks with a
+  four-thread limit. The initial one-thread-limited invocation failed its requirement that a parallel team
+  actually run (144/145); repeating with four threads resolves that harness constraint. No SIMPLE source was
+  changed. Exported builds lack a Git header hash, so the source pin must accompany the artifact explicitly.
+- **Benchmark harness, unmeasured.** It accepts `contraction=1|2`, `hermitian=0|1`, `ctile=`, `otile=`,
+  `compact=0|1`, the existing `ptiles=`, `widths=all|quarter|none`, and `evidence=0|1`. `all` disables cutoff;
+  `quarter` and `none` are synthetic fixed-survivor sensitivity cases, not best-so-far production shortlists.
+  Rows identify these choices, `revision=`, the grid file's `simple_commit` and `fftw_plans`, requested width
+  count, useful/executed radius-order slots, cold first pass, prepared device memory, host memo payload and
+  estimated tile/cache memory. The memory estimate accounts for the selected contraction and rejects an
+  entirely infeasible sweep before staging the case memos; each tile is checked again with the prepared
+  order. A CPU ratio is suppressed for cutoff/evidence work, unknown provenance or unmeasured FFTW plans.
+  Host payload excludes allocator/graph overhead; process peak and the transient full-half `yfull`/`ypk`
+  staging (16*nrots*band_shells*half_particles bytes) still require reconciliation in the resumed run.
+
+Artifacts: `/private/tmp/mlxf-phase5c/`; Debug/Release build trees are
+`/private/tmp/mlxf-polar-review-{debug,release}`. Final logs are `final-{debug,release}-tests.log`,
+`final-map-accuracy.log`, `final-dense-accuracy.log`, `metadata-{debug,release}-build.log`,
+`static-final.log`, `negative/results.json`, and `simple-kernel-validation-4threads.log`.
+The corrected control and Hermitian-only binaries/sources, active prototype source, pinned SIMPLE source/build,
+and mutation script are in that scratch directory. Scratch artifacts are temporary, not permanent fixtures.
+The concurrent parity-policy/ledger work is outside this change and was preserved.
+
+**Resume measurements later (not executed as part of this delivery):**
+
+1. Rebuild the current library in Release and record its base plus unstaged-diff hash, versions and machine.
+   Use a fresh empty output directory per invocation. Run the pinned SIMPLE executable twice with
+   `test=polar_matching_bench suite=shiftmap nthr=24 fftw_plans=measure`; regenerate the grid's two full-team
+   rates and provenance (`simple_commit=0a8b0903eee151700305399e8e3ff53c2c21caae`, `fftw_plans=measure`).
+   Do not silently reuse the historical `shiftmap_grid.txt` rates.
+2. Compare `test=bench_polar_table suite=shiftmap cases=<case-file> grid=<refreshed-grid> device=gpu
+   ptiles=4,16,64 widths=all evidence=0 revision=<recorded-revision>` with contraction 1/2 and Hermitian 0/1.
+   For contraction 2 sweep candidate tiles 4/8/16 and order tiles 1/4/8; compare compact radii to padding.
+   Interleave control/candidate, two invocations, warm-up/best-of-three, record idle load and process peak.
+3. Measure synthetic `widths=quarter|none` and `evidence=1` separately. A production width fraction and
+   equivalent-work CPU cutoff ratio remain unmeasured. Reconcile host/device/process memory, select paths
+   under the >30% extra-path rule, remove rejected experiments, then update this entry and the fusing roadmap.

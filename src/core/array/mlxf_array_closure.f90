@@ -7,8 +7,8 @@ implicit none
 
 contains
 
-    ! the arrays of an mlx-c vector, each adopted as a new counted handle; a failure returns a status and
-    ! frees the handle it was taking, since the C trampoline must not stop
+    ! the arrays of an mlx-c vector, each adopted as a new counted handle; a failure of mlx-c or of the
+    ! registry returns a status and frees the handle it was taking, since the C trampoline must not stop
     module subroutine mlxf_vector_import( arrays, v, status )
         type(mlx_array),         allocatable, intent(out) :: arrays(:)
         type(mlxc_vector_array), intent(in)               :: v
@@ -27,7 +27,11 @@ contains
                 call mlxf_check(mlxc_array_free(h), 'closure vector import cleanup', status=cleanup)
                 return
             endif
-            call adopt(arrays(i), h, 'closure vector import')
+            call adopt(arrays(i), h, 'closure vector import', status)
+            if( status /= 0 )then
+                call mlxf_check(mlxc_array_free(h), 'closure vector import cleanup', status=cleanup)
+                return
+            endif
         end do
     end subroutine mlxf_vector_import
 

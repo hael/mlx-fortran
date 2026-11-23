@@ -53,7 +53,9 @@ contains
     end function view_target
 
     ! points p, of rank 0 to 7, at q with the Fortran shape s; p is null when q is (a refused view or
-    ! allocation). One copy per kind, each rank its own case: Fortran has no procedure generic over either
+    ! allocation) and after the refusal of a rank above 7, so a failed call leaves no stale association. One copy
+    ! per kind, each rank its own case: Fortran has no procedure generic over either, and an assumed-rank pointer
+    ! can be nullified only in a case of its rank
     subroutine point_r32( q, s, p, proc, status )
         type(c_ptr),           intent(in)    :: q
         integer,               intent(in)    :: s(:)
@@ -85,9 +87,24 @@ contains
             rank(7)
                 nullify(p)
                 if( c_associated(q) ) call c_f_pointer(q, p, s(1:7))
-            rank default
-                if( c_associated(q) ) call mlxf_report(proc, 'a pointer of rank above 7', status)
+            rank(8)
+                nullify(p)
+            rank(9)
+                nullify(p)
+            rank(10)
+                nullify(p)
+            rank(11)
+                nullify(p)
+            rank(12)
+                nullify(p)
+            rank(13)
+                nullify(p)
+            rank(14)
+                nullify(p)
+            rank(15)
+                nullify(p)
         end select
+        if( rank(p) > 7 .and. c_associated(q) ) call mlxf_report(proc, 'a pointer of rank above 7', status)
     end subroutine point_r32
 
     subroutine point_r64( q, s, p, proc, status )
@@ -121,9 +138,24 @@ contains
             rank(7)
                 nullify(p)
                 if( c_associated(q) ) call c_f_pointer(q, p, s(1:7))
-            rank default
-                if( c_associated(q) ) call mlxf_report(proc, 'a pointer of rank above 7', status)
+            rank(8)
+                nullify(p)
+            rank(9)
+                nullify(p)
+            rank(10)
+                nullify(p)
+            rank(11)
+                nullify(p)
+            rank(12)
+                nullify(p)
+            rank(13)
+                nullify(p)
+            rank(14)
+                nullify(p)
+            rank(15)
+                nullify(p)
         end select
+        if( rank(p) > 7 .and. c_associated(q) ) call mlxf_report(proc, 'a pointer of rank above 7', status)
     end subroutine point_r64
 
     subroutine point_c32( q, s, p, proc, status )
@@ -157,9 +189,24 @@ contains
             rank(7)
                 nullify(p)
                 if( c_associated(q) ) call c_f_pointer(q, p, s(1:7))
-            rank default
-                if( c_associated(q) ) call mlxf_report(proc, 'a pointer of rank above 7', status)
+            rank(8)
+                nullify(p)
+            rank(9)
+                nullify(p)
+            rank(10)
+                nullify(p)
+            rank(11)
+                nullify(p)
+            rank(12)
+                nullify(p)
+            rank(13)
+                nullify(p)
+            rank(14)
+                nullify(p)
+            rank(15)
+                nullify(p)
         end select
+        if( rank(p) > 7 .and. c_associated(q) ) call mlxf_report(proc, 'a pointer of rank above 7', status)
     end subroutine point_c32
 
     subroutine point_i32( q, s, p, proc, status )
@@ -193,9 +240,24 @@ contains
             rank(7)
                 nullify(p)
                 if( c_associated(q) ) call c_f_pointer(q, p, s(1:7))
-            rank default
-                if( c_associated(q) ) call mlxf_report(proc, 'a pointer of rank above 7', status)
+            rank(8)
+                nullify(p)
+            rank(9)
+                nullify(p)
+            rank(10)
+                nullify(p)
+            rank(11)
+                nullify(p)
+            rank(12)
+                nullify(p)
+            rank(13)
+                nullify(p)
+            rank(14)
+                nullify(p)
+            rank(15)
+                nullify(p)
         end select
+        if( rank(p) > 7 .and. c_associated(q) ) call mlxf_report(proc, 'a pointer of rank above 7', status)
     end subroutine point_i32
 
     subroutine point_i64( q, s, p, proc, status )
@@ -229,9 +291,24 @@ contains
             rank(7)
                 nullify(p)
                 if( c_associated(q) ) call c_f_pointer(q, p, s(1:7))
-            rank default
-                if( c_associated(q) ) call mlxf_report(proc, 'a pointer of rank above 7', status)
+            rank(8)
+                nullify(p)
+            rank(9)
+                nullify(p)
+            rank(10)
+                nullify(p)
+            rank(11)
+                nullify(p)
+            rank(12)
+                nullify(p)
+            rank(13)
+                nullify(p)
+            rank(14)
+                nullify(p)
+            rank(15)
+                nullify(p)
         end select
+        if( rank(p) > 7 .and. c_associated(q) ) call mlxf_report(proc, 'a pointer of rank above 7', status)
     end subroutine point_i64
 
     subroutine point_l( q, s, p, proc, status )
@@ -265,9 +342,24 @@ contains
             rank(7)
                 nullify(p)
                 if( c_associated(q) ) call c_f_pointer(q, p, s(1:7))
-            rank default
-                if( c_associated(q) ) call mlxf_report(proc, 'a pointer of rank above 7', status)
+            rank(8)
+                nullify(p)
+            rank(9)
+                nullify(p)
+            rank(10)
+                nullify(p)
+            rank(11)
+                nullify(p)
+            rank(12)
+                nullify(p)
+            rank(13)
+                nullify(p)
+            rank(14)
+                nullify(p)
+            rank(15)
+                nullify(p)
         end select
+        if( rank(p) > 7 .and. c_associated(q) ) call mlxf_report(proc, 'a pointer of rank above 7', status)
     end subroutine point_l
 
     module subroutine view_r32( a, p, status )
@@ -358,9 +450,13 @@ contains
             call mlxf_report(PROC, 'a shape of rank above 7 or with a negative extent', status)
             return
         endif
-        ! whole pages: Metal maps whole pages without a copy, so the buffer covers only memory the library owns
-        nbytes = max(1_c_size_t, int(product(int(fshape, int64)), c_size_t) * itemsize(dtype))
-        nbytes = PAGE_BYTES * ((nbytes + PAGE_BYTES - 1_c_size_t) / PAGE_BYTES)
+        ! whole pages: Metal maps whole pages without a copy, so the buffer covers only memory the library owns.
+        ! A shape whose bytes do not fit is refused: a wrapped count would allocate less than MLX addresses
+        nbytes = buffer_bytes(fshape, itemsize(dtype))
+        if( nbytes < 0_c_size_t )then
+            call mlxf_report(PROC, 'a shape whose size in bytes is not representable', status)
+            return
+        endif
         if( c_posix_memalign(buf, PAGE_BYTES, nbytes) /= 0 )then
             call mlxf_report(PROC, 'posix_memalign failed', status)
             return
@@ -377,6 +473,29 @@ contains
         p = data_pointer(h, dtype)
         if( present(zero_copy) ) zero_copy = c_associated(p, buf)
     end function alloc_target
+
+    ! the bytes of a buffer for fshape of elements of isz bytes, rounded up to whole pages and at least one;
+    ! -1 when a product or the rounding would pass the largest size the kind holds
+    pure integer(c_size_t) function buffer_bytes( fshape, isz ) result(nbytes)
+        integer,           intent(in) :: fshape(:)
+        integer(c_size_t), intent(in) :: isz
+        integer(c_size_t) :: count, limit
+        integer           :: i
+        nbytes = -1_c_size_t
+        limit  = huge(nbytes) - PAGE_BYTES + 1_c_size_t
+        count  = 1_c_size_t
+        do i = 1, size(fshape)
+            if( fshape(i) == 0 )then
+                count = 0_c_size_t
+                exit
+            endif
+            if( count > limit / int(fshape(i), c_size_t) ) return
+            count = count * int(fshape(i), c_size_t)
+        end do
+        if( count > limit / isz ) return
+        nbytes = max(1_c_size_t, count * isz)
+        nbytes = PAGE_BYTES * ((nbytes + PAGE_BYTES - 1_c_size_t) / PAGE_BYTES)
+    end function buffer_bytes
 
     module function alloc_r32( fshape, mold, view, status, zero_copy ) result(a)
         integer              , intent(in)    :: fshape(:)

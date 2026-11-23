@@ -54,7 +54,7 @@ type :: polar_table
     ! nrots, nrefs) and their squared-modulus memos (pftsz+1, nkb, nrefs), the real Bessel weights of every
     ! order in wfold (nkb, 1, norder+1, nrho, 1, 1), the phase of each order's shift per rotation in ffold
     ! (1, norder+1, 1, nrots, 1), the band's weights (1, nkb, 1), the compiled selection (mode, loss) and
-    ! reduction (width, evidence) of a tile's maps, the cells' shift components and the prior
+    ! separate reductions (width and optional evidence) of a tile's maps, the cells' shift components and the prior
     ! with the log area (nalpha, 1, nrho); mstage_s the profiled seconds: construction, mode, width, copy-out
     logical                       :: maps_ready  = .false.
     integer                       :: map_nkb     = 0
@@ -64,6 +64,7 @@ type :: polar_table
     real(real64)                  :: map_lse_prior = 0._real64
     real(real64)                  :: mstage_s(4) = 0._real64
     real(real64),     allocatable :: map_rho(:)
+    integer,          allocatable :: map_nharm(:)
     type(mlx_array)               :: rfull
     type(mlx_array)               :: ref2b
     type(mlx_array)               :: wfold
@@ -75,6 +76,7 @@ type :: polar_table
     type(mlx_array)               :: cellprior
     type(mlx_function)            :: map_select
     type(mlx_function)            :: map_reduce
+    type(mlx_function)            :: map_evidence
     integer,          allocatable :: ids(:)
     type(mlx_array)               :: refs
     type(mlx_array)               :: imat
@@ -94,6 +96,7 @@ type :: polar_table
     procedure :: prepare_maps  => polar_table_prepare_maps
     procedure :: score_maps    => polar_table_score_maps
     procedure :: map_order
+    procedure :: map_term_counts
     procedure :: map_seconds
     final     :: polar_table_final
 end type polar_table
@@ -167,6 +170,13 @@ interface
     pure module integer function map_order( self )
         class(polar_table), intent(in) :: self
     end function map_order
+
+    ! Active and padded radius-order counts, for accounting for useful and executed contractions.
+    pure module function map_term_counts( self, mblk ) result(counts)
+        class(polar_table),    intent(in) :: self
+        type(polar_map_block), intent(in) :: mblk
+        integer(int64) :: counts(2)
+    end function map_term_counts
 
     ! the profiled map stages' accumulated seconds (see mstage_s)
     pure module function map_seconds( self ) result(t)

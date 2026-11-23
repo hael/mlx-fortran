@@ -156,6 +156,11 @@ the style of the others and checked where reading can check them.
 - **New here: the generated layer's types are one module** (`mlxf_c_types`) and its interfaces one module
   per header, because mlx-c's headers refer to each other's types in a cycle; a C type the generator's one
   mapping table does not map stops the build, and so does a difference from the independent prototype list.
+- **New here (owner, 2026-11-23): parity with mlx-c is a goal.** SIMPLE's rule that code grows only with a
+  demonstrated need still holds, and for a public library MLX's documented C API is that need: every mlx-c
+  function has one line in `scripts/mlxc_parity.txt` (public, plumbing, internal, excluded with its reason,
+  or pending in a phase of `mlxf_mlxc_parity.md`). Rule `parity` keeps the ledger equal to the headers and to
+  what the library calls, and its pending count is a ratchet. Outside the ledger, no need, no wrapper.
 
 ## 5. Errors
 

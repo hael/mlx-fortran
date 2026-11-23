@@ -65,6 +65,14 @@ Rules:
   findpkg    no `find_package(... REQUIRED ...)` in the CMake files (CMakeLists.txt, cmake/*.cmake): a missing
              dependency is tested by its _FOUND variable and fails with a FATAL_ERROR that says what was
              searched and how to install it (SIMPLE's and XEMA's policy), never with CMake's own message
+  parity     scripts/mlxc_parity.txt, the parity ledger, names every mlx-c function once: the same names as the
+             headers (MLXC_ROOT, .deps/install, Homebrew, or the build's prototype list when no header is
+             found), each with a known class (mlx-c PARITY_MLXC_VERSION is the minimum: headers of an older
+             release fail, a newer release's added or removed names are printed as warnings); a public line's Fortran name is in the public block of mlxf.f90
+             (for T%b, the type T is); a line is public or plumbing exactly when the library (src/core,
+             src/defs, testers aside) calls the function; a pending line names a phase of the parity plan
+             that its Progress has not closed; and the count of pending lines equals PARITY_PENDING (a ratchet:
+             lower it in the same change)
 
 Python 3.7 or newer, standard library only; it runs before the compile.
 """
@@ -112,6 +120,14 @@ HANDLE_GETTERS = ('shape', 'ndim', 'size', 'kind')
 INQUIRY = re.compile(r'(?<![%\w])(size|lbound|ubound|shape|rank|allocated|present|storage_size|is_contiguous|'
                      r'same_type_as|extends_type_of)\s*\(', re.I)
 FIND_PACKAGE = re.compile(r'\bfind_package\s*\(([^)]*)\)', re.I)
+PARITY_LEDGER = 'scripts/mlxc_parity.txt'
+PARITY_PLAN = 'doc/implementation_notes/planned/mlxf_mlxc_parity.md'
+PARITY_CLASSES = ('public', 'plumbing', 'internal', 'excluded', 'pending')
+PARITY_PHASES = range(1, 9)
+# the mlx-c release the ledger lists: the minimum; a newer one's differences are warnings, an older one fails
+PARITY_MLXC_VERSION = '0.8.0'
+# the pending lines of the ledger; may only shrink
+PARITY_PENDING = 339
 
 
 def sources(root):
@@ -894,6 +910,150 @@ def check_findpkg(root, out):
     return out
 
 
+def version_tuple(text):
+    return tuple(int(x) for x in re.findall(r'\d+', text)[:3])
+
+
+def mlxc_version(root, header_dir):
+    """the mlx-c release of a header directory: Homebrew's Cellar path, the package config beside the headers, or
+    the build's record (build/gen/mlxf_build_info.inc); None if none says"""
+    real = os.path.realpath(header_dir) if header_dir else ''
+    m = re.search(r'/mlx-c/(\d+\.\d+\.\d+)/', real + '/')
+    if m:
+        return m.group(1)
+    if header_dir:
+        prefix = os.path.dirname(os.path.dirname(os.path.dirname(real)))
+        for sub in ('share', 'lib'):
+            cdir = os.path.join(prefix, sub, 'cmake')
+            for d in (sorted(os.listdir(cdir)) if os.path.isdir(cdir) else []):
+                for f in (sorted(os.listdir(os.path.join(cdir, d))) if d.upper().startswith('MLXC') else []):
+                    if f.endswith('ConfigVersion.cmake'):
+                        m = re.search(r'PACKAGE_VERSION\s+"([\d.]+)"', read(os.path.join(cdir, d), f))
+                        if m:
+                            return m.group(1)
+    info = os.path.join(root, 'build', 'gen', 'mlxf_build_info.inc')
+    if os.path.isfile(info):
+        m = re.search(r'BUILD_INFO_MLXC\s*=\s*"([\d.]+)"', read(root, 'build/gen/mlxf_build_info.inc'))
+        if m:
+            return m.group(1)
+    return None
+
+
+def mlxc_prototypes(root):
+    """the mlx-c function names of the linked headers, and where they came from; (None, None) if none found"""
+    path = os.path.join(root, 'scripts', 'list_mlxc_prototypes.py')
+    namespace = {'__name__': 'list_mlxc_prototypes'}
+    with open(path, encoding='utf-8') as h:
+        exec(compile(h.read(), path, 'exec'), namespace)
+    cands = []
+    if os.environ.get('MLXC_ROOT'):
+        cands += [os.path.join(os.environ['MLXC_ROOT'], 'include'), os.environ['MLXC_ROOT']]
+    cands += [os.path.join(root, '.deps', 'install', 'include'), '/opt/homebrew/include', '/usr/local/include']
+    for cand in cands:
+        d = namespace['header_dir'](cand) if os.path.isdir(cand) else None
+        if d:
+            names = set()
+            for h in sorted(os.listdir(d)):
+                if h.endswith('.h'):
+                    names |= set(namespace['names_of'](read(d, h)))
+            return names, d
+    listed = os.path.join(root, 'build', 'gen', 'mlxc_prototypes.txt')
+    if os.path.isfile(listed):
+        return set(read(root, 'build/gen/mlxc_prototypes.txt').split()), 'build/gen/mlxc_prototypes.txt'
+    return None, None
+
+
+def mlxc_calls(root, files):
+    """the mlx-c functions the library calls through the generated layer (mlxc_<x>, mlxc_internal_<x>)"""
+    called = set()
+    for rel in files:
+        if not (rel.startswith(CORE) or rel.startswith(DEFS)) or rel.endswith('_tester.f90'):
+            continue
+        for n in re.findall(r'\bmlxc_(\w+)', '\n'.join(code_of(l) for l in read(root, rel).split('\n')), re.I):
+            n = n.lower()
+            called.add('_mlx_' + n[len('internal_'):] if n.startswith('internal_') else 'mlx_' + n)
+    return called
+
+
+def closed_parity_phases(root):
+    """the phases whose Progress entry in the parity plan says complete"""
+    if not os.path.isfile(os.path.join(root, PARITY_PLAN)):
+        return set()
+    text = read(root, PARITY_PLAN)
+    progress = text.split('\n## Progress', 1)[1] if '\n## Progress' in text else ''
+    return {int(m.group(1)) for m in re.finditer(r'^### Phase (\d+)\b[^\n]*\bcomplete\b', progress, re.M | re.I)}
+
+
+def check_parity(root, files, api, out):
+    rel = PARITY_LEDGER
+    if not os.path.isfile(os.path.join(root, rel)):
+        out.append('%s: parity: the ledger is missing' % rel)
+        return
+    entries, pending = {}, 0
+    closed = closed_parity_phases(root)
+    for k, line in enumerate(read(root, rel).split('\n'), 1):
+        if not line.strip() or line.lstrip().startswith('#'):
+            continue
+        f = line.split(None, 2)
+        name, cls, rest = f[0], (f[1] if len(f) > 1 else ''), (f[2].strip() if len(f) > 2 else '')
+        if name in entries:
+            out.append('%s:%d: parity: %s listed twice' % (rel, k, name))
+        if cls not in PARITY_CLASSES:
+            out.append('%s:%d: parity: %s: unknown class %r' % (rel, k, name, cls))
+            continue
+        if cls == 'pending':
+            pending += 1
+            ph = rest.split(None, 1)
+            if not ph or not ph[0].isdigit() or int(ph[0]) not in PARITY_PHASES or len(ph) < 2:
+                out.append('%s:%d: parity: %s: a pending line names a phase (1 to 8) and the planned Fortran name'
+                           % (rel, k, name))
+            elif int(ph[0]) in closed:
+                out.append('%s:%d: parity: %s is pending in Phase %s, which the plan\'s Progress has closed'
+                           % (rel, k, name, ph[0]))
+        elif cls in ('public', 'excluded') and not rest:
+            out.append('%s:%d: parity: %s: a %s line names %s' % (rel, k, name, cls,
+                       'its Fortran name' if cls == 'public' else 'the reason'))
+        elif cls == 'public':
+            fname = rest.split()[0].lower()
+            owner = fname.split('%', 1)[0]
+            if owner not in api:
+                out.append('%s:%d: parity: %s: %s is not a public name of %s' % (rel, k, name, owner, USER_MODULE))
+        entries[name] = (k, cls)
+    protos, source = mlxc_prototypes(root)
+    if protos is None:
+        print('check_rules: parity: no mlx-c headers or prototype list found; the ledger\'s names were not compared')
+    else:
+        found = mlxc_version(root, None if source.endswith('.txt') else source)
+        newer = found is not None and version_tuple(found) > version_tuple(PARITY_MLXC_VERSION)
+        if found is not None and version_tuple(found) < version_tuple(PARITY_MLXC_VERSION):
+            out.append('%s: parity: mlx-c %s at %s is older than %s, the minimum the ledger lists'
+                       % (rel, found, source, PARITY_MLXC_VERSION))
+        else:
+            diffs = ['%s: parity: %s (in %s) has no ledger line' % (rel, n, source)
+                     for n in sorted(protos - set(entries))]
+            diffs += ['%s:%d: parity: %s is not an mlx-c function of %s' % (rel, entries[n][0], n, source)
+                      for n in sorted(set(entries) - protos)]
+            if newer:
+                for d in diffs:
+                    print('check_rules: warning (mlx-c %s, newer than the ledger\'s %s): %s'
+                          % (found, PARITY_MLXC_VERSION, d))
+            else:
+                out.extend(diffs)
+    called = mlxc_calls(root, files)
+    for n, (k, cls) in sorted(entries.items()):
+        if n in called and cls not in ('public', 'plumbing'):
+            out.append('%s:%d: parity: %s is called by the library but classed %s (public or plumbing)'
+                       % (rel, k, n, cls))
+        elif n not in called and cls in ('public', 'plumbing'):
+            out.append('%s:%d: parity: %s is classed %s but the library does not call it' % (rel, k, n, cls))
+    if pending > PARITY_PENDING:
+        out.append('%s: parity: %d pending lines, PARITY_PENDING allows %d (the count may only shrink)'
+                   % (rel, pending, PARITY_PENDING))
+    elif pending < PARITY_PENDING:
+        out.append('%s: parity: %d pending lines, below PARITY_PENDING %d - lower it in scripts/check_rules.py'
+                   % (rel, pending, PARITY_PENDING))
+
+
 def ledger_check(rule, counts, ledger, out):
     for rel, n in sorted(counts.items()):
         if rel not in ledger:
@@ -947,6 +1107,7 @@ def main():
     check_defs(root, files, out)
     check_entry(root, files, api, out)
     check_findpkg(root, out)
+    check_parity(root, files, api, out)
     ledger_check('cbind', cbind, CBIND_LEDGER, out)
     ledger_check('libc', libc, LIBC_LEDGER, out)
     ledger_check('prints', prints, PRINT_LEDGER, out)

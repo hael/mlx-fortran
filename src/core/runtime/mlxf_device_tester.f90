@@ -56,23 +56,39 @@ contains
     end subroutine test_default_device
 
     subroutine test_device_info
-        integer(int64) :: maxbuf, memsize
+        character(len=:), allocatable :: msg, str
+        integer(int64)                :: maxbuf, memsize, n
+        integer                       :: st
         write(*,'(A)') 'test_device_info'
+        ! a device type MLX does not know is refused before it reaches mlx-c (which indexes a table with it):
+        ! a status and a message, and -1 never stands for the failure alone
+        n   = mlx_device_info_size(7, 'memory_size', status=st)
+        msg = mlx_last_error()
+        call assert_true(n == -1_int64 .and. st /= 0 .and. index(msg, 'unknown device type') > 0, &
+            &'device information of an unknown device type returns a status and a message')
+        str = mlx_device_info_string(-1, 'device_name', status=st)
+        call assert_true(len(str) == 0 .and. st /= 0, 'a device string of an unknown device type returns a status')
+        call mlx_set_default_device(7, status=st)
+        call assert_true(st /= 0, 'an unknown device type as the default device returns a status')
         if( mlx_device_count(MLX_DEVICES%gpu) == 0 )then
+            n = mlx_device_info_size(MLX_DEVICES%gpu, 'memory_size', status=st)
+            call assert_true(n == -1_int64 .and. st == 0, 'an absent GPU gives -1 with status 0, not an error')
             write(*,'(A)') '    SKIP: no GPU device'
             return
         endif
         write(*,'(A)') '    GPU: '//mlx_device_info_string(MLX_DEVICES%gpu, 'device_name')//', '//&
             &mlx_device_info_string(MLX_DEVICES%gpu, 'architecture')
         maxbuf  = mlx_device_info_size(MLX_DEVICES%gpu, 'max_buffer_length')
-        memsize = mlx_device_info_size(MLX_DEVICES%gpu, 'memory_size')
+        memsize = mlx_device_info_size(MLX_DEVICES%gpu, 'memory_size', status=st)
         write(*,'(A,I0,A,I0)') '    max_buffer_length ', maxbuf, ', memory_size ', memsize
+        call assert_true(st == 0 .and. memsize > 0_int64, 'a present size key gives its value with status 0')
         call assert_true(len(mlx_device_info_string(MLX_DEVICES%gpu, 'architecture')) > 0, 'the GPU reports its architecture')
         call assert_true(maxbuf > 0_int64 .and. maxbuf <= memsize, &
             &'the GPU reports a maximum buffer length no larger than its memory')
-        call assert_true(mlx_device_info_size(MLX_DEVICES%gpu, 'no_such_key') == -1_int64, 'an absent size key gives -1')
-        call assert_true(len(mlx_device_info_string(MLX_DEVICES%gpu, 'no_such_key')) == 0, &
-            &'an absent string key gives an empty string')
+        n = mlx_device_info_size(MLX_DEVICES%gpu, 'no_such_key', status=st)
+        call assert_true(n == -1_int64 .and. st == 0, 'an absent size key gives -1 with status 0')
+        str = mlx_device_info_string(MLX_DEVICES%gpu, 'no_such_key', status=st)
+        call assert_true(len(str) == 0 .and. st == 0, 'an absent string key gives an empty string with status 0')
     end subroutine test_device_info
 
 end module mlxf_device_tester

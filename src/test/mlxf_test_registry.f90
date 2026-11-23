@@ -18,7 +18,7 @@ use mlxf_linalg_tester,                      only: run_all_linalg_tests
 use mlxf_fft_tester,                         only: run_all_fft_tests
 use mlxf_compile_tester,                     only: run_all_compile_tests
 use mlxf_kernel_polar_table_tester,          only: run_all_polar_table_tests
-use mlxf_kernel_polar_table_shiftmap_tester, only: run_all_polar_shiftmap_tests
+use mlxf_kernel_polar_table_shiftmap_tester, only: run_all_polar_shiftmap_tests, run_all_polar_shiftmap_accuracy_tests
 use mlxf_bench_polar_table,                  only: run_bench_polar_table
 use mlxf_test_utils,                         only: begin_test_suite, end_test_suite
 implicit none
@@ -36,7 +36,7 @@ character(len=*), parameter :: AREAS(7) = [character(len=16) :: 'core', 'array',
 ! the measure-only benchmarks, run by hand (never by CTest): mlxf_test_exec test=bench_<x> suite=<mode>
 character(len=*), parameter :: BENCHES(1) = [character(len=32) :: 'polar_table']
 ! sub-suites an area runs only when suite= names them (too costly for the fast gate)
-character(len=*), parameter :: NAMED_ONLY(1) = [character(len=32) :: 'recovery_half']
+character(len=*), parameter :: NAMED_ONLY(2) = [character(len=32) :: 'recovery_half', 'polar_shiftmap_accuracy']
 
 type :: guard_member
     character(len=32) :: name  = ''
@@ -85,6 +85,7 @@ contains
             case('kernels')
                 call run_suite('polar_table', run_all_polar_table_tests, suite, ran)
                 call run_suite('polar_shiftmap', run_all_polar_shiftmap_tests, suite, ran)
+                call run_suite('polar_shiftmap_accuracy', run_all_polar_shiftmap_accuracy_tests, suite, ran)
             case default
                 found = .false.
                 return

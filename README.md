@@ -86,6 +86,15 @@ build/bin/mlxf_test_exec test=unit_core   # one area: core, array, ops, linalg, 
 Both builds treat warnings as errors in CI (`-DMLXF_WERROR=ON`). Only `mlxf.mod` and the library are
 installed. [`doc/how2s/how2set_up_dev.md`](doc/how2s/how2set_up_dev.md) has the details.
 
+By default (`FORTLS=ON`) a build also installs the Fortran language server fortls (pip, into the build tree)
+and registers its Claude Code plugin for this checkout; offline it only warns. Downstream and offline builds
+can pass `-DFORTLS=OFF`.
+
+The CI on GitHub's macOS runners builds both configurations and runs the source checks, but the runners have
+no Metal device, so the device tests skip there. A release needs `scripts/release_gate.sh` on an Apple-silicon
+Mac with a GPU: Debug and Release from scratch with `MLXF_REQUIRE_GPU=ON`, the fast gate on each, and a
+failure on any skip; its log names the commit, the toolchain, MLX and the device.
+
 ## Layout
 
 | path | what |

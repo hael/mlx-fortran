@@ -60,15 +60,25 @@ contains
         call release(self)
     end subroutine finalize_array
 
-    ! makes a the owner of a new MLX object h (count 1); h with a null ctx is the failure of the call made it
-    module subroutine adopt( a, h, proc )
-        type(mlx_array),  intent(inout) :: a
-        type(mlxc_array), intent(in)    :: h
-        character(len=*), intent(in)    :: proc
-        if( .not. c_associated(h%ctx) ) call mlxf_check(1_c_int, proc)
+    ! makes a the owner of a new MLX object h (count 1); h with a null ctx is the failure of the call made it.
+    ! A failure stops, or with status returns it, a empty and h still the caller's to free (the closure
+    ! trampolines take that path, since they must not stop)
+    module subroutine adopt( a, h, proc, status )
+        type(mlx_array),   intent(inout) :: a
+        type(mlxc_array),  intent(in)    :: h
+        character(len=*),  intent(in)    :: proc
+        integer, optional, intent(out)   :: status
+        integer(int64) :: serial
+        if( present(status) ) status = 0
+        if( .not. c_associated(h%ctx) )then
+            call mlxf_check(1_c_int, proc, status)
+            return
+        endif
         call release(a)
+        serial = registry_add(key_of(h), status)
+        if( serial == 0_int64 ) return
         a%h      = h
-        a%serial = registry_add(key_of(h))
+        a%serial = serial
     end subroutine adopt
 
     ! the MLX handle of a live array: stops on an empty array or a stale copy. A check, not an entry: every

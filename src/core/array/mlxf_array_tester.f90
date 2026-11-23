@@ -456,22 +456,45 @@ contains
 
     ! the failures of the checked procedures return a status and leave the pointer disassociated
     subroutine test_checked_failures
-        real(real32),     target      :: x(3, 5), empty(0)
-        real(real32),     pointer     :: p2(:,:), p1(:)
+        real(real32),     target      :: x(3, 5), empty(0), x8(1, 1, 1, 1, 1, 1, 1, 1)
+        real(real32),     pointer     :: p2(:,:), p1(:), p3(:,:,:), p8(:,:,:,:,:,:,:,:)
         real(real32),     allocatable :: col(:,:), row(:,:), big(:,:)
         character(len=:), allocatable :: msg
         type(mlx_array)               :: a, ca, cb
         integer                       :: st
         write(*,'(A)') 'test_checked_failures'
         x  = 1.0_real32
+        x8 = 1.0_real32
         p2 => x
         a  = mlx_alloc([3, 5], 1.0_real32, p1, status=st)
         call assert_true(st /= 0 .and. .not. associated(p1), &
             &'mlx_alloc with a view whose rank differs from the shape returns a status and no view')
+        ! the byte count at the edge of what a size holds: one side is refused before any allocation, the
+        ! other is representable and fails in the allocator; neither returns a view
+        p3 => null()
+        a  = mlx_alloc([2**30, 2**29, 7], 1.0_real32, p3, status=st)
+        msg = mlx_last_error()
+        call assert_true(st /= 0 .and. .not. associated(p3) .and. index(msg, 'not representable') > 0, &
+            &'mlx_alloc refuses a shape whose size in bytes does not fit before allocating')
+        a  = mlx_alloc([2**30, 2**29, 3], 1.0_real32, p3, status=st)
+        msg = mlx_last_error()
+        call assert_true(st /= 0 .and. .not. associated(p3) .and. index(msg, 'posix_memalign') > 0, &
+            &'mlx_alloc of a representable size no host holds returns the allocator''s failure')
+        a  = mlx_alloc([3, 5, 2], 1.0_real32, p3, status=st)
+        call assert_true(st == 0 .and. associated(p3), 'mlx_alloc of an ordinary shape still succeeds')
+        ! a pointer of a rank above 7, associated before the call, is null after any refusal
+        p8 => x8
+        a  = mlx_alloc([1, 1, 1, 1, 1, 1, 1, 1], 1.0_real32, p8, status=st)
+        call assert_true(st /= 0 .and. .not. associated(p8), &
+            &'mlx_alloc refuses a rank above 7 and disassociates the pointer')
         a = mlx_from(empty)
         call mlx_view(a, p1, status=st)
         call assert_true(st /= 0 .and. .not. associated(p1), 'mlx_view of an array without elements returns a status')
         a = mlx_from(x)
+        p8 => x8
+        call mlx_view(a, p8, status=st)
+        call assert_true(st /= 0 .and. .not. associated(p8), &
+            &'mlx_view with a pointer of a rank above 7 returns a status and disassociates the pointer')
         p1 => x(:, 1)
         call mlx_view(a, p1, status=st)
         call assert_true(st /= 0 .and. .not. associated(p1), &

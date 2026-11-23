@@ -517,10 +517,11 @@ interface
         type(mlx_array), intent(inout) :: self
     end subroutine finalize_array
 
-    module subroutine adopt( a, h, proc )
-        type(mlx_array),  intent(inout) :: a
-        type(mlxc_array), intent(in)    :: h
-        character(len=*), intent(in)    :: proc
+    module subroutine adopt( a, h, proc, status )
+        type(mlx_array),   intent(inout) :: a
+        type(mlxc_array),  intent(in)    :: h
+        character(len=*),  intent(in)    :: proc
+        integer, optional, intent(out)   :: status
     end subroutine adopt
 
     module function mlxf_handle( a, proc ) result(h)

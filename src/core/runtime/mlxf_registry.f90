@@ -4,7 +4,7 @@
 ! the library is called from one thread.
 module mlxf_registry
 use, intrinsic :: iso_fortran_env, only: int64
-use mlxf_error, only: mlxf_fail, mlxf_guard_thread
+use mlxf_error, only: mlxf_report, mlxf_guard_thread
 implicit none
 
 public :: mlx_live_count, registry_add, registry_retain, registry_release, registry_is_live, registry_stale_releases
@@ -36,14 +36,32 @@ contains
         registry_stale_releases = table%nstale
     end function registry_stale_releases
 
-    ! registers a new MLX object with count 1 and returns its serial
-    function registry_add( key ) result(serial)
-        integer(int64), intent(in) :: key
+    ! registers a new MLX object with count 1 and returns its serial. A failure (the object registered already,
+    ! a table that cannot grow) stops, or with status returns serial 0 and leaves the object unregistered: the
+    ! C trampolines of the callbacks take that path, since they must not stop
+    function registry_add( key, status ) result(serial)
+        integer(int64),    intent(in)  :: key
+        integer, optional, intent(out) :: status
         integer(int64) :: serial
         integer        :: slot
-        if( .not. allocated(table%keys) ) call rehash(MIN_CAPACITY)
-        if( 2 * (table%nused + 1) > size(table%keys) ) call rehash(max(MIN_CAPACITY, 4 * table%nlive))
-        if( find(key) > 0 ) call mlxf_fail('registry', 'an MLX object registered twice')
+        serial = 0_int64
+        if( present(status) ) status = 0
+        if( .not. allocated(table%keys) )then
+            if( .not. rehash(MIN_CAPACITY) )then
+                call mlxf_report('registry', 'the handle table could not be allocated', status)
+                return
+            endif
+        endif
+        if( 2 * (table%nused + 1) > size(table%keys) )then
+            if( .not. rehash(max(MIN_CAPACITY, 4 * table%nlive)) )then
+                call mlxf_report('registry', 'the handle table could not grow', status)
+                return
+            endif
+        endif
+        if( find(key) > 0 )then
+            call mlxf_report('registry', 'an MLX object registered twice', status)
+            return
+        endif
         slot = free_slot(key)
         if( table%keys(slot) == EMPTY ) table%nused = table%nused + 1
         table%last_serial  = table%last_serial + 1_int64
@@ -137,18 +155,24 @@ contains
         if( next_slot > size(table%keys) ) next_slot = 1
     end function next_slot
 
-    ! rebuilds the table at a new capacity without its tombstones
-    subroutine rehash( capacity )
+    ! rebuilds the table at a new capacity without its tombstones; false, the table unchanged, when the new
+    ! arrays cannot be allocated
+    logical function rehash( capacity ) result(ok)
         integer, intent(in) :: capacity
-        integer(int64), allocatable :: keys(:), serials(:)
-        integer,        allocatable :: counts(:)
-        integer                     :: i, slot
+        integer(int64), allocatable :: keys(:), serials(:), new_keys(:), new_serials(:)
+        integer,        allocatable :: counts(:), new_counts(:)
+        integer                     :: i, slot, st
+        allocate(new_keys(capacity), new_serials(capacity), new_counts(capacity), stat=st)
+        ok = st == 0
+        if( .not. ok ) return
         if( allocated(table%keys) )then
             call move_alloc(table%keys, keys)
             call move_alloc(table%serials, serials)
             call move_alloc(table%counts, counts)
         endif
-        allocate(table%keys(capacity), table%serials(capacity), table%counts(capacity))
+        call move_alloc(new_keys, table%keys)
+        call move_alloc(new_serials, table%serials)
+        call move_alloc(new_counts, table%counts)
         table%keys    = EMPTY
         table%serials = 0_int64
         table%counts  = 0
@@ -162,6 +186,6 @@ contains
             table%counts(slot)  = counts(i)
             table%nused         = table%nused + 1
         end do
-    end subroutine rehash
+    end function rehash
 
 end module mlxf_registry

@@ -31,6 +31,17 @@ end type polar_form_codes
 
 type(polar_form_codes), parameter :: POLAR_FORMS = polar_form_codes()
 
+! The shift-map contraction experiments; the weighted-particle graph remains the control.
+type :: polar_map_form_codes
+    integer :: weighted_particle = 1
+    integer :: real_weights = 2
+end type polar_map_form_codes
+
+type(polar_map_form_codes), parameter :: POLAR_MAP_FORMS = polar_map_form_codes()
+integer,                    parameter :: POLAR_MAP_PTILES(3) = [4, 16, 64]
+integer,                    parameter :: POLAR_MAP_CTILES(3) = [4, 8, 16]
+integer,                    parameter :: POLAR_MAP_OTILES(3) = [1, 4, 8]
+
 ! the seeds of the polar calibrations and of the runs they judge (the fixture's and the accuracy block's)
 integer, parameter :: POLAR_SEED_CALIBRATION = 1
 integer, parameter :: POLAR_SEED_JUDGED      = 2
@@ -121,6 +132,11 @@ type :: polar_map_block
     integer                      :: half       = 0
     integer(int64)               :: generation = 0_int64
     integer                      :: ptcl_tile  = 16
+    integer                      :: contraction = POLAR_MAP_FORMS%weighted_particle
+    integer                      :: cand_tile = 16
+    integer                      :: order_tile = 4
+    logical                      :: compact_radii = .true.
+    logical                      :: hermitian = .false.
     logical                      :: maps       = .false.
     logical                      :: evidence   = .false.
     logical                      :: profile    = .false.
@@ -131,6 +147,8 @@ type :: polar_map_block
     real(real64),    allocatable :: ptclpow(:)
     real(real32),    allocatable :: temps(:)
     real(real32),    allocatable :: temps_phys(:)
+    ! If present, skip physical moments when the selected loss strictly exceeds this per-pair cutoff.
+    real(real32), allocatable :: width_cutoff(:,:)
 end type polar_map_block
 
 ! per (candidate, particle): the mode's loss, rotation, radius and direction (1-based), the physical width

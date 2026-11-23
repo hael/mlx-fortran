@@ -56,7 +56,8 @@ Skills live in `.claude/skills/` (a symlink to `.github/skills/`, shared with Co
   intrinsic's name (`matmul`, `sum`, `exp`); modules `mlxf_<x>`; the generated layer's entities `mlxc_<x>`.
   Users import `mlxf`.
 - No SIMPLE type, constant or naming enters the library. SIMPLE is the first consumer and decides what is
-  built first; the API stays general and grows only with a demonstrated need.
+  built first; the API stays general and grows only with a demonstrated need. The parity ledger
+  (`scripts/mlxc_parity.txt`, rule `parity`) is that need for the mlx-c functions it lists as pending.
 - The Fortran view is Fortran's: column-major arrays, 1-based dimensions, indices and positions. Translating
   to MLX's row-major, 0-based world is the library's job, never the user's.
 - Every call of mlx-c checks its status; MLX's errors never exit the process from inside C++, and a
