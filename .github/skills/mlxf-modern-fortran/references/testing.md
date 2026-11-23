@@ -20,6 +20,10 @@ admission rules; `doc/architecture_principles.md`, section 7).
   normalisation of FFTs.
 - A negative control where cheap (a transposed input does not compare equal; a freed handle is not live).
 - Every random draw from a fixed seed (`set_fixed_seed`, and MLX's own key for MLX draws).
+- A fixture is the same in every build type: compute its single-precision values in double precision and
+  round once (`real(a + b*x, real32)` with `a`, `b`, `x` real64). Single-precision `a + b*x` is contracted to
+  a fused multiply-add at `-O3` and not at `-O0`, so the fixture, and any bound calibrated on it, would
+  differ between Debug and Release.
 - Not a test: a program that only runs, prints or times. Benchmarks are measure-only entries
   (`test=bench_<x>`), never pass/fail and never in CTest.
 

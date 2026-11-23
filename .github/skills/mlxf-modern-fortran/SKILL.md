@@ -68,8 +68,16 @@ holds is `doc/architecture_principles.md`; `scripts/check_tree.sh` checks what r
   its module stays there. Move it when the second module needs it, not before. The defs module is public by
   default, lists every name it imports in a `private ::` statement, holds no procedures and imports only the
   generated layer. Import a constant from `mlxf_defs`, never through a module that re-exports it (test code
-  imports it through `mlxf`, as users do). A test constant shared by test modules goes to
-  `src/test/mlxf_test_defs.f90`. `check_rules.py`, rule `defs`.
+  imports it through `mlxf`, as users do). A test constant or record shared by test modules goes to
+  `src/test/mlxf_test_defs.f90`. `check_rules.py`, rule `defs` (constants and behaviourless types).
+- **Where a type or constant lives**, in short (the register, section 2, has the reasons):
+  - a class, with type-bound procedures or private components, stays in the module that implements it;
+  - a behaviourless record that another module builds or reads goes to defs;
+  - a constant another module needs, or that two modules declare alike, goes to defs;
+  - a tunable goes to defs even when one module reads it: a tolerance, a calibration constant, a seed, a
+    budget, a sweep grid, a tile plan, a constant mirrored from SIMPLE;
+  - a logic table stays: fixture shapes, poses, candidate lists, stage orders, capacities, formats;
+  - a name no other module imports is private, also in a parent whose submodules use it.
 - `mlxf` is the one re-export module; no library module imports it; test code (kernels, benchmarks,
   testers of the public surface) imports it as a user would.
 - A module contains no entity of its own name, and no entity that differs from an imported name only in

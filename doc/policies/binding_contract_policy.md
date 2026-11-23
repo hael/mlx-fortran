@@ -265,6 +265,15 @@ written, the skill `mlxf-modern-fortran`.
   rank and shape and shifts them inside the graph. It does not check index values for the Fortran
   range: index 0 becomes MLX index -1 and wraps to the last element of the selected dimension.
   Callers needing strict bounds must validate indices before constructing the graph.
+- `mlx_take(a,indices,dim)` gathers whole slices: the indices' Fortran shape takes the place of dimension
+  `dim`, `r(.., i1, .., ik, ..) = a(.., indices(i1, .., ik), ..)`. Its indices are one-based, shifted in
+  the graph and unchecked, as `mlx_take_along_dim`'s (0 wraps to the last slice). Gathering a slab per index
+  is cheaper than `mlx_take_along_dim`, which computes one index per output element.
+- `mlx_bitcast(a,dtype)` reads `a`'s bytes as another dtype and converts no value (MLX's `view`; the name
+  `mlx_view` is the Fortran pointer view of section 4). Where the item sizes differ, the first Fortran
+  dimension scales by their ratio: a float32 `(2n, ...)` array whose pairs along dimension 1 are (real,
+  imaginary) reads as complex64 `(n, ...)`, and back. A contiguous input is reinterpreted in place; MLX
+  copies a strided one first.
 - `sum(a,dim)`, `minval(a,dim)`, `minloc(a,dim)` and `mlx_logsumexp(a,dim)` remove the selected dimension.
   `minloc` returns one-based int32 positions, choosing the first equal minimum. `mlx_logsumexp` uses
   MLX's stable reduction; its test bound is `1e-5 * max(1, abs(logsumexp(x)))`, in log units,

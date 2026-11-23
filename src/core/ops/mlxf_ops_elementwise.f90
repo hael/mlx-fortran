@@ -1,6 +1,7 @@
 !@descr: elementwise operations through the array signature helpers
 submodule(mlxf_ops) mlxf_ops_elementwise
-use mlxf_c_ops,  only: mlxc_add, mlxc_astype, mlxc_conjugate, mlxc_imag, mlxc_maximum, mlxc_real, mlxc_sqrt, mlxc_where
+use mlxf_c_ops,  only: mlxc_add, mlxc_astype, mlxc_conjugate, mlxc_imag, mlxc_maximum, mlxc_real, mlxc_sqrt, mlxc_view, &
+                       mlxc_where
 use mlxf_defs,   only: MLX_DTYPES
 use mlxf_array,  only: mlx_from, mlxf_binary, mlxf_int_op, mlxf_ternary_op, mlxf_unary, mlxf_weak_scalar
 use mlxf_device, only: mlxf_enter
@@ -48,6 +49,16 @@ contains
         type(mlx_array) :: r
         call mlxf_int_op(r, mlxc_astype, a, dtype, 'mlx_astype')
     end function mlx_astype
+
+    ! a's bytes read as dtype, one of MLX_DTYPES (MLX's view; mlx_view is the Fortran pointer view): no value
+    ! is converted. Where the item sizes differ, the first Fortran dimension scales by their ratio, so a float32
+    ! (2 n, ...) array whose pairs along dimension 1 are (real, imaginary) reads as complex64 (n, ...)
+    module function mlx_bitcast( a, dtype ) result(r)
+        type(mlx_array), intent(in) :: a
+        integer,         intent(in) :: dtype
+        type(mlx_array) :: r
+        call mlxf_int_op(r, mlxc_view, a, dtype, 'mlx_bitcast')
+    end function mlx_bitcast
 
     ! Fortran's max(a, b) elementwise; a scalar operand is weak and takes the array's kind
     module function max_array( a, b ) result(r)

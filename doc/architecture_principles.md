@@ -81,8 +81,28 @@ is imported is how Fortran is written, built, tested, checked, documented and ha
   library: every name a defs module imports (the `MLXC_*` codes its vocabularies are built from) is listed in
   a `private ::` statement, so that its `.mod` re-exports nothing. Defs modules hold no procedures and import
   only the generated layer. **Adopt (XEMA): import a name from its declaring module** (`mlxf` re-exports the
-  vocabularies from `mlxf_defs`). Checked: `check_rules.py`, rule `defs`, with an exceptions table for a
-  constant argued to stay with its owner (empty).
+  vocabularies from `mlxf_defs`). Checked: `check_rules.py`, rule `defs`, for constants and, since the review
+  of run `mlxf_m1` (owner, 2026-11-22), for types, with an exceptions table for a name argued to stay with its
+  owner (empty).
+- **Where a type or a constant lives** (owner's review of run `mlxf_m1`, 2026-11-22, from XEMA's AGENTS.md
+  "Refactoring and module housekeeping" and SIMPLE's `simple-modern-fortran` skill):
+  - *A class stays with its behaviour* (both): a type with type-bound procedures or private components is
+    declared in the module that implements it, named after it where the module is its own (SIMPLE), and so
+    is a type shaped like a module's private state (XEMA). Never turn a class into a public record passed to
+    free procedures (SIMPLE).
+  - *A behaviourless record that crosses a module boundary goes to defs* (XEMA): inputs, results and specs
+    that a class takes or returns, when another module builds or reads them. Checked.
+  - *A constant another module needs goes to defs* (both), and so does one that two modules declare alike:
+    a duplicate is an export written twice. Checked for imports; duplicates are a review item.
+  - *Tunables go to defs even when one module reads them* (SIMPLE, `simple_defs_<domain>`): a number a
+    maintainer is expected to tune or a plan freezes (a tolerance, a calibration constant, a seed, a memory
+    budget, a sweep grid, a tile plan, a constant mirrored from SIMPLE's production code). XEMA's "local =
+    stay" governs everything else: a module keeps its logic tables (fixture shapes, poses and candidate lists
+    of a test fixture, stage orders, capacities, formats) and procedure-local values. A review item.
+  - *Two exceptions stay with their owner* (XEMA's (a) and (b)): constants of the module's own type, and a
+    module's closed identity vocabulary or algorithm constants.
+  - *Public only when imported*: a name no other module uses is private, also in a parent module whose
+    submodules use it (host association reaches private names).
 
 ## 3. Writing Fortran
 

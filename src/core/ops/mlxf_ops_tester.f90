@@ -5,7 +5,7 @@ use, intrinsic :: iso_c_binding, only: c_bool
 use mlxf,            only: mlx_array, mlx_from, mlx_to, mlx_set_default_device, mlx_default_device, MLX_DEVICES, &
                            MLX_DTYPES, exp, sqrt, real, aimag, conjg, cmplx, merge, max, reshape, transpose, sum, &
                            minval, minloc, mlx_astype, mlx_permute, mlx_slice, mlx_concatenate, mlx_take_along_dim, &
-                           mlx_logsumexp, mlx_cumsum, mlx_zeros, mlx_arange
+                           mlx_logsumexp, mlx_cumsum, mlx_zeros, mlx_arange, mlx_take, mlx_bitcast
 use mlxf_test_utils, only: assert_true, assert_int, bits_equal, test_devices, device_name
 implicit none
 private
@@ -27,6 +27,7 @@ contains
             call test_reductions
             call test_long_minloc
             call test_real_conversion_and_precision
+            call test_take_and_bitcast
         end do
         call mlx_set_default_device(original)
     end subroutine run_all_ops_tests
@@ -463,5 +464,55 @@ contains
         call assert_int(MLX_DTYPES%float32, kind, 'real(real64 array) returns default real')
         if( kind == MLX_DTYPES%float32 ) call check_exact(r, real(x, real32), 'real real64 rounding follows Fortran')
     end subroutine test_real_conversion_and_precision
+
+    ! mlx_take gathers whole slices at 1-based indices and puts the indices' shape in place of the dimension;
+    ! mlx_bitcast reads the bytes as another dtype, scaling the first Fortran dimension by the item sizes
+    subroutine test_take_and_bitcast
+        type(mlx_array)    :: a, r, idx
+        real(real32)       :: x(3, 4, 2), y(3, 2, 2, 2), got(3, 2, 2, 2), z(4, 3), w(6)
+        complex(real32)    :: zc(2, 3), zg(3)
+        integer(int32)     :: ind(2, 2), bits(4), back(4)
+        integer            :: i, j, k, l
+        write(*,'(a)') 'test_take_and_bitcast'
+        x = reshape([(real(i, real32)/4, i=1, 24)], shape(x))
+        a = mlx_from(x)
+        ind = reshape([4, 1, 2, 4], [2, 2])
+        idx = mlx_from(ind)
+        r = mlx_take(a, idx, 2)
+        call assert_true(all(r%shape() == [3, 2, 2, 2]), 'take puts the indices'' shape in place of the dimension')
+        do k = 1, 2
+            do l = 1, 2
+                do j = 1, 2
+                    y(:, j, l, k) = x(:, ind(j, l), k)
+                end do
+            end do
+        end do
+        call mlx_to(got, r)
+        call assert_true(all(bits_equal(reshape(got, [24]), reshape(y, [24]))), 'take gathers whole slices at '//&
+            &'one-based indices')
+        idx = mlx_from([0_int32])
+        r = mlx_take(mlx_from(reshape(x(:, :, 1), [3, 4])), idx, 2)
+        call mlx_to(z(1:3, 1), r)
+        call assert_true(all(bits_equal(z(1:3, 1), x(:, 4, 1))), 'take index zero wraps to the last slice')
+        ! six float32 as three complex64: the pairs along dimension 1 are (real, imaginary)
+        w  = [1.5_real32, -2._real32, 3._real32, 0.25_real32, -7._real32, 8._real32]
+        r  = mlx_bitcast(mlx_from(reshape(w, [2, 3])), MLX_DTYPES%complex64)
+        call assert_true(all(r%shape() == [1, 3]), 'bitcast to complex64 halves the first dimension')
+        call assert_int(MLX_DTYPES%complex64, r%kind(), 'bitcast gives the requested dtype')
+        call mlx_to(zg, r)
+        call assert_true(all(bits_equal(transfer(zg, [0._real32], 6), w)), 'bitcast reads the pairs along '//&
+            &'dimension 1 as (real, imaginary)')
+        zc = reshape([(cmplx(real(i, real32), -real(i, real32), real32), i=1, 6)], shape(zc))
+        r  = mlx_bitcast(mlx_from(zc), MLX_DTYPES%float32)
+        call assert_true(all(r%shape() == [4, 3]), 'bitcast to float32 doubles the first dimension')
+        call mlx_to(z, r)
+        call assert_true(all(bits_equal(reshape(z, [12]), reshape(transfer(zc, [0._real32], 12), [12]))), &
+            &'bitcast to float32 keeps every byte')
+        bits = [1065353216_int32, -1073741824_int32, 0_int32, 2139095040_int32]
+        r = mlx_bitcast(mlx_from(bits), MLX_DTYPES%float32)
+        r = mlx_bitcast(r, MLX_DTYPES%int32)
+        call mlx_to(back, r)
+        call assert_true(all(back == bits), 'bitcast int32 to float32 and back keeps every bit')
+    end subroutine test_take_and_bitcast
 end module mlxf_ops_tester
 

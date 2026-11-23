@@ -12,9 +12,9 @@ use mlxf_memory,   only: mlx_active_memory, mlx_peak_memory, mlx_reset_peak_memo
                          mlx_set_memory_limit, mlx_set_cache_limit
 use mlxf_array,    only: mlx_array, mlx_from, mlx_to, mlx_to_alloc, mlx_view, mlx_alloc, mlx_eval, mlx_async_eval, &
                          mlx_synchronize, mlx_is_live, exp
-use mlxf_ops,      only: real, aimag, conjg, sqrt, mlx_astype, max, merge, cmplx, reshape, mlx_permute, transpose, &
-                         mlx_concatenate, mlx_slice, mlx_take_along_dim, sum, minval, mlx_logsumexp, mlx_cumsum, &
-                         minloc, mlx_zeros, mlx_arange
+use mlxf_ops,      only: real, aimag, conjg, sqrt, mlx_astype, mlx_bitcast, max, merge, cmplx, reshape, mlx_permute, &
+                         transpose, mlx_concatenate, mlx_slice, mlx_take_along_dim, mlx_take, sum, minval, &
+                         mlx_logsumexp, mlx_cumsum, minloc, mlx_zeros, mlx_arange
 use mlxf_linalg,   only: matmul
 use mlxf_fft,      only: mlx_fft, mlx_ifft, mlx_rfft, mlx_irfft, mlx_fft2, mlx_ifft2
 use mlxf_compile,  only: mlx_function, mlx_compile
@@ -33,6 +33,7 @@ public :: real, &
     &conjg, &
     &sqrt, &
     &mlx_astype, &
+    &mlx_bitcast, &
     &max, &
     &merge, &
     &cmplx, &
@@ -42,6 +43,7 @@ public :: real, &
     &mlx_concatenate, &
     &mlx_slice, &
     &mlx_take_along_dim, &
+    &mlx_take, &
     &sum, &
     &minval, &
     &mlx_logsumexp, &

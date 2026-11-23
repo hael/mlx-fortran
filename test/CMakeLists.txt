@@ -52,7 +52,12 @@ endfunction()
 # ops, linalg and fft isolate the operation families and run independent CPU/GPU oracles.
 # compile isolates callback tracing, checked callback failures and shapeless reuse on both devices.
 # Cold CPU/GPU JIT compilation can put it above 0.5 s; cached invocations are much shorter.
-set(MLXF_TEST_AREAS core array ops linalg fft compile)
+# kernels: test-only models of SIMPLE's pipelines (the polar table's scoring
+#   workspace and its shift maps) on seeded or analytic fixtures against double-precision oracles, on both
+#   devices; its own process keeps the workspace's lifecycle checks (live count and active memory back to warm
+#   values) apart from other areas. Above 0.5 s in Release: the oracles' direct sums over every rotation and
+#   cell, and the GPU's first compilation of its kernels.
+set(MLXF_TEST_AREAS core array ops linalg fft compile kernels)
 foreach(_area IN LISTS MLXF_TEST_AREAS)
     mlxf_add_test(unit_${_area} fast 600 COMMAND $<TARGET_FILE:mlxf_test_exec> test=unit_${_area})
 endforeach()
@@ -65,7 +70,7 @@ endforeach()
 mlxf_add_test(object_contracts fast 600 COMMAND $<TARGET_FILE:mlxf_test_exec> expect_aborts object_contracts)
 
 # ---- the budget ----------------------------------------------------------------------------------
-set(MLXF_CTEST_BUDGET 7)
+set(MLXF_CTEST_BUDGET 8)
 get_property(_mlxf_tests DIRECTORY PROPERTY TESTS)
 list(LENGTH _mlxf_tests _mlxf_ntests)
 if(NOT _mlxf_ntests EQUAL MLXF_CTEST_BUDGET)

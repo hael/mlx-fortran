@@ -4,7 +4,7 @@
 ! hard-error status; expect_abort <member> does the same for one member.
 program mlxf_test_exec
 use mlxf,               only: MLXF_HARD_ERROR_STATUS, MLX_DEVICES, mlx_device_count
-use mlxf_test_registry, only: run_area, list_areas, run_guard, guard_members
+use mlxf_test_registry, only: run_area, list_areas, run_guard, guard_members, run_bench
 use mlxf_test_utils,    only: report_summary
 implicit none
 character(len=256) :: arg, test, suite, guard
@@ -25,15 +25,20 @@ if( command_argument_count() == 2 )then
         stop
     endif
 endif
+! the test first: a benchmark reads its own key=value arguments, in any order
+do i = 1, command_argument_count()
+    call get_command_argument(i, arg)
+    if( index(arg, 'test=') == 1 ) test = arg(6:)
+end do
 do i = 1, command_argument_count()
     call get_command_argument(i, arg)
     if( index(arg, 'test=') == 1 )then
-        test = arg(6:)
+        cycle
     else if( index(arg, 'suite=') == 1 )then
         suite = arg(7:)
     else if( index(arg, 'guard=') == 1 )then
         guard = arg(7:)
-    else if( index(arg, 'device=') /= 1 )then
+    else if( index(arg, 'device=') /= 1 .and. index(test, 'bench_') /= 1 )then
         write(*,'(A)') 'mlxf_test_exec: unknown argument '//trim(arg)
         call list_areas
         error stop 2
@@ -50,6 +55,17 @@ if( len_trim(guard) > 0 )then
 endif
 if( len_trim(test) == 0 .or. trim(test) == 'list' )then
     call list_areas
+    stop
+endif
+if( index(test, 'bench_') == 1 )then
+    call run_bench(test(7:), suite, found)
+    if( .not. found )then
+        write(*,'(A)') 'mlxf_test_exec: no benchmark '//trim(test)//' with mode "'//trim(suite)//'"'
+        call list_areas
+        error stop 2
+    endif
+    call report_summary(failed)
+    if( failed ) error stop 1
     stop
 endif
 if( index(test, 'unit_') /= 1 )then

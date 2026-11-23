@@ -8,6 +8,7 @@ public :: real, &
     &conjg, &
     &sqrt, &
     &mlx_astype, &
+    &mlx_bitcast, &
     &max, &
     &merge, &
     &cmplx, &
@@ -17,6 +18,7 @@ public :: real, &
     &mlx_concatenate, &
     &mlx_slice, &
     &mlx_take_along_dim, &
+    &mlx_take, &
     &sum, &
     &minval, &
     &mlx_logsumexp, &
@@ -95,6 +97,11 @@ interface
         integer,         intent(in) :: dtype
         type(mlx_array) :: r
     end function mlx_astype
+    module function mlx_bitcast( a, dtype ) result(r)
+        type(mlx_array), intent(in) :: a
+        integer,         intent(in) :: dtype
+        type(mlx_array) :: r
+    end function mlx_bitcast
     module function max_array( a, b ) result(r)
         type(mlx_array), intent(in) :: a, b
         type(mlx_array) :: r
@@ -157,6 +164,11 @@ interface
         integer,         intent(in) :: dim
         type(mlx_array) :: r
     end function mlx_take_along_dim
+    module function mlx_take( a, indices, dim ) result(r)
+        type(mlx_array), intent(in) :: a, indices
+        integer,         intent(in) :: dim
+        type(mlx_array) :: r
+    end function mlx_take
     module function sum_array( a, dim ) result(r)
         type(mlx_array), intent(in) :: a
         integer,         intent(in) :: dim

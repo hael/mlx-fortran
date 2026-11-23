@@ -15,7 +15,7 @@ One test executable, `mlxf_test_exec`, built by every compile script unless it i
 | label | entries | when | what |
 | --- | --- | --- | --- |
 | `fast` | one `unit_<area>` per area, and the guard groups | every compile script, between build and install | unit tests: hermetic, in-process (guard groups: one child per member), one thread, seconds |
-| none | `bench_<x>` | by hand | measure-only benchmarks; never pass/fail, never registered with CTest |
+| none | `bench_<x>` | by hand | benchmarks: measure-only modes, and accuracy modes that hold frozen gates too large for the fast gate; never registered with CTest |
 
 **The fast gate is part of the build.** `scripts/run_fast_gate.sh` runs between `make` and
 `make install`: first the static gate `scripts/check_tree.sh` (`check_descr.py`, `check_rules.py`,
@@ -29,13 +29,35 @@ One test executable, `mlxf_test_exec`, built by every compile script unless it i
 `MLXF_CTEST_BUDGET` in `test/CMakeLists.txt` must equal the registered count or configuration fails; it
 changes only with an owner decision or a plan that names the new entry, recorded in `doc/history/`.
 
-The current process budget is **7**: areas `core`, `array`, `ops`, `linalg`, `fft`, `compile`, plus
+The current process budget is **8**: areas `core`, `array`, `ops`, `linalg`, `fft`, `compile`, `kernels`, plus
 the `object_contracts` guard group (ten members, including invalid FFT normalizations). The compile suite also
 checks empty local handles in a two-thread OpenMP region; no live MLX work is submitted there. The operation areas compare both devices with independent Fortran
 references; `array` also runs 10,000 evaluated iterations per new operation family and checks exact
 active memory, live handles and stale releases. The compile area checks byte identity for exactly
 representable compiled/uncompiled arithmetic on each device, shapeless trace reuse and callback error
 recovery; the array area also runs 10,000 compiled calls and verifies complete closure teardown.
+The kernels area holds test-only models of SIMPLE's pipelines written against `mlxf` as a user writes
+(`src/test/mlxf_kernel_<x>.f90`); its sub-suite `polar_table` checks the polar table's scoring workspace
+on a seeded fixture against a double-precision ring oracle, on both devices, with row bounds calibrated
+on the CPU device and frozen in `src/test/mlxf_test_defs.f90` before the first GPU run; the draw on the
+device's own rows, refusals of mismatched blocks, schedule identity and the workspace's lifecycle. Its
+sub-suite `polar_shiftmap` checks the workspace's shift maps on analytic fixtures against a direct
+double-precision residual at every cell, with caps confirmed on the CPU device and frozen there before the
+first GPU run: the maps, the mode where its margin is clear, the zero radius, the folding of orders beyond the
+directions, the Nyquist ring, the width and the log evidence against the host's moments, candidate order and
+tiles, refusals and rebuilds, and 100 prepare-score-invalidate cycles.
+Constants several test modules share live in `src/test/mlxf_test_defs.f90`, a defs module (rule `defs`).
+
+**Benchmarks** are `mlxf_test_exec test=bench_<x> suite=<mode> [key=value ...]`, listed in the registry's
+`BENCHES` table and reached through `run_bench` (`check_test_registry.py` holds the two to each other). They
+run by hand, never in CTest, and append rows to `./bench_<x>*.tsv` in the working directory. A mode that
+measures asserts nothing. A mode that judges, such as `bench_polar_table suite=accuracy` (the polar table's
+64,000-pair block against its DFT-matrix oracle, at SIMPLE's sizes), uses the assertions of `mlxf_test_utils`
+and fails the process like a test. Its bounds are calibrated on the CPU device and frozen in
+`src/test/mlxf_test_defs.f90` before its first GPU run. `bench_polar_table suite=shiftmap` measures the shift
+maps on SIMPLE's grid (read from a key = value file of SIMPLE's rows) with SIMPLE's column names. Timed runs
+follow the plan's rules: Release, an idle machine with the load recorded, best of 3 after a warm-up, two
+invocations, and the precision mode in every row.
 
 ## 2. What a test is
 

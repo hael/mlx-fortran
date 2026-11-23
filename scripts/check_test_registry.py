@@ -10,7 +10,8 @@ Three lists must agree, or a tester never runs and nothing reports it:
     suite= names them) is the name of a row.
 And the guard groups agree: every `expect_aborts <group>` entry of test/CMakeLists.txt names a group of the
 registry's GUARDS table, every group of the table has such an entry, and every member of the table has its
-case() branch in run_guard (and no branch lacks a member).
+case() branch in run_guard (and no branch lacks a member). And the benchmarks agree: every name of the registry's
+BENCHES table has its case() branch in run_bench, and no branch lacks a name.
 usage: scripts/check_test_registry.py [ROOT] [--verbose]
 exit status: 0 consistent, 1 a mismatch
 """
@@ -21,6 +22,7 @@ import sys
 
 CMAKE_AREAS_RE = re.compile(r"set\(\s*MLXF_TEST_AREAS\s+([^)]*)\)", re.IGNORECASE)
 NAMED_RE = re.compile(r"NAMED_ONLY\s*\(\s*\d+\s*\)\s*=\s*\[[^\]]*::([^\]]*)\]", re.IGNORECASE | re.DOTALL)
+BENCH_RE = re.compile(r"BENCHES\s*\(\s*\d+\s*\)\s*=\s*\[[^\]]*::([^\]]*)\]", re.IGNORECASE | re.DOTALL)
 TABLE_RE = re.compile(r"AREAS\s*\(\s*\d+\s*\)\s*=\s*\[[^\]]*::([^\]]*)\]", re.IGNORECASE | re.DOTALL)
 CASE_RE = re.compile(r"^\s*case\s*\(\s*'(\w+)'\s*\)", re.IGNORECASE)
 ROW_RE = re.compile(r"call\s+run_suite\s*\(\s*'([^']+)'\s*,\s*(\w+)", re.IGNORECASE)
@@ -51,7 +53,7 @@ def main():
     reg = code(reg_path)
     m = TABLE_RE.search("".join(reg))
     table_areas = re.findall(r"'(\w+)'", m.group(1)) if m else []
-    case_areas, rows, area, guard_cases, proc = [], [], None, [], None
+    case_areas, rows, area, guard_cases, proc, bench_cases = [], [], None, [], None, []
     for line in reg:
         p = re.match(r"^\s*(?:end\s+)?subroutine\s+(\w+)", line, re.IGNORECASE)
         if p:
@@ -62,6 +64,8 @@ def main():
             case_areas.append(area)
         elif c and proc == "run_guard":
             guard_cases.append(c.group(1))
+        elif c and proc == "run_bench":
+            bench_cases.append(c.group(1))
         for name, entry in ROW_RE.findall(line):
             rows.append((area, name, entry.lower()))
     guards = GUARD_RE.findall("".join(reg))
@@ -73,6 +77,14 @@ def main():
     if sorted(n for n, _ in guards) != sorted(guard_cases):
         problems.append("guard members differ: registry GUARDS %s, run_guard case() %s" %
                         (sorted(n for n, _ in guards), sorted(guard_cases)))
+
+    mb = BENCH_RE.search("".join(reg))
+    if mb is None and re.search(r"\bBENCHES\s*\(", "".join(reg), re.IGNORECASE):
+        problems.append("BENCHES table not read: write it as BENCHES(n) = [character(len=32) :: '...', ...]")
+    benches = re.findall(r"'(\w+)'", mb.group(1)) if mb else []
+    if sorted(benches) != sorted(bench_cases):
+        problems.append("benchmarks differ: registry BENCHES %s, run_bench case() %s" % (sorted(benches),
+                                                                                       sorted(bench_cases)))
 
     if cmake_areas != table_areas:
         problems.append("areas differ: test/CMakeLists.txt %s, registry AREAS %s" % (cmake_areas, table_areas))

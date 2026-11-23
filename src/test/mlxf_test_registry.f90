@@ -4,31 +4,37 @@
 ! A guard member is a stop the library makes by contract: it runs in a child process (mlxf_test_exec
 ! expect_aborts <group>) and its last reachable statement is the guarded call.
 module mlxf_test_registry
-use, intrinsic :: iso_fortran_env, only: real32, real64
-use mlxf,                 only: mlx_array, mlx_from, mlx_eval, mlx_live_count, mlx_last_error, mlx_set_default_device, &
-                                MLX_DEVICES, exp, mlx_fft, mlx_fft2
-use mlxf_array_tester,    only: run_all_array_tests
-use mlxf_device_tester,   only: run_all_device_tests
-use mlxf_error_tester,    only: run_all_error_tests, run_all_recovery_half_tests
-use mlxf_memory_tester,   only: run_all_memory_tests
-use mlxf_registry_tester, only: run_all_registry_tests
-use mlxf_version_tester,  only: run_all_version_tests
-use mlxf_ops_tester,      only: run_all_ops_tests
-use mlxf_linalg_tester,   only: run_all_linalg_tests
-use mlxf_fft_tester,      only: run_all_fft_tests
-use mlxf_compile_tester,  only: run_all_compile_tests
-use mlxf_test_utils,      only: begin_test_suite, end_test_suite
+use, intrinsic :: iso_fortran_env,           only: real32, real64
+use mlxf,                                    only: mlx_array, mlx_from, mlx_eval, mlx_live_count, mlx_last_error, &
+                                                   mlx_set_default_device, MLX_DEVICES, exp, mlx_fft, mlx_fft2
+use mlxf_array_tester,                       only: run_all_array_tests
+use mlxf_device_tester,                      only: run_all_device_tests
+use mlxf_error_tester,                       only: run_all_error_tests, run_all_recovery_half_tests
+use mlxf_memory_tester,                      only: run_all_memory_tests
+use mlxf_registry_tester,                    only: run_all_registry_tests
+use mlxf_version_tester,                     only: run_all_version_tests
+use mlxf_ops_tester,                         only: run_all_ops_tests
+use mlxf_linalg_tester,                      only: run_all_linalg_tests
+use mlxf_fft_tester,                         only: run_all_fft_tests
+use mlxf_compile_tester,                     only: run_all_compile_tests
+use mlxf_kernel_polar_table_tester,          only: run_all_polar_table_tests
+use mlxf_kernel_polar_table_shiftmap_tester, only: run_all_polar_shiftmap_tests
+use mlxf_bench_polar_table,                  only: run_bench_polar_table
+use mlxf_test_utils,                         only: begin_test_suite, end_test_suite
 implicit none
 private
 
-public :: run_area, list_areas, run_guard, guard_members
+public :: run_area, list_areas, run_guard, guard_members, run_bench
 
 abstract interface
     subroutine tester_entry()
     end subroutine tester_entry
 end interface
 
-character(len=*), parameter :: AREAS(6) = [character(len=16) :: 'core', 'array', 'ops', 'linalg', 'fft', 'compile']
+character(len=*), parameter :: AREAS(7) = [character(len=16) :: 'core', 'array', 'ops', 'linalg', 'fft', 'compile', &
+    &'kernels']
+! the measure-only benchmarks, run by hand (never by CTest): mlxf_test_exec test=bench_<x> suite=<mode>
+character(len=*), parameter :: BENCHES(1) = [character(len=32) :: 'polar_table']
 ! sub-suites an area runs only when suite= names them (too costly for the fast gate)
 character(len=*), parameter :: NAMED_ONLY(1) = [character(len=32) :: 'recovery_half']
 
@@ -76,6 +82,9 @@ contains
                 call run_suite('fft', run_all_fft_tests, suite, ran)
             case('compile')
                 call run_suite('compile', run_all_compile_tests, suite, ran)
+            case('kernels')
+                call run_suite('polar_table', run_all_polar_table_tests, suite, ran)
+                call run_suite('polar_shiftmap', run_all_polar_shiftmap_tests, suite, ran)
             case default
                 found = .false.
                 return
@@ -93,11 +102,26 @@ contains
         do i = 1, size(GUARDS)
             write(*,'(A)') '    '//trim(GUARDS(i)%group)//': '//trim(GUARDS(i)%name)
         end do
+        write(*,'(A)') 'benchmarks, by hand: mlxf_test_exec test=bench_<x> suite=<mode> [key=value ...]:'
+        do i = 1, size(BENCHES)
+            write(*,'(A)') '    bench_'//trim(BENCHES(i))
+        end do
         write(*,'(A)') 'sub-suites run only when named (suite=<name>):'
         do i = 1, size(NAMED_ONLY)
             write(*,'(A)') '    '//trim(NAMED_ONLY(i))
         end do
     end subroutine list_areas
+
+    ! runs one mode of a benchmark (found: the benchmark and the mode exist)
+    subroutine run_bench( name, mode, found )
+        character(len=*), intent(in)  :: name, mode
+        logical,          intent(out) :: found
+        found = .false.
+        select case( trim(name) )
+            case('polar_table')
+                call run_bench_polar_table(mode, found)
+        end select
+    end subroutine run_bench
 
     subroutine run_suite( name, entry, only, ran )
         character(len=*), intent(in)    :: name, only

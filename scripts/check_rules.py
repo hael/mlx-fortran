@@ -53,8 +53,11 @@ Rules:
              initialisation run on every path, empty inputs included. The lifetime bindings (ENTRY_IF_LIVE) may
              open with the guard conditional on a live handle instead. ENTRY_EXEMPT names the exceptions
   defs       exported = defs, local = stay (SIMPLE's and XEMA's rule): a named constant (a parameter, a
-             vocabulary constant included) that another module imports is declared in src/defs, unless
-             DEFS_EXCEPTIONS claims it with a reason; one used only inside its module stays there. A defs
+             vocabulary constant included) or a behaviourless derived type (no type-bound procedure, no
+             private component) that another module imports is declared in src/defs, unless DEFS_EXCEPTIONS
+             claims it with a reason; one used only inside its module stays there; a class (type-bound
+             procedures or private components) stays with its module. Test code shares its constants and
+             records through src/test/mlxf_test_defs.f90, a defs module of the same form. A defs
              module holds constants and behaviourless types only (no contains), imports only the generated
              layer and the intrinsic modules, writes no public statement or
              attribute and no bare private (public by default, as XEMA's defs modules), and lists every name
@@ -73,6 +76,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TOPS = ('src', 'test')
 CORE = 'src/core/'
 DEFS = 'src/defs/'
+# the defs module of test code: the constants several test modules share, under the same form
+TEST_DEFS = 'src/test/mlxf_test_defs.f90'
 
 CBIND_LEDGER = {}
 LIBC_LEDGER = {}
@@ -668,6 +673,41 @@ def module_constants(lines):
     return found
 
 
+def module_records(lines):
+    """the behaviourless derived types of a module's specification part, lower case: no type-bound procedure
+    and no private component. A type with either is a class and stays with its behaviour"""
+    found, name, body, depth = set(), None, [], 0
+    for s in statements(lines):
+        low = s.lower()
+        if re.match(r'^contains\b', low) and name is None and depth == 0:
+            break
+        if re.match(r'^(abstract\s+)?interface\b', low):
+            depth += 1
+            continue
+        if re.match(r'^end\s*interface\b', low):
+            depth -= 1
+            continue
+        if depth:
+            continue
+        m = re.match(r'^type\s*(?:,\s*([^:]*))?::\s*(\w+)\s*$|^type\s+(\w+)\s*$', low)
+        if name is None and m and not re.match(r'^type\s*\(', low):
+            attrs = m.group(1) or ''
+            name, body = (m.group(2) or m.group(3)), []
+            if 'abstract' in attrs or re.search(r'\bbind\s*\(\s*c\b', attrs):
+                name = '-'           # an abstract or interoperable type is no record of this rule
+            continue
+        if name is not None and re.match(r'^end\s*type\b', low):
+            if name != '-' and not any(re.match(r'^contains\b', b) or re.match(r'^private\b', b) or
+                                       ('::' in b and re.search(r'\bprivate\b', b.split('::', 1)[0]))
+                                       for b in body):
+                found.add(name)
+            name = None
+            continue
+        if name is not None:
+            body.append(low)
+    return found
+
+
 def use_imports(lines):
     """(line, module, imported names) of every use statement with an only: list; a rename yields its target"""
     out = []
@@ -680,16 +720,22 @@ def use_imports(lines):
     return out
 
 
+def is_defs(rel):
+    """a defs module: src/defs, or the one defs module of test code"""
+    return rel.startswith(DEFS) or rel == TEST_DEFS
+
+
 def check_defs(root, files, out):
     """exported = defs, local = stay; and the form of a defs module"""
-    owners = {}
+    owners, records = {}, {}
     for rel in files:
-        if rel.startswith(DEFS):
+        if is_defs(rel):
             continue
         lines = read(root, rel).split('\n')
         mod = module_of(lines)
         if mod:
             owners[mod] = module_constants(lines)
+            records[mod] = module_records(lines)
     for rel in files:
         lines = read(root, rel).split('\n')
         me = module_of(lines)
@@ -699,8 +745,12 @@ def check_defs(root, files, out):
             for n in names:
                 if n in owners[mod] and (mod, n) not in DEFS_EXCEPTIONS:
                     out.append('%s:%d: defs: %s is a constant of %s that another module imports; declare it in '
-                               'src/defs (exported = defs, local = stay)' % (rel, start, n.upper(), mod))
-        if not rel.startswith(DEFS):
+                               'src/defs, or for test code in %s (exported = defs, local = stay)' % (rel, start, n.upper(), mod, TEST_DEFS))
+                if n in records[mod] and (mod, n) not in DEFS_EXCEPTIONS:
+                    out.append('%s:%d: defs: %s is a behaviourless type of %s that another module imports; declare it '
+                               'in src/defs, or for test code in %s (a class, with type-bound procedures or private '
+                               'components, stays with its module)' % (rel, start, n, mod, TEST_DEFS))
+        if not is_defs(rel):
             continue
         privates, imported = set(), set()
         for start, stmt in logical_lines([code_of(l) for l in lines]):

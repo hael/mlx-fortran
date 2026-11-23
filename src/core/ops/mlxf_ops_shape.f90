@@ -1,7 +1,7 @@
 !@descr: shape operations through the array signature helpers
 submodule(mlxf_ops) mlxf_ops_shape
 use mlxf_c_ops,  only: mlxc_arange, mlxc_concatenate_axis, mlxc_reshape, mlxc_slice, mlxc_take_along_axis, &
-                       mlxc_transpose_axes, mlxc_zeros
+                       mlxc_take_axis, mlxc_transpose_axes, mlxc_zeros
 use mlxf_defs,   only: MLX_DTYPES, mlxf_slice_spec, mlxf_range_spec
 use mlxf_array,  only: mlx_from, mlxf_concat_op, mlxf_range_op, mlxf_slice_op, mlxf_take_op, mlxf_vector_op, &
                        mlxf_zeros_op
@@ -88,6 +88,24 @@ contains
         shifted = indices-one
         call mlxf_take_op(r, mlxc_take_along_axis, [a, shifted], dim, 'mlx_take_along_dim')
     end function mlx_take_along_dim
+
+    ! the slices of a at 1-based integer indices along dim: the indices' Fortran shape takes the place of
+    ! dimension dim, r(.., i1, .., ik, ..) = a(.., indices(i1, .., ik), ..); whole slices are gathered, so a
+    ! repeated index repeats its slice. MLX checks no bounds, so an index of 0 wraps to the last slice
+    module function mlx_take( a, indices, dim ) result(r)
+        type(mlx_array), intent(in) :: a, indices
+        integer,         intent(in) :: dim
+        type(mlx_array) :: r
+        type(mlx_array) :: shifted, one
+        integer         :: dtype
+        call mlxf_enter('mlx_take')
+        dtype = indices%kind()
+        if( dtype /= MLX_DTYPES%int32 .and. dtype /= MLX_DTYPES%int64 ) &
+            &call mlxf_fail('mlx_take', 'indices must be integers')
+        one = mlx_from(1_int32)
+        shifted = indices-one
+        call mlxf_take_op(r, mlxc_take_axis, [a, shifted], dim, 'mlx_take')
+    end function mlx_take
 
     ! a zero array of Fortran shape shape, float32 unless dtype is given
     module function mlx_zeros( shape, dtype ) result(r)

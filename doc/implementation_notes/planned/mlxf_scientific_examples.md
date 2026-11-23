@@ -473,3 +473,24 @@ needed for this documentation-only change; Debug/Release and device gates remain
 - Still open: the dry-run evidence in `/private/tmp` on the Mac is cleared by a reboot. Copy
   `check_mlxf_toy_design.py` and its log to `~/agent_work/` or into the repository. The plan-form
   conversion (pinned base, change type per phase, stop list, gates no ruling may waive) happens at the hold.
+
+2026-11-22, example 1 delivered (run `mlxf_m1`, Phase 5b of milestone 1, M2 Ultra):
+- The shift maps live in `src/test/mlxf_kernel_polar_table_shiftmap.f90`, a submodule of the polar table
+  workspace. It prepares the Bessel weights (host real64, K from the tail rule at 1e-12, rounded once) with
+  the references. Per tile of pairs, on the device: one real contraction over the shells per order, the
+  orders folded onto the directions, the 2D transform, then the mode, the width at the physical temperature
+  and the log evidence. Only the compact results come back (the maps when asked).
+- The tester `src/test/mlxf_kernel_polar_table_shiftmap_tester.f90` (sub-suite `polar_shiftmap` of
+  `kernels`) uses this section's fixtures and a direct real64 residual oracle. Its caps (decision 17 there)
+  were confirmed on the CPU device and frozen in `src/test/mlxf_test_defs.f90` before the first GPU run.
+  It passes 574 checks on both devices. The five negative controls of the section each failed their
+  assertion when planted.
+- `bench_polar_table suite=shiftmap` measures SIMPLE's window and screen grids. The milestone plan's Phase 5b
+  Progress entry has the numbers and logs.
+- Findings against this note:
+  - With SIMPLE's normaliser (`shiftmap_prior` over every cell, rotations included), a flat likelihood gives
+    log evidence -T L, not log(Nrot) - T L.
+  - The tail rule keeps more orders than SIMPLE's `JTOL` (K 21 against 16 on the window, 41 against 32 on the
+    screen).
+  - No CDF cap applies: the maps return their modes.
+  - `width_cutoff` is not implemented; the width is computed for every candidate, as SIMPLE's benchmark does.
