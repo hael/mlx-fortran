@@ -1,8 +1,8 @@
 !@descr: shared storage: mlx_view (read-only borrowing after evaluation) and mlx_alloc (writable initialisation of page-aligned memory)
 submodule (mlxf_array) mlxf_array_borrow
-use, intrinsic :: iso_c_binding, only: c_null_ptr, c_associated, c_f_pointer, c_funloc
+use, intrinsic :: iso_c_binding, only: c_null_ptr, c_associated, c_f_pointer, c_funloc, c_sizeof
 use mlxf_c_types, only: MLXC_BOOL, MLXC_INT32, MLXC_INT64, MLXC_FLOAT32, MLXC_FLOAT64, MLXC_COMPLEX64
-use mlxf_c_array, only: mlxc_array_new_data_managed, mlxc_array_size, mlxc_array_dtype, mlxc_array_eval, &
+use mlxf_c_array, only: mlxc_array_new_data_managed_payload, mlxc_array_size, mlxc_array_dtype, mlxc_array_eval, &
                         mlxc_internal_array_is_row_contiguous
 use mlxf_libc,    only: c_posix_memalign, c_free
 use mlxf_error,   only: mlxf_check, mlxf_report
@@ -10,6 +10,15 @@ use mlxf_device,  only: mlxf_enter, mlxf_require_device
 implicit none
 
 integer(c_size_t), parameter :: PAGE_BYTES = 16384_c_size_t
+
+! who frees a buffer mlx_alloc hands to MLX. MLX's deleter frees it: at once when MLX copies it, or when the
+! array dies. A deleter run inside the creating call (a copy, or a failure after MLX took the buffer) only
+! marks it freed, so mlx_alloc knows whether a failed call left the buffer to it
+type, bind(c) :: buffer_owner
+    type(c_ptr)    :: buf     = c_null_ptr
+    integer(c_int) :: in_call = 0
+    integer(c_int) :: freed   = 0
+end type buffer_owner
 
 contains
 
@@ -437,7 +446,9 @@ contains
         integer, optional, intent(out)   :: status
         logical, optional, intent(out)   :: zero_copy
         character(len=*), parameter :: PROC = 'mlx_alloc'
-        type(c_ptr)                 :: p, buf
+        type(c_ptr)                 :: p, buf, rec
+        type(buffer_owner), pointer :: owner
+        type(buffer_owner)          :: blank
         type(mlxc_array)            :: h
         integer(c_int)              :: cshape(MAX_RANK)
         integer(c_size_t)           :: nbytes
@@ -461,18 +472,47 @@ contains
             call mlxf_report(PROC, 'posix_memalign failed', status)
             return
         endif
-        cshape(1:n) = int(fshape(n:1:-1), c_int)
-        h = mlxc_array_new_data_managed(buf, cshape, int(n, c_int), dtype, c_funloc(c_free))
-        if( .not. c_associated(h%ctx) )then
+        if( c_posix_memalign(rec, 16_c_size_t, int(c_sizeof(blank), c_size_t)) /= 0 )then
             call c_free(buf)
+            call mlxf_report(PROC, 'posix_memalign failed', status)
+            return
+        endif
+        call c_f_pointer(rec, owner)
+        owner%buf     = buf
+        owner%in_call = 1
+        owner%freed   = 0
+        cshape(1:n) = int(fshape(n:1:-1), c_int)
+        h = mlxc_array_new_data_managed_payload(buf, cshape, int(n, c_int), dtype, rec, c_funloc(release_buffer))
+        owner%in_call = 0
+        if( .not. c_associated(h%ctx) )then
+            ! a failure: the buffer is still ours unless MLX took it and its deleter already ran
+            if( owner%freed == 0 ) call c_free(buf)
+            call c_free(rec)
             call mlxf_check(1_c_int, PROC, status)
             return
         endif
+        ! when MLX copied the buffer, its deleter ran in the call and left the record to us; otherwise the
+        ! deleter frees the record with the buffer when the array dies
+        if( owner%freed /= 0 ) call c_free(rec)
         call adopt(a, h, PROC)
         if( present(status) ) status = 0
         p = data_pointer(h, dtype)
         if( present(zero_copy) ) zero_copy = c_associated(p, buf)
     end function alloc_target
+
+    ! MLX's deleter of a buffer mlx_alloc handed it, given its buffer_owner: frees the buffer, and the record
+    ! too unless the creating call is still running (mlx_alloc then frees it). C++ calls it: it never stops
+    subroutine release_buffer( rec ) bind(c, name='mlxf_release_alloc_buffer')
+        type(c_ptr), value :: rec
+        type(buffer_owner), pointer :: owner
+        call c_f_pointer(rec, owner)
+        call c_free(owner%buf)
+        if( owner%in_call /= 0 )then
+            owner%freed = 1
+        else
+            call c_free(rec)
+        endif
+    end subroutine release_buffer
 
     ! the bytes of a buffer for fshape of elements of isz bytes, rounded up to whole pages and at least one;
     ! -1 when a product or the rounding would pass the largest size the kind holds

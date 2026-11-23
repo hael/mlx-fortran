@@ -84,8 +84,8 @@ mlx_array_new                                    plumbing   -
 mlx_array_new_bool                               internal   -
 mlx_array_new_complex                            plumbing   -
 mlx_array_new_data                               plumbing   -
-mlx_array_new_data_managed                       plumbing   -
-mlx_array_new_data_managed_payload               internal   -
+mlx_array_new_data_managed                       excluded   the _payload form serves mlx_alloc: its deleter tells a failed call whether MLX freed the buffer
+mlx_array_new_data_managed_payload               plumbing   -
 mlx_array_new_double                             internal   -
 mlx_array_new_float                              internal   -
 mlx_array_new_float32                            plumbing   -

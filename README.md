@@ -5,7 +5,8 @@ unified CPU/GPU memory of Apple silicon, built on MLX's C API
 [mlx-c](https://github.com/ml-explore/mlx-c).
 
 **Status: milestone 1, early.** The whole of mlx-c 0.8.0 is bound at the C level, generated at build time
-and checked against an independent list of its 680 functions. On top of it, the Fortran layer has the
+and checked against an independent list of its 680 functions. That check is name coverage, not ABI
+verification: an interface is proven against the C library only where a test calls it. On top of it, the Fortran layer has the
 `mlx_array` type and its lifetime, data movement, evaluation and errors, plus the first operations: elementwise
 arithmetic and comparisons, shape and indexing operations, reductions and scans, batched `matmul`, 1D and 2D
 FFTs, and graph compilation of Fortran callbacks. That set covers the first SIMPLE pipeline (scoring and shift
@@ -43,6 +44,12 @@ call mlx_to_alloc(z, c)      ! evaluates, allocates z(m,n) and copies
   alive.
 - **Evaluation.** Operations build a graph; `mlx_eval`, `mlx_async_eval`, `mlx_to`, `mlx_to_alloc` and
   `mlx_view` run it. `mlx_alloc` and `mlx_view` share memory with Fortran without a copy.
+- **Borrowing.** `mlx_view(w, p)` points `p` at the storage of a named `mlx_array` `w`, valid while `w` is
+  unchanged. Never view an expression (`mlx_view(exp(a), p)`): its result dies at the end of the statement
+  and `p` dangles. Assign it first: `w = exp(a)`, then `call mlx_view(w, p)`.
+- **One thread, one error handler.** Build and evaluate graphs from one thread; a library call inside an
+  OpenMP parallel region stops. At its first call the library installs a process-wide mlx-c error handler
+  that records MLX's messages; a program that installs its own handler takes those errors from the library.
 - **Errors.** An error MLX reports while a graph is built is a program error and stops with
   `error stop 86`. The procedures that run a graph or move data take an optional `status`, and
   `mlx_last_error()` has MLX's message. MLX's exceptions never cross into Fortran.

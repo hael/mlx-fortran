@@ -163,13 +163,17 @@ written, the skill `mlxf-modern-fortran`.
   copied once, after which `view` points at MLX's copy. Writes through `view` are allowed only until `a` is
   first passed to any library procedure; from then on the storage is read-only, because a lazy graph may read
   it at any later evaluation. A shape whose size in bytes does not fit `c_size_t` is refused before anything
-  is allocated.
+  is allocated. MLX's deleter frees the buffer, at once when MLX copies it; it runs with a small ownership
+  record, so a failed call frees the buffer only when the deleter has not, never twice and never leaked.
 - **Read-only borrowing.** `mlx_view(a, p[, status])` evaluates `a` and points `p` at its storage when `a` is
   row-contiguous (Fortran order) and of `p`'s kind and rank; a strided view returns a status. `p` is valid
   until the next statement that assigns to, kills or ends the scope of `a` (including `a = f(a)`, after
   which MLX may reuse the buffer) and is never written through. A view survives unrelated evaluations (MLX
   donates only buffers no live array references). After any refused `mlx_view` or `mlx_alloc` the pointer is
   disassociated, a pointer of rank above 7 included.
+  The owner is a named variable: a view of an expression, `call mlx_view(exp(a), p)`, dangles when the
+  statement ends, because the expression's result is finalized there (the library cannot detect it).
+  `w = exp(a)`, then `call mlx_view(w, p)`, keeps `p` valid while `w` is unchanged.
 
 ## 5. Kinds and scalars
 
@@ -208,7 +212,8 @@ written, the skill `mlxf-modern-fortran`.
   returns. That holds for the trampoline's own work too: importing its inputs (mlx-c, the registry, an
   allocation) and exporting its outputs report a status.
 - A device type other than `MLX_DEVICES%cpu` or `%gpu` is refused before it reaches mlx-c, which indexes a
-  table with it. The device information is -1 (or empty) with status 0 when the device or the key is absent;
+  table with it; likewise a dtype outside `MLX_DTYPES` (`mlx_astype`, `mlx_bitcast`, `mlx_zeros`,
+  `mlx_arange`), which stops (guards `guard_dtype_*` of `object_contracts`). The device information is -1 (or empty) with status 0 when the device or the key is absent;
   a failure inside MLX is an error, never that value alone.
 
 ## 7. Devices, threads, precision
@@ -282,7 +287,8 @@ written, the skill `mlxf-modern-fortran`.
   imaginary) reads as complex64 `(n, ...)`, and back. A contiguous input is reinterpreted in place; MLX
   copies a strided one first.
 - `sum(a,dim)`, `minval(a,dim)`, `minloc(a,dim)` and `mlx_logsumexp(a,dim)` remove the selected dimension.
-  `minloc` returns one-based int32 positions, choosing the first equal minimum. `mlx_logsumexp` uses
+  `minloc` returns one-based int32 positions, choosing the first equal minimum; for a zero-size array it
+  returns zeros of the reduced shape, as Fortran's `minloc` does, where MLX's argmin refuses the array. `mlx_logsumexp` uses
   MLX's stable reduction; its test bound is `1e-5 * max(1, abs(logsumexp(x)))`, in log units,
   including CPU float64 (the exponential uses float32 precision). `mlx_cumsum(a,dim)` preserves shape and is forward and inclusive.
 - `mlx_zeros(shape[,dtype])` defaults to float32. `mlx_arange(start,stop[,step,dtype])` takes real64

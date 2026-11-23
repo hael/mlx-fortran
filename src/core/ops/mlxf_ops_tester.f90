@@ -26,6 +26,7 @@ contains
             call test_shape_indices
             call test_reductions
             call test_long_minloc
+            call test_empty_minloc
             call test_real_conversion_and_precision
             call test_take_and_bitcast
         end do
@@ -422,6 +423,24 @@ contains
         call mlx_to(loc, r)
         call assert_true(all(loc == minloc(x, dim=1)), 'minloc first ties across a 4097-element strided axis')
     end subroutine test_long_minloc
+
+    ! minloc of a zero-size array is Fortran's: zeros of the reduced shape, where MLX's argmin refuses the array
+    subroutine test_empty_minloc
+        real(real32)    :: x(0, 3)
+        integer(int32)  :: loc(3), want(3)
+        type(mlx_array) :: a, r
+        integer         :: rkind
+        write(*,'(a)') 'test_empty_minloc'
+        a = mlx_from(x)
+        r = minloc(a, dim=1)
+        want = minloc(x, dim=1)
+        call mlx_to(loc, r)
+        rkind = r%kind()
+        call assert_true(all(r%shape() == [3]) .and. all(loc == want) .and. rkind == MLX_DTYPES%int32, &
+            &'minloc along an empty dimension gives int32 zeros, as Fortran''s minloc')
+        r = minloc(a, dim=2)
+        call assert_true(all(r%shape() == shape(minloc(x, dim=2))), 'minloc across a zero-size array keeps its empty shape')
+    end subroutine test_empty_minloc
 
     ! real() gives float32 as Fortran's default real, and integer arrays with real scalars
     ! give float32

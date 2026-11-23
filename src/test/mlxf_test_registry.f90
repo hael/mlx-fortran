@@ -6,7 +6,8 @@
 module mlxf_test_registry
 use, intrinsic :: iso_fortran_env,           only: real32, real64
 use mlxf,                                    only: mlx_array, mlx_from, mlx_eval, mlx_live_count, mlx_last_error, &
-                                                   mlx_set_default_device, MLX_DEVICES, exp, mlx_fft, mlx_fft2
+                                                   mlx_set_default_device, MLX_DEVICES, exp, mlx_fft, mlx_fft2, &
+                                                   mlx_astype, mlx_zeros, mlx_arange
 use mlxf_array_tester,                       only: run_all_array_tests
 use mlxf_device_tester,                      only: run_all_device_tests
 use mlxf_error_tester,                       only: run_all_error_tests, run_all_recovery_half_tests
@@ -43,7 +44,7 @@ type :: guard_member
     character(len=32) :: group = ''
 end type guard_member
 
-type(guard_member), parameter :: GUARDS(10) = [&
+type(guard_member), parameter :: GUARDS(13) = [&
     &guard_member('guard_empty_operation',   'object_contracts'), &
     &guard_member('guard_stale_handle',      'object_contracts'), &
     &guard_member('guard_openmp_region',     'object_contracts'), &
@@ -53,7 +54,10 @@ type(guard_member), parameter :: GUARDS(10) = [&
     &guard_member('guard_region_last_error', 'object_contracts'), &
     &guard_member('guard_region_private',    'object_contracts'), &
     &guard_member('guard_fft_norm',          'object_contracts'), &
-    &guard_member('guard_fft2_norm',         'object_contracts')]
+    &guard_member('guard_fft2_norm',         'object_contracts'), &
+    &guard_member('guard_dtype_astype',      'object_contracts'), &
+    &guard_member('guard_dtype_zeros',       'object_contracts'), &
+    &guard_member('guard_dtype_arange',      'object_contracts')]
 
 contains
 
@@ -160,6 +164,12 @@ contains
                 call guard_fft_norm
             case('guard_fft2_norm')
                 call guard_fft2_norm
+            case('guard_dtype_astype')
+                call guard_dtype_astype
+            case('guard_dtype_zeros')
+                call guard_dtype_zeros
+            case('guard_dtype_arange')
+                call guard_dtype_arange
             case('guard_empty_operation')
                 call guard_empty_operation
             case('guard_stale_handle')
@@ -197,6 +207,28 @@ contains
         a = mlx_from(reshape([1._real32, 2._real32, 3._real32, 4._real32], [2, 2]))
         r = mlx_fft2(a, [1, 2], norm=-42)
     end subroutine guard_fft2_norm
+
+    ! a dtype outside MLX_DTYPES stops before it reaches mlx-c, which indexes a table with it unchecked
+    subroutine guard_dtype_astype
+        type(mlx_array) :: a, r
+        write(*,'(a)') 'guard_dtype_astype: mlx_astype to a dtype outside MLX_DTYPES'
+        a = mlx_from([1._real32, 2._real32])
+        r = mlx_astype(a, 99)
+    end subroutine guard_dtype_astype
+
+    ! as guard_dtype_astype, through mlx_zeros
+    subroutine guard_dtype_zeros
+        type(mlx_array) :: r
+        write(*,'(a)') 'guard_dtype_zeros: mlx_zeros of a dtype outside MLX_DTYPES'
+        r = mlx_zeros([2, 3], dtype=-1)
+    end subroutine guard_dtype_zeros
+
+    ! as guard_dtype_astype, through mlx_arange
+    subroutine guard_dtype_arange
+        type(mlx_array) :: r
+        write(*,'(a)') 'guard_dtype_arange: mlx_arange of a dtype outside MLX_DTYPES'
+        r = mlx_arange(0.d0, 4.d0, dtype=99)
+    end subroutine guard_dtype_arange
 
     subroutine guard_empty_operation
         type(mlx_array) :: a, b

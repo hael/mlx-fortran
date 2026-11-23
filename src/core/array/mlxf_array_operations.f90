@@ -3,7 +3,7 @@ submodule(mlxf_array) mlxf_array_operations
 use mlxf_c_array,  only: mlxc_array_new, mlxc_array_free
 use mlxf_c_stream, only: mlxc_stream_free
 use mlxf_c_vector, only: mlxc_vector_array_free
-use mlxf_defs,     only: MLX_FFT_NORMS
+use mlxf_defs,     only: MLX_DTYPES, MLX_FFT_NORMS
 use mlxf_device,   only: mlxf_require_device, mlxf_default_stream
 use mlxf_error,    only: mlxf_check, mlxf_fail
 implicit none
@@ -11,7 +11,7 @@ implicit none
 contains
 
     ! r = f(a, option) on the default device, for every int f(mlx_array* res, const mlx_array a,
-    ! mlx_dtype dtype, const mlx_stream s)
+    ! mlx_dtype dtype, const mlx_stream s); option, the dtype, is checked first
     module subroutine mlxf_int_op( r, f, a, option, proc )
         type(mlx_array),  intent(inout) :: r
         procedure(mlxc_int_op)          :: f
@@ -23,6 +23,7 @@ contains
         type(mlxc_stream) :: s
         integer(c_int)    :: ierr
         call mlxf_require_device(proc)
+        call check_dtype(option, proc)
         ha = mlxf_handle(a, proc)
         res = mlxc_array_new()
         s = mlxf_default_stream(proc)
@@ -232,6 +233,7 @@ contains
         type(mlxc_stream) :: s
         integer(c_int)    :: ierr
         call mlxf_require_device(proc)
+        call check_dtype(dtype, proc)
         res = mlxc_array_new()
         s = mlxf_default_stream(proc)
         ierr = f(res, int(shape(size(shape):1:-1), c_int), int(size(shape), c_size_t), int(dtype, c_int), s)
@@ -252,6 +254,7 @@ contains
         type(mlxc_stream) :: s
         integer(c_int)    :: ierr
         call mlxf_require_device(proc)
+        call check_dtype(option%dtype, proc)
         res = mlxc_array_new()
         s = mlxf_default_stream(proc)
         ierr = f(res, option%start, option%stop, option%step, int(option%dtype, c_int), s)
@@ -320,6 +323,14 @@ contains
         if( all(norm /= [MLX_FFT_NORMS%backward, MLX_FFT_NORMS%forward, MLX_FFT_NORMS%ortho]) ) &
             &call mlxf_fail(proc, 'normalization must be a member of MLX_FFT_NORMS')
     end subroutine check_fft_norm
+
+    ! stops unless dtype is a member of MLX_DTYPES: mlx-c converts it through a table it indexes unchecked
+    subroutine check_dtype( dtype, proc )
+        integer,          intent(in) :: dtype
+        character(len=*), intent(in) :: proc
+        if( all(dtype /= [MLX_DTYPES%bool, MLX_DTYPES%int32, MLX_DTYPES%int64, MLX_DTYPES%float32, &
+            &MLX_DTYPES%float64, MLX_DTYPES%complex64]) ) call mlxf_fail(proc, 'the dtype must be a member of MLX_DTYPES')
+    end subroutine check_dtype
 
     ! stops unless dim is a dimension of a (1 to its rank)
     module subroutine check_dim( a, dim, proc )
