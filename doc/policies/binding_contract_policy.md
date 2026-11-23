@@ -70,6 +70,11 @@ written, the skill `mlxf-modern-fortran`.
   `mlx_to` ask whether an array is row-contiguous through mlx-c's internal `_mlx_array_is_row_contiguous` (no
   public entry exists in mlx-c 0.8.0); an mlx-c without it changes the prototype list, and the build names it.
 - A declared, never-assigned `mlx_array` is empty: `kill` and `final` skip it, every operation stops on it.
+  Assigning an empty `mlx_array` is not an operation: the left side releases its object and becomes empty,
+  as an allocatable component becomes unallocated when a derived type is assigned from one whose component
+  is unallocated. A derived type holding empty handles may therefore be assigned over one holding live
+  handles, with no leak and no stop (the bare assignment is asserted in `unit_array`,
+  `test_sections_and_empty`).
   `mlx_is_live(a)` says whether `a` holds a live object; `mlx_live_count()` is the number of live objects, so
   a caller can assert that a loop leaks nothing.
 - **A copy made without the defined assignment** shares the object without a count. When the counted owners
@@ -147,9 +152,11 @@ written, the skill `mlxf-modern-fortran`.
 - **Copies are the default.** `mlx_from(x)` copies a Fortran array of any rank (assumed rank, `contiguous`:
   a strided actual is copied in by the compiler) of kind `real32`, `real64`, `complex(real32)`, `int32`,
   `int64` or `logical(c_bool)` into a new MLX array; a zero-size array becomes an empty MLX array without
-  taking an address. `mlx_to(y, a)` evaluates `a` and copies it into an existing array of the same size and
-  kind (a strided view, a transpose, is made contiguous first); `mlx_to_alloc(y, a)` (allocatable `y` of rank
-  1 to 7, the rank of `a`) allocates to `a`'s shape and copies.
+  taking an address. `mlx_to(y, a)` evaluates `a` and copies it into an existing array of `a`'s kind and
+  shape, or into a rank-1 array of its size, which receives the elements in Fortran order (a strided view, a
+  transpose, is made contiguous first). Any other shape of the same size returns a status: it would
+  reinterpret the data, as a (3,5) array filled from the (5,3) transpose does. `mlx_to_alloc(y, a)`
+  (allocatable `y` of rank 1 to 7, the rank of `a`) allocates to `a`'s shape and copies.
 - **Writable initialisation.** `a = mlx_alloc(shape, mold, view[, status, zero_copy])` gives an array whose
   storage the caller fills through the Fortran pointer `view`: page-aligned host memory, rounded up to whole
   16 KiB pages, handed to MLX without a copy when Metal accepts it (`zero_copy` says whether it did), else

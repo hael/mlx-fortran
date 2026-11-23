@@ -298,6 +298,10 @@ ratio table exists with spreads; SIMPLE's fast gate passes; the branch's files a
 | `doc/compiler_issues/gfortran_*.f90` | the "versions seen" header line only, if needed | 3 |
 | SIMPLE: `src/main/commanders/test/simple_polar_matching_bench.f90`, `src/main/commanders/test/simple_commanders_test_highlevel_matchbench.f90`, `src/main/ui/simple_test/simple_test_ui_highlevel.f90`, `doc/policies/test_environment_policy.md` | the `fftw_plans` key, on Phase 4's branch | 4 |
 | SIMPLE: `src/main/pftc/simple_polarft_memo.f90`, `src/main/pftc/simple_polarft_shiftmap.f90` | the planner choice under a fixed seed, if needed; production path unchanged | 4 |
+| SIMPLE: `scripts/simple_args_generator.pl` | accept the test-only `fftw_plans` command-line key | 4 |
+| SIMPLE: `src/main/pftc/simple_polarft_calc.f90`, `src/main/pftc/simple_polarft_core.f90` | pass the benchmark's planner choice into the calculator before its eager plan creation | 4 |
+| SIMPLE: `src/main/pftc/simple_polarft_block.f90` | report the block FFT plan's measured construction time | 4 |
+| SIMPLE: `.codex/branch-context/master.md` | local verified milestone record required by SIMPLE's agent instructions | 4 |
 
 ## Progress
 
@@ -329,7 +333,7 @@ short".)
 
 **What it means, in short:** the local baseline is established; no work was run on the M2 Ultra.
 
-### Phase 1, CI: 2026-11-22 - evidence incomplete
+### Phase 1, CI: 2026-11-22 - complete
 
 - **GitHub results (exact):** both matrix jobs succeeded for [`0d3537b`](https://github.com/hael/mlx-fortran/actions/runs/44957271541),
   [`2862201`](https://github.com/hael/mlx-fortran/actions/runs/45036228067), and
@@ -365,3 +369,188 @@ the Release workflow and the same verbose core step passed there as well. The ne
 `headless-release-core.log`
 under `/private/tmp/mlxf-m1-codex-20261122/`. The owner will commit and push; the new GitHub run and its
 runner versions and device line are still required to close the phase.
+
+**Pushed run:** the owner committed and pushed `69b64f32a613972438819f0d7c8bb7da927ffc8a`. Both matrix
+jobs and their `Report device availability` steps succeeded in
+[`45070808884`](https://github.com/hael/mlx-fortran/actions/runs/45070808884). The public jobs API
+confirms the conclusions; the owner supplied the Debug job's signed-in log output. Its `brew list` reported
+GCC 16.2.0, CMake 4.5.0, MLX 0.32.4 and mlx-c 0.8.0. Its verbose `unit_core` reported one GPU, an Apple
+Paravirtual device with architecture `air64_v27`; the device suite passed, and CPU array tests ran. This is
+the Debug runner's observation, not an assertion about the Release runner. Phase 2 research proceeded while
+waiting for these lines. **History text:** The Debug and Release GitHub jobs passed with version and device
+reporting; the Debug runner opened one Apple Paravirtual GPU and ran its device tests. The owner also
+reported a GitHub warning that `actions/checkout@v4` targets deprecated Node.js 20 and is being run on
+Node.js 24; the job still succeeded.
+
+### Phase 2, new Mac setup: 2026-11-22 - complete
+
+- **Files:** `doc/how2s/how2set_up_dev.md` (section 6) and this Progress entry. No packages were installed,
+  upgraded, downgraded or unlinked on the laptop. A fresh M5 Ultra has not been tested.
+- **Homebrew (measured 2026-11-22):** `HOMEBREW_NO_AUTO_UPDATE=1 brew info --json=v2` reported MLX 0.32.4
+  (runtime dependency `python@3.15`), mlx-c 0.8.0 (MLX), GCC 16.2.0 (gmp, isl, libmpc, mpfr, zstd),
+  CMake 4.5.1 (none), FFTW 3.3.11 (libomp), libtiff 4.7.2 (jpeg-turbo, webp, xz, zstd), jpeg-turbo
+  3.2.1 (none), and Python 3.15.2. Each of the first seven has an `arm64_tahoe` bottle. Raw formula output
+  is in `/private/tmp/mlxf-m1-codex-20261122/brew-info.json` and `brew-image-info.json`.
+- **Pin method (measured):** `HOMEBREW_CACHE=/private/tmp/mlxf-m1-codex-20261122/brew-cache brew fetch
+  --force-bottle mlx mlx-c` fetched the macOS 26 arm64 bottles. Their SHA-256 values matched Homebrew's
+  metadata: MLX `ffa4d6ec493da3452637f438860f42cbbf1fc689cea0c5f358a0d3053ba1d4fb`, mlx-c
+  `c81ab3e3177acc5cbdcc27e2c7651afeaeec28509231f44bfedb985420868606`. The same versions are installed
+  and passed Phase 0 on macOS 26 arm64. `brew-fetch.log` records the fetch. The guide recommends the
+  current bottles with a version check; if they disappear, the pinned Xcode source build is the fallback,
+  whose script and prerequisites were read, not executed in this phase.
+- **Upstream release reading (exact):** the GitHub release API lists no MLX release after `v0.32.4`;
+  mlx-c's release list is empty and its tags API lists `v0.8.0` as newest. Therefore no later release
+  changes were found for CPU float64 FFT/transcendentals, `irfft`, NAX/TF32, the CMake package name, or
+  `_mlx_array_is_row_contiguous`. API results: `mlx-releases.json`, `mlxc-releases.json`, and
+  `mlxc-tags.json` in the temporary log directory; this says nothing about unreleased changes.
+- **NAX (source, exact):** at MLX `v0.32.4`, `mlx/backend/metal/device_info.cpp:25-51` exposes
+  `device_name` and `architecture`, not a NAX status key. `device.cpp:978-995` checks build support,
+  macOS 26.2 and architecture generation (17 for Macs); `matmul.cpp:960-966` checks NAX availability,
+  dtype and TF32; `mlx/utils.h:225-227` reads `MLX_ENABLE_TF32` once with default 1. The guide separates
+  architecture-based eligibility from observed dispatch and requires a capture for the latter.
+- **SIMPLE (source, exact):** at `3a595f42f`, `cmake/Dependencies.cmake` requires FFTW, TIFF, JPEG and
+  zlib and fetches bundled OpenBLAS 0.3.34 at configuration. `compile_clean.sh` builds Release and runs
+  its fast gate. The setup points to `agent_runs/SETUP.md` for arun.
+- **History text:** A new-Mac guide records the currently available pinned MLX and mlx-c bottles, SIMPLE's
+  dependencies and GPU/NAX checks; the actual M5 installation remains to be performed on that machine.
+
+**What it means, in short:** the pinned pair is available for macOS 26 arm64 today, with a source-build
+fallback; NAX capability and actual kernel use must be recorded separately on the new machine.
+
+### Phase 3, gfortran reports: 2026-11-22 - complete, prepared for owner filing
+
+- **Files:** `doc/compiler_issues/README.md` and this Progress entry. No upstream report was filed. The
+  reproducer headers retain their accurate historical observations; the differing trunk result is recorded
+  in the README. The two house formatters were probed on a scratch copy: the full restyler changes the
+  reproducer body, which the file table does not permit, so no reproducer source was touched.
+- **Trunk (measured):** with explicit owner approval, all five standalone reproducers were submitted to
+  Compiler Explorer and executed using x86-64 Linux GNU Fortran 17.0.0 20261122, GCC commit
+  `a3a3f32131a9fe59b6a3a555696b63094fdea323`. They all compiled; issue 4 passed its expected-value check,
+  issues 1 to 3 still missed the specified assignments/finalizations, and issue 5 still showed an
+  AddressSanitizer heap-use-after-free. The README quotes all five outputs, flags and exit codes. Complete
+  request and response JSON files are `/private/tmp/mlxf-m1-codex-20261122/ce-issue<N>-{request,result}.json`.
+- **GCC reports (exact):** Bugzilla's current statuses are 57696 NEW, 119802 UNCONFIRMED, 110626 REOPENED,
+  37336 ASSIGNED, and 90068, 121472, 121475 and 128856 RESOLVED FIXED. The README links the relevant
+  comments, classifies issue 1 as a duplicate of 57696, issue 4 as fixed on the tested snapshot, and issues
+  2, 3 and 5 as related to existing fixed reports but still failing and suitable for new reports. It gives
+  suggested filing text and leaves new upstream numbers for the owner. Raw Bugzilla responses are in the
+  temporary log directory.
+- **History text:** Five gfortran reproducers were run on trunk: the self-assignment case passed, the other
+  four did not; the report index now records the related GCC issues and proposed filing text.
+
+**What it means, in short:** the owner has the evidence to comment on the existing allocatable-component
+report and file the three remaining cases. A passing trunk case is not proof that the installed 16.2 or
+every architecture is fixed.
+
+### Phase 4, measured FFTW planner: 2026-11-22 - complete, with largest-case timing qualification
+
+- **Checkout:** the owner directed work straight in the repositories, with no branches. SIMPLE was clean on
+  `master` at `ed0aaa3428b7ebe9d834418587f31354850cb99b`; the files named by the original plan are
+  unchanged there from the working pin, but other SIMPLE files differ. To obtain an exact pin baseline,
+  a temporary source copy was reconstructed at `3a595f42f928a366744094a28b62aeb6020099e4` by replacing the
+  eleven changed tracked files from that commit; its Release test-executable build passed outside either
+  checkout, with no compiler warnings observed (`simple-pin-build.log`). A small one-thread shift-map
+  identity fixture (`nspace=100 nstates=1 nptcls=8`) completed at the pin; its identity files and log are
+  under `/private/tmp/mlxf-m1-codex-20261122/pin-identity/`. This is a preliminary fixture, not the full
+  planned comparison.
+  The pinned scratch configuration selected `-mtune=native` while the existing checkout's Release cache
+  uses `-mtune=generic`; both use GCC/GFortran 16.2, `-O3`, OpenMP and `USE_ARCHOPT=ON`. This difference
+  must be considered if the byte comparison fails; timings compare planners within the same modified build.
+- **Delivered changes:** `fftw_plans=estimate|measure` was added to the two named benchmark suites,
+  with estimate as the default and measured planning under a fixed seed without wisdom-file I/O. The
+  additional accepted-key generator and calculator interface/lifecycle files have rows in the table above.
+  SIMPLE's existing checkout was built for validation; no branch, commit or push was made.
+- **Formatter finding:** SIMPLE has neither of mlx-fortran's two formatters. Running those formatters on
+  copies of the touched SIMPLE files produces broad unrelated restyling; the restyler refuses the benchmark
+  driver because it contains a continued string. The originals were preserved. SIMPLE's own static checks
+  passed. Owner ruling, 2026-11-22: use SIMPLE's own formatting checks. The owner also reported that
+  nothing else was running on the laptop and authorized the remaining measurements when idle.
+- **Build and checks (measured):** the modified Release `simple_test_exec` and full build completed;
+  no compiler warnings were observed. The install refreshed `build/bin/simple_test_exec`, whose invalid
+  planner check also failed as intended. After clarifying the UI help, the full fast gate was rerun and
+  passed all 15 entries, followed by a full build and install. Logs in
+  `/private/tmp/mlxf-m1-codex-20261122/`: `simple-modified-build.log`, `simple-ui-rebuild.log`,
+  `simple-fast-gate-final.log`, `simple-full-build-final.log` and `simple-install-final.log`.
+  For the small fixture above, both default and explicit
+  `fftw_plans=estimate` produced window and screen identity files byte-for-byte equal to the pinned build.
+  Both `shiftmap` and `block_prod` ran with `measure`, logged separate FFTW planning times and created no
+  wisdom file; an invalid planner and use on `suite=per_pair` were rejected. In this small shift-map fixture,
+  the measured and estimated plans gave the same rotation, radius and direction indices across 128 maps per
+  type; the largest loss difference was `1.20e-7` and width differences were `8.11e-5` (screen) and
+  `5.42e-5` (window). These are observations, not frozen accuracy bounds. Smoke logs and outputs are in
+  the `simple-smoke-*` and `simple-block-smoke` directories under the temporary log directory.
+  A second one-thread identity fixture at `nspace=1000 nstates=1 nptcls=16` also matched both map files
+  byte for byte between the pin, the default and explicit `estimate` (`identity-1000-*` directories).
+- **Production check:** `simple_test_exec` always calls `fix_test_seed`,
+  and the benchmark itself sets a fixed seed, so that executable cannot exercise the unseeded production
+  path. The unseeded wisdom-import/export branch was checked in the diff but not run.
+
+**Full-size measurements, 2026-11-22:** the owner reported the laptop otherwise idle and ruled that
+SIMPLE's own formatting checks apply. Runs are sequential at `nthr=11`, whose existing driver also measures
+5 and 1 threads; the one-thread timing rows retain the suite's 200-particle cap. `OPENBLAS_NUM_THREADS=1`.
+The pinned 2500-direction, 4-state, 2000-particle shift-map reference completed both team-identity checks
+with zero maps differing and wrote both identity files. Its resource wrapper returned 1 after normal
+completion because sandbox access to `kern.clockrate` was denied; those timing values are excluded from
+the comparison. VM swapouts rose from 0 to 31148 pages during this reference invocation, so subsequent
+timed invocations record VM counters and flag paging. Logs and TSVs are under
+`/private/tmp/mlxf-m1-codex-20261122/full-bench/`; `driver.log` records each invocation and `manifest.json`
+indexes the measured runs. The driver starts with the lower-memory block cases and reverses planner order
+between repeats. No benchmark result is inferred from a paging-affected sample without qualification.
+
+**Full-size exits:** all 16 block and all five modified shift-map invocations returned zero. The default
+shift-map run and both explicit-estimate repeats match both verified pin identity files byte for byte
+(1,024 map entries per file). All five modified shift-map invocations reported zero maps differing between
+one and eleven threads. No invocation created a wisdom file. A final pinned run with working resource
+counter access returned zero and reproduced the original reference files (`pin-shiftmap-verified/`),
+closing the earlier wrapper-only failure. The two pinned runs are excluded from the planner timing table.
+
+**Planner comparison (measured rates; derived ratios and spreads).** Each rate is the arithmetic mean
+of two invocations, each taking its own best of three after a warm-up. Spread is
+`100 * (maximum - minimum) / mean` across the two invocation rates. Rates are useful pairs/s for
+`block_prod`, maps/s for screen/window. All rows below use 2,000 particles. For block scoring, the
+11-thread run sweeps B=4,8,16 and its best B is used at five threads; B=16 was selected in every run.
+The capped one-thread rows remain in the raw TSVs and are not mixed into these comparisons.
+
+| Suite/case (directions x states) | Threads | Estimate /s | Measure /s | Measure/estimate | Spread E / M (%) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| block_prod 1000x1 | 5 | 674,029.0 | 677,924.5 | 1.0058 | 3.90 / 1.22 |
+| block_prod 1000x1 | 11 | 978,166.5 | 970,060.0 | 0.9917 | 2.05 / 0.68 |
+| block_prod 1000x4 | 5 | 725,605.0 | 720,945.5 | 0.9936 | 0.63 / 0.04 |
+| block_prod 1000x4 | 11 | 1,057,800.0 | 1,062,320.0 | 1.0043 | 1.88 / 0.63 |
+| block_prod 2500x1 | 5 | 677,766.0 | 671,195.5 | 0.9903 | 0.95 / 0.85 |
+| block_prod 2500x1 | 11 | 985,686.0 | 965,439.0 | 0.9795 | 0.86 / 0.50 |
+| block_prod 2500x4 * | 5 | 706,208.0 | 703,809.0 | 0.9966 | 1.24 / 0.21 |
+| block_prod 2500x4 * | 11 | 1,050,640.0 | 1,045,850.0 | 0.9954 | 0.39 / 0.04 |
+| screen 2500x4 | 5 | 2,255.8 | 2,411.2 | 1.0689 | 1.27 / 0.03 |
+| screen 2500x4 | 11 | 3,263.1 | 3,460.3 | 1.0605 | 0.08 / 0.03 |
+| window 2500x4 | 5 | 13,386.8 | 13,674.5 | 1.0215 | 0.98 / 0.16 |
+| window 2500x4 | 11 | 19,554.7 | 19,858.2 | 1.0155 | 0.11 / 0.08 |
+
+* The largest block case had system-wide swap-outs in 2 of its four invocations (`block-2500-4-estimate-r1`, `block-2500-4-measure-r2`).
+Memory pressure limits the interpretation of its ratios; they do not establish a precise planner ranking.
+The other timed invocations had 0 new swap-out pages in total. Some invocations had small system-wide
+swap-in activity; the raw VM counters are retained. The maximum process memory footprint was 9.691 GiB.
+These measurements are from the M3 Pro; the M5 needs its own run.
+
+**Measured planning cost (seconds, range over the two measured-planner invocations).** The timer
+surrounds FFTW plan creation before the scoring loops. The memo group includes its short setup
+bookkeeping; no optional many-reference workspace was requested by these benchmark calls.
+
+| Case | Memo plans | Block plan | Screen-map plan | Window-map plan |
+| --- | ---: | ---: | ---: | ---: |
+| block_prod 1000x1 | 0.011797–0.012522 | 0.000021–0.000023 | — | — |
+| block_prod 2500x1 | 0.012459–0.013118 | 0.000019–0.000730 | — | — |
+| block_prod 1000x4 | 0.011631–0.012677 | 0.000014–0.000020 | — | — |
+| block_prod 2500x4 | 0.011229–0.012131 | 0.000018–0.000019 | — | — |
+| shiftmap 2500x4 | 0.012085–0.014713 | 0.000019–0.000661 | 0.011333–0.011399 | 0.001341–0.001353 |
+
+**History text:** On the M3 Pro, SIMPLE gained the test-only FFTW planner option with estimated plans as
+the default. Release build, UI validation, installation and all 15 fast entries passed. Full-size default
+and explicit-estimate shift-map files equal the SIMPLE pin byte for byte. Two invocations per planner
+showed little block-throughput change and roughly 6–7 % screen-map and 1.5–2.2 % window-map improvement
+with measured plans. The largest block case had system paging, so its small ratio differences are qualified.
+The owner ruled that SIMPLE's own formatting checks apply. No commit, push, branch or M2 Ultra work was done.
+
+**What it means, in short:** the laptop work is delivered with reproducible identity evidence and the
+requested planner comparison. These numbers inform the M5 run specification; they do not choose its
+SIMPLE working commit or planner policy. The largest block result needs its memory-pressure qualification.

@@ -5,7 +5,8 @@ widened the same day by decision 15 (the shift maps of the scientific examples' 
 by decisions 19 and 20 (SIMPLE's matching shift-map benchmark; Phases 1 to 3 done interactively).
 Phases 1 to 3 are complete, done interactively (Progress; decision 20), and were reviewed on 2026-11-22. Run
 `mlxf_m1` starts at Phase 0 on the maintainer's commit of that work, with the SIMPLE pin of decision 19.
-Decision 21 records the callback ruling of Phase 3. Base: the maintainer's commit of the working tree on top of `0d3537b`, which holds the
+Decision 21 records the callback ruling of Phase 3. Decision 22 (2026-11-22) makes the CPU comparator's FFT
+plans measured and moves the SIMPLE pin to Hans's commit of that option. Base: the maintainer's commit of the working tree on top of `0d3537b`, which holds the
 `findpkg` change and the split of the design plan. That commit is a launch precondition, and the run records
 its hash. Supersedes: Phases 2 to 6 of `doc/implementation_notes/completed/mlxf_design.md` ("the design
 plan" below). Depends on: the handle model and the core (validated: yes, the design plan's Phase 1, commit
@@ -109,7 +110,8 @@ for the contract:
     shift map on (`PMB_TRS` = 3 pixels) but writes no fill profile. Decision 19 adds `suite=shiftmap`.
   - The test executable fixes a process-wide seed (`fix_test_seed`, propagated through `SIMPLE_SEED`), so
     the calculator's FFTW plans are `FFTW_ESTIMATE` in every `polar_matching_bench` suite, `block_prod`
-    included, where production plans with `FFTW_MEASURE`.
+    included, where production plans with `FFTW_MEASURE`. Decision 22 makes measured plans the default of
+    `block_prod` and `shiftmap`.
 
 ## 3. Decisions and rulings
 
@@ -156,7 +158,7 @@ Numbered, dated, never renumbered. "Design decision N" is decision N of the desi
    - Run `mlxf_m1` covers Phase 0 and Phases 4 to 5b on the M2 Ultra (FWM-S116118), unattended (arun).
      Phases 1 to 3 are done interactively before it (decision 20).
    - Run `mlxf_m1_m5` covers Phases 6 and 7 on the M5 Ultra once it is set up: Homebrew GCC 16, CMake and
-     mlx-c, and SIMPLE `7ec7e2972`'s build dependencies.
+     mlx-c, and the SIMPLE pin's build dependencies (decision 22).
    - Between the runs Hans reviews and commits. That commit is Phase 6's base, and no edit reaches the
      repository while a phase runs. Each run starts only on a clean working tree, and records
      `git --no-optional-locks status --short` at the start of every phase. A change it did not make is a
@@ -305,8 +307,8 @@ Numbered, dated, never renumbered. "Design decision N" is decision N of the desi
       to 2.0 **lead**, < 1.0 **negative**. The report gives both maps; the screen carries most of the cost
       in the PorF and exp_gate profiles.
     - *Caveats stated beside the numbers:*
-      - the CPU suite plans its FFTs with `FFTW_ESTIMATE` (its `fftw_plans` column), production with
-        `FFTW_MEASURE`, so the CPU rate may be pessimistic for the 2D transform;
+      - the CPU suite plans its FFTs with `FFTW_MEASURE`, as production does (decision 22; its
+        `fftw_plans` column says so), but without production's wisdom file;
       - the CPU suite builds maps back to back with warm per-thread work arrays, while production
         interleaves them with block scoring and the shift refinement;
       - the CPU suite computes the width for every candidate, as the GPU does, while production skips the
@@ -339,8 +341,9 @@ Numbered, dated, never renumbered. "Design decision N" is decision N of the desi
         `rho_max_px`, `prior_w`, `load1`, `wall_s`, `wall_rep1..3`, `us_map_thread`, `maps_per_s`,
         `us_construct`, `us_select`, `us_reduce`, `fftw_plans`.
       - The one-thread results of 64 particles (loss, width, the mode's rotation, radius and direction) go
-        to `./polar_shiftmap_identity_<map>.bin` for comparing builds byte for byte. A team-identity line
-        compares them with the full team's (the mode draws nothing, so they must be identical).
+        to `./polar_shiftmap_identity_<map>.bin` for comparing builds byte for byte, under
+        `fftw_plans=estimate` (decision 22). A team-identity line compares them with the full team's under
+        either planner (the mode draws nothing, so they must be identical).
     - *mlx-fortran side* (Phase 5b): `bench_polar_table suite=shiftmap` on the same case.
       - It reads the grid from SIMPLE's row: `pftsz`, `nrots`, `kfrom`, `kscreen`, `nrho`, `nalpha`,
         `rho_max_px`, `prior_w`. The radii are `(i-1) * rho_max_px / (nrho-1)`.
@@ -354,7 +357,8 @@ Numbered, dated, never renumbered. "Design decision N" is decision N of the desi
     - *Scoring* (Phase 5): the rows of `bench_polar_table suite=time` likewise carry `polar_matching_bench`'s
       case columns with the same names: `nspace`, `nstates`, `nrefs`, `nptcls`, `pftsz`, `nrots`, `kfrom`,
       `kto`, `load1`, `wall_s`, `wall_rep1..3`, `pairs_per_s`. Here B and R are the GPU tile, with `device`,
-      `precision` and memory columns added. The case geometry is read from Phase 0's `block_prod` rows.
+      `precision` and memory columns added, `precision` in the place of SIMPLE's `fftw_plans`. The case
+      geometry is read from Phase 0's `block_prod` rows.
 20. (2026-11-22, Hans) **Phases 1 to 3 are done interactively, with Codex**, on the Mac: Phase 1's open exit
     items, Phase 2 with decision 16's operations, and Phase 3. Each phase writes its Progress entry with the
     exits as written. Run `mlxf_m1` starts at Phase 0 on the commit that holds them, and then runs Phases 4
@@ -370,6 +374,31 @@ Numbered, dated, never renumbered. "Design decision N" is decision N of the desi
       (`doc/compiler_issues/gfortran_finalize_allocatable_array_result.f90`, issue 5 of its README).
     - The binding policy's section on closure callbacks is the living rule. No gate was relaxed.
 
+22. (2026-11-22, Hans: "we should make this default across the packages") **The CPU comparator plans its
+    FFTs as production does.**
+    - *SIMPLE:* `polar_matching_bench` plans the calculator's FFTs with `FFTW_MEASURE` by default in
+      `suite=block_prod` and `suite=shiftmap` (`fftw_plans=measure`), as production does. `fftw_plans=estimate`
+      gives reproducible output, and only it writes the identity files `polar_shiftmap_identity_<map>.bin`:
+      measured plans can differ between runs in the last bits. Measured planning reads and writes no wisdom
+      file and is logged apart from the timed loops. Both TSVs carry an `fftw_plans` column.
+    - *Evidence* (Codex's side-quest plan `mlxf_m1_codex.md`, Phase 4; M3 Pro, 2,000 particles, two
+      invocations per planner): measured plans left `block_prod` within its spread (−2 % to +0.6 %) and made
+      the screen maps 6–7 % and the window maps 1.5–2 % faster. Planning took about 12 ms for the
+      calculator's plans and 11 ms for a screen map's. With
+      `estimate`, the full 2,500 × 4 case's identity files equal the pin's byte for byte.
+    - *The pin:* decision 19's SIMPLE pin moves to Hans's commit of the planner option on top of
+      `ed0aaa342`. The comparator's code (`pftc`, the benchmark, the probability tables, `stage_trslim`) is
+      unchanged from `3a595f42f` there apart from the planner. That commit is a launch precondition of both
+      runs, and Phase 0 records its hash.
+    - *The runs:* Phases 0 and 6 run both suites with the default and keep the `fftw_plans` column. A byte
+      comparison of SIMPLE builds uses `fftw_plans=estimate`. Decision 18's caveat on the FFTW planner is
+      withdrawn.
+    - *Later comparators:* an FFTW comparator in this repository (section 9's particle-stack FFTs) plans
+      with `FFTW_MEASURE` too, and states SIMPLE's production planner for that transform beside it.
+    - *Not changed:* SIMPLE's production planners. The polar calculator already measures, with wisdom.
+      Particle-image FFTs use `FFTW_ESTIMATE` unless a caller asks for `fft_measure`. Changing them is a
+      SIMPLE production change, judged by timing on its x86 target, and is not part of this plan.
+
 Defaults taken without a question: the folder and submodule names of decision 10, the vocabulary name
 `MLX_FFT_NORMS`, the run names of decision 6, the file name of decision 9, the rule name `ctorexpr`, the
 submodule, tester, sub-suite and mode names of decision 15, and decision 19's candidate count (16), check
@@ -377,8 +406,8 @@ size (64), file name and the mlx-fortran column names.
 
 ## 4. Not in this plan
 
-- Any change to SIMPLE beyond decision 19's benchmark suite, which is made before launch. SIMPLE's
-  integration is a SIMPLE plan written after the hold (design decisions 32, 42).
+- Any change to SIMPLE beyond decision 19's benchmark suite and decision 22's planner option, which are made
+  before launch. SIMPLE's integration is a SIMPLE plan written after the hold (design decisions 32, 42).
 - Transforms (`grad`, `vjp`, `vmap`), neural-network layers, explicit streams, IO, float16 and bfloat16,
   quantised operations, CUDA, Linux, flang, Windows, packaging and releases.
 - n-dimensional FFTs beyond the shift maps' two-dimensional transform, gather and scatter, Metal kernels,
@@ -555,24 +584,26 @@ interactive changes once they build and gate on the Mac. The run records the has
 2. Build the base in Debug and Release from scratch (`compile_debug.sh`, `compile_clean.sh`) and keep both
    trees. Record the fast gate's per-entry times (`ctest_fast.log.timing.txt`), with `unit_core`'s recovery
    share, and the zero-warning check.
-3. Export the SIMPLE pin (decision 19) into scratch and configure it by hand: Release, tests on,
+3. Export the SIMPLE pin (decisions 19 and 22) into scratch and configure it by hand: Release, tests on,
    `-DFORTLS=OFF`. Build it, run its fast gate (record failures per case), and record the BLAS and FFTW it
    links. Confirm `block_prod`, `check`, `fills`, `neigh` and `shiftmap` with `simple_test_exec
    test=polar_matching_bench suite=list`.
 4. Run each of the four dense cases twice, all of run 1 before run 2:
    `OPENBLAS_NUM_THREADS=1 simple_test_exec test=polar_matching_bench suite=block_prod
    nspace=<1000|2500> nstates=<1|4> nptcls=2000 nthr=24`. Add a run at `nthr=16` (the performance cores).
-   Keep every TSV, the load record, B, the useful pairs and the spread. The driver's one-thread
+   Keep every TSV, the load record, B, the useful pairs and the spread. The rows' `fftw_plans` column reads
+   `measure`, the default (decision 22). The driver's one-thread
    200-particle row is labelled as such and not compared with the all-core workload. Record the polar
    dimensions (pftsz, nk, nrots) and the reference residency for Phase 4's generator.
 5. `suite=check nthr=24` and `suite=fills nthr=24` once each, with default sizes and all routes.
    `suite=neigh nthr=24` twice, keeping the representative, member and cone rows apart.
 6. s and f per decision 5, or recorded as unmeasured.
 7. `simple_test_exec test=polar_matching_bench suite=shiftmap nthr=24` twice, then once at `nthr=16`
-   (decision 19). Keep both TSVs and the team-identity lines. The rows' grid columns (`kscreen`, `nrho`,
-   `nalpha`, `rho_max_px`, `prior_w`, for the window and the screen) are the geometry Phase 5b's benchmark
-   reads. Also record the per-map CPU costs of the PorF and exp_gate profiles (map construction, selection
-   and reduction thread-seconds over their map counts), labelled with their unknown machine and commit.
+   (decision 19), with the default measured plans. Keep both TSVs and the team-identity lines. The rows' grid
+   columns (`kscreen`, `nrho`, `nalpha`, `rho_max_px`, `prior_w`, for the window and the screen) are the
+   geometry Phase 5b's benchmark reads. Also record the per-map CPU costs of the PorF and exp_gate profiles
+   (map construction, selection and reduction thread-seconds over their map counts), labelled with their
+   unknown machine and commit.
 
 Exit: the machine record and base hash; both base trees gate with zero warnings; the fast gate's per-entry
 times are in Progress; SIMPLE built, its fast gate recorded, `block_prod` measured twice per dense case with
@@ -712,13 +743,16 @@ warnings.
 
 ### Phase 6, the M5 Ultra (run `mlxf_m1_m5`)
 
-1. Record the machine and dependencies as in Phase 0 step 1, including whether NAX is present.
+1. Record the machine and dependencies as in Phase 0 step 1, with the GPU's `architecture` as
+   `unit_core` prints it and the macOS version: the NAX preconditions of `doc/how2s/how2set_up_dev.md`,
+   section 6. MLX reports no NAX-in-use key, so NAX use is stated only from a Metal capture of the
+   workload; without one it is recorded as unproven, never inferred from the architecture.
 2. Build Debug and Release from scratch at Phase 6's base. Run the fast gate, `recovery_half` (if
    decision 3 is ruled yes), `unit_kernels suite=polar_table` and `suite=polar_shiftmap` on both devices,
    and `bench_polar_table suite=accuracy`. The frozen bounds of Phases 4a, 5a and 5b-a are unchanged.
-3. Repeat Phase 0 steps 3 to 5 and 7 there: the SIMPLE pin, `block_prod` twice per dense case, `check`,
-   `fills`, `neigh` and `suite=shiftmap` twice at the full team. Recheck the polar dimensions, half counts
-   and the shift-map grid against Phase 0's.
+3. Repeat Phase 0 steps 3 to 5 and 7 there: the SIMPLE pin (decision 22), `block_prod` twice per dense
+   case, `check`, `fills`, `neigh` and `suite=shiftmap` twice at the full team, both suites with measured
+   plans. Recheck the polar dimensions, half counts and the shift-map grid against Phase 0's.
 4. `bench_polar_table` on the M5 Ultra in full precision (`time`, `accuracy`, `profile`, `overlap`), then
    `time` and `accuracy` in accelerated mode. The accelerated mode is reported, and counts only within the
    frozen gates.
@@ -814,7 +848,8 @@ code at a new pin:
   the n-dimensional FFTs and the gather and scatter operations they need (design decisions 22 and 33);
 - **the continuous shift search** that follows the shift maps (decision 15 left it out);
 - **n-dimensional FFTs of particle stacks** (design decisions 21 and 23; SIMPLE uses single-threaded
-  `FFTW_ESTIMATE` plans in an OpenMP loop, per the design plan's Phase 0) and **Metal kernels** (design
+  `FFTW_ESTIMATE` plans in an OpenMP loop, per the design plan's Phase 0; the FFTW comparator plans with
+  `FFTW_MEASURE`, decision 22) and **Metal kernels** (design
   decision 18), where a measured bottleneck asks for them;
 - **packaging for consumers**: a CMake package config `mlxf::mlxf` with a compiler-version check, a
   consumer project and `scripts/check_install.sh` (the design plan's Phase 5);

@@ -83,3 +83,73 @@ Start from `templates/generic` of `~/agent_runs` with: `PROJECT=mlx-fortran`,
 `PATH_BASE=` (paths in the table are from the repository root), `COMPANION=".f90:_tester"`,
 `COPY_EXCLUDES="/build/ /build_*/ /.deps/work/"`, `TOOLS="gfortran cmake make xcrun"`,
 `CHECKOUT_MARKER=compile_debug.sh`. GPU phases run on a Mac, not on the Linux box.
+
+## 6. New Mac for a run
+
+Prepare the machine before the run, in a Terminal session with access to its GPU. The working MLX pair is
+MLX **0.32.4** and mlx-c **0.8.0**; a newer pair needs the owner's decision and revalidation. These are
+the Homebrew formula versions observed on 2026-11-22, not a promise that `brew install` will keep selecting
+them. Check before installing:
+
+```bash
+xcode-select --install
+brew info mlx mlx-c gcc cmake fftw libtiff
+```
+
+Command Line Tools suffice for the bottled dependencies and the Fortran builds. Building MLX from source
+or profiling Metal requires Xcode; for the source build also install its Metal toolchain with
+`xcodebuild -downloadComponent MetalToolchain` and select Xcode with `xcode-select`. Install Homebrew using
+its official instructions if it is not already present.
+
+On that date Homebrew listed bottles for macOS 26 Apple silicon: MLX 0.32.4, mlx-c 0.8.0, GCC 16.2.0,
+CMake 4.5.1, FFTW 3.3.11 and libtiff 4.7.2; libtiff brings jpeg-turbo. The MLX and mlx-c bottles were
+fetched and their checksums verified. If `brew info` still shows the pinned MLX pair, install the tools and
+dependencies and check what was actually installed:
+
+```bash
+brew install gcc cmake fftw libtiff mlx-c
+brew list --versions gcc cmake fftw libtiff jpeg-turbo mlx mlx-c
+gfortran --version
+cmake --version
+python3 --version
+```
+
+The build's Python floor is 3.7. Homebrew's MLX formula also brings its own Python dependency; check the
+selected `python3` after installation. If the formula versions have moved, **do not install a newer pair as
+the pin**. The alternative is the pinned source build in section 2, using clones containing MLX tag
+`v0.32.4` and mlx-c tag `v0.8.0`, Xcode with its Metal toolchain, and network access for MLX's build
+dependencies. It installs into `.deps/install` and does not replace Homebrew packages. A local Homebrew tap
+with extracted historical formulae may be another option, but its bottle availability and dependency
+compatibility must be checked; it is not assumed to reproduce this installation.
+
+Use SIMPLE at the run's pin and verify it before building. For milestone 1 that is Hans's commit of the
+benchmark's FFTW planner option (`fftw_plans`) on top of `ed0aaa3428b7ebe9d834418587f31354850cb99b`
+(milestone decision 22, which replaced `3a595f42f928a366744094a28b62aeb6020099e4`); the run's spec gives its
+hash. SIMPLE requires FFTW in single and double precision, TIFF, JPEG and zlib; it fetches its pinned
+OpenBLAS 0.3.34 during configuration and builds it into its own cache, so the first build needs network
+access. In the SIMPLE checkout:
+
+```bash
+git --no-optional-locks log -1 --format='%H %s'
+./compile_clean.sh
+```
+
+Build mlx-fortran as in section 3. From Terminal, run `build/bin/mlxf_test_exec test=unit_core` and verify
+that it reports one GPU device and prints its name and architecture. A sandboxed or headless session may
+report zero; that is not a successful GPU validation.
+
+For NAX, record the `architecture` printed by that test and the macOS version. In MLX 0.32.4, device
+information reports `device_name` and `architecture`, but no NAX-in-use key. Its NAX availability check
+also depends on the library's build, macOS 26.2 or later and the architecture generation; on a Mac it
+requires generation 17 or later. The architecture alone cannot prove the installed library enabled NAX or
+that a particular operation used it. Confirm actual dispatch with a Metal capture/profile of the workload,
+and record what the capture shows. For float32 matrix products, `MLX_ENABLE_TF32=0` disables that NAX path;
+the variable defaults to enabled and is read once per process, so set it before starting the program.
+CTest sets it to zero. The pinned sources are
+[`device_info.cpp`](https://github.com/ml-explore/mlx/blob/v0.32.4/mlx/backend/metal/device_info.cpp#L25-L51),
+[`device.cpp`](https://github.com/ml-explore/mlx/blob/v0.32.4/mlx/backend/metal/device.cpp#L978-L995),
+[`matmul.cpp`](https://github.com/ml-explore/mlx/blob/v0.32.4/mlx/backend/metal/matmul.cpp#L960-L966) and
+[`utils.h`](https://github.com/ml-explore/mlx/blob/v0.32.4/mlx/utils.h#L225-L227).
+
+For arun itself, follow `SETUP.md` in the `agent_runs` checkout; the run spec supplies the machine-specific
+settings.

@@ -52,14 +52,14 @@ contains
         if( .not. c_associated(p) ) call mlxf_report(PROC, 'MLX returned no storage for the mlx_array', status)
     end function view_target
 
-    module subroutine view_r32( a, p, status )
-        type(mlx_array)      , intent(in)    :: a
+    ! points p, of rank 0 to 7, at q with the Fortran shape s; p is null when q is (a refused view or
+    ! allocation). One copy per kind, each rank its own case: Fortran has no procedure generic over either
+    subroutine point_r32( q, s, p, proc, status )
+        type(c_ptr),           intent(in)    :: q
+        integer,               intent(in)    :: s(:)
         real(real32), pointer, intent(inout) :: p(..)
-        integer, optional    , intent(out)   :: status
-        integer, allocatable :: s(:)
-        type(c_ptr)          :: q
-        call mlxf_enter('mlx_view')
-        q = view_target(a, rank(p), MLXC_FLOAT32, s, status)
+        character(len=*),      intent(in)    :: proc
+        integer, optional,     intent(inout) :: status
         select rank( p )
             rank(0)
                 nullify(p)
@@ -86,8 +86,199 @@ contains
                 nullify(p)
                 if( c_associated(q) ) call c_f_pointer(q, p, s(1:7))
             rank default
-                if( c_associated(q) ) call mlxf_report('mlx_view', 'a pointer of rank above 7', status)
+                if( c_associated(q) ) call mlxf_report(proc, 'a pointer of rank above 7', status)
         end select
+    end subroutine point_r32
+
+    subroutine point_r64( q, s, p, proc, status )
+        type(c_ptr),           intent(in)    :: q
+        integer,               intent(in)    :: s(:)
+        real(real64), pointer, intent(inout) :: p(..)
+        character(len=*),      intent(in)    :: proc
+        integer, optional,     intent(inout) :: status
+        select rank( p )
+            rank(0)
+                nullify(p)
+                if( c_associated(q) ) call c_f_pointer(q, p)
+            rank(1)
+                nullify(p)
+                if( c_associated(q) ) call c_f_pointer(q, p, s(1:1))
+            rank(2)
+                nullify(p)
+                if( c_associated(q) ) call c_f_pointer(q, p, s(1:2))
+            rank(3)
+                nullify(p)
+                if( c_associated(q) ) call c_f_pointer(q, p, s(1:3))
+            rank(4)
+                nullify(p)
+                if( c_associated(q) ) call c_f_pointer(q, p, s(1:4))
+            rank(5)
+                nullify(p)
+                if( c_associated(q) ) call c_f_pointer(q, p, s(1:5))
+            rank(6)
+                nullify(p)
+                if( c_associated(q) ) call c_f_pointer(q, p, s(1:6))
+            rank(7)
+                nullify(p)
+                if( c_associated(q) ) call c_f_pointer(q, p, s(1:7))
+            rank default
+                if( c_associated(q) ) call mlxf_report(proc, 'a pointer of rank above 7', status)
+        end select
+    end subroutine point_r64
+
+    subroutine point_c32( q, s, p, proc, status )
+        type(c_ptr),              intent(in)    :: q
+        integer,                  intent(in)    :: s(:)
+        complex(real32), pointer, intent(inout) :: p(..)
+        character(len=*),         intent(in)    :: proc
+        integer, optional,        intent(inout) :: status
+        select rank( p )
+            rank(0)
+                nullify(p)
+                if( c_associated(q) ) call c_f_pointer(q, p)
+            rank(1)
+                nullify(p)
+                if( c_associated(q) ) call c_f_pointer(q, p, s(1:1))
+            rank(2)
+                nullify(p)
+                if( c_associated(q) ) call c_f_pointer(q, p, s(1:2))
+            rank(3)
+                nullify(p)
+                if( c_associated(q) ) call c_f_pointer(q, p, s(1:3))
+            rank(4)
+                nullify(p)
+                if( c_associated(q) ) call c_f_pointer(q, p, s(1:4))
+            rank(5)
+                nullify(p)
+                if( c_associated(q) ) call c_f_pointer(q, p, s(1:5))
+            rank(6)
+                nullify(p)
+                if( c_associated(q) ) call c_f_pointer(q, p, s(1:6))
+            rank(7)
+                nullify(p)
+                if( c_associated(q) ) call c_f_pointer(q, p, s(1:7))
+            rank default
+                if( c_associated(q) ) call mlxf_report(proc, 'a pointer of rank above 7', status)
+        end select
+    end subroutine point_c32
+
+    subroutine point_i32( q, s, p, proc, status )
+        type(c_ptr),             intent(in)    :: q
+        integer,                 intent(in)    :: s(:)
+        integer(int32), pointer, intent(inout) :: p(..)
+        character(len=*),        intent(in)    :: proc
+        integer, optional,       intent(inout) :: status
+        select rank( p )
+            rank(0)
+                nullify(p)
+                if( c_associated(q) ) call c_f_pointer(q, p)
+            rank(1)
+                nullify(p)
+                if( c_associated(q) ) call c_f_pointer(q, p, s(1:1))
+            rank(2)
+                nullify(p)
+                if( c_associated(q) ) call c_f_pointer(q, p, s(1:2))
+            rank(3)
+                nullify(p)
+                if( c_associated(q) ) call c_f_pointer(q, p, s(1:3))
+            rank(4)
+                nullify(p)
+                if( c_associated(q) ) call c_f_pointer(q, p, s(1:4))
+            rank(5)
+                nullify(p)
+                if( c_associated(q) ) call c_f_pointer(q, p, s(1:5))
+            rank(6)
+                nullify(p)
+                if( c_associated(q) ) call c_f_pointer(q, p, s(1:6))
+            rank(7)
+                nullify(p)
+                if( c_associated(q) ) call c_f_pointer(q, p, s(1:7))
+            rank default
+                if( c_associated(q) ) call mlxf_report(proc, 'a pointer of rank above 7', status)
+        end select
+    end subroutine point_i32
+
+    subroutine point_i64( q, s, p, proc, status )
+        type(c_ptr),             intent(in)    :: q
+        integer,                 intent(in)    :: s(:)
+        integer(int64), pointer, intent(inout) :: p(..)
+        character(len=*),        intent(in)    :: proc
+        integer, optional,       intent(inout) :: status
+        select rank( p )
+            rank(0)
+                nullify(p)
+                if( c_associated(q) ) call c_f_pointer(q, p)
+            rank(1)
+                nullify(p)
+                if( c_associated(q) ) call c_f_pointer(q, p, s(1:1))
+            rank(2)
+                nullify(p)
+                if( c_associated(q) ) call c_f_pointer(q, p, s(1:2))
+            rank(3)
+                nullify(p)
+                if( c_associated(q) ) call c_f_pointer(q, p, s(1:3))
+            rank(4)
+                nullify(p)
+                if( c_associated(q) ) call c_f_pointer(q, p, s(1:4))
+            rank(5)
+                nullify(p)
+                if( c_associated(q) ) call c_f_pointer(q, p, s(1:5))
+            rank(6)
+                nullify(p)
+                if( c_associated(q) ) call c_f_pointer(q, p, s(1:6))
+            rank(7)
+                nullify(p)
+                if( c_associated(q) ) call c_f_pointer(q, p, s(1:7))
+            rank default
+                if( c_associated(q) ) call mlxf_report(proc, 'a pointer of rank above 7', status)
+        end select
+    end subroutine point_i64
+
+    subroutine point_l( q, s, p, proc, status )
+        type(c_ptr),              intent(in)    :: q
+        integer,                  intent(in)    :: s(:)
+        logical(c_bool), pointer, intent(inout) :: p(..)
+        character(len=*),         intent(in)    :: proc
+        integer, optional,        intent(inout) :: status
+        select rank( p )
+            rank(0)
+                nullify(p)
+                if( c_associated(q) ) call c_f_pointer(q, p)
+            rank(1)
+                nullify(p)
+                if( c_associated(q) ) call c_f_pointer(q, p, s(1:1))
+            rank(2)
+                nullify(p)
+                if( c_associated(q) ) call c_f_pointer(q, p, s(1:2))
+            rank(3)
+                nullify(p)
+                if( c_associated(q) ) call c_f_pointer(q, p, s(1:3))
+            rank(4)
+                nullify(p)
+                if( c_associated(q) ) call c_f_pointer(q, p, s(1:4))
+            rank(5)
+                nullify(p)
+                if( c_associated(q) ) call c_f_pointer(q, p, s(1:5))
+            rank(6)
+                nullify(p)
+                if( c_associated(q) ) call c_f_pointer(q, p, s(1:6))
+            rank(7)
+                nullify(p)
+                if( c_associated(q) ) call c_f_pointer(q, p, s(1:7))
+            rank default
+                if( c_associated(q) ) call mlxf_report(proc, 'a pointer of rank above 7', status)
+        end select
+    end subroutine point_l
+
+    module subroutine view_r32( a, p, status )
+        type(mlx_array)      , intent(in)    :: a
+        real(real32), pointer, intent(inout) :: p(..)
+        integer, optional    , intent(out)   :: status
+        integer, allocatable :: s(:)
+        type(c_ptr)          :: q
+        call mlxf_enter('mlx_view')
+        q = view_target(a, rank(p), MLXC_FLOAT32, s, status)
+        call point_r32(q, s, p, 'mlx_view', status)
     end subroutine view_r32
 
     module subroutine view_r64( a, p, status )
@@ -98,34 +289,7 @@ contains
         type(c_ptr)          :: q
         call mlxf_enter('mlx_view')
         q = view_target(a, rank(p), MLXC_FLOAT64, s, status)
-        select rank( p )
-            rank(0)
-                nullify(p)
-                if( c_associated(q) ) call c_f_pointer(q, p)
-            rank(1)
-                nullify(p)
-                if( c_associated(q) ) call c_f_pointer(q, p, s(1:1))
-            rank(2)
-                nullify(p)
-                if( c_associated(q) ) call c_f_pointer(q, p, s(1:2))
-            rank(3)
-                nullify(p)
-                if( c_associated(q) ) call c_f_pointer(q, p, s(1:3))
-            rank(4)
-                nullify(p)
-                if( c_associated(q) ) call c_f_pointer(q, p, s(1:4))
-            rank(5)
-                nullify(p)
-                if( c_associated(q) ) call c_f_pointer(q, p, s(1:5))
-            rank(6)
-                nullify(p)
-                if( c_associated(q) ) call c_f_pointer(q, p, s(1:6))
-            rank(7)
-                nullify(p)
-                if( c_associated(q) ) call c_f_pointer(q, p, s(1:7))
-            rank default
-                if( c_associated(q) ) call mlxf_report('mlx_view', 'a pointer of rank above 7', status)
-        end select
+        call point_r64(q, s, p, 'mlx_view', status)
     end subroutine view_r64
 
     module subroutine view_c32( a, p, status )
@@ -136,34 +300,7 @@ contains
         type(c_ptr)          :: q
         call mlxf_enter('mlx_view')
         q = view_target(a, rank(p), MLXC_COMPLEX64, s, status)
-        select rank( p )
-            rank(0)
-                nullify(p)
-                if( c_associated(q) ) call c_f_pointer(q, p)
-            rank(1)
-                nullify(p)
-                if( c_associated(q) ) call c_f_pointer(q, p, s(1:1))
-            rank(2)
-                nullify(p)
-                if( c_associated(q) ) call c_f_pointer(q, p, s(1:2))
-            rank(3)
-                nullify(p)
-                if( c_associated(q) ) call c_f_pointer(q, p, s(1:3))
-            rank(4)
-                nullify(p)
-                if( c_associated(q) ) call c_f_pointer(q, p, s(1:4))
-            rank(5)
-                nullify(p)
-                if( c_associated(q) ) call c_f_pointer(q, p, s(1:5))
-            rank(6)
-                nullify(p)
-                if( c_associated(q) ) call c_f_pointer(q, p, s(1:6))
-            rank(7)
-                nullify(p)
-                if( c_associated(q) ) call c_f_pointer(q, p, s(1:7))
-            rank default
-                if( c_associated(q) ) call mlxf_report('mlx_view', 'a pointer of rank above 7', status)
-        end select
+        call point_c32(q, s, p, 'mlx_view', status)
     end subroutine view_c32
 
     module subroutine view_i32( a, p, status )
@@ -174,34 +311,7 @@ contains
         type(c_ptr)          :: q
         call mlxf_enter('mlx_view')
         q = view_target(a, rank(p), MLXC_INT32, s, status)
-        select rank( p )
-            rank(0)
-                nullify(p)
-                if( c_associated(q) ) call c_f_pointer(q, p)
-            rank(1)
-                nullify(p)
-                if( c_associated(q) ) call c_f_pointer(q, p, s(1:1))
-            rank(2)
-                nullify(p)
-                if( c_associated(q) ) call c_f_pointer(q, p, s(1:2))
-            rank(3)
-                nullify(p)
-                if( c_associated(q) ) call c_f_pointer(q, p, s(1:3))
-            rank(4)
-                nullify(p)
-                if( c_associated(q) ) call c_f_pointer(q, p, s(1:4))
-            rank(5)
-                nullify(p)
-                if( c_associated(q) ) call c_f_pointer(q, p, s(1:5))
-            rank(6)
-                nullify(p)
-                if( c_associated(q) ) call c_f_pointer(q, p, s(1:6))
-            rank(7)
-                nullify(p)
-                if( c_associated(q) ) call c_f_pointer(q, p, s(1:7))
-            rank default
-                if( c_associated(q) ) call mlxf_report('mlx_view', 'a pointer of rank above 7', status)
-        end select
+        call point_i32(q, s, p, 'mlx_view', status)
     end subroutine view_i32
 
     module subroutine view_i64( a, p, status )
@@ -212,34 +322,7 @@ contains
         type(c_ptr)          :: q
         call mlxf_enter('mlx_view')
         q = view_target(a, rank(p), MLXC_INT64, s, status)
-        select rank( p )
-            rank(0)
-                nullify(p)
-                if( c_associated(q) ) call c_f_pointer(q, p)
-            rank(1)
-                nullify(p)
-                if( c_associated(q) ) call c_f_pointer(q, p, s(1:1))
-            rank(2)
-                nullify(p)
-                if( c_associated(q) ) call c_f_pointer(q, p, s(1:2))
-            rank(3)
-                nullify(p)
-                if( c_associated(q) ) call c_f_pointer(q, p, s(1:3))
-            rank(4)
-                nullify(p)
-                if( c_associated(q) ) call c_f_pointer(q, p, s(1:4))
-            rank(5)
-                nullify(p)
-                if( c_associated(q) ) call c_f_pointer(q, p, s(1:5))
-            rank(6)
-                nullify(p)
-                if( c_associated(q) ) call c_f_pointer(q, p, s(1:6))
-            rank(7)
-                nullify(p)
-                if( c_associated(q) ) call c_f_pointer(q, p, s(1:7))
-            rank default
-                if( c_associated(q) ) call mlxf_report('mlx_view', 'a pointer of rank above 7', status)
-        end select
+        call point_i64(q, s, p, 'mlx_view', status)
     end subroutine view_i64
 
     module subroutine view_l( a, p, status )
@@ -250,34 +333,7 @@ contains
         type(c_ptr)          :: q
         call mlxf_enter('mlx_view')
         q = view_target(a, rank(p), MLXC_BOOL, s, status)
-        select rank( p )
-            rank(0)
-                nullify(p)
-                if( c_associated(q) ) call c_f_pointer(q, p)
-            rank(1)
-                nullify(p)
-                if( c_associated(q) ) call c_f_pointer(q, p, s(1:1))
-            rank(2)
-                nullify(p)
-                if( c_associated(q) ) call c_f_pointer(q, p, s(1:2))
-            rank(3)
-                nullify(p)
-                if( c_associated(q) ) call c_f_pointer(q, p, s(1:3))
-            rank(4)
-                nullify(p)
-                if( c_associated(q) ) call c_f_pointer(q, p, s(1:4))
-            rank(5)
-                nullify(p)
-                if( c_associated(q) ) call c_f_pointer(q, p, s(1:5))
-            rank(6)
-                nullify(p)
-                if( c_associated(q) ) call c_f_pointer(q, p, s(1:6))
-            rank(7)
-                nullify(p)
-                if( c_associated(q) ) call c_f_pointer(q, p, s(1:7))
-            rank default
-                if( c_associated(q) ) call mlxf_report('mlx_view', 'a pointer of rank above 7', status)
-        end select
+        call point_l(q, s, p, 'mlx_view', status)
     end subroutine view_l
 
     ! page-aligned host memory handed to MLX (zero-copy when Metal accepts it; otherwise MLX copies it and
@@ -337,34 +393,7 @@ contains
         else
             call mlxf_report('mlx_alloc', 'the view''s rank differs from the size of the shape', status)
         endif
-        select rank( view )
-            rank(0)
-                nullify(view)
-                if( c_associated(q) ) call c_f_pointer(q, view)
-            rank(1)
-                nullify(view)
-                if( c_associated(q) ) call c_f_pointer(q, view, fshape(1:1))
-            rank(2)
-                nullify(view)
-                if( c_associated(q) ) call c_f_pointer(q, view, fshape(1:2))
-            rank(3)
-                nullify(view)
-                if( c_associated(q) ) call c_f_pointer(q, view, fshape(1:3))
-            rank(4)
-                nullify(view)
-                if( c_associated(q) ) call c_f_pointer(q, view, fshape(1:4))
-            rank(5)
-                nullify(view)
-                if( c_associated(q) ) call c_f_pointer(q, view, fshape(1:5))
-            rank(6)
-                nullify(view)
-                if( c_associated(q) ) call c_f_pointer(q, view, fshape(1:6))
-            rank(7)
-                nullify(view)
-                if( c_associated(q) ) call c_f_pointer(q, view, fshape(1:7))
-            rank default
-                if( c_associated(q) ) call mlxf_report('mlx_alloc', 'a view of rank above 7', status)
-        end select
+        call point_r32(q, fshape, view, 'mlx_alloc', status)
     end function alloc_r32
 
     module function alloc_r64( fshape, mold, view, status, zero_copy ) result(a)
@@ -382,34 +411,7 @@ contains
         else
             call mlxf_report('mlx_alloc', 'the view''s rank differs from the size of the shape', status)
         endif
-        select rank( view )
-            rank(0)
-                nullify(view)
-                if( c_associated(q) ) call c_f_pointer(q, view)
-            rank(1)
-                nullify(view)
-                if( c_associated(q) ) call c_f_pointer(q, view, fshape(1:1))
-            rank(2)
-                nullify(view)
-                if( c_associated(q) ) call c_f_pointer(q, view, fshape(1:2))
-            rank(3)
-                nullify(view)
-                if( c_associated(q) ) call c_f_pointer(q, view, fshape(1:3))
-            rank(4)
-                nullify(view)
-                if( c_associated(q) ) call c_f_pointer(q, view, fshape(1:4))
-            rank(5)
-                nullify(view)
-                if( c_associated(q) ) call c_f_pointer(q, view, fshape(1:5))
-            rank(6)
-                nullify(view)
-                if( c_associated(q) ) call c_f_pointer(q, view, fshape(1:6))
-            rank(7)
-                nullify(view)
-                if( c_associated(q) ) call c_f_pointer(q, view, fshape(1:7))
-            rank default
-                if( c_associated(q) ) call mlxf_report('mlx_alloc', 'a view of rank above 7', status)
-        end select
+        call point_r64(q, fshape, view, 'mlx_alloc', status)
     end function alloc_r64
 
     module function alloc_c32( fshape, mold, view, status, zero_copy ) result(a)
@@ -427,34 +429,7 @@ contains
         else
             call mlxf_report('mlx_alloc', 'the view''s rank differs from the size of the shape', status)
         endif
-        select rank( view )
-            rank(0)
-                nullify(view)
-                if( c_associated(q) ) call c_f_pointer(q, view)
-            rank(1)
-                nullify(view)
-                if( c_associated(q) ) call c_f_pointer(q, view, fshape(1:1))
-            rank(2)
-                nullify(view)
-                if( c_associated(q) ) call c_f_pointer(q, view, fshape(1:2))
-            rank(3)
-                nullify(view)
-                if( c_associated(q) ) call c_f_pointer(q, view, fshape(1:3))
-            rank(4)
-                nullify(view)
-                if( c_associated(q) ) call c_f_pointer(q, view, fshape(1:4))
-            rank(5)
-                nullify(view)
-                if( c_associated(q) ) call c_f_pointer(q, view, fshape(1:5))
-            rank(6)
-                nullify(view)
-                if( c_associated(q) ) call c_f_pointer(q, view, fshape(1:6))
-            rank(7)
-                nullify(view)
-                if( c_associated(q) ) call c_f_pointer(q, view, fshape(1:7))
-            rank default
-                if( c_associated(q) ) call mlxf_report('mlx_alloc', 'a view of rank above 7', status)
-        end select
+        call point_c32(q, fshape, view, 'mlx_alloc', status)
     end function alloc_c32
 
     module function alloc_i32( fshape, mold, view, status, zero_copy ) result(a)
@@ -472,34 +447,7 @@ contains
         else
             call mlxf_report('mlx_alloc', 'the view''s rank differs from the size of the shape', status)
         endif
-        select rank( view )
-            rank(0)
-                nullify(view)
-                if( c_associated(q) ) call c_f_pointer(q, view)
-            rank(1)
-                nullify(view)
-                if( c_associated(q) ) call c_f_pointer(q, view, fshape(1:1))
-            rank(2)
-                nullify(view)
-                if( c_associated(q) ) call c_f_pointer(q, view, fshape(1:2))
-            rank(3)
-                nullify(view)
-                if( c_associated(q) ) call c_f_pointer(q, view, fshape(1:3))
-            rank(4)
-                nullify(view)
-                if( c_associated(q) ) call c_f_pointer(q, view, fshape(1:4))
-            rank(5)
-                nullify(view)
-                if( c_associated(q) ) call c_f_pointer(q, view, fshape(1:5))
-            rank(6)
-                nullify(view)
-                if( c_associated(q) ) call c_f_pointer(q, view, fshape(1:6))
-            rank(7)
-                nullify(view)
-                if( c_associated(q) ) call c_f_pointer(q, view, fshape(1:7))
-            rank default
-                if( c_associated(q) ) call mlxf_report('mlx_alloc', 'a view of rank above 7', status)
-        end select
+        call point_i32(q, fshape, view, 'mlx_alloc', status)
     end function alloc_i32
 
     module function alloc_i64( fshape, mold, view, status, zero_copy ) result(a)
@@ -517,34 +465,7 @@ contains
         else
             call mlxf_report('mlx_alloc', 'the view''s rank differs from the size of the shape', status)
         endif
-        select rank( view )
-            rank(0)
-                nullify(view)
-                if( c_associated(q) ) call c_f_pointer(q, view)
-            rank(1)
-                nullify(view)
-                if( c_associated(q) ) call c_f_pointer(q, view, fshape(1:1))
-            rank(2)
-                nullify(view)
-                if( c_associated(q) ) call c_f_pointer(q, view, fshape(1:2))
-            rank(3)
-                nullify(view)
-                if( c_associated(q) ) call c_f_pointer(q, view, fshape(1:3))
-            rank(4)
-                nullify(view)
-                if( c_associated(q) ) call c_f_pointer(q, view, fshape(1:4))
-            rank(5)
-                nullify(view)
-                if( c_associated(q) ) call c_f_pointer(q, view, fshape(1:5))
-            rank(6)
-                nullify(view)
-                if( c_associated(q) ) call c_f_pointer(q, view, fshape(1:6))
-            rank(7)
-                nullify(view)
-                if( c_associated(q) ) call c_f_pointer(q, view, fshape(1:7))
-            rank default
-                if( c_associated(q) ) call mlxf_report('mlx_alloc', 'a view of rank above 7', status)
-        end select
+        call point_i64(q, fshape, view, 'mlx_alloc', status)
     end function alloc_i64
 
     module function alloc_l( fshape, mold, view, status, zero_copy ) result(a)
@@ -562,34 +483,7 @@ contains
         else
             call mlxf_report('mlx_alloc', 'the view''s rank differs from the size of the shape', status)
         endif
-        select rank( view )
-            rank(0)
-                nullify(view)
-                if( c_associated(q) ) call c_f_pointer(q, view)
-            rank(1)
-                nullify(view)
-                if( c_associated(q) ) call c_f_pointer(q, view, fshape(1:1))
-            rank(2)
-                nullify(view)
-                if( c_associated(q) ) call c_f_pointer(q, view, fshape(1:2))
-            rank(3)
-                nullify(view)
-                if( c_associated(q) ) call c_f_pointer(q, view, fshape(1:3))
-            rank(4)
-                nullify(view)
-                if( c_associated(q) ) call c_f_pointer(q, view, fshape(1:4))
-            rank(5)
-                nullify(view)
-                if( c_associated(q) ) call c_f_pointer(q, view, fshape(1:5))
-            rank(6)
-                nullify(view)
-                if( c_associated(q) ) call c_f_pointer(q, view, fshape(1:6))
-            rank(7)
-                nullify(view)
-                if( c_associated(q) ) call c_f_pointer(q, view, fshape(1:7))
-            rank default
-                if( c_associated(q) ) call mlxf_report('mlx_alloc', 'a view of rank above 7', status)
-        end select
+        call point_l(q, fshape, view, 'mlx_alloc', status)
     end function alloc_l
 
 end submodule mlxf_array_borrow

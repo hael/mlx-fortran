@@ -6,7 +6,7 @@ use mlxf_c_array,    only: mlxc_array_ndim, mlxc_array_shape
 use mlxf_c_ops,      only: mlxc_transpose
 use mlxf,            only: mlx_array, mlx_function, mlx_compile, MLX_DEVICES, MLX_DTYPES, mlx_from, mlx_to, &
                            mlx_to_alloc, mlx_view, mlx_alloc, mlx_eval, mlx_synchronize, mlx_clear_cache, &
-                           mlx_active_memory, mlx_live_count, mlx_last_error, mlx_default_device, &
+                           mlx_active_memory, mlx_live_count, mlx_is_live, mlx_last_error, mlx_default_device, &
                            mlx_set_default_device, exp, sum, sqrt, reshape, transpose, matmul, mlx_rfft, mlx_irfft
 use mlxf_registry,   only: registry_stale_releases
 use mlxf_array,      only: mlxf_handle, mlxf_unary
@@ -355,15 +355,16 @@ contains
             &all(b3 .eqv. g3) .and. dkind == MLX_DTYPES%bool, device_name(dev)//': bool ranks 0, 2, 3 round-trip')
     end subroutine test_identity_kinds
 
-    ! strided sections in and out (the compiler copies in and out of the contiguous dummies), odd sizes, and
-    ! a zero-size array
+    ! strided sections in and out (the compiler copies in and out of the contiguous dummies), odd sizes, a
+    ! zero-size array, and a never-assigned mlx_array assigned over a live one
     subroutine test_sections_and_empty
         real(real32)              :: x(7, 6), y(10, 6), empty(0)
         real(real32), allocatable :: z(:)
-        type(mlx_array)           :: a
+        type(mlx_array)           :: a, unset
         integer(int64)            :: n
         integer, allocatable      :: shp(:)
-        integer                   :: st
+        integer                   :: st, live, now
+        logical                   :: held
         write(*,'(A)') 'test_sections_and_empty'
         call set_fixed_seed(13)
         x = reshape(random_r32(42), [7, 6])
@@ -381,11 +382,18 @@ contains
         call assert_true(n == 0_int64 .and. all(shp == [0]), 'a zero-size array is an empty MLX array')
         call mlx_to_alloc(z, a, status=st)
         call assert_true(st == 0 .and. size(z) == 0, 'a zero-size array comes back with size 0')
+        live = mlx_live_count()
+        a    = unset
+        held = mlx_is_live(a)
+        now  = mlx_live_count()
+        call assert_true(.not. held .and. now == live-1, &
+            &'a never-assigned mlx_array assigned over a live one frees its object and leaves it empty')
     end subroutine test_sections_and_empty
 
-    ! (3,5) reaches MLX as [5,3]; a transposed view holds the transpose and is no view of Fortran order
+    ! (3,5) reaches MLX as [5,3]; a transposed view holds the transpose and is no view of Fortran order; mlx_to
+    ! copies it into its own shape or a vector of its size, never into another shape of that size
     subroutine test_memory_order
-        real(real32)              :: x(3, 5), y(5, 3), yy(3, 5)
+        real(real32)              :: x(3, 5), y(5, 3), yy(3, 5), flat(15)
         real(real32), pointer     :: p(:,:)
         type(mlx_array)           :: a, t
         integer(c_int), pointer   :: cs(:)
@@ -406,8 +414,14 @@ contains
         call mlx_to(y, t, status=st)
         call assert_true(st == 0 .and. all(bits_equal(y, transpose(x))), &
             &'copying out the transposed view gives Fortran''s transpose')
+        yy = 0._real32
         call mlx_to(yy, t, status=st)
-        call assert_true(.not. all(bits_equal(yy, x)), 'the transposed array does not compare equal to the original')
+        call assert_true(st /= 0 .and. all(bits_equal(yy, 0._real32)), &
+            &'a (3,5) destination for the (5,3) transpose is refused and left untouched')
+        call assert_true(index(mlx_last_error(), 'differ in shape') > 0, 'and the message says the shapes differ')
+        call mlx_to(flat, t, status=st)
+        call assert_true(st == 0 .and. all(bits_equal(flat, reshape(transpose(x), [15]))), &
+            &'a rank-1 destination of the same size takes the transpose in Fortran element order')
         nullify(p)
         call mlx_view(t, p, status=st)
         call assert_true(st /= 0 .and. .not. associated(p), 'mlx_view of a non-contiguous array returns a status')

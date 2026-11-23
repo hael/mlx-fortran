@@ -98,26 +98,43 @@ contains
         endif
     end function from_l
 
-    ! evaluates a and copies its n elements of type dtype, in Fortran order, to p
-    subroutine copy_out( a, p, n, dtype, status )
+    ! evaluates a and copies it, in Fortran order, to p, the storage of a Fortran array of shape yshape and type
+    ! dtype: a's shape, or rank 1 and a's size
+    subroutine copy_out( a, p, yshape, dtype, status )
         type(mlx_array),   intent(in)  :: a
         type(c_ptr),       intent(in)  :: p
-        integer(int64),    intent(in)  :: n
+        integer(int64),    intent(in)  :: yshape(:)
         integer(c_int),    intent(in)  :: dtype
         integer, optional, intent(out) :: status
         character(len=*), parameter :: PROC = 'mlx_to'
         type(mlxc_array)            :: h, hc
         type(mlxc_stream)           :: s
         type(c_ptr)                 :: q
+        integer, allocatable        :: ashape(:)
+        integer(int64)              :: n
         logical(c_bool)             :: row
+        logical                     :: l_shape
         integer(c_int)              :: ierr
         h = mlxf_handle(a, PROC)
+        n = product(yshape)
         if( mlxc_array_dtype(h) /= dtype )then
             call mlxf_report(PROC, 'the Fortran array and the mlx_array differ in kind', status)
             return
         endif
         if( int(mlxc_array_size(h), int64) /= n )then
             call mlxf_report(PROC, 'the Fortran array and the mlx_array differ in size', status)
+            return
+        endif
+        ! a destination of rank 1 takes any shape of its size; any other must have a's shape
+        l_shape = size(yshape) == 1
+        if( .not. l_shape )then
+            ashape  = a%shape()
+            l_shape = size(ashape) == size(yshape)
+            if( l_shape ) l_shape = all(int(ashape, int64) == yshape)
+        endif
+        if( .not. l_shape )then
+            call mlxf_report(PROC, 'the Fortran array and the mlx_array differ in shape (only a rank-1 array of '//&
+                &'the same size takes any shape)', status)
             return
         endif
         ierr = mlxc_array_eval(h)
@@ -175,16 +192,16 @@ contains
         end select
     end function itemsize
 
-    ! evaluates a and copies it into y, a Fortran array of the same size and kind
+    ! evaluates a and copies it into y, a Fortran array of a's kind and shape, or of rank 1 and a's size
     module subroutine to_r32( y, a, status )
         real(real32), target, contiguous, intent(inout) :: y(..)
         type(mlx_array),                  intent(in)    :: a
         integer, optional,                intent(out)   :: status
         call mlxf_enter('mlx_to')
         if( size(y, kind=int64) == 0_int64 )then
-            call copy_out(a, c_null_ptr, 0_int64, MLXC_FLOAT32, status)
+            call copy_out(a, c_null_ptr, shape(y, kind=int64), MLXC_FLOAT32, status)
         else
-            call copy_out(a, c_loc(y), size(y, kind=int64), MLXC_FLOAT32, status)
+            call copy_out(a, c_loc(y), shape(y, kind=int64), MLXC_FLOAT32, status)
         endif
     end subroutine to_r32
 
@@ -194,9 +211,9 @@ contains
         integer, optional,                intent(out)   :: status
         call mlxf_enter('mlx_to')
         if( size(y, kind=int64) == 0_int64 )then
-            call copy_out(a, c_null_ptr, 0_int64, MLXC_FLOAT64, status)
+            call copy_out(a, c_null_ptr, shape(y, kind=int64), MLXC_FLOAT64, status)
         else
-            call copy_out(a, c_loc(y), size(y, kind=int64), MLXC_FLOAT64, status)
+            call copy_out(a, c_loc(y), shape(y, kind=int64), MLXC_FLOAT64, status)
         endif
     end subroutine to_r64
 
@@ -206,9 +223,9 @@ contains
         integer, optional,                   intent(out)   :: status
         call mlxf_enter('mlx_to')
         if( size(y, kind=int64) == 0_int64 )then
-            call copy_out(a, c_null_ptr, 0_int64, MLXC_COMPLEX64, status)
+            call copy_out(a, c_null_ptr, shape(y, kind=int64), MLXC_COMPLEX64, status)
         else
-            call copy_out(a, c_loc(y), size(y, kind=int64), MLXC_COMPLEX64, status)
+            call copy_out(a, c_loc(y), shape(y, kind=int64), MLXC_COMPLEX64, status)
         endif
     end subroutine to_c32
 
@@ -218,9 +235,9 @@ contains
         integer, optional,                  intent(out)   :: status
         call mlxf_enter('mlx_to')
         if( size(y, kind=int64) == 0_int64 )then
-            call copy_out(a, c_null_ptr, 0_int64, MLXC_INT32, status)
+            call copy_out(a, c_null_ptr, shape(y, kind=int64), MLXC_INT32, status)
         else
-            call copy_out(a, c_loc(y), size(y, kind=int64), MLXC_INT32, status)
+            call copy_out(a, c_loc(y), shape(y, kind=int64), MLXC_INT32, status)
         endif
     end subroutine to_i32
 
@@ -230,9 +247,9 @@ contains
         integer, optional,                  intent(out)   :: status
         call mlxf_enter('mlx_to')
         if( size(y, kind=int64) == 0_int64 )then
-            call copy_out(a, c_null_ptr, 0_int64, MLXC_INT64, status)
+            call copy_out(a, c_null_ptr, shape(y, kind=int64), MLXC_INT64, status)
         else
-            call copy_out(a, c_loc(y), size(y, kind=int64), MLXC_INT64, status)
+            call copy_out(a, c_loc(y), shape(y, kind=int64), MLXC_INT64, status)
         endif
     end subroutine to_i64
 
@@ -242,9 +259,9 @@ contains
         integer, optional,                   intent(out)   :: status
         call mlxf_enter('mlx_to')
         if( size(y, kind=int64) == 0_int64 )then
-            call copy_out(a, c_null_ptr, 0_int64, MLXC_BOOL, status)
+            call copy_out(a, c_null_ptr, shape(y, kind=int64), MLXC_BOOL, status)
         else
-            call copy_out(a, c_loc(y), size(y, kind=int64), MLXC_BOOL, status)
+            call copy_out(a, c_loc(y), shape(y, kind=int64), MLXC_BOOL, status)
         endif
     end subroutine to_l
 
@@ -301,9 +318,9 @@ contains
             return
         endif
         if( size(y, kind=int64) == 0_int64 )then
-            call copy_out(a, c_null_ptr, 0_int64, MLXC_FLOAT32, status)
+            call copy_out(a, c_null_ptr, shape(y, kind=int64), MLXC_FLOAT32, status)
         else
-            call copy_out(a, c_loc(y), size(y, kind=int64), MLXC_FLOAT32, status)
+            call copy_out(a, c_loc(y), shape(y, kind=int64), MLXC_FLOAT32, status)
         endif
     end subroutine to_alloc_r32
 
@@ -347,9 +364,9 @@ contains
             return
         endif
         if( size(y, kind=int64) == 0_int64 )then
-            call copy_out(a, c_null_ptr, 0_int64, MLXC_FLOAT64, status)
+            call copy_out(a, c_null_ptr, shape(y, kind=int64), MLXC_FLOAT64, status)
         else
-            call copy_out(a, c_loc(y), size(y, kind=int64), MLXC_FLOAT64, status)
+            call copy_out(a, c_loc(y), shape(y, kind=int64), MLXC_FLOAT64, status)
         endif
     end subroutine to_alloc_r64
 
@@ -393,9 +410,9 @@ contains
             return
         endif
         if( size(y, kind=int64) == 0_int64 )then
-            call copy_out(a, c_null_ptr, 0_int64, MLXC_COMPLEX64, status)
+            call copy_out(a, c_null_ptr, shape(y, kind=int64), MLXC_COMPLEX64, status)
         else
-            call copy_out(a, c_loc(y), size(y, kind=int64), MLXC_COMPLEX64, status)
+            call copy_out(a, c_loc(y), shape(y, kind=int64), MLXC_COMPLEX64, status)
         endif
     end subroutine to_alloc_c32
 
@@ -439,9 +456,9 @@ contains
             return
         endif
         if( size(y, kind=int64) == 0_int64 )then
-            call copy_out(a, c_null_ptr, 0_int64, MLXC_INT32, status)
+            call copy_out(a, c_null_ptr, shape(y, kind=int64), MLXC_INT32, status)
         else
-            call copy_out(a, c_loc(y), size(y, kind=int64), MLXC_INT32, status)
+            call copy_out(a, c_loc(y), shape(y, kind=int64), MLXC_INT32, status)
         endif
     end subroutine to_alloc_i32
 
@@ -485,9 +502,9 @@ contains
             return
         endif
         if( size(y, kind=int64) == 0_int64 )then
-            call copy_out(a, c_null_ptr, 0_int64, MLXC_INT64, status)
+            call copy_out(a, c_null_ptr, shape(y, kind=int64), MLXC_INT64, status)
         else
-            call copy_out(a, c_loc(y), size(y, kind=int64), MLXC_INT64, status)
+            call copy_out(a, c_loc(y), shape(y, kind=int64), MLXC_INT64, status)
         endif
     end subroutine to_alloc_i64
 
@@ -531,9 +548,9 @@ contains
             return
         endif
         if( size(y, kind=int64) == 0_int64 )then
-            call copy_out(a, c_null_ptr, 0_int64, MLXC_BOOL, status)
+            call copy_out(a, c_null_ptr, shape(y, kind=int64), MLXC_BOOL, status)
         else
-            call copy_out(a, c_loc(y), size(y, kind=int64), MLXC_BOOL, status)
+            call copy_out(a, c_loc(y), shape(y, kind=int64), MLXC_BOOL, status)
         endif
     end subroutine to_alloc_l
 
