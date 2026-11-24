@@ -14,3 +14,5 @@ __pycache__
 /.codex
 # written by the fortls target for this checkout (cmake/InstallFortls.cmake), never committed
 /.claude/settings.local.json
+# session worktrees the Claude Code desktop app creates inside the checkout, never committed
+/.claude/worktrees/

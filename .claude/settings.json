@@ -1,0 +1,35 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(git commit *)",
+      "Bash(git -C * commit *)",
+      "Bash(git push *)",
+      "Bash(git -C * push *)",
+      "Bash(git add *)",
+      "Bash(git stash *)",
+      "Bash(git reset *)",
+      "Bash(git restore *)",
+      "Bash(git checkout *)",
+      "Bash(git switch *)",
+      "Bash(git clean *)",
+      "Bash(git merge *)",
+      "Bash(git rebase *)",
+      "Bash(git cherry-pick *)",
+      "Bash(git revert *)"
+    ]
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/stop_gate.sh",
+            "timeout": 60,
+            "statusMessage": "Running the static gate"
+          }
+        ]
+      }
+    ]
+  }
+}
