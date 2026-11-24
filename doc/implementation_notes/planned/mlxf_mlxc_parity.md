@@ -1,6 +1,10 @@
 # mlx-fortran: parity with mlx-c
 
-Status, 2026-11-23: Phase 0 complete (interactive, decision 23); Phase 1 complete (run `mlxf_parity`);
+Status, 2026-11-24: Phases 0 and 1 complete. Phases 2 and 3 run next, on the M5 Ultra (decision 26), from the
+maintainer's commit that closes milestone 1's hold. After the Phase 3 hold, the wrappers that milestone 2's
+kernels need come first (decision 27).
+
+Earlier status, 2026-11-23: Phase 0 complete (interactive, decision 23); Phase 1 complete (run `mlxf_parity`);
 Phases 2 and 3 run next in the same run (decision 25); Phases 4 to 9 planned.
 Decisions 1 to 4 ruled by Hans on 2026-11-23 as recommended. The run waits for its base, the maintainer's commit that closes milestone 1 (Phase 7 of `mlxf_milestone1.md`, run `mlxf_m1_m5`), and the run
 records its hash. Written against `309807c` plus the unstaged review of run `mlxf_m1` (2026-11-23), and
@@ -227,6 +231,23 @@ Decisions 1 to 4 were ruled by Hans on 2026-11-23, each as recommended. None is 
     ends at Phase 3's hold. Phases 4 to 9 keep decision 3. Phase 1 opens with the base measurements that
     decision 23 moved there. The file table lists phases one by one, because the run's fence reads only
     the numbers written.
+
+26. (2026-11-24, Hans: "This is the machine we are working on now"; roadmap decision 4) **The runs continue
+    on the M5 Ultra.** This replaces the M2 Ultra of decisions 4, 23 and 25. No output of Phases 2 or 3
+    exists on another machine. Phase 2 opens with the base measurements on the M5 (the gate's time per area,
+    the Release clean build twice), since Phase 1's were taken on the M2 Ultra.
+27. (2026-11-24, Hans: yes; roadmap decision 5) **The order after the Phase 3 hold.** The wrappers that
+    milestone 2's kernels need run first ([`mlxf_kernel_families.md`](mlxf_kernel_families.md)):
+    - the custom Metal kernel of decision 17 (`mlx_metal_kernel_spec` and `type(mlx_metal_kernel)`, over
+      `mlx_fast_metal_kernel_new` and `mlx_fast_metal_kernel_apply`), with Phase 7's test of it;
+    - the FFT lines of Phase 5 (`mlx_fftn`, `mlx_ifftn`, `mlx_rfft2`, `mlx_irfft2`, `mlx_rfftn`, `mlx_irfftn`
+      and the shift and frequency helpers);
+    - `mlx_gather_mm`, `mlx_block_masked_mm` and `mlx_segmented_mm` of Phase 4.
+
+    The remaining lines of Phases 4 to 8 follow in the plan's order, beside milestone 2 on a disjoint file
+    table. This replaces decision 3's order for these lines. Rule `parity` is unchanged: a phase's lines may
+    become public before the phase closes, the count of pending lines only shrinks, and Progress closes a
+    phase only when no line names it.
 
 Defaults taken without a question (cheap to veto): the ledger's path and format; the record names
 `mlxf_conv_spec` and `mlx_metal_kernel_spec`; the new type names `mlx_grad_function`, `mlx_imported_function`,

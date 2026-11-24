@@ -12,10 +12,11 @@ adapted or rejected, and why.
 - `doc/policies/binding_contract_policy.md`: the binding contract (memory order, indices, lifetime and its
   unsupported uses, data movement, kinds, errors, devices, threads, precision). It is the truth; the design
   plan `doc/implementation_notes/completed/mlxf_design.md` holds the decisions' history (cited by number),
-  and `doc/implementation_notes/planned/mlxf_milestone1.md` the phases to come.
+  and `doc/implementation_notes/planned/mlxf_roadmap.md` ranks the work to come and names the plan that owns
+  each item (milestone 1 is closed: `doc/implementation_notes/completed/mlxf_milestone1.md`).
 - `doc/architecture_principles.md`: the house rules' origin and reasons. A disagreement between it and a
   skill is a defect fixed first.
-- `doc/policies/`: the binding, compile-time and test policies.
+- `doc/policies/`: the binding, compile-time, test and toy-example policies.
 - `doc/history/YYYY-MM.md`: owner decisions, delivered batches, negative results, overrides; newest first.
 - `doc/collaboration/apple_questions.md`: questions and reports for the MLX team, numbered, with a status;
   add to it when work meets an MLX or mlx-c question, and record the answer there when it comes.

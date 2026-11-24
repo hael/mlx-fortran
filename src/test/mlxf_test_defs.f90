@@ -21,27 +21,6 @@ real(real64), parameter :: POLAR_DRAW_TOL = 1.e-4_real64
 ! an oracle distance this close to POLAR_DIST_MAX, relative to its row's largest |d|, may be judged valid in
 ! float64 and invalid in float32 (or the reverse): three orders above single-precision rounding
 real(real64), parameter :: POLAR_VALID_MARGIN = 1.e-4_real64
-! the polar table's formulations of a tile's sums and transform: b, the complex product of every bin as a real
-! product of packed (Re, Im) parts, then the inverse real FFT (the full-precision formulation); c, as b, with the
-! inverse transform a second real product against a fixed cosine and sine matrix, so that every product is real
-type :: polar_form_codes
-    integer :: b = 1
-    integer :: c = 2
-end type polar_form_codes
-
-type(polar_form_codes), parameter :: POLAR_FORMS = polar_form_codes()
-
-! The shift-map contraction experiments; the weighted-particle graph remains the control.
-type :: polar_map_form_codes
-    integer :: weighted_particle = 1
-    integer :: real_weights = 2
-end type polar_map_form_codes
-
-type(polar_map_form_codes), parameter :: POLAR_MAP_FORMS = polar_map_form_codes()
-integer,                    parameter :: POLAR_MAP_PTILES(3) = [4, 16, 64]
-integer,                    parameter :: POLAR_MAP_CTILES(3) = [4, 8, 16]
-integer,                    parameter :: POLAR_MAP_OTILES(3) = [1, 4, 8]
-
 ! the seeds of the polar calibrations and of the runs they judge (the fixture's and the accuracy block's)
 integer, parameter :: POLAR_SEED_CALIBRATION = 1
 integer, parameter :: POLAR_SEED_JUDGED      = 2
@@ -51,8 +30,8 @@ integer, parameter :: POLAR_GRID_R(5) = [64, 250, 500, 1000, 2500]
 ! the memory budget of one benchmark configuration, checked before allocation: this share of the machine's
 ! memory as the GPU reports it (memory_size; unified on Apple silicon)
 real(real64), parameter :: POLAR_BUDGET_SHARE = 0.25_real64
-! the canonical tile plan of the kept formulation (particles and references per tile), measured fastest on the
-! M2 Ultra; the timing modes profile and overlap use it
+! the canonical tile plan (particles and references per tile), measured fastest on the M2 Ultra; the timing
+! modes profile and overlap use it
 integer, parameter :: POLAR_CANON_BT = 64
 integer, parameter :: POLAR_CANON_RT = 250
 ! the accuracy block's tile plan (particles and references per tile)
@@ -65,15 +44,14 @@ real(real64), parameter :: POLAR_PROB_BETA = 0.3_real64
 ! the references of one half, in the production memo's layout: for each shell k and angular bin p of the
 ! pftsz+1 bins, ft_ref the transform of the reference ring and ft_ref2 the conjugated transform of its squared
 ! modulus; ids the references' global IDs in the order their entries come back; rt and bt the canonical tile
-! plan (references and particles per tile, every tile padded to them); formulation one of POLAR_FORMS
+! plan (references and particles per tile, every tile padded to them)
 type :: polar_table_refs
     integer                      :: pftsz      = 0
     integer                      :: nk         = 0
     integer                      :: half       = 0
     integer                      :: rt         = 0
     integer                      :: bt         = 0
-    integer(int64)               :: generation  = 0_int64
-    integer                      :: formulation = POLAR_FORMS%b
+    integer(int64)               :: generation = 0_int64
     integer,         allocatable :: ids(:)
     complex(real32), allocatable :: ft_ref(:,:,:)
     complex(real32), allocatable :: ft_ref2(:,:,:)
@@ -132,11 +110,6 @@ type :: polar_map_block
     integer                      :: half       = 0
     integer(int64)               :: generation = 0_int64
     integer                      :: ptcl_tile  = 16
-    integer                      :: contraction = POLAR_MAP_FORMS%weighted_particle
-    integer                      :: cand_tile = 16
-    integer                      :: order_tile = 4
-    logical                      :: compact_radii = .true.
-    logical                      :: hermitian = .false.
     logical                      :: maps       = .false.
     logical                      :: evidence   = .false.
     logical                      :: profile    = .false.
@@ -188,11 +161,10 @@ real(real64), parameter :: POLAR_MAP_CAP_LOG = 1.e-4_real64
 real(real64), parameter :: POLAR_MAP_CAP_VAR = 1.e-4_real64
 
 ! the polar fixture's calibration on the CPU device, fixture seed 1 (its seed banks the particles translated
-! back), one pair per formulation (indexed by POLAR_FORMS: each formulation is judged against its own), frozen:
-! e_cpu, the largest error of a pair's distances relative to the largest |d| of its oracle row, and n_cpu, the
-! pairs whose minimising rotation differs from the oracle's
-real(real64), parameter :: POLAR_FIXTURE_ERR_CPU(2) = [2.3972463973750171e-07_real64, 5.8318067127818633e-07_real64]
-integer,      parameter :: POLAR_FIXTURE_ROT_CPU(2) = [0, 0]
+! back), frozen: e_cpu, the largest error of a pair's distances relative to the largest |d| of its oracle row,
+! and n_cpu, the pairs whose minimising rotation differs from the oracle's
+real(real64), parameter :: POLAR_FIXTURE_ERR_CPU = 2.3972463973750171e-07_real64
+integer,      parameter :: POLAR_FIXTURE_ROT_CPU = 0
 ! a device's rows are within this factor of e_cpu; its rotation disagreements at most
 ! max(factor * n_cpu, POLAR_FIXTURE_ROT_Q), q being the count a 1e-5 per-pair rate exceeds with probability
 ! below 1e-4 over the fixture's 96 pairs

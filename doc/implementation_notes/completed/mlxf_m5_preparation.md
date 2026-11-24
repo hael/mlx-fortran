@@ -24,7 +24,7 @@ this plan owns only their independent host preparation. No second specification 
 Depends on:
 
 - Phase 5c at the base above (validated: implementation reviewed; previous CPU/Metal checks recorded in
-  [milestone 1](../planned/mlxf_milestone1.md); the home Mac's baseline has not been run).
+  [milestone 1](mlxf_milestone1.md); the home Mac's baseline has not been run).
 - Claude's `mlxf_parity`, Phases 1–3 on the M2 Ultra (validated: scope read in
   [decision 25](../planned/mlxf_mlxc_parity.md); completion and its final API are not assumed).
 - The M5 run `mlxf_m1_m5` at `4706ecb` (validated: base supplied by Hans; external run specification

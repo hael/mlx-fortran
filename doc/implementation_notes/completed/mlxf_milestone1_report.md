@@ -1,12 +1,22 @@
 # Milestone 1 report: the M5 Ultra's measurements and verdicts (run `mlxf_m1_m5`)
 
 Run `mlxf_m1_m5`, 2026-11-24, 02:21–04:34 EST. Claude, unattended, on the M5 Ultra. It carried out plan
-[`planned/mlxf_m1_m5.md`](../planned/mlxf_m1_m5.md), which is milestone 1's deferred Phase 5c measurements and
+[`planned/mlxf_m1_m5.md`](mlxf_m1_m5.md), which is milestone 1's deferred Phase 5c measurements and
 its Phases 6 and 7. Measured: mlx-fortran `4706ecb2b8e1a4f77c8e9b67753a66e62b3c3b47` against SIMPLE
 `0a8b0903eee151700305399e8e3ff53c2c21caae`. Run HEAD `af0c23f`. No rulings were needed. Measurement and
 documentation only: no source, test, script or build file changed. The detail is in the plan's Progress,
-Phases 0 to 4; milestone 1's summary is in [its Progress](../planned/mlxf_milestone1.md). Milestone 1 is at
+Phases 0 to 4; milestone 1's summary is in [its Progress](mlxf_milestone1.md). Milestone 1 is at
 the hold of design decision 32.
+
+**How to read the ratios** (added 2026-11-24, [roadmap](../planned/mlxf_roadmap.md) decision 3; no measured
+number changes). SIMPLE never runs as one 30-thread process against the GPU. It runs as several part
+processes at once (3 × 10 or 6 × 5 threads on this machine), and every part would use the GPU at the same
+time. The ratios below compare standalone rates, the GPU alone against 30 threads alone. Scoring at 4.69
+means the GPU alone scores 4.69 times what all 30 cores score. The maps at 0.971 and 0.683 mean the GPU
+alone builds maps at that fraction of the 30 cores' rate; "negative" names decision 18's branch for a GPU
+that replaces the cores, not a loss to them. These rates bound what the GPU could add to busy cores; they do
+not measure it. Under a concurrent 30-thread memory-streaming load the GPU path slowed by 18 % (section 1,
+item 7), and how several processes share the GPU and the memory was not measured here.
 
 ## 1. What was learned
 

@@ -188,7 +188,8 @@ Corrections from the M5 run (`mlxf_m1_m5`, 2026-11-24):
   cached OpenBLAS".
 - At `4706ecb`, `bench_polar_table suite=shiftmap` reads no `nthr` (its timing is the GPU with one
   submitting thread), and `suite=accuracy` uses teams 1 and 24 built in. Pass `nthr` to `time`,
-  `profile`, `overlap` and `stream`.
+  `profile`, `overlap` and `stream`. After milestone 1's hold closed, `suite=shiftmap` refuses `nthr=` with
+  a message, and the benchmark's rows carry `mlx_cache_bytes` beside the peak.
 - **NAX dispatch from a trace:**
   - With Xcode installed, no `xcode-select` change is needed:
 

@@ -1,13 +1,20 @@
 # mlx-fortran milestone 1: the Phase 1 follow-ups, the tiled polar pipeline and the shift maps
 
-Status, 2026-11-24 (run `mlxf_m1_m5`): **Phases 5c (performance exit), 6 and 7 delivered by run `mlxf_m1_m5` on the
+Status, 2026-11-24: **closed.** Hans closed the hold of design decision 32 on 2026-11-24
+([roadmap](../planned/mlxf_roadmap.md), decisions 1 to 3): this plan and [`mlxf_m1_m5.md`](mlxf_m1_m5.md)
+moved to `completed/`, the failed experiments left the test code, and the benchmark's arguments were fixed.
+The roadmap ranks what follows. The verdicts below compare standalone rates, the GPU alone against 30
+threads alone; SIMPLE runs as several part processes that share the GPU, so they bound what the GPU could
+add and do not measure it.
+
+Earlier status, 2026-11-24 (run `mlxf_m1_m5`): **Phases 5c (performance exit), 6 and 7 delivered by run `mlxf_m1_m5` on the
 M5 Ultra; at the hold of design decision 32.** Scoring verdict 4.69, go; shift maps 0.971 (screen) and 0.683
 (window), negative; no Phase 5c alternative retained. Summary in Progress, report in
-[`completed/mlxf_milestone1_report.md`](../completed/mlxf_milestone1_report.md). Hans moves this plan and
+[`completed/mlxf_milestone1_report.md`](mlxf_milestone1_report.md). Hans moves this plan and
 [`mlxf_m1_m5.md`](mlxf_m1_m5.md) and updates the README status line at the hold (`mlxf_m1_m5` decision 13).
 
 Earlier disposition, 2026-11-24: active contract and remaining work. Completed phase instructions
-and Progress have moved to [the M2 delivery record](../completed/mlxf_milestone1_m2.md).
+and Progress have moved to [the M2 delivery record](mlxf_milestone1_m2.md).
 Decision numbers, this path and the file table remain stable for the run tooling. The full Phase 5c
 contract below is retained because its performance exit is still open; implementation is already delivered.
 
@@ -398,7 +405,7 @@ Numbered, dated, never renumbered. "Design decision N" is decision N of the desi
       gives reproducible output, and only it writes the identity files `polar_shiftmap_identity_<map>.bin`:
       measured plans can differ between runs in the last bits. Measured planning reads and writes no wisdom
       file and is logged apart from the timed loops. Both TSVs carry an `fftw_plans` column.
-    - *Evidence* (Codex's side-quest plan [`mlxf_m1_codex.md`](../completed/mlxf_m1_codex.md), Phase 4; M3 Pro, 2,000 particles, two
+    - *Evidence* (Codex's side-quest plan [`mlxf_m1_codex.md`](mlxf_m1_codex.md), Phase 4; M3 Pro, 2,000 particles, two
       invocations per planner): measured plans left `block_prod` within its spread (−2 % to +0.6 %) and made
       the screen maps 6–7 % and the window maps 1.5–2 % faster. Planning took about 12 ms for the
       calculator's plans and 11 ms for a screen map's. With
@@ -701,8 +708,8 @@ interactive changes once they build and gate on the Mac. The run records the has
 ### Phases 0–5b, delivered
 
 The completed instructions, calibration freezes and execution records are in
-[the M2 delivery record](../completed/mlxf_milestone1_m2.md); the original run's report is
-[the M2 batch report](../completed/mlxf_milestone1_m2_report.md). They are historical evidence, not
+[the M2 delivery record](mlxf_milestone1_m2.md); the original run's report is
+[the M2 batch report](mlxf_milestone1_m2_report.md). They are historical evidence, not
 instructions to rerun completed implementation. Phase 5c's remaining measurements and Phases 6–7 follow.
 
 ### Phase 5c, SIMPLE's optimized shift maps in the GPU model (decision 27; implementation/validation)
@@ -755,7 +762,7 @@ memory budget. Record a measured winner or a negative result. Phase 6 repeats ag
 2. Build Debug and Release from scratch at Phase 6's base. Run the fast gate, `recovery_half` (if
    decision 3 is ruled yes), `unit_kernels suite=polar_table` and `suite=polar_shiftmap` on both devices,
    and `bench_polar_table suite=accuracy`. The frozen bounds of Phases 4a, 5a and 5b-a are unchanged.
-3. Repeat [the archived Phase 0](../completed/mlxf_milestone1_m2.md) steps 3 to 5 and 7 there:
+3. Repeat [the archived Phase 0](mlxf_milestone1_m2.md) steps 3 to 5 and 7 there:
    the SIMPLE pin (decision 27), `block_prod` twice per dense
    case, `check`, `fills`, `neigh` and `suite=shiftmap` twice at the full team, both suites with measured
    plans. Recheck the polar dimensions, half counts and the shift-map grid against Phase 0's.
@@ -865,7 +872,7 @@ code at a new pin:
   `FFTW_ESTIMATE` plans in an OpenMP loop, per the design plan's Phase 0; the FFTW comparator plans with
   `FFTW_MEASURE`, decision 22) and **Metal kernels** (design
   decision 18), where a measured bottleneck asks for them;
-- **packaging for consumers**: delivered in [laptop preparation Phase 3](../completed/mlxf_m5_preparation.md),
+- **packaging for consumers**: delivered in [laptop preparation Phase 3](../planned/mlxf_m5_preparation.md),
   including `mlxf::mlxf`, compiler checks, an external consumer and `scripts/check_install.sh`; combined
   parity integration remains in the preparation follow-up;
 - **SIMPLE's integration plan**, if the verdict is go or lead and Hans rules it.
@@ -875,16 +882,16 @@ code at a new pin:
 ### Delivered implementation and validation, through 2026-11-23
 
 Phases 0–5b, the review fixes, particle-shift reuse and Phase 5c implementation/validation are recorded in
-[the completed M2 record](../completed/mlxf_milestone1_m2.md). Its entries preserve the frozen calibration
+[the completed M2 record](mlxf_milestone1_m2.md). Its entries preserve the frozen calibration
 values, source pins, measurements, negative results and limitations. The stronger regression tests and
-consumer package are recorded in [the completed laptop preparation](../completed/mlxf_m5_preparation.md).
+consumer package are recorded in [the completed laptop preparation](../planned/mlxf_m5_preparation.md).
 
 ### Remaining work, 2026-11-24
 
 - Phase 5c: benchmarks, requested-output profiling, tile selection and the retention decision remain deferred.
 - Phases 6–7: the M5 run and final milestone report/verdict are pending; the M2 report is not the final report.
 - Launch auditing and combined parity integration are tracked in
-  [the preparation follow-up](mlxf_m5_preparation.md).
+  [the preparation follow-up](../planned/mlxf_m5_preparation.md).
 
 Append new execution evidence here. Completed records are linked above rather than duplicated.
 

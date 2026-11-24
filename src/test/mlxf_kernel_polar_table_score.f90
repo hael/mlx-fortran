@@ -1,9 +1,9 @@
-!@descr: the polar table workspace's scoring: block validation, the per-tile graph (formulations b, c), the draw, copy-out
+!@descr: the polar table workspace's scoring: block validation, the per-tile graph, the draw, copy-out
 ! Per particle tile and reference tile, every angular bin's complex sums of the particle terms (bt, 2nk) and the
-! tile (2nk, rt) are one real product of packed (Re, Im) parts, batched over the bins; the inverse real transform
-! (an FFT for b, a real product with a fixed matrix for c) gives the rows, and the compiled tail (the distances
-! and the posterior draw) picks each pair's rotation on the device. Tiles are always full (padded), so a pair's
-! entry depends on its tile position only, never on the outer batch or slot.
+! tile (2nk, rt) are one real product of packed (Re, Im) parts, batched over the bins; the inverse real FFT
+! gives the rows, and the compiled tail (the distances and the posterior draw) picks each pair's rotation on
+! the device. Tiles are always full (padded), so a pair's entry depends on its tile position only, never on the
+! outer batch or slot.
 submodule (mlxf_kernel_polar_table) mlxf_kernel_polar_table_score
 use, intrinsic :: iso_fortran_env, only: int64
 use mlxf,           only: mlx_from, mlx_to, mlx_eval, mlx_async_eval, mlx_slice, mlx_permute, mlx_concatenate, reshape, &
@@ -184,30 +184,22 @@ contains
         pr = mlx_concatenate([re, im], 2)
     end function packed_terms
 
-    ! the rows (nrots, rt, bt) of a tile's packed sums (bt, 2rt, P): for b, recombined to complex sums and the
-    ! inverse real FFT; for c, the real and imaginary parts against the inverse transform's matrix
+    ! the rows (nrots, rt, bt) of a tile's packed sums (bt, 2rt, P): recombined to complex sums, then the
+    ! inverse real FFT
     function inverse_transform( self, prod ) result(raw)
         class(polar_table), intent(in) :: self
         type(mlx_array),    intent(in) :: prod
         type(mlx_array) :: raw
-        type(mlx_array) :: c, re, im, x, xp, xr, r2
+        type(mlx_array) :: c, re, im
         integer         :: shp(3), bt, rt, n1
         shp = prod%shape()
         bt  = shp(1)
         n1  = shp(3)
         rt  = shp(2) / 2
-        re = mlx_slice(prod, [1, 1, 1], [bt, rt, n1])
-        im = mlx_slice(prod, [1, rt + 1, 1], [bt, 2 * rt, n1])
-        if( self%formulation == POLAR_FORMS%b )then
-            c   = mlx_permute(cmplx(re, im), [3, 2, 1])
-            raw = mlx_irfft(c, 1, n=self%nrots)
-        else
-            x   = mlx_concatenate([re, im], 3)
-            xp  = mlx_permute(x, [3, 2, 1])
-            xr  = reshape(xp, [2 * n1, rt * bt])
-            r2  = matmul(self%imat, xr)
-            raw = reshape(r2, [self%nrots, rt, bt])
-        endif
+        re  = mlx_slice(prod, [1, 1, 1], [bt, rt, n1])
+        im  = mlx_slice(prod, [1, rt + 1, 1], [bt, 2 * rt, n1])
+        c   = mlx_permute(cmplx(re, im), [3, 2, 1])
+        raw = mlx_irfft(c, 1, n=self%nrots)
     end function inverse_transform
 
     ! the tail of a tile through the compiled function

@@ -1,6 +1,12 @@
 # Scientific examples: remaining volume processing and Fourier projection
 
-Status, 2026-11-24: examples 2 and 3 and the tutorials remain planned after the milestone-1 hold.
+Status, 2026-11-24: **re-scoped** by [`mlxf_kernel_families.md`](mlxf_kernel_families.md) (Hans,
+[roadmap](mlxf_roadmap.md) decision 6). Example 1 grew into its family A. Example 3 became families B and C.
+Example 2's PCG problem became family D, and its filter bank is deferred without a date. The fixtures,
+oracles, tolerances and decisions below stay the design basis of the parts kept. Section 7's phase table is
+superseded by the design note's deliverables K1 to K8.
+
+Earlier status, 2026-11-24: examples 2 and 3 and the tutorials remain planned after the milestone-1 hold.
 Example 1 is delivered through milestone 1. Design review and independent host-reference preparation
 are complete; see [the preparation record](../completed/mlxf_scientific_examples_preparation.md) and
 [the completed review](../completed/mlxf_scientific_examples_review.md).
@@ -9,7 +15,7 @@ The equations and decisions below remain the design basis for milestone 2. Conve
 implementation plan at the hold, with a fresh base and the delivered parity APIs. Full 3D FFT wrappers
 remain parity Phase 5 work; host-reference checks do not establish device implementation or calibration.
 Historical design pins are SIMPLE `7ec7e29720b3e57c2a56a6a7ab754e6f6c57fe35` and mlx-fortran `0d3537b`;
-they are not a new launch base. [Milestone 1](mlxf_milestone1.md) owns the polar pipeline and its verdict.
+they are not a new launch base. [Milestone 1](../completed/mlxf_milestone1.md) owns the polar pipeline and its verdict.
 
 ## 1. Purpose and grouping
 
@@ -95,7 +101,7 @@ references, not an instruction to copy SIMPLE's modules or test harness into the
 
 The original fixture/equation design is in
 [the completed preparation record](../completed/mlxf_scientific_examples_preparation.md).
-[Milestone 1](mlxf_milestone1.md) owns the implemented contract and subsequent corrections;
+[Milestone 1](../completed/mlxf_milestone1.md) owns the implemented contract and subsequent corrections;
 [its completed M2 record](../completed/mlxf_milestone1_m2.md) holds the delivery evidence.
 Reuse that implementation for the tutorial; do not build another scorer here.
 

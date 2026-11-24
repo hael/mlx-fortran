@@ -66,6 +66,13 @@ direction transform) at each map's best particle tile; µs per map of wall time,
   construction 10 % shorter on the screen and 46 % shorter on the window; a 2.0 go needs 81 % and 95 %). No speedup is assumed; item 3's 30 % rule and gates stand. A fused selection and reduction
   (item 4) has at most the reduction's 23 % (screen) to gain.
 
+**Reading and direction** (added 2026-11-24, [roadmap](mlxf_roadmap.md) decisions 3 and 6). The ratios above
+compare standalone rates: SIMPLE runs as several part processes that share the GPU, so a GPU map at 0.68 to
+0.97 of the 30 cores' rate is capacity the GPU could add, at most, to busy cores. The maps' formulation is replaced, not tuned further:
+family A of [`mlxf_kernel_families.md`](mlxf_kernel_families.md) builds them as the dense score at a lattice
+of particle shifts. Items 1 and 3 below stand as history for the Fourier-Bessel form; item 2, the Metal-kernel
+wrapper, is now the roadmap's rank 1b.
+
 ## 2. What is needed, in order
 
 1. **SIMPLE's optimizations in the graph model first.** Milestone-1 decision 27 and Phase 5c own the

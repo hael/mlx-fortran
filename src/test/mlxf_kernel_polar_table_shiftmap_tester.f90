@@ -9,8 +9,7 @@ use mlxf,                     only: mlx_set_default_device, mlx_default_device, 
                                     mlx_synchronize, mlx_clear_cache
 use mlxf_test_defs,           only: POLAR_MAP_CAP_L2, POLAR_MAP_CAP_LOG, POLAR_MAP_CAP_VAR, POLAR_MAP_LOG_CUT, &
                                     polar_table_refs, polar_table_block, polar_table_entries, polar_map_spec, &
-                                    polar_map_block, polar_map_results, POLAR_MAP_FORMS, POLAR_MAP_CTILES, &
-                                    POLAR_MAP_OTILES
+                                    polar_map_block, polar_map_results
 use mlxf_kernel_polar_table,  only: polar_table
 use mlxf_kernel_polar_oracle, only: polar_full_ring, polar_dft_matrix, polar_dft_bins
 use mlxf_test_utils,          only: assert_true, assert_int, device_name, bits_equal, test_devices
@@ -68,7 +67,7 @@ contains
             call test_zero_radius(devs(i))
             call test_folding(devs(i))
             call test_nyquist(devs(i))
-            call test_formulations(devs(i))
+            call test_broadband_maps(devs(i))
             call test_evidence_width(devs(i))
             call test_requested_outputs(devs(i))
             call test_width_cutoff(devs(i))
@@ -86,7 +85,7 @@ contains
         type(polar_map_block)   :: mb
         type(polar_map_results) :: res
         integer, allocatable    :: devs(:)
-        integer                 :: original, d, grid, h, c, sample, pose(3), st, variant
+        integer                 :: original, d, grid, h, c, sample, pose(3), st
         real(real64)            :: expected, err2, norm2, err
         write(*,'(a)') '**** running all polar_shiftmap_accuracy tests ****'
         call test_devices(devs)
@@ -98,9 +97,7 @@ contains
                 do h = 1, 2
                     call prepare_half(fx, h, PRIOR_SCREEN, ws)
                     mb = map_block(fx, [h], reshape([2, 7], [2, 1]), [TEMP_T, TEMP_PHYS])
-                    do variant = 1, 4
-                        call map_variant(mb, variant)
-                        call ws%score_maps(mb, res, st)
+                    call ws%score_maps(mb, res, st)
                     call assert_int(0, st, 'production-geometry sample scores')
                     if( st /= 0 ) cycle
                     err2 = 0._real64
@@ -121,7 +118,6 @@ contains
                     err = sqrt(err2/norm2)
                     write(*,'(a,a,a,i0,a,i0,a,es12.5)') '  ', device_name(devs(d)), ' grid=', grid, ' half=', h, ' error=', err
                     call assert_true(err <= POLAR_MAP_CAP_L2, 'production-geometry sampled maps satisfy the frozen cap')
-                    end do
                 end do
             end do
         end do
@@ -754,7 +750,7 @@ contains
         type(polar_table)       :: ws
         type(polar_map_block)   :: mb
         type(polar_map_results) :: res
-        integer                 :: st, k, m, variant
+        integer                 :: st, k, m
         write(*,'(a)') 'test_nyquist'
         fx = make_map_fixture(.false., .false.)
         do k = 1, fx%nk
@@ -767,9 +763,7 @@ contains
         call fixture_memos(fx)
         call prepare_half(fx, 1, 0._real64, ws)
         mb = map_block(fx, [1], reshape([1], [1, 1]), [TEMP_T, TEMP_PHYS])
-        do variant = 1, 4
-            call map_variant(mb, variant)
-            call ws%score_maps(mb, res, st)
+        call ws%score_maps(mb, res, st)
         call assert_int(0, st, 'the Nyquist ring is scored')
         if( st /= 0 ) return
         write(*,'(a,es12.5,a,es12.5)') '    Nyquist ring: loss at the identity ', res%maps(1, 1, 1, 1, 1), &
@@ -778,7 +772,6 @@ contains
             &device_name(dev)//': the Nyquist ring has loss 0 at the identity')
         call assert_true(abs(res%maps(1, 2, 1, 1, 1) - 4._real32) <= 4._real32 * real(POLAR_MAP_CAP_L2, real32), &
             &device_name(dev)//': the Nyquist ring has loss 4 one angular step away')
-        end do
         call ws%kill()
     end subroutine test_nyquist
 
@@ -840,18 +833,10 @@ contains
             &'the variance cap tells apart')
     end subroutine test_evidence_width
 
-    ! candidate permutations and duplicates give the same entry for the same pair, tiles of one and of two
-    ! particles (three particles: the last tile partial) the entries of one graph, and three repeats identical
-    ! entries
-    subroutine map_variant( mb, variant )
-        type(polar_map_block), intent(inout) :: mb
-        integer,               intent(in)    :: variant
-        mb%contraction = POLAR_MAP_FORMS%weighted_particle
-        if( variant > 2 ) mb%contraction = POLAR_MAP_FORMS%real_weights
-        mb%hermitian = mod(variant, 2) == 0
-    end subroutine map_variant
-
-    subroutine test_formulations( dev )
+    ! the broadband fixtures (the regular and the folding grid) with seven candidates per particle, repeats
+    ! among them, a temperature pair per particle, the screen's prior and tiles of two particles (the last one
+    ! partial): maps, selected losses, evidence, widths and clear modes against the oracle; a repeat is identical
+    subroutine test_broadband_maps( dev )
         integer, intent(in) :: dev
         integer,      parameter   :: LISTS(7, 3) = reshape([7, 2, 5, 2, 7, 5, 1, &
             &1, 5, 7, 5, 2, 1, 7, 3, 7, 2, 3, 5, 2, 1], [7, 3])
@@ -862,8 +847,8 @@ contains
         type(map_summary)         :: sm(7, 3)
         real(real64), allocatable :: expected(:,:,:,:,:)
         real(real64)              :: rel, varerr, logerr, losserr, bound, lo
-        integer                   :: grid, variant, config, c, b, st, njudged, nmodes
-        write(*,'(a)') 'test_formulations'
+        integer                   :: grid, c, b, st, njudged, nmodes
+        write(*,'(a)') 'test_broadband_maps'
         do grid = 1, 2
             fx = make_map_fixture(grid == 2, .true., broadband=.true.)
             call prepare_half(fx, 1, PRIOR_SCREEN, ws)
@@ -878,69 +863,46 @@ contains
                     sm(c, b) = summarize(fx, expected(:,:,:, c, b), [mb%temps(b), mb%temps_phys(b)], PRIOR_SCREEN)
                 end do
             end do
-            do variant = 1, 4
-                call map_variant(mb, variant)
-                do config = 1, 4
-                    if( variant <= 2 .and. config > 1 ) cycle
-                    mb%cand_tile = POLAR_MAP_CTILES(min(config, 3))
-                    mb%order_tile = POLAR_MAP_OTILES(min(config, 3))
-                    mb%compact_radii = config /= 4
-                    call ws%score_maps(mb, res, st)
-                    call assert_int(0, st, 'the contraction/transform/tile configuration scores')
-                    if( st /= 0 ) cycle
-                    rel = 0._real64
-                    varerr = 0._real64
-                    logerr = 0._real64
-                    losserr = 0._real64
-                    njudged = 0
-                    nmodes = 0
-                    do b = 1, 3
-                        do c = 1, 7
-                            rel = max(rel, sqrt(sum((real(res%maps(:,:,:, c, b), real64)-expected(:,:,:, c, b))**2)/ &
-                                &sum(expected(:,:,:, c, b)**2)))
-                            lo = expected(res%ialpha(c, b), res%irot(c, b), res%irho(c, b), c, b)
-                            losserr = max(losserr, abs(real(res%loss(c, b), real64)-lo)/max(1._real64, abs(lo)))
-                            logerr = max(logerr, abs(real(res%logz(c, b), real64)-sm(c, b)%logz))
-                            varerr = max(varerr, abs(real(res%sdev(c, b), real64)**2-sm(c, b)%sdev**2))
-                            bound = real(mb%temps(b), real64)*POLAR_MAP_CAP_L2*sqrt(sum(expected(:,:,:, c, b)**2))
-                            if( sm(c, b)%margin > 2._real64*bound )then
-                                njudged = njudged+1
-                                if( res%ialpha(c, b) == sm(c, b)%ialpha .and. res%irot(c, b) == sm(c, b)%irot .and. &
-                                    &res%irho(c, b) == sm(c, b)%irho ) nmodes = nmodes+1
-                            endif
-                        end do
-                    end do
-                    call assert_true(rel <= POLAR_MAP_CAP_L2 .and. losserr <= POLAR_MAP_CAP_L2, &
-                        &device_name(dev)//': every formulation matches direct maps and selected losses')
-                    call assert_true(logerr <= POLAR_MAP_CAP_LOG, 'every formulation matches independent evidence')
-                    call assert_true(varerr <= POLAR_MAP_CAP_VAR*max(1._real64, maxval(fx%rho)**2), &
-                        &'every formulation matches independent physical moments')
-                    call assert_int(njudged, nmodes, 'clear-margin modes survive formulation and tile changes')
-                    write(*,'(a,4(i0,a))') '    grid ', grid, ' variant ', variant, ' config ', config, &
-                        &' modes judged ', njudged, ''
-                    call assert_true(njudged > 0, 'the broadband fixture has clear-margin modes to judge')
-                end do
-                call ws%score_maps(mb, again, st)
-                call assert_true(all(bits_equal(res%loss, again%loss)) .and. all(bits_equal(res%sdev, again%sdev)) .and. &
-                    &all(bits_equal(res%logz, again%logz)), 'a repeated fixed configuration is bit-identical')
-            end do
-            deallocate(expected)
-        end do
-        ! Direction counts one and two exercise the degenerate and real-only Hermitian halves.
-        do grid = 1, 2
-            fx%nalpha = grid
-            call prepare_half(fx, 1, PRIOR_SCREEN, ws)
-            mb = map_block(fx, [1], reshape([2], [1, 1]), [TEMP_T, TEMP_PHYS])
-            mb%hermitian = .true.
             call ws%score_maps(mb, res, st)
-            allocate(expected(grid, fx%nrot, size(fx%rho), 1, 1))
-            expected(:,:,:, 1, 1) = oracle_map(fx, 1, 2)
-            rel = sqrt(sum((real(res%maps, real64)-expected)**2)/sum(expected**2))
-            call assert_true(rel <= POLAR_MAP_CAP_L2, 'one/two-direction real transforms match the direct residual')
+            call assert_int(0, st, 'the broadband block scores')
+            if( st /= 0 ) return
+            rel = 0._real64
+            varerr = 0._real64
+            logerr = 0._real64
+            losserr = 0._real64
+            njudged = 0
+            nmodes = 0
+            do b = 1, 3
+                do c = 1, 7
+                    rel = max(rel, sqrt(sum((real(res%maps(:,:,:, c, b), real64)-expected(:,:,:, c, b))**2)/ &
+                        &sum(expected(:,:,:, c, b)**2)))
+                    lo = expected(res%ialpha(c, b), res%irot(c, b), res%irho(c, b), c, b)
+                    losserr = max(losserr, abs(real(res%loss(c, b), real64)-lo)/max(1._real64, abs(lo)))
+                    logerr = max(logerr, abs(real(res%logz(c, b), real64)-sm(c, b)%logz))
+                    varerr = max(varerr, abs(real(res%sdev(c, b), real64)**2-sm(c, b)%sdev**2))
+                    bound = real(mb%temps(b), real64)*POLAR_MAP_CAP_L2*sqrt(sum(expected(:,:,:, c, b)**2))
+                    if( sm(c, b)%margin > 2._real64*bound )then
+                        njudged = njudged+1
+                        if( res%ialpha(c, b) == sm(c, b)%ialpha .and. res%irot(c, b) == sm(c, b)%irot .and. &
+                            &res%irho(c, b) == sm(c, b)%irho ) nmodes = nmodes+1
+                    endif
+                end do
+            end do
+            call assert_true(rel <= POLAR_MAP_CAP_L2 .and. losserr <= POLAR_MAP_CAP_L2, &
+                &device_name(dev)//': the broadband maps and selected losses match the direct residual')
+            call assert_true(logerr <= POLAR_MAP_CAP_LOG, 'the broadband evidence matches the host''s log-sum-exp')
+            call assert_true(varerr <= POLAR_MAP_CAP_VAR*max(1._real64, maxval(fx%rho)**2), &
+                &'the broadband widths match the host''s grid moments')
+            call assert_int(njudged, nmodes, 'the broadband clear-margin modes equal the oracle''s')
+            write(*,'(a,i0,a,i0)') '    grid ', grid, ' modes judged ', njudged
+            call assert_true(njudged > 0, 'the broadband fixture has clear-margin modes to judge')
+            call ws%score_maps(mb, again, st)
+            call assert_true(all(bits_equal(res%loss, again%loss)) .and. all(bits_equal(res%sdev, again%sdev)) .and. &
+                &all(bits_equal(res%logz, again%logz)), 'a repeated fixed configuration is bit-identical')
             deallocate(expected)
         end do
         call ws%kill()
-    end subroutine test_formulations
+    end subroutine test_broadband_maps
 
     subroutine test_width_cutoff( dev )
         integer, intent(in) :: dev
@@ -951,7 +913,7 @@ contains
         type(map_summary)         :: sm
         real(real64), allocatable :: expected(:,:,:)
         real(real64)              :: varerr, logerr
-        integer                   :: st, mode, variant, b, c
+        integer                   :: st, mode, b, c
         logical                   :: keep(3, 3)
         write(*,'(a)') 'test_width_cutoff'
         fx = make_map_fixture(.false., .true.)
@@ -960,11 +922,9 @@ contains
         mb%temps = [3._real32, 9._real32, 27._real32]
         mb%temps_phys = [7._real32, 30._real32, 90._real32]
         mb%ptcl_tile = 2
-        do variant = 1, 4
-            call map_variant(mb, variant)
-            call ws%score_maps(mb, base, st)
+        call ws%score_maps(mb, base, st)
         call assert_int(0, st, 'cutoff-disabled reference succeeds')
-        if( st /= 0 ) cycle
+        if( st /= 0 ) return
         varerr = 0._real64
         logerr = 0._real64
         do b = 1, 3
@@ -999,8 +959,6 @@ contains
                 &device_name(dev)//': retained pairs preserve physical-temperature widths')
             call assert_true(all(bits_equal(pack(res%sdev, .not. keep), -1._real32)), 'rejected widths are exactly -1')
             call assert_true(all(bits_equal(res%logz, base%logz)), 'cutoffs preserve requested tempered evidence')
-        end do
-        deallocate(mb%width_cutoff)
         end do
         mb%width_cutoff = reshape([0._real32], [1, 1])
         call ws%score_maps(mb, res, st)
@@ -1066,14 +1024,12 @@ contains
         type(polar_table)       :: ws
         type(polar_map_block)   :: mb
         type(polar_map_results) :: base, profiled
-        integer                 :: st, mode, variant
+        integer                 :: st, mode
         write(*,'(a)') 'test_requested_outputs'
         fx = make_map_fixture(.false., .true.)
         call prepare_half(fx, 1, PRIOR_SCREEN, ws)
         mb = map_block(fx, half_pids(1), same_cands(CANDS(:, 1), 3), [TEMP_T, TEMP_PHYS])
         mb%ptcl_tile = 2
-        do variant = 1, 4
-            call map_variant(mb, variant)
         do mode = 0, 3
             mb%maps = btest(mode, 0)
             mb%evidence = btest(mode, 1)
@@ -1092,10 +1048,12 @@ contains
             if( mb%evidence ) call assert_true(all(bits_equal(base%logz, profiled%logz)), 'profiling preserves evidence')
             if( mb%maps ) call assert_true(all(bits_equal(base%maps, profiled%maps)), 'profiling preserves maps')
         end do
-        end do
         call ws%kill()
     end subroutine test_requested_outputs
 
+    ! candidate permutations and duplicates give the same entry for the same pair, tiles of one and of two
+    ! particles (three particles: the last tile partial) the entries of one graph, and three repeats identical
+    ! entries
     subroutine test_candidates_and_tiles( dev )
         integer, intent(in) :: dev
         type(map_fixture)       :: fx
@@ -1181,18 +1139,6 @@ contains
         call ws%score_maps(mb, res, st)
         call assert_true(st /= 0, device_name(dev)//': a workspace without references refuses maps')
         call prepare_half(fx, 1, 0._real64, ws)
-        bad = mb
-        bad%contraction = -1
-        call ws%score_maps(bad, res, st)
-        call assert_true(st /= 0 .and. index(ws%message(), 'contraction') > 0, 'unknown contractions are refused')
-        bad = mb
-        bad%order_tile = 0
-        call ws%score_maps(bad, res, st)
-        call assert_true(st /= 0, 'zero order tiles are refused before graph construction')
-        bad = mb
-        bad%cand_tile = 0
-        call ws%score_maps(bad, res, st)
-        call assert_true(st /= 0, 'zero candidate tiles are refused before graph construction')
         bad = mb
         bad%half = 2
         call ws%score_maps(bad, res, st)
@@ -1289,14 +1235,11 @@ contains
         type(polar_table)       :: ws
         type(polar_map_results) :: res
         type(polar_map_block)   :: mb
-        integer                 :: st, variant
+        integer                 :: st
         call prepare_half(fx, 1, PRIOR_SCREEN, ws)
         mb = map_block(fx, [1, 3], same_cands(CANDS(:, 1), 2), [TEMP_T, TEMP_PHYS])
-        do variant = 1, 4
-            call map_variant(mb, variant)
-            call ws%score_maps(mb, res, st)
+        call ws%score_maps(mb, res, st)
         nbad = nbad + merge(1, 0, st /= 0 .or. .not. allocated(res%loss))
-        end do
         call ws%kill()
     end subroutine map_cycle
 

@@ -8,7 +8,7 @@ module mlxf_kernel_polar_table
 use, intrinsic :: iso_fortran_env, only: int64, real32, real64
 use mlxf,           only: mlx_array, mlx_function
 use mlxf_test_defs, only: polar_table_refs, polar_table_block, polar_table_entries, polar_map_spec, polar_map_block, &
-                          polar_map_results, POLAR_FORMS
+                          polar_map_results
 implicit none
 
 public :: polar_table
@@ -33,9 +33,8 @@ end type polar_table_slot
 
 ! the workspace of one half: refs holds the reference tiles (4nk, 2rt, pftsz+1, ntiles) real: a tile G of every
 ! bin, rows 1..nk ft_ref2 and rows nk+1..2nk conj(ft_ref), packed as [[Re G, Im G], [-Im G, Re G]], so that a
-! tile's complex sums of every bin are one real product; imat (c) the inverse real transform as a
-! (nrots, 2(pftsz+1)) matrix; tail the compiled distances and draw; stage_s the profiled stages' seconds:
-! particle terms, products, inverse transform, distances and draw, concatenation
+! tile's complex sums of every bin are one real product; tail the compiled distances and draw; stage_s the
+! profiled stages' seconds: particle terms, products, inverse transform, distances and draw, concatenation
 type :: polar_table
     private
     logical                       :: prepared   = .false.
@@ -47,9 +46,8 @@ type :: polar_table
     integer                       :: bt         = 0
     integer                       :: nrefs      = 0
     integer                       :: ntiles     = 0
-    integer(int64)                :: generation  = -1_int64
-    integer                       :: formulation = POLAR_FORMS%b
-    real(real64)                  :: stage_s(5)  = 0._real64
+    integer(int64)                :: generation = -1_int64
+    real(real64)                  :: stage_s(5) = 0._real64
     ! the shift maps' grid and resident data: the references' full-ring spectra over the band in rfull (nkb,
     ! nrots, nrefs) and their squared-modulus memos (pftsz+1, nkb, nrefs), the real Bessel weights of every
     ! order in wfold (nkb, 1, norder+1, nrho, 1, 1), the phase of each order's shift per rotation in ffold
@@ -79,7 +77,6 @@ type :: polar_table
     type(mlx_function)            :: map_evidence
     integer,          allocatable :: ids(:)
     type(mlx_array)               :: refs
-    type(mlx_array)               :: imat
     type(mlx_function)            :: tail
     type(polar_table_slot)        :: slots(POLAR_TABLE_NSLOTS)
     character(len=:), allocatable :: msg
@@ -171,10 +168,10 @@ interface
         class(polar_table), intent(in) :: self
     end function map_order
 
-    ! Active and padded radius-order counts, for accounting for useful and executed contractions.
-    pure module function map_term_counts( self, mblk ) result(counts)
-        class(polar_table),    intent(in) :: self
-        type(polar_map_block), intent(in) :: mblk
+    ! the radius-order terms of a map's contraction: those the truncation keeps, and those executed (every
+    ! radius padded to the largest order)
+    pure module function map_term_counts( self ) result(counts)
+        class(polar_table), intent(in) :: self
         integer(int64) :: counts(2)
     end function map_term_counts
 

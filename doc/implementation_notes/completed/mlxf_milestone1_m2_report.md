@@ -3,7 +3,7 @@
 Status, 2026-11-24: completed report for the original M2 run, archived separately from the future
 final milestone report. The dated results and then-open findings below are historical; later particle-tile,
 Phase 5c and review work is in [the M2 delivery record](mlxf_milestone1_m2.md).
-The current remaining work and M5 verdict belong to [the active plan](../planned/mlxf_milestone1.md).
+The current remaining work and M5 verdict belong to [the active plan](mlxf_milestone1.md).
 
 Run `mlxf_m1`, unattended, on the M2 Ultra (FWM-S116118), 2026-11-22. Base `27d80aa`; SIMPLE pin
 `3a595f42f`; GFortran 16.2, mlx-c 0.8.0 / MLX 0.32.4 (Homebrew). The run carried out Phase 0, Phase 4, and

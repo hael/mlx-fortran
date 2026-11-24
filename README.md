@@ -4,15 +4,17 @@ A modern Fortran interface to [MLX](https://github.com/ml-explore/mlx), Apple's 
 unified CPU/GPU memory of Apple silicon, built on MLX's C API
 [mlx-c](https://github.com/ml-explore/mlx-c).
 
-**Status: milestone 1, early.** The whole of mlx-c 0.8.0 is bound at the C level, generated at build time
+**Status: milestone 1 closed; the library is growing toward parity with mlx-c.** The whole of mlx-c 0.8.0 is
+bound at the C level, generated at build time
 and checked against an independent list of its 680 functions. That check is name coverage, not ABI
 verification: an interface is proven against the C library only where a test calls it. On top of it, the Fortran layer has the
 `mlx_array` type and its lifetime, data movement, evaluation and errors, plus the first operations: elementwise
 arithmetic and comparisons, shape and indexing operations, reductions and scans, batched `matmul`, 1D and 2D
-FFTs, and graph compilation of Fortran callbacks. That set covers the first SIMPLE pipeline (scoring and shift
-maps of the polar table), which is measured on the M2 Ultra and goes to the M5 Ultra next. The API grows with
-demonstrated need, so expect it to change. The plan in progress is
-[`doc/implementation_notes/planned/mlxf_milestone1.md`](doc/implementation_notes/planned/mlxf_milestone1.md).
+FFTs, and graph compilation of Fortran callbacks. That set covers the first SIMPLE-shaped pipeline (scoring
+and shift maps of the polar table), measured on the M2 and M5 Ultra
+([report](doc/implementation_notes/completed/mlxf_milestone1_report.md)). The API is still growing, so expect
+it to change. The work to come is ranked in the
+[roadmap](doc/implementation_notes/planned/mlxf_roadmap.md).
 See the [implementation-notes index](doc/implementation_notes/README.md) for active work and completed records.
 
 ## What it is for

@@ -56,52 +56,28 @@ contains
         deallocate(tiles)
         self%refs = mlx_from(rtiles)
         deallocate(rtiles)
-        if( refs%formulation == POLAR_FORMS%c ) self%imat = mlx_from(inverse_rdft_matrix(2 * refs%pftsz, n1))
         ! the distances and draw as one compiled function, traced at the first tile on the current device
         f         = mlx_function(polar_tail_callback)
         self%tail = mlx_compile(f, shapeless=.false.)
         call mlx_eval(self%refs, status=ierr)
-        if( ierr == 0 .and. refs%formulation == POLAR_FORMS%c ) call mlx_eval(self%imat, status=ierr)
         if( ierr /= 0 )then
             self%msg = 'polar_table%new: the reference tiles could not be evaluated'
             call self%kill()
             return
         endif
-        self%pftsz       = refs%pftsz
-        self%nk          = refs%nk
-        self%nrots       = 2 * refs%pftsz
-        self%half        = refs%half
-        self%rt          = refs%rt
-        self%bt          = refs%bt
-        self%nrefs       = nrefs
-        self%ntiles      = ntiles
-        self%generation  = refs%generation
-        self%formulation = refs%formulation
-        self%ids         = refs%ids
-        self%prepared    = .true.
-        status           = 0
+        self%pftsz      = refs%pftsz
+        self%nk         = refs%nk
+        self%nrots      = 2 * refs%pftsz
+        self%half       = refs%half
+        self%rt         = refs%rt
+        self%bt         = refs%bt
+        self%nrefs      = nrefs
+        self%ntiles     = ntiles
+        self%generation = refs%generation
+        self%ids        = refs%ids
+        self%prepared   = .true.
+        status          = 0
     end subroutine polar_table_new
-
-    ! the inverse real DFT (backward, 1/n) of n samples from the bins' real parts (columns 1..nbins) and
-    ! imaginary parts (columns nbins+1..2 nbins): the first and last bins count once and their imaginary parts
-    ! not at all, the others twice; computed in double precision and rounded once
-    function inverse_rdft_matrix( n, nbins ) result(m)
-        integer, intent(in) :: n, nbins
-        real(real32) :: m(n, 2*nbins)
-        real(real64) :: a, angle
-        integer      :: i, p
-        do p = 1, nbins
-            a = 2._real64 / real(n, real64)
-            if( p == 1 .or. p == nbins ) a = 1._real64 / real(n, real64)
-            do i = 1, n
-                angle           = 2._real64 * acos(-1._real64) * real(mod((p - 1) * (i - 1), n), real64) / &
-                    &real(n, real64)
-                m(i, p)         = real(a * cos(angle), real32)
-                m(i, nbins + p) = 0._real32
-                if( p /= 1 .and. p /= nbins ) m(i, nbins + p) = real(-a * sin(angle), real32)
-            end do
-        end do
-    end function inverse_rdft_matrix
 
     ! the reason refs cannot be prepared, or an empty string
     subroutine check_refs( refs, msg )
@@ -117,8 +93,6 @@ contains
             msg = 'polar_table%new: half must be 1 or 2'
         else if( refs%rt < 1 .or. refs%bt < 1 )then
             msg = 'polar_table%new: the tile plan needs rt and bt of at least 1'
-        else if( refs%formulation /= POLAR_FORMS%b .and. refs%formulation /= POLAR_FORMS%c )then
-            msg = 'polar_table%new: no such formulation'
         else if( .not. allocated(refs%ids) )then
             msg = 'polar_table%new: no reference IDs'
         endif
@@ -183,7 +157,6 @@ contains
         class(polar_table), intent(inout) :: self
         integer :: i
         call self%refs%kill()
-        call self%imat%kill()
         call self%tail%kill()
         call polar_table_drop_maps(self)
         do i = 1, POLAR_TABLE_NSLOTS
@@ -202,8 +175,7 @@ contains
         self%bt         = 0
         self%nrefs      = 0
         self%ntiles     = 0
-        self%generation  = -1_int64
-        self%formulation = POLAR_FORMS%b
+        self%generation = -1_int64
     end subroutine polar_table_kill
 
     module subroutine polar_table_final( self )

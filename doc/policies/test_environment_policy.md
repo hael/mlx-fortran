@@ -37,7 +37,7 @@ active memory, live handles and stale releases. The compile area checks byte ide
 representable compiled/uncompiled arithmetic on each device, shapeless trace reuse and callback error
 recovery; the array area also runs 10,000 compiled calls and verifies complete closure teardown.
 The kernels area holds test-only models of SIMPLE's pipelines written against `mlxf` as a user writes
-(`src/test/mlxf_kernel_<x>.f90`); its sub-suite `polar_table` checks the polar table's scoring workspace
+(`src/test/mlxf_kernel_<x>.f90`; the toy example policy rules the form of new ones and of their refactoring); its sub-suite `polar_table` checks the polar table's scoring workspace
 on a seeded fixture against a double-precision ring oracle, on both devices, with row bounds calibrated
 on the CPU device and frozen in `src/test/mlxf_test_defs.f90` before the first GPU run; the draw on the
 device's own rows, refusals of mismatched blocks, schedule identity and the workspace's lifecycle. Its
@@ -45,11 +45,11 @@ sub-suite `polar_shiftmap` checks the workspace's shift maps on analytic fixture
 double-precision residual at every cell, with caps confirmed on the CPU device and frozen there before the
 first GPU run: the maps, the mode where its margin is clear, the zero radius, the folding of orders beyond the
 directions, the Nyquist ring, the width and the log evidence against the host's moments, candidate order and
-tiles, refusals and rebuilds, and 100 prepare-score-invalidate cycles. The shift-map suite also checks both
-contractions and direction transforms, active-radius/padded order tiles, requested-output profiling, changed
-weights/grid/band, strict width cutoffs and exact teardown. `unit_kernels suite=polar_shiftmap_accuracy` is
-named-only: a direct-residual sample at the production window/screen geometry, on both devices and for every
-graph combination. It uses the same frozen caps, has assertions, and is outside the fast CTest process budget.
+tiles, refusals and rebuilds, and 100 prepare-score-invalidate cycles. The shift-map suite also checks
+requested-output profiling, changed weights/grid/band, strict width cutoffs and exact teardown.
+`unit_kernels suite=polar_shiftmap_accuracy` is named-only: a direct-residual sample at the production
+window/screen geometry, on both devices. It uses the same frozen caps, has assertions, and is outside the
+fast CTest process budget.
 Constants several test modules share live in `src/test/mlxf_test_defs.f90`, a defs module (rule `defs`).
 
 **Benchmarks** are `mlxf_test_exec test=bench_<x> suite=<mode> [key=value ...]`, listed in the registry's
@@ -61,8 +61,10 @@ and fails the process like a test. Its bounds are calibrated on the CPU device a
 `src/test/mlxf_test_defs.f90` before its first GPU run. `bench_polar_table suite=shiftmap` measures the shift
 maps on SIMPLE's grid (read from a key = value file of SIMPLE's rows) with SIMPLE's column names. Timed runs
 follow the plan's rules: Release, an idle machine with the load recorded, best of 3 after a warm-up, two
-invocations, and the precision mode in every row. The shift-map options `contraction=1|2`, `hermitian=0|1`,
-`ctile=`, `otile=` and `compact=0|1` select test-model experiments. `widths=quarter|none` selects synthetic
+invocations, and the precision mode in every row. `suite=shiftmap` refuses `nthr=`: the maps run on the
+device with one submitting thread. A key a suite does not read is ignored, so the keys of the removed
+experiments (`form=`, `contraction=`, `hermitian=`, `ctile=`, `otile=`, `compact=`) no longer select
+anything. `widths=quarter|none` selects synthetic
 cutoff survivors; `widths=all evidence=0` is the matched baseline. Cutoff/evidence rows do not claim an
 all-width CPU speedup. Grid files must carry fresh `simple_commit`, `fftw_plans` and full-team rates before
 ratios are used; `revision=` identifies the measured mlx-fortran tree. Performance runs are currently deferred

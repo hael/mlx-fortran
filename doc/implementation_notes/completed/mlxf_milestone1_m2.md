@@ -3,7 +3,7 @@
 Status, 2026-11-24: completed delivery record, split from the active milestone plan at `26387c1`.
 Phases 0–5b and Phase 5c implementation/correctness validation are delivered. Phase 5c benchmarking and
 retention, M5 measurements, and the final milestone verdict are still open in the
-[active milestone plan](../planned/mlxf_milestone1.md). No new validation or benchmark was run for this split.
+[active milestone plan](mlxf_milestone1.md). No new validation or benchmark was run for this split.
 
 The original completed-phase instructions and Progress entries follow unchanged. References to decisions,
 acceptance sections and the file table mean the active milestone plan, whose numbering is preserved.

@@ -7,10 +7,10 @@ module mlxf_kernel_polar_table_tester
 use, intrinsic :: iso_fortran_env, only: int64, real32, real64
 use mlxf,                     only: mlx_set_default_device, mlx_default_device, mlx_live_count, mlx_active_memory, &
                                     mlx_synchronize, mlx_clear_cache, MLX_DEVICES
-use mlxf_test_defs,           only: POLAR_FORMS, POLAR_DIST_MAX, POLAR_DIST_INVALID, POLAR_DIST_VALID, &
-                                    POLAR_FIXTURE_ERR_CPU, POLAR_FIXTURE_ROT_CPU, POLAR_ROW_FACTOR, &
-                                    POLAR_FIXTURE_ROT_Q, POLAR_SEED_CALIBRATION, POLAR_SEED_JUDGED, polar_table_refs, &
-                                    polar_table_block, polar_table_entries, polar_row_check
+use mlxf_test_defs,           only: POLAR_DIST_MAX, POLAR_DIST_INVALID, POLAR_DIST_VALID, POLAR_FIXTURE_ERR_CPU, &
+                                    POLAR_FIXTURE_ROT_CPU, POLAR_ROW_FACTOR, POLAR_FIXTURE_ROT_Q, &
+                                    POLAR_SEED_CALIBRATION, POLAR_SEED_JUDGED, polar_table_refs, polar_table_block, &
+                                    polar_table_entries, polar_row_check
 use mlxf_kernel_polar_table,  only: polar_table
 use mlxf_kernel_polar_oracle, only: polar_full_ring, polar_dft_matrix, polar_dft_bins, polar_keyed_u, polar_first_min, &
                                     polar_row_weights, polar_compare_rows, polar_draws_off, polar_report_draws
@@ -72,7 +72,6 @@ type :: selection
     integer, allocatable :: ids(:)
     integer, allocatable :: pids(:)
     integer              :: tiles(2) = [RT, BT]
-    integer              :: formulation = POLAR_FORMS%b
 end type selection
 
 contains
@@ -90,7 +89,6 @@ contains
             write(*,'(a)') '  on the '//device_name(devs(i))
             if( devs(i) == MLX_DEVICES%cpu ) call report_calibration
             call test_fixture_rows(devs(i))
-            call test_formulations(devs(i))
             call test_fallbacks(devs(i))
             call test_convention(devs(i))
             call test_lists_and_tiles(devs(i))
@@ -416,12 +414,9 @@ contains
         type(selection),           intent(in)  :: sel
         type(polar_table_block),   intent(out) :: blk
         type(polar_table_entries), intent(out) :: ent
-        type(polar_table)      :: ws
-        type(polar_table_refs) :: refs
-        integer                :: st
-        refs             = make_refs(fx, sel%half, sel%ids, sel%tiles, 1_int64)
-        refs%formulation = sel%formulation
-        call ws%new(refs, st)
+        type(polar_table) :: ws
+        integer           :: st
+        call ws%new(make_refs(fx, sel%half, sel%ids, sel%tiles, 1_int64), st)
         call assert_int(0, st, 'the references are prepared: '//ws%message())
         blk = make_block(fx, sel%half, sel%ids, sel%pids, 1_int64)
         call ws%score(blk, ent, st)
@@ -460,45 +455,36 @@ contains
         if( .not. gated ) return
         write(*,'(a,es10.3,a,i0,a,i0,a)') '    '//label//': row error ', chk%err, ', minimising rotation differs in ', &
             &chk%argmin_off, ' of ', chk%npairs, ' pairs'
-        call assert_within_fixture_bounds(label, chk, sel%formulation)
+        call assert_within_fixture_bounds(label, chk)
         call polar_report_draws(label, fx%seed, dor, ent, blk)
     end function judge
 
-    ! the fixture's frozen gates for formulation form: row error at most POLAR_ROW_FACTOR e_cpu, minimising-rotation
-    ! disagreements at most max(POLAR_ROW_FACTOR n_cpu, q), with the formulation's own calibration pair
-    subroutine assert_within_fixture_bounds( label, chk, form )
+    ! the fixture's frozen gates: row error at most POLAR_ROW_FACTOR e_cpu, minimising-rotation disagreements at
+    ! most max(POLAR_ROW_FACTOR n_cpu, q)
+    subroutine assert_within_fixture_bounds( label, chk )
         character(len=*),      intent(in) :: label
         type(polar_row_check), intent(in) :: chk
-        integer,               intent(in) :: form
-        call assert_true(chk%err <= POLAR_ROW_FACTOR * POLAR_FIXTURE_ERR_CPU(form), label//': the rows'' error is '//&
-            &'within twice the formulation''s CPU calibration e_cpu')
-        call assert_true(chk%argmin_off <= max(nint(POLAR_ROW_FACTOR) * POLAR_FIXTURE_ROT_CPU(form), &
-            &POLAR_FIXTURE_ROT_Q), label//': the minimising rotation differs from the oracle''s in at most '//&
-            &'max(2 n_cpu, 1) pairs')
+        call assert_true(chk%err <= POLAR_ROW_FACTOR * POLAR_FIXTURE_ERR_CPU, label//': the rows'' error is within '//&
+            &'twice the CPU calibration''s e_cpu')
+        call assert_true(chk%argmin_off <= max(nint(POLAR_ROW_FACTOR) * POLAR_FIXTURE_ROT_CPU, POLAR_FIXTURE_ROT_Q), &
+            &label//': the minimising rotation differs from the oracle''s in at most max(2 n_cpu, 1) pairs')
     end subroutine assert_within_fixture_bounds
 
     ! ---- the tests -----------------------------------------------------------------------------------------
 
-    ! the fixture's calibration on the CPU device, fixture seed 1, both halves, all references, each formulation
-    ! (each is judged against its own pair): reported
+    ! the fixture's calibration on the CPU device, fixture seed 1, both halves, all references: reported
     subroutine report_calibration
         type(fixture)         :: fx
-        type(selection)       :: sel
         type(polar_row_check) :: chk(2)
-        integer               :: h, f
-        character(len=1)      :: fname(2) = ['B', 'C']
+        integer               :: h
         write(*,'(a)') 'report_calibration'
         fx = make_fixture(POLAR_SEED_CALIBRATION)
-        do f = POLAR_FORMS%b, POLAR_FORMS%c
-            do h = 1, 2
-                sel             = selection_of(h, ALL_REFS, half_ptcls(h), [RT, BT])
-                sel%formulation = f
-                chk(h) = judge('calibration', fx, sel, .false.)
-            end do
-            write(*,'(a,es23.16,a,i0,a,i0,a,i0,a,i0,a)') '    calibration (fixture seed 1, cpu, formulation '//fname(f)//&
-                &'): e_cpu = ', maxval(chk%err), ', n_cpu = ', sum(chk%argmin_off), ' of ', sum(chk%npairs), ' pairs (', &
-                &sum(chk%mixed), ' of mixed validity, ', sum(chk%invalid), ' invalid)'
+        do h = 1, 2
+            chk(h) = judge('calibration', fx, selection_of(h, ALL_REFS, half_ptcls(h), [RT, BT]), .false.)
         end do
+        write(*,'(a,es23.16,a,i0,a,i0,a,i0,a,i0,a)') '    calibration (fixture seed 1, cpu): e_cpu = ', &
+            &maxval(chk%err), ', n_cpu = ', sum(chk%argmin_off), ' of ', sum(chk%npairs), ' pairs (', sum(chk%mixed), &
+            &' of mixed validity, ', sum(chk%invalid), ' invalid)'
     end subroutine report_calibration
 
     ! fixture seed 2, both halves, all references, the canonical tile plan: the oracle rows and the draw
@@ -519,23 +505,6 @@ contains
         call assert_true(sum(chk%mixed) >= 2, 'the fixture has rows of mixed validity (the mixed particles)')
         call assert_true(sum(chk%invalid) >= NREFS, 'the fixture has rows without a valid rotation')
     end subroutine test_fixture_rows
-
-    ! the other formulation of the workspace (c) held to the fixture's frozen bounds on seed 2; b, the default,
-    ! is every other test's
-    subroutine test_formulations( dev )
-        integer, intent(in) :: dev
-        type(fixture)         :: fx
-        type(selection)       :: sel
-        type(polar_row_check) :: chk
-        integer               :: h
-        write(*,'(a)') 'test_formulations'
-        fx = make_fixture(POLAR_SEED_JUDGED)
-        do h = 1, 2
-            sel             = selection_of(h, ALL_REFS, half_ptcls(h), [RT, BT])
-            sel%formulation = POLAR_FORMS%c
-            chk = judge(device_name(dev)//' formulation C', fx, sel, .true.)
-        end do
-    end subroutine test_formulations
 
     ! the draw's fallbacks: u = 0 draws the first rotation of positive weight, u >= 1 (no rotation reaches it)
     ! the minimising rotation, a row without a valid rotation gives (invalid, 1); and the cutoff: a rotation
@@ -789,7 +758,7 @@ contains
         dor = oracle_rows(fb, 2, ALL_REFS, half_ptcls(2))
         chk = polar_compare_rows(dor, eb)
         call assert_int(0, chk%valid_off, device_name(dev)//': the rebuilt entries'' validity matches the new oracle')
-        call assert_within_fixture_bounds(device_name(dev)//' rebuilt', chk, POLAR_FORMS%b)
+        call assert_within_fixture_bounds(device_name(dev)//' rebuilt', chk)
         call assert_true(any(.not. bits_equal(ea%rows, eb%rows)), device_name(dev)//': the rebuilt rows differ '//&
             &'from the old ones')
         call ws%kill()

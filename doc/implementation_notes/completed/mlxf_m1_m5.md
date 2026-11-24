@@ -1,13 +1,16 @@
 # Run `mlxf_m1_m5`: milestone 1's measurements and verdicts on the M5 Ultra
 
-Status, 2026-11-24: **delivered by run `mlxf_m1_m5`, Phases 0 to 4; at the hold with milestone 1** (scoring verdict
+Status, 2026-11-24: **closed with milestone 1** ([roadmap](../planned/mlxf_roadmap.md), decision 2), and
+moved to `completed/`.
+
+Earlier status, 2026-11-24: **delivered by run `mlxf_m1_m5`, Phases 0 to 4; at the hold with milestone 1** (scoring verdict
 4.69, go; shift maps 0.971 and 0.683, negative; report `completed/mlxf_milestone1_report.md`). Planned the same
 day; decisions 1 to 14 ruled by Hans on 2026-11-24 (11 as amended, the others as
 recommended). Base: mlx-fortran
 `0cfb128` (this note's commit is the run's HEAD). Measured sources: mlx-fortran
 `4706ecb2b8e1a4f77c8e9b67753a66e62b3c3b47` and SIMPLE `0a8b0903eee151700305399e8e3ff53c2c21caae`.
 Supersedes: none. It is the `mlxf_m1_m5` specification that [milestone 1](mlxf_milestone1.md) decision 6
-and [the M5 preparation follow-up](mlxf_m5_preparation.md) Phase 2 refer to. Depends on: milestone 1
+and [the M5 preparation follow-up](../planned/mlxf_m5_preparation.md) Phase 2 refer to. Depends on: milestone 1
 Phases 0–5c delivered (validated: yes, M2 Ultra and MacBook Pro); the M5 Ultra with MLX 0.32.4 and mlx-c
 0.8.0 (validated: device probe below, no gate run yet); SIMPLE's pin (validated: present, not built here).
 
@@ -70,7 +73,7 @@ scored the verdict's case at 4.29 to 4.55 times SIMPLE's 24 cores and built the 
   cached for GNU 16.2 and OpenMP under `~/src/SIMPLE/.deps/numerics`, with its tarball in `.deps/downloads`.
 - **Missing inputs**: no production BENCH output on this Mac (`~/for_claude` absent), so s, f and the
   width share w stay unmeasured. The laptop's evidence root `~/agent_work/mlxf_m5_preparation/` is not here.
-  Its command matrix is in the [completed record](../completed/mlxf_m5_preparation.md), Phase 2 Progress,
+  Its command matrix is in the [completed record](../planned/mlxf_m5_preparation.md), Phase 2 Progress,
   and section 8 below follows it with the corrections listed there.
 - **arun** is `~/src/agent_runs` with `HOST=local`. Its `hosts/local.md` says the maintainer may work on
   the machine during a run, hence decision 5's load rule.
@@ -257,7 +260,7 @@ all as absolute paths.
 4. Current tree: `scripts/release_gate.sh --jobs 30` in the repository copy (its `build_release_gate/` is
    git-ignored; `--allow-dirty` once this run's documentation edits exist, which the log lists), then `polar_shiftmap` and `polar_shiftmap_accuracy` on both devices in its Release tree.
    Results go to Progress; failures are findings (decision 14).
-5. The launch audit: a Progress entry in [the follow-up](mlxf_m5_preparation.md) (its Phase 2). It names
+5. The launch audit: a Progress entry in [the follow-up](../planned/mlxf_m5_preparation.md) (its Phase 2). It names
    this note as the actual specification, with checksums; the verified pins; the corrections to the
    laptop's matrix (section 2's findings: the hand-built export, the team of 30, the budget, the OpenBLAS
    cache, traces in place of a capture option); and the inputs still to come from Phase 1.
@@ -341,7 +344,7 @@ nthr=30`, plus the keys named below. Full precision unless stated.
    transient full-half staging (16 · nrots · band shells · half particles bytes). Reconcile.
 8. (deferrable) The verdict graph once each with `widths=quarter`, `widths=none` and `evidence=1`, labelled
    synthetic, with no CPU ratio.
-9. Refresh [the fusing note](mlxf_fusing_note.md) from the final requested-output profile: which stages
+9. Refresh [the fusing note](../planned/mlxf_fusing_note.md) from the final requested-output profile: which stages
    dominate, and which remain kernel candidates. No speedup is assumed.
 
 Exit: Stage A complete with two clean invocations per graph; retention per decision 7 with its numbers;
@@ -424,7 +427,7 @@ Files changed: this note (Progress), `mlxf_m5_preparation.md` (the launch audit'
    M2's size (167.9), inside HEAD's committed bound, so not a failure here. In HEAD's Release tree:
    `polar_shiftmap` 1,364/1,364 (the laptop's 56 added assertions) and `polar_shiftmap_accuracy` 144/144,
    `device=all`.
-5. **Launch audit**: entry written in [the follow-up](mlxf_m5_preparation.md), Progress.
+5. **Launch audit**: entry written in [the follow-up](../planned/mlxf_m5_preparation.md), Progress.
 
 Findings for later phases (no decision changed):
 
@@ -662,7 +665,7 @@ Machine: the M5 Ultra as in Phase 0. Sources: mlx-fortran `4706ecb2b8e1a4f77c8e9
 Release base tree), SIMPLE `0a8b0903eee151700305399e8e3ff53c2c21caae` (Phase 1's rows). Inputs `$C`
 (`90a974fa…f1d9`) and `$G` (`aa05ca27…2eca`; its `maps_per_s_t24` holds Phase 1's two 30-thread rates, and
 the rows' `cpu_maps_per_s` is the faster of them). Rulings: none. Files changed: this note (Progress) and
-[the fusing note](mlxf_fusing_note.md) (status and a new section 1a). Evidence under `keep/phase3_runs/` (one
+[the fusing note](../planned/mlxf_fusing_note.md) (status and a new section 1a). Evidence under `keep/phase3_runs/` (one
 directory per invocation, with `sidecar.txt`, `samples.tsv`, `/usr/bin/time -l`) and `keep/phase3_logs/`
 (the driver scripts `stage{A,B,C}.sh`, `mem_regions.sh`, `summarize_maps.py` and its outputs
 `stage{A,B}_summary.txt`). **All 35 timed invocations are clean at their first attempt** (largest

@@ -88,7 +88,7 @@ Only the former supports launch readiness. No benchmark or remote run is started
 
 Exit: combined review and validation are recorded and the launch-readiness status is explicit.
 Close this follow-up only after its required launch audit and integration work are done. M5 measurements
-and the milestone verdict remain owned by [milestone 1](mlxf_milestone1.md).
+and the milestone verdict remain owned by [milestone 1](../completed/mlxf_milestone1.md).
 
 ### File table
 
@@ -113,7 +113,7 @@ source hashes. These are historical observed results, not a new validation of th
 
 ### Phase 2, launch audit, 2026-11-24 (run `mlxf_m1_m5`, Phase 0, on the M5 Ultra)
 
-**The actual specification** is [`mlxf_m1_m5.md`](mlxf_m1_m5.md) (SHA-256 at launch
+**The actual specification** is [`mlxf_m1_m5.md`](../completed/mlxf_m1_m5.md) (SHA-256 at launch
 `070eaf1596fbef8fc007e5a5252f55ef14be3283d5e0c62d3c10a38c0574a2c5`), run by arun from
 `~/agent_runs/mlxf_m1_m5/spec/` (`prompt.md` `1600a316856301150c2e3de3fb665079b7b060980526e9f9e2d33a0773fc3210`,
 `phases.md` `145bb8f84efc34d62afaff7ba22d5972b821f25ba5b2afd716949a75dd87302e`, `run.conf`

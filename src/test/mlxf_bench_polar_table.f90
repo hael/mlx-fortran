@@ -10,13 +10,12 @@ use, intrinsic :: iso_c_binding,   only: c_int, c_double
 !$ use omp_lib,               only: omp_get_max_threads
 use mlxf,                     only: mlx_set_default_device, mlx_default_device, mlx_peak_memory, mlx_reset_peak_memory, &
                                     mlx_synchronize, mlx_clear_cache, mlx_device_info_size, MLX_DEVICES, &
-                                    mlx_active_memory
-use mlxf_test_defs,           only: POLAR_FORMS, POLAR_MAP_FORMS, POLAR_ROW_FACTOR, POLAR_BLOCK_ERR_CPU, &
-                                    POLAR_BLOCK_ROT_CPU, POLAR_BLOCK_ROT_Q, POLAR_SEED_CALIBRATION, POLAR_SEED_JUDGED, &
-                                    POLAR_GRID_B, POLAR_GRID_R, POLAR_BUDGET_SHARE, POLAR_CANON_BT, POLAR_CANON_RT, &
-                                    POLAR_BLOCK_BT, POLAR_BLOCK_RT, POLAR_PROB_BETA, polar_table_refs, &
-                                    polar_table_block, polar_table_entries, polar_map_spec, polar_map_block, &
-                                    polar_map_results, polar_row_check
+                                    mlx_active_memory, mlx_cache_memory
+use mlxf_test_defs,           only: POLAR_ROW_FACTOR, POLAR_BLOCK_ERR_CPU, POLAR_BLOCK_ROT_CPU, POLAR_BLOCK_ROT_Q, &
+                                    POLAR_SEED_CALIBRATION, POLAR_SEED_JUDGED, POLAR_GRID_B, POLAR_GRID_R, &
+                                    POLAR_BUDGET_SHARE, POLAR_CANON_BT, POLAR_CANON_RT, POLAR_BLOCK_BT, POLAR_BLOCK_RT, &
+                                    POLAR_PROB_BETA, polar_table_refs, polar_table_block, polar_table_entries, &
+                                    polar_map_spec, polar_map_block, polar_map_results, polar_row_check
 use mlxf_kernel_polar_table,  only: polar_table
 use mlxf_kernel_polar_oracle, only: polar_dft_matrix, polar_keyed_u, polar_compare_rows, polar_draws_off, &
                                     polar_report_draws, polar_memo_rows
@@ -35,6 +34,8 @@ integer, parameter :: POOL_RINGS = 1000
 real(real32), parameter :: TEMP_LEVELS(4) = [1._real32, 30._real32, 420._real32, 1.e4_real32]
 ! the estimate's count of rotation-row temporaries a tile's tail holds at once (conservative)
 integer, parameter :: TAIL_ROWS = 12
+! the formulation the dense rows record: packed real products, the inverse real FFT and the compiled tail
+character(len=*), parameter :: FORMULATION = 'B+compiled'
 
 ! one of SIMPLE's measured cases
 type :: bench_case
@@ -70,7 +71,8 @@ end type bench_map
 
 ! one shift-map configuration: the particles of a tile (each with all its candidates), the walls of the 3 repeats, the preparation of the
 ! references and of the maps, the profiled pass's wall and stages (construction, mode, width, copy-out), the
-! MLX peak, the estimate checked against the budget, the load, the Bessel order used and the status
+! MLX peak and the cache read with it, the estimate checked against the budget, the load, the Bessel order used
+! and the status
 type :: map_timing
     integer        :: ptcl_tile   = 0
     integer        :: norder_used = 0
@@ -79,6 +81,7 @@ type :: map_timing
     real(real64)   :: pwall       = -1._real64
     real(real64)   :: stages(4)   = 0._real64
     real(real64)   :: peak        = -1._real64
+    real(real64)   :: cache       = -1._real64
     real(real64)   :: est         = -1._real64
     real           :: load1       = -1.
     integer(int64) :: terms(2) = 0_int64
@@ -121,11 +124,10 @@ type :: half_table
     real(real64)              :: submit_s = 0._real64
 end type half_table
 
-! a tile plan and formulation of a workspace
+! a tile plan of a workspace
 type :: bench_config
-    integer :: bt          = POLAR_BLOCK_BT
-    integer :: rt          = POLAR_BLOCK_RT
-    integer :: formulation = POLAR_FORMS%b
+    integer :: bt = POLAR_BLOCK_BT
+    integer :: rt = POLAR_BLOCK_RT
 end type bench_config
 
 interface
@@ -175,35 +177,43 @@ contains
         end do
     end function arg_str
 
+    ! whether key=value is on the command line, whatever the value
+    logical function arg_given( key )
+        character(len=*), intent(in) :: key
+        character(len=512) :: arg
+        integer            :: i
+        arg_given = .false.
+        do i = 1, command_argument_count()
+            call get_command_argument(i, arg)
+            if( index(arg, key//'=') == 1 ) arg_given = .true.
+        end do
+    end function arg_given
+
+    ! the integer value of key=value on the command line, or dflt when the key is absent; a value that is not
+    ! an optionally signed integer stops, a benchmark's usage error
     integer function arg_int( key, dflt )
         character(len=*), intent(in) :: key
         integer,          intent(in) :: dflt
         character(len=:), allocatable :: s
         integer                       :: ios
-        s       = arg_str(key, '')
         arg_int = dflt
-        if( len(s) > 0 ) read(s, *, iostat=ios) arg_int
-        if( ios /= 0 ) arg_int = dflt
+        if( .not. arg_given(key) ) return
+        s   = arg_str(key, '')
+        ios = 1
+        if( verify(s, '+-0123456789') == 0 ) read(s, *, iostat=ios) arg_int
+        if( ios /= 0 )then
+            write(*,'(a)') 'bench_polar_table: '//key//'='//s//' is not an integer'
+            error stop 2
+        endif
     end function arg_int
 
-    ! the tile plan of bt= and rt=, and the formulation named by form= (b, the default, or c)
+    ! the tile plan of bt= and rt=
     function arg_config( dflt ) result(cfg)
         type(bench_config), intent(in) :: dflt
-        type(bench_config)            :: cfg
-        character(len=:), allocatable :: f
-        cfg    = dflt
+        type(bench_config) :: cfg
         cfg%bt = arg_int('bt', dflt%bt)
         cfg%rt = arg_int('rt', dflt%rt)
-        f      = arg_str('form', 'b')
-        if( f == 'c' ) cfg%formulation = POLAR_FORMS%c
     end function arg_config
-
-    function form_name( cfg ) result(name)
-        type(bench_config), intent(in) :: cfg
-        character(len=:), allocatable :: name
-        name = 'B+compiled'
-        if( cfg%formulation == POLAR_FORMS%c ) name = 'C+compiled'
-    end function form_name
 
     ! a case of the key = value file (blocks [case name]); stops when absent, a benchmark's usage error
     function read_case( path, name ) result(cs)
@@ -502,10 +512,9 @@ contains
         integer,            intent(in)    :: half
         type(bench_config), intent(in)    :: cfg
         integer :: st
-        d%refs(half)%rt          = cfg%rt
-        d%refs(half)%bt          = cfg%bt
-        d%refs(half)%formulation = cfg%formulation
-        d%refs(half)%generation  = 1_int64
+        d%refs(half)%rt         = cfg%rt
+        d%refs(half)%bt         = cfg%bt
+        d%refs(half)%generation = 1_int64
         call ws%new(d%refs(half), st)
         call assert_int(0, st, 'bench_polar_table: the references are prepared: '//ws%message())
     end subroutine prepare
@@ -555,7 +564,7 @@ contains
         or2 = oracle_halves(d2)
         do i = 1, size(devs)
             call mlx_set_default_device(devs(i))
-            write(*,'(a)') '  on the '//device_name(devs(i))//', formulation '//form_name(cfg)
+            write(*,'(a)') '  on the '//device_name(devs(i))//', formulation '//FORMULATION
             if( devs(i) == MLX_DEVICES%cpu )then
                 if( .not. allocated(or1) )then
                     d1  = make_data(cs, POLAR_SEED_CALIBRATION)
@@ -635,7 +644,7 @@ contains
         type(bench_config), intent(in)    :: cfg
         type(polar_row_check) :: chk
         chk = score_and_compare(d, dor, cfg, canonical_plan(.true.), .false.)
-        write(*,'(a,es23.16,a,i0,a,i0,a,i0,a,i0,a,i0)') '    calibration (block seed 1, cpu, '//form_name(cfg)// &
+        write(*,'(a,es23.16,a,i0,a,i0,a,i0,a,i0,a,i0)') '    calibration (block seed 1, cpu, '//FORMULATION// &
             &'): e_cpu = ', chk%err, ', n_cpu = ', chk%argmin_off, ' of ', chk%npairs, ' pairs; validity off ', &
             &chk%valid_off, ', draws off ', chk%draws_bad, ', mixed rows ', chk%mixed
     end subroutine report_block_calibration
@@ -651,13 +660,13 @@ contains
         type(score_plan)      :: plan
         plan = canonical_plan(.true.)
         chk  = score_and_compare(d, dor, cfg, plan, .true.)
-        write(*,'(a,es10.3,a,i0,a,i0,a)') '    block seed 2 ('//dev//', '//form_name(cfg)//'): row error ', chk%err, &
+        write(*,'(a,es10.3,a,i0,a,i0,a)') '    block seed 2 ('//dev//', '//FORMULATION//'): row error ', chk%err, &
             &', minimising rotation differs in ', chk%argmin_off, ' of ', chk%npairs, ' pairs'
         call assert_int(BLOCK_NPTCLS * BLOCK_NREFS, chk%npairs, 'the accuracy block scores 64,000 pairs')
         call assert_int(0, chk%valid_off, dev//' block: every entry is valid or invalid as in the oracle')
         call assert_int(0, chk%draws_bad, dev//' block: the draw lies in the device row''s cumulative interval '//&
             &'within 1e-4 W, and the entry''s distance is the row''s')
-        call assert_block_bounds(dev//' block '//form_name(cfg), chk)
+        call assert_block_bounds(dev//' block '//FORMULATION, chk)
     end subroutine judge_block
 
     ! the block's frozen bounds: row error at most POLAR_ROW_FACTOR e_cpu, minimising-rotation disagreements at
@@ -837,10 +846,10 @@ contains
         estimate_bytes = refs + real(nslots, real64) * (inputs + tile)
     end function estimate_bytes
 
-    ! the sweep of decision 13's grid over one case (case=) or the cases named by cases_list=, in one
-    ! formulation: configurations above the particles per half, above the references or beyond the budget are
-    ! pruned before any allocation; each kept one is prepared, warmed up and timed best of 3 (both halves, all
-    ! particles, from the memos through the entries in Fortran arrays)
+    ! the sweep of decision 13's grid over one case (case=) or the cases named by cases_list=: configurations
+    ! above the particles per half, above the references or beyond the budget are pruned before any allocation;
+    ! each kept one is prepared, warmed up and timed best of 3 (both halves, all particles, from the memos
+    ! through the entries in Fortran arrays)
     subroutine bench_time
         type(bench_case)              :: cs
         type(bench_data)              :: d
@@ -909,7 +918,7 @@ contains
         type(score_plan)              :: plan
         character(len=:), allocatable :: status
         real(real64)                  :: walls(3), t0, prep, est, cpu_s
-        real(real64)                  :: peak
+        real(real64)                  :: peak, cache
         real                          :: load1
         integer                       :: h, rep, nh
         nh     = d%cs%nptcls / 2
@@ -923,6 +932,7 @@ contains
         walls = -1._real64
         prep  = -1._real64
         peak  = -1._real64
+        cache = -1._real64
         cpu_s = 0._real64
         load1 = load_average()
         if( status == 'timed' )then
@@ -947,21 +957,23 @@ contains
                 end do
                 walls(rep) = clock_s() - t0
             end do
-            peak = real(mlx_peak_memory(), real64)
+            peak  = real(mlx_peak_memory(), real64)
+            cache = real(mlx_cache_memory(), real64)
             do h = 1, 2
                 call ws(h)%kill()
             end do
             call mlx_clear_cache()
         endif
-        call write_time_row(d, cfg, [walls, prep, est, peak, cpu_s / 3._real64], load1, status)
+        call write_time_row(d, cfg, [walls, prep, est, peak, cache, cpu_s / 3._real64], load1, status)
     end subroutine time_config
 
     ! a row of bench_polar_table.tsv: SIMPLE's case columns by name, then the tile, formulation, device,
-    ! precision, preparation and memory; vals = wall_rep1..3, prep_s, est_bytes, mlx_peak_bytes, cpu_s
+    ! precision, preparation and memory; vals = wall_rep1..3, prep_s, est_bytes, mlx_peak_bytes,
+    ! mlx_cache_bytes, cpu_s
     subroutine write_time_row( d, cfg, vals, load1, status )
         type(bench_data),   intent(in) :: d
         type(bench_config), intent(in) :: cfg
-        real(real64),       intent(in) :: vals(7)
+        real(real64),       intent(in) :: vals(8)
         real,               intent(in) :: load1
         character(len=*),   intent(in) :: status
         character(len=*), parameter :: TSV = 'bench_polar_table.tsv'
@@ -983,22 +995,22 @@ contains
             &'nrots'//T//'kfrom'//T//'kto'//T//'B'//T//'R'//T//'formulation'//T//'device'//T//'precision'//T//&
             &'load1'//T//'wall_s'//T//'wall_rep1'//T//'wall_rep2'//T//'wall_rep3'//T//'pairs_per_s'//T//&
             &'useful_pairs'//T//'padded_pairs'//T//'prep_s'//T//'host_cpu_s'//T//'est_bytes'//T//'mlx_peak_bytes'//&
-            &T//'status'
-        write(u,'(a,10(a,i0),a,a,a,a,a,a,a,f6.2,4(a,f10.4),a,es12.5,2(a,es12.5),2(a,f10.4),2(a,es12.5),a,a)') &
+            &T//'mlx_cache_bytes'//T//'status'
+        write(u,'(a,10(a,i0),a,a,a,a,a,a,a,f6.2,4(a,f10.4),a,es12.5,2(a,es12.5),2(a,f10.4),3(a,es12.5),a,a)') &
             &trim(d%cs%name), T, d%cs%nspace, T, d%cs%nstates, T, d%cs%nrefs, T, d%cs%nptcls, T, d%cs%pftsz, T, &
-            &nrots, T, d%cs%kfrom, T, d%cs%kto, T, cfg%bt, T, cfg%rt, T, form_name(cfg), T, &
+            &nrots, T, d%cs%kfrom, T, d%cs%kto, T, cfg%bt, T, cfg%rt, T, FORMULATION, T, &
             &device_name(mlx_default_device()), T, precision_mode(), T, load1, T, wall, T, vals(1), T, vals(2), T, &
             &vals(3), T, merge(pairs / wall, -1._real64, wall > 0._real64), T, pairs, T, padded, T, vals(4), T, &
-            &vals(7), T, vals(5), T, vals(6), T, status
+            &vals(8), T, vals(5), T, vals(6), T, vals(7), T, status
         close(u)
-        write(*,'(a,i0,a,i0,a,f9.4,a,es11.4,a,es10.3,a)') '    '//trim(d%cs%name)//' '//form_name(cfg)//' B=', &
+        write(*,'(a,i0,a,i0,a,f9.4,a,es11.4,2(a,es10.3),a)') '    '//trim(d%cs%name)//' '//FORMULATION//' B=', &
             &cfg%bt, ' R=', cfg%rt, ' wall=', wall, ' s, ', merge(pairs / wall, -1._real64, wall > 0._real64), &
-            &' pairs/s, peak ', vals(6), ' B: '//status
+            &' pairs/s, peak ', vals(6), ' B, cache ', vals(7), ' B: '//status
     end subroutine write_time_row
 
     ! ---- profile ---------------------------------------------------------------------------------------------
 
-    ! one configuration (case=, bt=, rt=, form=) scored with an evaluation barrier after every stage:
+    ! one configuration (case=, bt=, rt=) scored with an evaluation barrier after every stage:
     ! the stages' seconds summed over both halves, and the copy-out apart; best of 3 after a warm-up
     subroutine bench_profile
         type(bench_case)            :: cs
@@ -1049,7 +1061,7 @@ contains
             &T//'device'//T//'precision'//T//'wall_s'//T//'terms_s'//T//'products_s'//T//'transform_s'//T//&
             &'distances_draw_s'//T//'concat_s'//T//'copyout_host_s'//T//'prep_s'//T//'cold_first_s'
         write(u,'(a,3(a,i0),2(a,i0),a,a,a,a,a,a,9(a,f10.4))') trim(cs%name), T, cs%nrefs, T, cs%nptcls, T, &
-            &cs%pftsz, T, cfg%bt, T, cfg%rt, T, form_name(cfg), T, device_name(mlx_default_device()), T, &
+            &cs%pftsz, T, cfg%bt, T, cfg%rt, T, FORMULATION, T, device_name(mlx_default_device()), T, &
             &precision_mode(), T, wbest, T, best(1), T, best(2), T, best(3), T, best(4), T, best(5), T, &
             &wbest - sum(best), T, prep, T, cold
         close(u)
@@ -1119,7 +1131,7 @@ contains
             &T//'device'//T//'precision'//T//'load'//T//'sync_s'//T//'two_slots_s'//T//'host_cpu_sync_s'//T//&
             &'host_submit_sync_s'//T//'hidden_share'
         write(u,'(a,5(a,i0),a,a,a,a,a,a,a,a,4(a,f10.4),a,f8.4)') trim(cs%name), T, cs%nrefs, T, cs%nptcls, T, &
-            &cfg%bt, T, cfg%rt, T, plan%outer, T, form_name(cfg), T, device_name(mlx_default_device()), T, &
+            &cfg%bt, T, cfg%rt, T, plan%outer, T, FORMULATION, T, device_name(mlx_default_device()), T, &
             &precision_mode(), T, arg_str('load', 'none'), T, wsync, T, wover, T, cpu_sync, T, sub_sync, T, &
             &(wsync - wover) / max(cpu_sync + sub_sync, 1.e-9_real64)
         close(u)
@@ -1171,6 +1183,12 @@ contains
         integer,          allocatable :: ptiles(:)
         integer                       :: ic, i0
         write(*,'(a)') '**** bench_polar_table suite=shiftmap ****'
+        ! no team to size (the maps run on the device with one submitting thread): nthr= is refused, not ignored
+        if( arg_given('nthr') )then
+            write(*,'(a)') 'bench_polar_table: suite=shiftmap takes no nthr= (the maps run on the device with one '//&
+                &'submitting thread)'
+            error stop 2
+        endif
         write(*,'(a,f0.1,a)') '    memory budget ', budget_bytes() / 1.e9_real64, ' GB (a share of the GPU''s memory_size)'
         call mlx_set_default_device(device_of_arg())
         cs     = read_case(arg_str('cases', 'polar_case.txt'), arg_str('case', '2500_4'))
@@ -1361,23 +1379,22 @@ contains
         type(map_timing)        :: tm
         real(real64)            :: t0, st0(4)
         integer                 :: h, ip, rep, st
-        logical                 :: fits
+        logical                 :: fits, l_evidence
         real(real64)            :: trial_bytes, budget
         call check_map_case(d%cs, mp)
-        do h = 1, 2
-            call map_execution_args(mb(h))
-        end do
+        ! read before any staging: a malformed value stops here, not after the data are made
+        l_evidence = arg_int('evidence', 0) /= 0
         fits = .false.
         budget = budget_bytes()
         do ip = 1, size(ptiles)
             if( ptiles(ip) < 1 ) error stop 'bench_polar_table: particle tiles must be positive'
-            trial_bytes = map_estimate_bytes(d%cs, mp, ptiles(ip), mp%norder, mb(1))
+            trial_bytes = map_estimate_bytes(d%cs, mp, ptiles(ip), mp%norder)
             fits = fits .or. trial_bytes <= budget
         end do
         if( .not. fits )then
             do ip = 1, size(ptiles)
                 tm%ptcl_tile = ptiles(ip)
-                tm%est = map_estimate_bytes(d%cs, mp, ptiles(ip), mp%norder, mb(1))
+                tm%est = map_estimate_bytes(d%cs, mp, ptiles(ip), mp%norder)
                 tm%status = budget_status()
                 call write_map_row(d, mp, tm)
             end do
@@ -1397,23 +1414,24 @@ contains
             call assert_int(0, st, 'bench_polar_table: a half''s maps are prepared: '//ws(h)%message())
             if( st /= 0 ) return
             mb(h) = map_block(d, mp, h)
-            call map_execution_args(mb(h))
+            mb(h)%evidence = l_evidence
             call set_width_mode(mb(h), arg_str('widths', 'all'))
         end do
         call mlx_synchronize()
         tm%prep(2)     = clock_s() - t0
         tm%norder_used = ws(1)%map_order()
-        tm%terms = ws(1)%map_term_counts(mb(1))
+        tm%terms = ws(1)%map_term_counts()
         tm%resident = real(mlx_active_memory(), real64)
         tm%host_bytes = map_host_bytes(d, mb)
         do ip = 1, size(ptiles)
             tm%ptcl_tile  = ptiles(ip)
             tm%load1      = load_average()
-            tm%est        = map_estimate_bytes(d%cs, mp, ptiles(ip), tm%norder_used, mb(1))
-            tm%tile_bytes = tm%est - map_estimate_bytes(d%cs, mp, 0, tm%norder_used, mb(1))
+            tm%est        = map_estimate_bytes(d%cs, mp, ptiles(ip), tm%norder_used)
+            tm%tile_bytes = tm%est - map_estimate_bytes(d%cs, mp, 0, tm%norder_used)
             tm%walls      = -1._real64
             tm%pwall      = -1._real64
             tm%peak       = -1._real64
+            tm%cache      = -1._real64
             tm%stages     = 0._real64
             tm%status     = 'timed'
             if( tm%est > budget_bytes() )then
@@ -1434,6 +1452,7 @@ contains
                 tm%walls(rep) = clock_s() - t0
             end do
             tm%peak       = real(mlx_peak_memory(), real64)
+            tm%cache      = real(mlx_cache_memory(), real64)
             mb(:)%profile = .true.
             st0 = ws(1)%map_seconds() + ws(2)%map_seconds()
             t0  = clock_s()
@@ -1459,12 +1478,10 @@ contains
     ! weighted spectra (complex), its candidates' spectra, the contraction's output with its transform and their
     ! reordered copy, the directions' transform with its reordered copy, and the cell-sized temporaries of the
     ! reductions per pair; counted twice: the tile in use and the previous tile's buffers MLX's cache keeps
-    real(real64) function map_estimate_bytes( cs, mp, ptcl_tile, norder, mb )
-        type(bench_case),      intent(in) :: cs
-        type(bench_map),       intent(in) :: mp
-        integer,               intent(in) :: ptcl_tile, norder
-        type(polar_map_block), intent(in) :: mb
-        real(real64) :: ct, nt
+    real(real64) function map_estimate_bytes( cs, mp, ptcl_tile, norder )
+        type(bench_case), intent(in) :: cs
+        type(bench_map),  intent(in) :: mp
+        integer,          intent(in) :: ptcl_tile, norder
         real(real64) :: nrots, nkb, nrefs, nord, nrho, nalpha, ncand, cells, resident, per_ptcl
         nrots    = real(mp%nrots, real64)
         nkb      = real(mp%kscreen - mp%kfrom + 1, real64)
@@ -1479,29 +1496,8 @@ contains
         per_ptcl = 8._real64 * (nord * nrho * nkb * nrots + 2._real64 * nord * nkb * nrots + nkb * ncand * nrots + &
             &3._real64 * nord * nrho * ncand * nrots + 2._real64 * nalpha * nrho * ncand * nrots) + &
             &4._real64 * 10._real64 * cells * ncand
-        if( mb%contraction == POLAR_MAP_FORMS%real_weights )then
-            ct = real(min(mp%ncand, mb%cand_tile), real64)
-            nt = real(min(norder+1, mb%order_tile), real64)
-            per_ptcl = 8._real64 * (2._real64*nt*nkb*nrots + nkb*ncand*nrots + &
-                &2._real64*ct*nt*nkb*nrots + 2._real64*ct*nt*nrho*nrots + &
-                &3._real64*nord*nrho*ncand*nrots + 2._real64*nalpha*nrho*ncand*nrots) + &
-                &4._real64*10._real64*cells*ncand
-        endif
         map_estimate_bytes = resident + 2._real64 * real(ptcl_tile, real64) * per_ptcl
     end function map_estimate_bytes
-
-    subroutine map_execution_args( mb )
-        type(polar_map_block), intent(inout) :: mb
-        mb%contraction = arg_int('contraction', POLAR_MAP_FORMS%weighted_particle)
-        mb%cand_tile = arg_int('ctile', 16)
-        mb%order_tile = arg_int('otile', 4)
-        mb%compact_radii = arg_int('compact', 1) /= 0
-        mb%hermitian = arg_int('hermitian', 0) /= 0
-        mb%evidence = arg_int('evidence', 0) /= 0
-        if( mb%cand_tile < 1 .or. mb%order_tile < 1 ) error stop 'bench_polar_table: ctile and otile must be positive'
-        if( mb%contraction /= POLAR_MAP_FORMS%weighted_particle .and. &
-            &mb%contraction /= POLAR_MAP_FORMS%real_weights ) error stop 'bench_polar_table: contraction=1|2'
-    end subroutine map_execution_args
 
     ! Synthetic sensitivity modes: predetermined survivors, not a production best-so-far shortlist.
     subroutine set_width_mode( mb, mode )
@@ -1547,17 +1543,17 @@ contains
     end function results_in_range
 
     ! a row of bench_polar_table_shiftmap.tsv: SIMPLE's shift-map columns by name (device for nthr, precision for
-    ! fftw_plans, us_map_thread the device's microseconds per map), then the Bessel order used, the MLX peak,
-    ! the preparation and the copy-out (the profiled pass's), and the tile, the preparation's parts, the host's
-    ! share of the profiled pass per map, its wall, and SIMPLE's full-team rate with the ratio (context)
+    ! fftw_plans, us_map_thread the device's microseconds per map), then the Bessel order used, the MLX peak and
+    ! cache, the preparation and the copy-out (the profiled pass's), and the tile, the preparation's parts, the
+    ! host's share of the profiled pass per map, its wall, and SIMPLE's full-team rate with the ratio (context)
     subroutine write_map_row( d, mp, tm )
         type(bench_data), intent(in) :: d
         type(bench_map),  intent(in) :: mp
         type(map_timing), intent(in) :: tm
         character(len=*), parameter :: TSV = 'bench_polar_table_shiftmap.tsv'
         character(len=*), parameter :: FMT = '(a,5(a,i0),a,a,7(a,i0),a,f10.4,a,es12.5,a,f6.2,4(a,f10.4),a,f10.3,a,'//&
-            &'es12.5,3(a,f10.3),a,a,a,i0,a,es12.5,2(a,f10.4),a,i0,2(a,f10.4),2(a,f10.3),a,f10.4,a,es12.5,a,f8.3,a,'//&
-            &'es12.5,a,a)'
+            &'es12.5,3(a,f10.3),a,a,a,i0,2(a,es12.5),2(a,f10.4),a,i0,2(a,f10.4),2(a,f10.3),a,f10.4,a,es12.5,a,f8.3,'//&
+            &'a,es12.5,a,a)'
         character(len=1), parameter :: T = achar(9)
         real(real64)                :: wall, nmaps, us(4), cpu, rate, ratio
         integer                     :: u
@@ -1580,30 +1576,28 @@ contains
             &'device'//T//'pftsz'//T//'nrots'//T//'kfrom'//T//'kscreen'//T//'nrho'//T//'nalpha'//T//'norder'//T//&
             &'rho_max_px'//T//'prior_w'//T//'load1'//T//'wall_s'//T//'wall_rep1'//T//'wall_rep2'//T//'wall_rep3'//&
             &T//'us_map_thread'//T//'maps_per_s'//T//'us_construct'//T//'us_select'//T//'us_reduce'//T//&
-            &'precision'//T//'norder_used'//T//'mlx_peak_bytes'//T//'prep_s'//T//'copyout_s'//T//'ptcl_tile'//T//&
-            &'prep_refs_s'//T//'prep_maps_s'//T//'us_copyout'//T//'us_host'//T//'profile_wall_s'//T//&
+            &'precision'//T//'norder_used'//T//'mlx_peak_bytes'//T//'mlx_cache_bytes'//T//'prep_s'//T//'copyout_s'//T//&
+            &'ptcl_tile'//T//'prep_refs_s'//T//'prep_maps_s'//T//'us_copyout'//T//'us_host'//T//'profile_wall_s'//T//&
             &'cpu_maps_per_s'//T//'ratio_cpu'//T//'est_bytes'//T//'status'//T//'mlx_revision'//T//'simple_commit'//T//&
             &'fftw_plans'//T//'width_mode'//T//'evidence'//T//'width_pairs'//T//'active_radius_orders'//T//&
-            &'executed_radius_orders'//T//'cold_s'//T//'prepared_device_bytes'//T//'host_bytes'//T//'tile_cache_est_bytes'//T//&
-            &'contraction'//T//'hermitian'//T//'candidate_tile'//T//'order_tile'//T//'compact_radii'
+            &'executed_radius_orders'//T//'cold_s'//T//'prepared_device_bytes'//T//'host_bytes'//T//&
+            &'tile_cache_est_bytes'
         write(u,FMT, advance='no') trim(mp%name), T, &
             &d%cs%nspace, T, d%cs%nstates, T, d%cs%nrefs, T, d%cs%nptcls, T, mp%ncand, T, &
             &device_name(mlx_default_device()), T, mp%pftsz, T, mp%nrots, T, mp%kfrom, T, mp%kscreen, T, mp%nrho, &
             &T, mp%nalpha, T, mp%norder, T, mp%rho_max, T, mp%prior_w, T, tm%load1, T, wall, T, tm%walls(1), T, &
             &tm%walls(2), T, tm%walls(3), T, wall * 1.e6_real64 / nmaps, T, rate, T, us(1), T, us(2), T, &
-            &us(3), T, precision_mode(), T, tm%norder_used, T, tm%peak, T, sum(tm%prep), T, tm%stages(4), T, &
-            &tm%ptcl_tile, T, tm%prep(1), T, tm%prep(2), T, us(4), T, (tm%pwall - sum(tm%stages)) * 1.e6_real64 / nmaps, &
-            &T, tm%pwall, T, cpu, T, ratio, T, tm%est, T, tm%status
-        write(u,'(8a,4(a,i0),4(a,es16.8),5(a,i0))') T, arg_str('revision', 'working-tree'), T, trim(mp%simple_commit), &
+            &us(3), T, precision_mode(), T, tm%norder_used, T, tm%peak, T, tm%cache, T, sum(tm%prep), T, tm%stages(4), &
+            &T, tm%ptcl_tile, T, tm%prep(1), T, tm%prep(2), T, us(4), T, &
+            &(tm%pwall - sum(tm%stages)) * 1.e6_real64 / nmaps, T, tm%pwall, T, cpu, T, ratio, T, tm%est, T, tm%status
+        write(u,'(8a,4(a,i0),4(a,es16.8))') T, arg_str('revision', 'working-tree'), T, trim(mp%simple_commit), &
             &T, trim(mp%fftw_plans), T, arg_str('widths', 'all'), T, arg_int('evidence', 0), T, tm%width_pairs, &
-            &T, tm%terms(1), T, tm%terms(2), T, tm%cold, T, tm%resident, T, tm%host_bytes, T, tm%tile_bytes, &
-            &T, arg_int('contraction', POLAR_MAP_FORMS%weighted_particle), T, arg_int('hermitian', 0), T, arg_int('ctile', 16), &
-            &T, arg_int('otile', 4), T, arg_int('compact', 1)
+            &T, tm%terms(1), T, tm%terms(2), T, tm%cold, T, tm%resident, T, tm%host_bytes, T, tm%tile_bytes
         close(u)
-        write(*,'(a,i0,a,i0,a,f9.4,a,es11.4,a,f7.3,a,es10.3,a,f8.3,a,f8.3,a)') '    shiftmap '//trim(mp%name)//&
+        write(*,'(a,i0,a,i0,a,f9.4,a,es11.4,a,f7.3,2(a,es10.3),2(a,f8.3),a)') '    shiftmap '//trim(mp%name)//&
             &' ptcl_tile=', tm%ptcl_tile, ' norder_used=', tm%norder_used, ' wall=', wall, ' s, ', rate, &
-            &' maps/s (x', ratio, ' SIMPLE full team), peak ', tm%peak, ' B, prep ', sum(tm%prep), &
-            &' s, copy-out ', tm%stages(4), ' s: '//tm%status
+            &' maps/s (x', ratio, ' SIMPLE full team), peak ', tm%peak, ' B, cache ', tm%cache, ' B, prep ', &
+            &sum(tm%prep), ' s, copy-out ', tm%stages(4), ' s: '//tm%status
     end subroutine write_map_row
 
 end module mlxf_bench_polar_table

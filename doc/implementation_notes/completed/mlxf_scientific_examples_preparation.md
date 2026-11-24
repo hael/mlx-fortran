@@ -7,7 +7,7 @@ of those later examples, their calibration and tutorials remain in
 
 The original example-1 design and dated Progress are retained below. They are historical: later milestone
 decisions corrected the evidence normalizer, aligned Bessel truncation with SIMPLE and added the cutoff.
-Use [milestone 1](../planned/mlxf_milestone1.md) for that active contract and its
+Use [milestone 1](mlxf_milestone1.md) for that active contract and its
 [completed delivery record](mlxf_milestone1_m2.md) for implementation evidence.
 The old scratch-artifact concern is addressed by the durable host-reference reconstruction recorded below;
 it does not imply future GPU tests have run.
