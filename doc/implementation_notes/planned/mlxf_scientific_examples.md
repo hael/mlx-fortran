@@ -436,6 +436,45 @@ not runtime dependencies or substitutes for an independent oracle in mlx-fortran
 
 ## Progress
 
+2026-11-23, durable host preparation (Codex, M5 preparation Phase 4):
+
+- The old `/private/tmp/check_mlxf_toy_design.py` and log were absent on this laptop. Reconstructed
+  self-contained standard-library probes from the equations above, with source anchors checked at this
+  note's existing SIMPLE pin `7ec7e2972` (available locally). The later M5 comparator pin `0a8b0903e`
+  remains absent locally; no equivalence to its optimized kernels is inferred.
+- Portable evidence is retained under
+  `~/agent_work/mlxf_m5_preparation/4706ecb/host_references/`: `check_mlxf_host_references.py`,
+  `manifest.json`, `host-reference-results.json`, `run.log` and six isolated negative-control copies/logs.
+  Run with `python3 check_mlxf_host_references.py` in a writable directory; no package installation or
+  sibling checkout is needed. Source SHA-256:
+  `cbd573db5b3e193d94db72f17d297d62add04420870189586bee9a0630ef03f6`.
+- All **247** host checks pass at the unchanged initial real64 normwise cap `1e-12`. The largest normalized
+  error is `4.018729e-15`. The scripts record every reference norm, error and explicit scale used for zero
+  references. This does not calibrate or validate any future float32/device tolerance.
+- Spectral checks cover both specified shapes, analytic attenuation versus host DFT, Hermitian reality,
+  DC, every label, outside support, streamed composition and the two half-specific cost terms. Analytic
+  comparisons use the specified ideal modes; rounded-input comparisons explicitly include the filtered
+  quantization residual. Thus float32 input rounding is not mistaken for a real64 operator error.
+- For both the ordinary window and zero-face variant, the full explicit 64-by-64 stencil matrix agrees
+  with the independently transformed padded basis at `6.92e-16` / `6.70e-16` relative norm. Cholesky has
+  positive pivots; true matrix residuals for the rounded RHS are `2.12e-16` / `1.33e-16` relative norm.
+  The solution's difference from the unrounded manufactured input is separately recorded (about
+  `1.02e-7` / `1.10e-7` in absolute norm). No candidate/device PCG operator supplies an expected answer;
+  the optional host PCG dry run was unnecessary and was not implemented.
+- Projection checks cover all three proper rotations, scalar I0-series geometry, 72 polar samples and a
+  Cartesian slice, direct padded DFT sums, centered-point compensation, complex adjoint/observation
+  weights, density versus squared stencil, duplicate periodic destinations, signed and Nyquist/zero-plane
+  addressing, packed expansion and the real multiplicity-weighted adjoint. Fixture distance from a
+  half-integer is at least `0.021539` (above the unchanged `1e-4` safeguard); exact boundary queries are
+  checked separately. The padded DFT comparison is `2.34e-16` and packed adjoint `1.64e-16` normalized.
+- Wrong inverse scale, label origin, half inputs, padding compensation, adjoint conjugation and packed
+  multiplicity each fail their named assertion and exit 1 in an independent source copy. The positive
+  source exits 0; commands, source hashes, expected failures and logs are in the manifest.
+- Dependencies remain explicit: full 3D FFT wrappers belong to parity Phase 5; projection needs the
+  existing gather plus stencil arithmetic; the adjoint needs complex/real scatter-add and later collision
+  assessment. No new wrapper, scientific Fortran source, registry entry or CTest process was added.
+  Device implementations, residency, performance and scientific validation remain at the existing hold.
+
 2026-11-22: inspected SIMPLE kernels and tester routines, mlx-fortran's public core, current test registry,
 binding/test policies and milestone-1 plan. Defined three examples and their boundaries; no Fortran,
 wrapper, CTest or production code changed. All implementation phases remain pending. Documentation

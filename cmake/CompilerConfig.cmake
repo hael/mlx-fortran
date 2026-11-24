@@ -70,7 +70,7 @@ function(mlxf_add_library name)
         Fortran_MODULE_DIRECTORY "${_moddir}"
         POSITION_INDEPENDENT_CODE ON)
     target_include_directories(${name} PUBLIC $<BUILD_INTERFACE:${_moddir}>)
-    target_link_libraries(${name} PRIVATE mlxf_build_flags)
+    target_link_libraries(${name} PRIVATE $<BUILD_INTERFACE:mlxf_build_flags>)
 endfunction()
 
 # Installation rewrites RPATHs with install_name_tool; reserve load-command space for longer paths.

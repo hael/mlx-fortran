@@ -77,6 +77,24 @@ if(BUILD_TESTS)
 endif()
 add_subdirectory(scripts)  # fortls for Claude Code
 
+# Installed consumers need only mlxf.mod, the archive and these dependency/compiler facts.
+include(CMakePackageConfigHelpers)
+set(MLXF_CMAKE_INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/cmake/mlxf")
+configure_package_config_file(cmake/mlxfConfig.cmake.in
+    "${PROJECT_BINARY_DIR}/mlxfConfig.cmake"
+    INSTALL_DESTINATION "${MLXF_CMAKE_INSTALL_DIR}")
+write_basic_package_version_file("${PROJECT_BINARY_DIR}/mlxfConfigVersion.cmake"
+    VERSION "${PROJECT_VERSION}" COMPATIBILITY SameMajorVersion)
+install(EXPORT mlxfTargets NAMESPACE mlxf:: DESTINATION "${MLXF_CMAKE_INSTALL_DIR}" COMPONENT mlxf)
+install(FILES "${PROJECT_BINARY_DIR}/mlxfConfig.cmake" "${PROJECT_BINARY_DIR}/mlxfConfigVersion.cmake"
+    DESTINATION "${MLXF_CMAKE_INSTALL_DIR}" COMPONENT mlxf)
+set(MLXF_PC_OPENMP "")
+if(USE_OPENMP)
+    set(MLXF_PC_OPENMP "${OpenMP_Fortran_FLAGS}")
+endif()
+configure_file(cmake/mlxf.pc.in "${PROJECT_BINARY_DIR}/mlxf.pc" @ONLY)
+install(FILES "${PROJECT_BINARY_DIR}/mlxf.pc" DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig" COMPONENT mlxf)
+
 # ------------------------------------------------------------------------------
 # Testing
 # ------------------------------------------------------------------------------

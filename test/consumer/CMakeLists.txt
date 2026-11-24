@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.25)
+project(mlxf_consumer LANGUAGES Fortran)
+find_package(mlxf CONFIG QUIET)
+if(NOT mlxf_FOUND)
+    message(FATAL_ERROR "Cannot use installed mlxf: ${mlxf_NOT_FOUND_MESSAGE}. Set mlxf_DIR to <prefix>/lib/cmake/mlxf.")
+endif()
+add_executable(mlxf_consumer mlxf_consumer.f90)
+target_link_libraries(mlxf_consumer PRIVATE mlxf::mlxf)

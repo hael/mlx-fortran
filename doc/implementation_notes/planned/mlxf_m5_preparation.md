@@ -1,6 +1,7 @@
 # MacBook Pro preparation for the M5 Ultra
 
-Status, 2026-11-23: planned; no implementation phase has started. Supersedes: none. Written at mlx-fortran
+Status, 2026-11-23: local Phases 0–4 validated; handoff/integration hold. The actual M5 launch-spec audit
+and combined validation after Claude's parity Phase 3 remain pending. Supersedes: none. Written at mlx-fortran
 `4706ecb2b8e1a4f77c8e9b67753a66e62b3c3b47`, with the owner's uncommitted parity decision 25
 read and preserved. SIMPLE reference: `0a8b0903eee151700305399e8e3ff53c2c21caae`.
 Execution host: Hans's MacBook Pro at home; record its actual model and toolchain in Phase 0.
@@ -326,6 +327,218 @@ separate row because Phase 4 intentionally does not implement repository scienti
 | `~/agent_work/mlxf_m5_preparation/4706ecb/` (external) | Logs, source manifests, disposable mutation copies, test supplement and host reference sources | 0, 1, 2, 3, 4, 5 |
 
 ## Progress
+
+### Phase 5, laptop handoff and integration hold, 2026-11-23
+
+- The local work is delivered as an unstaged diff on `main`; no branch, commit, package update, benchmark
+  or M2 action was made. Claude owns parity Phases 1–3, confirmed again by Hans. No library Fortran,
+  shared test definitions/registry, test CMake, binding policy, README or parity-plan edit is included.
+- This checkout remains based at `6ef5ec5`; Claude's final Phase 3 diff is not present here. The combined
+  diff review and applicable Debug/Release/consumer gates must run after that output is integrated by the
+  owner. This plan/report stay in `planned/` until that integration result is recorded. The independent
+  measurement snapshot remains `4706ecb` regardless of that later integration.
+- The actual launch spec and updated SIMPLE comparator are unavailable locally as detailed below.
+  Phase 2's local exit is the explicit missing-spec finding plus the audited parser/matrix; launch
+  readiness remains open. No future M5 run was started or changed.
+- Deferred README wording, to integrate with Claude's text at handoff:
+  “The installation includes `mlxf.mod`, the static Fortran library, CMake package files and pkg-config
+  metadata. Enable Fortran, use `find_package(mlxf CONFIG REQUIRED)` and link `mlxf::mlxf`. The producing
+  and consuming compiler ID/full version must match. See `doc/how2s/how2use_from_simple.md` for an isolated
+  consumer and `scripts/check_install.sh` for the explicit installation check.”
+- The report is `mlxf_m5_preparation_report.md`. The evidence root contains the test-only patch and its
+  baseline-source proof separately from current-tree packaging artifacts. Host probes are portable,
+  use the standard library only and need no sibling source checkout when run on another Mac.
+
+### Phase 4, durable host references validated, 2026-11-23
+
+- Reconstructed the missing old scratch probe from the scientific-examples equations. Read corresponding
+  source anchors at that note's **available** SIMPLE pin `7ec7e2972`, recording eight source checksums;
+  this is distinct from Phase 2's unavailable measurement pin `0a8b0903e`.
+- Evidence: `host_references/check_mlxf_host_references.py`, `manifest.json`, per-control copies/logs and
+  `host-reference-results.json` under the evidence root. Command: `python3 check_mlxf_host_references.py`
+  in any writable directory. Probe SHA-256:
+  `cbd573db5b3e193d94db72f17d297d62add04420870189586bee9a0630ef03f6`.
+- All **247** checks pass. Largest normalized error `4.018729e-15` at the frozen initial host cap
+  `1e-12`; explicit input/operator scales cover zero references. Spectral analytic/DFT errors are
+  `1.95e-15` (8-cube) and `2.01e-15` (6×8×10). The independent full stencil/spectral matrices agree at
+  `6.92e-16` / `6.70e-16` for the ordinary/zero-face windows; Cholesky rounded-RHS true residuals are
+  `2.12e-16` / `1.33e-16`. No bound was widened.
+- Projection covers proper rotations, half-away rounding, normalized scalar I0 stencils, direct padded
+  DFT, the centered point, a Cartesian slice, conjugated weighted adjoints, density versus squared
+  weights, periodic duplicates and Hermitian packing/multiplicities. The fixture's minimum half-integer
+  distance is `0.021539`; boundary cases are separate. Six independently modified copies each fail a named
+  assertion and exit 1: inverse scale, label origin, half inputs, padding scale, adjoint conjugation and
+  packed multiplicity. The positive source exits 0.
+- Updated only the scientific-examples Progress with evidence and operation dependencies. 3D FFTs remain
+  parity Phase 5 work; scientific device code, scatter collision assessment, tolerances and performance
+  remain at that note's existing hold. The optional host PCG iteration was not needed; Cholesky supplies
+  the independent reference solution.
+
+### Phase 3, external package validated, 2026-11-23
+
+- Added config/version/export wiring, `mlxf::mlxf`, compiler ID/full-version refusal, conditional OpenMP
+  discovery and pkg-config metadata. `mlxf_build_flags` remains available in the producing build only;
+  no warning/debug/trap options or producer source/build paths reach the installed target.
+- `test/consumer/` uses only `mlxf`, compares `exp(-matmul(a,b))` against host arithmetic, transfers
+  results and releases every handle. It passes on CPU and the observed M3 Pro GPU in both configurations,
+  through both CMake and pkg-config, installed into prefixes containing spaces.
+- `scripts/check_install.sh` checks exactly one `.mod` (`mlxf.mod`), no `.smod`, isolation from producer
+  paths/flags, refusal of internal/generated imports and edited compiler metadata. An independently
+  broken consumer makes the script exit 1 at its intended `error stop`; its successful siblings exit 0.
+  `doc/how2s/how2use_from_simple.md` documents the generic package without adding SIMPLE integration.
+- Current-tree Debug/Release clean builds use `BUILD_TESTS=ON MLXF_REQUIRE_GPU=ON MLXF_WERROR=ON`,
+  FORTLS default, two jobs. Both fast/static gates pass, 8/8; both broadband accuracy suites pass, 144
+  checks. Full precision and existing thread environment apply. Zero compiler/CMake warnings in final
+  configure/build/install logs; the static gate reports only the expected untracked new consumer source.
+- An additional isolated Release library build with `USE_OPENMP=OFF BUILD_TESTS=OFF MLXF_WERROR=ON`
+  passes the same external install check, with no OpenMP dependency/flags in its consumer.
+- Exact commands/results are in `package-commands.json`, `extra-package-commands.json` and their logs.
+  Initial install-check development caught CMake's compiler cache using `STRING` rather than `FILEPATH`,
+  pkg-config's automatic space escaping, and preservation of the undefined FPHSA warning variable;
+  these were corrected before the final successful results. Normal library algorithms are unchanged.
+
+### Phase 2, launch audit and command/artifact matrix, 2026-11-23
+
+**Readiness: preparation available; M5 launch remains pending.** Searched the repository, local
+`~/agent_runs/{runs,templates,var}` and `~/agent_work`; no `mlxf_m1_m5` launch spec was present. Hans's
+supplied commit link points to parity decision 25, already read: it authorizes independent measurements
+at `4706ecb`, but supplies no launch commands. There is consequently no actual-spec checksum or claim
+that the external run has been audited. Its owner must apply/verify the matrix below against that spec.
+
+The clean local SIMPLE checkout is `67c6a05e22628b380fe0ca134b9c211f9f32cd76`; read-only
+`git show -s 0a8b0903eee151700305399e8e3ff53c2c21caae` fails with `bad object`. No fetch, checkout, build
+or remote job was attempted. Current local parser inspection confirms the earlier planner option;
+the updated comparator's source and build must be checked at the required pin before launch.
+The setup guide now distinguishes these two pins, the correctness supplement and measured executable,
+the release gate and named accuracy suite, and measured versus identity FFTW plans.
+
+The following commands are **dry-reviewed templates, not executed benchmarks**. `$exe` must name the
+Release executable built from the unchanged measurement snapshot; `$simple` must name the installed
+required SIMPLE comparator. `$cases` and `$grid` must be fresh absolute paths derived from that Mac's
+CPU rows. `$team` is its observed full CPU count (not the M2's assumed 24). Run each invocation in its
+own artifact directory, retain stdout/stderr and exit status, and use absolute executable/input paths.
+
+| Work | Future command/arguments | Artifacts and conditions |
+| --- | --- | --- |
+| Source/device bring-up | `git --no-optional-locks log -1 --format='%H %s'`; `git --no-optional-locks status --short`; `sw_vers`; compiler/CMake/Python and installed/linked MLX pair; verbose `unit_core` | `sources.json`, source checksums/diff, `machine.log`, dependency linkage, one observed GPU name/architecture; external spec path/checksum still required |
+| GPU-visible release checks | `bash scripts/release_gate.sh --jobs 2` in the intended clean source; separately build/check the test supplement in its own source copy | `release_gate_<commit>.log`, `supplement-sources.json`, patch and SHA-256; Debug/Release, 8/8 fast entries, no skips, both named shiftmap suites; the M5 owner's large recovery/64,000-pair accuracy gates remain required there |
+| CPU correctness | `$simple test=polar_matching_bench suite=check\|fills\|neigh nspace=... nstates=... nptcls=2000 nthr=$team` (one actual suite value per process) | Separate logs; confirm geometry, half populations, matching entries and team identity; verify syntax on SIMPLE `0a8b0903e` before use |
+| CPU dense denominator | `$simple test=polar_matching_bench suite=block_prod nspace=1000\|2500 nstates=1\|4 nptcls=2000 nthr=$team fftw_plans=measure` (one value per key) | Two invocations per four-case Cartesian product; `polar_block_prod_bench.tsv`, measured planner log, full/half/one-team rows and fastest measured CPU block; one-team cap does not replace full-team work |
+| CPU maps denominator | `$simple test=polar_matching_bench suite=shiftmap nspace=2500 nstates=4 nptcls=2000 nthr=$team fftw_plans=measure` | Two invocations; `polar_shiftmap_bench.tsv`, window/screen geometry, 16 candidates, all widths, no evidence, measured planning separate; each team identity difference must be zero |
+| Dense accuracy | `$exe test=bench_polar_table suite=accuracy cases=$cases case=2500_4 form=b\|c bt=... rt=... device=all` | M5-only 64,000-pair assertions, seed-1 diagnostics and frozen seed-2 gates, draw sensitivity and identity; no recalibration |
+| Dense sweep | `$exe test=bench_polar_table suite=time cases=$cases cases_list=1000_1,1000_4,2500_1,2500_4 form=b\|c nthr=$team` | `bench_polar_table.tsv`; built-in B/R grids each `{64,250,500,1000,2000}` / `{64,250,500,1000,2500}`, pruned against populations and quarter-memory budget; B and C are existing dense formulations |
+| Dense stages | `$exe test=bench_polar_table suite=profile cases=$cases case=2500_4 form=b\|c bt=... rt=... nthr=$team device=gpu` | `bench_polar_table_profile.tsv`, barriers/cold preparation separate from warm complete-work wall time |
+| Dense overlap | `$exe test=bench_polar_table suite=overlap cases=$cases case=2500_4 form=b\|c bt=... rt=... outer=250 nthr=$team load=none\|stream device=gpu` | `bench_polar_table_overlap.tsv`; two slots versus sync, exact canonical identity; start a separately logged `suite=stream seconds=60 nthr=...` only under the M5 owner's load experiment, never here |
+| Shiftmap control | `$exe test=bench_polar_table suite=shiftmap cases=$cases case=2500_4 grid=$grid maps=window,screen ptiles=4,16,64 contraction=1 hermitian=0 ctile=16 otile=4 compact=1 widths=all evidence=0 revision=4706ecb2b8e1a4f77c8e9b67753a66e62b3c3b47 device=gpu` | `bench_polar_table_shiftmap.tsv`; all-width/no-evidence is the matched CPU work; all rows retain precision, source revisions, requested outputs, work counts and pruning status |
+| Three map alternatives | Same command, `(contraction,hermitian)` = `(1,1)`, `(2,0)`, `(2,1)` | Compare separately and jointly with control, interleaving candidate/control; no alternative becomes default from correctness validation |
+| Map tile/radius experiments | For each applicable graph, `ptiles=4,16,64`; explicit loops over `ctile=4\|8\|16`, `otile=1\|4\|8`, `compact=0\|1` | Individual arguments take scalar values; do not pass a comma list to `ctile`/`otile`. Record useful/executed radius-order slots, host/prepared/live/peak bytes and all pruned configurations |
+| Cutoff/evidence sensitivity | Same graph command with `widths=none\|quarter\|all` and `evidence=0\|1`, each combination distinctly labelled | Synthetic survivor fraction and work; ratios against the all-width CPU baseline are not equivalent-work speedups; production width frequency remains unmeasured |
+| Dispatch evidence | In Xcode's Metal capture workflow select the pinned Release executable and its exact arguments/environment; capture representative full-precision and accelerated graph invocations separately | `.gputrace`/Instruments trace, capture settings, matched row IDs, named kernels/pipelines. Availability is not observed dispatch. The public Fortran API has no capture wrapper at this base; do not invent a `capture=` benchmark option |
+
+All timing rows require **two invocations**, each using its built-in warm-up and three repeats; report the
+spread and use the prescribed conservative CPU/GPU comparison. Set `MLX_ENABLE_TF32=0` or `=1` **before
+each new process**, retaining both modes separately. Full precision judges the verdict. Accelerated
+results count only at the same frozen accuracy caps; the architecture alone does not prove NAX dispatch.
+Keep one submitting thread; CPU consumption may use the explicitly recorded team outside MLX calls.
+
+Parser findings at the measurement source:
+
+- Case sections are `[case NAME]`, with `nspace,nstates,nrefs,nptcls,pftsz,kfrom,kto` integer keys.
+  Map sections are `[map window]`/`[map screen]`, with
+  `pftsz,nrots,kfrom,kscreen,nrho,nalpha,norder,nrefs,nptcls,ncand,rho_max_px,prior_w`, plus
+  `simple_commit`, `fftw_plans` and **`maps_per_s_t24`**. That last historical key parses the two actual
+  full-team rates even when the M5 team is not 24; record the real team in the sidecar. A renamed key
+  would silently leave rates missing. Export measured values rather than rounded historical geometry.
+- `revision=` is emitted by shiftmap rows only. Dense rows lack both revisions, and neither family
+  replaces OS process-peak/load evidence. Require a sidecar per invocation with both full commits,
+  executable hashes, input hashes, full command/environment, actual team, load samples, `/usr/bin/time -l`
+  peak footprint and swap information. Keep host, prepared/resident, estimated live, MLX peak and process
+  peak distinct, reconcile aliases and the two overlap slots, and reject a go verdict with unexplained gaps.
+- The benchmark parser ignores unknown keys, so invented `repeat=`, `capture=`, `candidate_tiles=` or
+  `maps_per_s_t<actual-team>` options must not be used. Repeats are compiled into the implementation.
+- Parser hygiene finding: `arg_int` tests `ios` after an omitted key without first initializing it.
+  Its result is already the default in either branch, but this is still an undefined read. It was not
+  changed in the pinned benchmark source; a separate fix must keep its source provenance explicit.
+- Before launch, the owner must supply/audit the actual external spec, make the required SIMPLE source
+  available, verify its parser/output against this matrix, generate fresh CPU case/grid files, and account
+  for every row above in the command schedule. The expected verdict/report remains milestone 1 Phases 6–7,
+  not this laptop delivery. No matrix command above has been timed or launched here.
+
+### Phase 3 choices before validation, 2026-11-23
+
+- CMake exports the existing static `mlxf` target, its sole installed public module and shared mlx-c;
+  OpenMP is discovered only for a producer using it. The private flags target uses a build-only link
+  interface, preserving its producer flags without exporting that target or its warning/debug options.
+- The config checks compiler ID and **exact full version string** before dependency/target import.
+  Consumer package discovery uses `CONFIG QUIET` plus an actionable `_FOUND` failure, following the
+  mandatory `findpkg` static rule. The guide shows downstream users' normal `CONFIG REQUIRED` spelling.
+  This resolves the plan's example/static-policy conflict without weakening the gate or editing it.
+- mlx-c's Homebrew package supplies no pkg-config file. `mlxf.pc` therefore records its shared link and
+  runtime-search flags directly in `Libs.private`, along with conditional OpenMP flags; `--static` is
+  required when linking the installed Fortran archive. No MLX package update is involved.
+- The consumer is explicitly configured outside the source/build trees and is not registered in CTest.
+  Builds use `build_m5prep_current_debug` and `build_m5prep_current_release`; these validate the current
+  checkout independently of the baseline/supplement snapshots. Results are still pending.
+
+### Phase 1, regression supplement validated, 2026-11-23
+
+- Retained all original low-harmonic, degenerate, Nyquist and lifecycle cases. The new broadband fixture
+  adds real even/imaginary odd bins, using distinct bins at ring 24 (real 2/6/8/10, imaginary 5/7/9/11)
+  and ring 364 (real 12/48/110/176, imaginary 11/37/95/173). The folding grid uses its representable
+  bins 2/4 and 1/3. Thus Friedel symmetry is constructed before rounding once to complex32.
+- Formulation tests use distinct candidate columns with duplicates, tempered `[3,9,27]`, physical
+  `[7,30,90]`, particle tile 2 with a final one-particle tail, and existing candidate/order tile choices.
+  Each pair's direct residual and independent moments use its own candidates and temperatures. Each
+  configuration judges 16 clear-margin modes on the 24-ring grid and 7 on the folding grid; all match.
+- The partial width mask retains `(1,1), (3,2), (2,3)`. Uncut heterogeneous widths/evidence are first
+  checked independently; disabled, all/none/partial/equality cases preserve mode/evidence and exact `-1`.
+- Both Debug and Release `MLXF_WERROR=ON` builds pass with zero compiler warnings. Both static/fast gates
+  pass (8/8 processes), as do `polar_shiftmap` (1,364 checks across CPU/Metal) and the broadband
+  `polar_shiftmap_accuracy` (144 checks). Frozen caps/scales and normal kernel behavior are unchanged.
+- Separately compiled Release mutants all fail assertions and exit 1 on **each** device:
+
+  | Fault | `polar_shiftmap` failures per device | Accuracy-sample failures per device |
+  | --- | ---: | ---: |
+  | Reuse the first particle's candidate column within a tile | 81 | Not run; the sample has one particle |
+  | Gather `tph(1:nactive)` instead of `tph(active)` | 5 | Not applicable to the sample's uncut widths |
+  | Zero interior harmonics above 4, retaining low modes and Nyquist | 41 | 49 |
+
+- Evidence: `phase1-commands.json`, `mutation-commands.json`, the drivers and logs in the evidence root.
+  `supplement-sources.json` verifies **all 121 other baseline files unchanged**, including the library,
+  polar kernels, benchmark and frozen definitions. Test SHA-256:
+  `741cebb38bdd5c9ea78d2f2a86209cd405f48ccba7ee18b20729e2749aac1fba`.
+  `shiftmap-test-supplement.patch` SHA-256:
+  `d8f0a2644593f206a4cd8990b1a4fa4d15896007a0c57578063cbfd380b378c7`.
+
+### Phase 0 result, 2026-11-23
+
+- Both pinned builds, static gates and 8-entry fast gates pass; zero compiler warnings. The original
+  `polar_shiftmap` passes 1,308 checks and the original geometry sample 144 checks across both devices,
+  in both build types. No baseline failure was found.
+- GPU output was observed: `GPU devices: 1`, `Apple M3 Pro`, `applegpu_g15s`, runtime MLX 0.32.4,
+  `MLX_ENABLE_TF32=0`. macOS 26.7.3 (`25G342`), GFortran 16.2.0, CMake 4.5.1, Python 3.12.2.
+- Baseline logs/manifests retain exact commands and versions. Phase 0 is complete. No benchmark,
+  memory-scaled recovery, package upgrade or remote action ran.
+
+### Phase 0 started, 2026-11-23 (Codex, MacBook Pro)
+
+- Owner authorized execution while Claude works on parity on the M2. No remote action or benchmark is
+  started. Initial branch `main`, clean tree at `6ef5ec5`; no git state was changed.
+- That head contains post-baseline library fixes. To preserve the experiment, exported the tracked
+  `4706ecb2b8e1a4f77c8e9b67753a66e62b3c3b47` sources with read-only `git show` into
+  `~/agent_work/mlxf_m5_preparation/4706ecb/baseline_source/`. The source manifest records each file's
+  SHA-256, the measurement base and the execution head. The source snapshot has no git worktree.
+- Evidence root: `/Users/elmlundho/agent_work/mlxf_m5_preparation/4706ecb/`. The portable baseline driver,
+  exact command/result manifest and per-step logs are retained there. The dedicated repository build
+  directories use that snapshot; later current-tree validation will use separate directories.
+- Observed host: MacBook Pro `Mac15,6`, Apple M3 Pro, 11 CPU cores (5 performance, 6 efficiency), 18 GB
+  RAM, 14-core GPU, Metal 4. Installed dependencies remain MLX 0.32.4 and mlx-c 0.8.0, GCC 16.2.0;
+  Homebrew CMake is 4.5.1 (the executable actually configured is recorded in its log).
+- Configure per type: `cmake -S "$evidence/baseline_source" -B "build_m5prep_${type}"`
+  with `-DCMAKE_BUILD_TYPE=Debug|Release -DBUILD_TESTS=ON -DMLXF_REQUIRE_GPU=ON -DMLXF_WERROR=ON`;
+  FORTLS keeps its default. Build: `cmake --build "build_m5prep_${type}" --parallel 2`.
+  Commands run with `MLX_ENABLE_TF32=0 OMP_NUM_THREADS=1 OMP_WAIT_POLICY=PASSIVE OMP_THREAD_LIMIT=4`.
+  Builds and tests are still pending; no pass is claimed here.
 
 ### Plan written, 2026-11-23
 

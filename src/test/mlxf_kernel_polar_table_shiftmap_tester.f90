@@ -92,7 +92,7 @@ contains
         call test_devices(devs)
         original = mlx_default_device()
         do grid = 1, 2
-            fx = make_map_fixture(.false., .true., production=grid)
+            fx = make_map_fixture(.false., .true., production=grid, broadband=.true.)
             do d = 1, size(devs)
                 call mlx_set_default_device(devs(d))
                 do h = 1, 2
@@ -142,6 +142,34 @@ contains
             &.31_real64 * sin(theta + phi) + .17_real64 * cos(3._real64 * theta - phi), real64)
     end function ring_value
 
+    ! Even real and odd imaginary bins preserve R(theta+pi)=conjg(R(theta)); small-grid bins do not alias.
+    pure complex(real64) function broadband_value( m, nrot, k, j, h )
+        integer, intent(in) :: m, nrot, k, j, h
+        integer      :: even_bins(4), odd_bins(4), b, nterms
+        real(real64) :: theta, phi, re, im
+        even_bins = [2, 4, 0, 0]
+        odd_bins = [1, 3, 0, 0]
+        nterms = 2
+        if( nrot == 24 )then
+            even_bins = [2, 6, 8, 10]
+            odd_bins = [5, 7, 9, 11]
+            nterms = 4
+        else if( nrot == 364 )then
+            even_bins = [12, 48, 110, 176]
+            odd_bins = [11, 37, 95, 173]
+            nterms = 4
+        endif
+        theta = 2._real64*acos(-1._real64)*real(m, real64)/real(nrot, real64)
+        phi = real(3*j + 2*h + k, real64)/13._real64
+        re = 0._real64
+        im = 0._real64
+        do b = 1, nterms
+            re = re + .3_real64/real(b, real64)*cos(real(even_bins(b), real64)*theta + real(b, real64)*phi)
+            im = im + .25_real64/real(b, real64)*sin(real(odd_bins(b), real64)*theta - real(b, real64)*phi)
+        end do
+        broadband_value = cmplx(re, im, real64)
+    end function broadband_value
+
     ! the full ring of a stored half ring (the samples, then their conjugates), in real64
     function full_of( z ) result(f)
         complex(real32), intent(in) :: z(:)
@@ -178,14 +206,19 @@ contains
 
     ! the note's fixture (24 ring positions, shells 1..4, box 32, radii 0 to 1.5, 16 directions) or the folding
     ! case's (8 ring positions, shells 1..3, box 16, radii 0, 4, 8, 7 directions); particles posed by POSES
-    function make_map_fixture( folding, perturbed, production ) result(fx)
+    function make_map_fixture( folding, perturbed, production, broadband ) result(fx)
         logical, intent(in)           :: folding, perturbed
         integer, optional, intent(in) :: production
+        logical, optional, intent(in) :: broadband
         type(map_fixture)            :: fx
         complex(real64), allocatable :: rf(:), p(:)
         real(real64),    allocatable :: rho(:)
         real(real64)                 :: theta
+        complex(real64)              :: z
+        logical                      :: broad
         integer                      :: h, j, k, m, i, nrot, nk, box, nalpha
+        broad = .false.
+        if( present(broadband) ) broad = broadband
         if( folding )then
             nrot   = 8
             nk     = 3
@@ -229,7 +262,9 @@ contains
             do j = 1, NREF
                 do k = 1, nk
                     do m = 0, fx%pftsz - 1
-                        fx%rref(m + 1, k, j, h) = cmplx(ring_value(m, nrot, k + fx%kfrom - 1, j, h), kind=real32)
+                        z = ring_value(m, nrot, k + fx%kfrom - 1, j, h)
+                        if( broad ) z = z + broadband_value(m, nrot, k + fx%kfrom - 1, j, h)
+                        fx%rref(m + 1, k, j, h) = cmplx(z, kind=real32)
                     end do
                 end do
             end do
@@ -818,7 +853,8 @@ contains
 
     subroutine test_formulations( dev )
         integer, intent(in) :: dev
-        integer,      parameter   :: LIST(7) = [7, 2, 5, 2, 7, 5, 1]
+        integer,      parameter   :: LISTS(7, 3) = reshape([7, 2, 5, 2, 7, 5, 1, &
+            &1, 5, 7, 5, 2, 1, 7, 3, 7, 2, 3, 5, 2, 1], [7, 3])
         type(map_fixture)         :: fx
         type(polar_table)         :: ws
         type(polar_map_block)     :: mb
@@ -829,15 +865,17 @@ contains
         integer                   :: grid, variant, config, c, b, st, njudged, nmodes
         write(*,'(a)') 'test_formulations'
         do grid = 1, 2
-            fx = make_map_fixture(grid == 2, .true.)
+            fx = make_map_fixture(grid == 2, .true., broadband=.true.)
             call prepare_half(fx, 1, PRIOR_SCREEN, ws)
-            mb = map_block(fx, half_pids(1), same_cands(LIST, 3), [TEMP_T, TEMP_PHYS])
+            mb = map_block(fx, half_pids(1), LISTS, [TEMP_T, TEMP_PHYS])
+            mb%temps = [3._real32, 9._real32, 27._real32]
+            mb%temps_phys = [7._real32, 30._real32, 90._real32]
             mb%ptcl_tile = 2
             allocate(expected(fx%nalpha, fx%nrot, size(fx%rho), 7, 3))
             do b = 1, 3
                 do c = 1, 7
-                    expected(:,:,:, c, b) = oracle_map(fx, mb%ptcl_ids(b), LIST(c))
-                    sm(c, b) = summarize(fx, expected(:,:,:, c, b), [TEMP_T, TEMP_PHYS], PRIOR_SCREEN)
+                    expected(:,:,:, c, b) = oracle_map(fx, mb%ptcl_ids(b), mb%cands(c, b))
+                    sm(c, b) = summarize(fx, expected(:,:,:, c, b), [mb%temps(b), mb%temps_phys(b)], PRIOR_SCREEN)
                 end do
             end do
             do variant = 1, 4
@@ -864,7 +902,7 @@ contains
                             losserr = max(losserr, abs(real(res%loss(c, b), real64)-lo)/max(1._real64, abs(lo)))
                             logerr = max(logerr, abs(real(res%logz(c, b), real64)-sm(c, b)%logz))
                             varerr = max(varerr, abs(real(res%sdev(c, b), real64)**2-sm(c, b)%sdev**2))
-                            bound = real(TEMP_T, real64)*POLAR_MAP_CAP_L2*sqrt(sum(expected(:,:,:, c, b)**2))
+                            bound = real(mb%temps(b), real64)*POLAR_MAP_CAP_L2*sqrt(sum(expected(:,:,:, c, b)**2))
                             if( sm(c, b)%margin > 2._real64*bound )then
                                 njudged = njudged+1
                                 if( res%ialpha(c, b) == sm(c, b)%ialpha .and. res%irot(c, b) == sm(c, b)%irot .and. &
@@ -878,6 +916,9 @@ contains
                     call assert_true(varerr <= POLAR_MAP_CAP_VAR*max(1._real64, maxval(fx%rho)**2), &
                         &'every formulation matches independent physical moments')
                     call assert_int(njudged, nmodes, 'clear-margin modes survive formulation and tile changes')
+                    write(*,'(a,4(i0,a))') '    grid ', grid, ' variant ', variant, ' config ', config, &
+                        &' modes judged ', njudged, ''
+                    call assert_true(njudged > 0, 'the broadband fixture has clear-margin modes to judge')
                 end do
                 call ws%score_maps(mb, again, st)
                 call assert_true(all(bits_equal(res%loss, again%loss)) .and. all(bits_equal(res%sdev, again%sdev)) .and. &
@@ -903,24 +944,48 @@ contains
 
     subroutine test_width_cutoff( dev )
         integer, intent(in) :: dev
-        type(map_fixture)       :: fx
-        type(polar_table)       :: ws
-        type(polar_map_block)   :: mb
-        type(polar_map_results) :: base, res
-        integer                 :: st, mode, variant
-        logical                 :: keep(3, 3)
+        type(map_fixture)         :: fx
+        type(polar_table)         :: ws
+        type(polar_map_block)     :: mb
+        type(polar_map_results)   :: base, res
+        type(map_summary)         :: sm
+        real(real64), allocatable :: expected(:,:,:)
+        real(real64)              :: varerr, logerr
+        integer                   :: st, mode, variant, b, c
+        logical                   :: keep(3, 3)
         write(*,'(a)') 'test_width_cutoff'
         fx = make_map_fixture(.false., .true.)
         call prepare_half(fx, 1, PRIOR_SCREEN, ws)
         mb = map_block(fx, half_pids(1), same_cands(CANDS(:, 1), 3), [TEMP_T, TEMP_PHYS])
+        mb%temps = [3._real32, 9._real32, 27._real32]
+        mb%temps_phys = [7._real32, 30._real32, 90._real32]
         mb%ptcl_tile = 2
         do variant = 1, 4
             call map_variant(mb, variant)
             call ws%score_maps(mb, base, st)
         call assert_int(0, st, 'cutoff-disabled reference succeeds')
+        if( st /= 0 ) cycle
+        varerr = 0._real64
+        logerr = 0._real64
+        do b = 1, 3
+            do c = 1, 3
+                expected = oracle_map(fx, mb%ptcl_ids(b), mb%cands(c, b))
+                sm = summarize(fx, expected, [mb%temps(b), mb%temps_phys(b)], PRIOR_SCREEN)
+                varerr = max(varerr, abs(real(base%sdev(c, b), real64)**2 - sm%sdev**2))
+                logerr = max(logerr, abs(real(base%logz(c, b), real64) - sm%logz))
+            end do
+        end do
+        call assert_true(varerr <= POLAR_MAP_CAP_VAR*max(1._real64, maxval(fx%rho)**2), &
+            &'the uncut widths match independent heterogeneous physical moments')
+        call assert_true(logerr <= POLAR_MAP_CAP_LOG, 'the uncut evidence matches independent tempered masses')
         do mode = 1, 4
             keep = .true.
-            if( mode == 2 ) keep(2:3, :) = .false.
+            if( mode == 2 )then
+                keep = .false.
+                keep(1, 1) = .true.
+                keep(3, 2) = .true.
+                keep(2, 3) = .true.
+            endif
             if( mode == 3 ) keep = .false.
             mb%width_cutoff = merge(huge(1._real32), -huge(1._real32), keep)
             ! Exact equality uses the same rounded loss as the cutoff contract; it must retain every width.

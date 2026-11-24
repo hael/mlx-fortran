@@ -1,0 +1,13 @@
+prefix=${pcfiledir}/../..
+libdir=${prefix}/@CMAKE_INSTALL_LIBDIR@
+includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
+mlxc_libdir=@MLX_C_LIBRARY_DIRS@
+fortran_compiler_id=@CMAKE_Fortran_COMPILER_ID@
+fortran_compiler_version=@CMAKE_Fortran_COMPILER_VERSION@
+
+Name: mlx-fortran
+Description: @PROJECT_DESCRIPTION@
+Version: @PROJECT_VERSION@
+Libs: -L${libdir} -lmlxf
+Libs.private: -L${mlxc_libdir} -Wl,-rpath,${mlxc_libdir} -lmlxc @MLXF_PC_OPENMP@
+Cflags: -I${includedir}/mlxf

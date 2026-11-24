@@ -51,10 +51,10 @@ if(USE_OPENMP)
     target_link_libraries(mlxf PUBLIC OpenMP::OpenMP_Fortran)
 endif()
 
-install(TARGETS mlxf
-    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
+install(TARGETS mlxf EXPORT mlxfTargets
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT mlxf
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT mlxf)
 # Only the user module is installed. Every other module file (the generated mlxc_* layer, the registry, the
 # internal helpers) would let a consumer reach a handle and free it behind the reference count; gfortran
 # writes into mlxf.mod everything a consumer of its public names needs.
-install(FILES "${PROJECT_BINARY_DIR}/modules/mlxf/mlxf.mod" DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/mlxf")
+install(FILES "${PROJECT_BINARY_DIR}/modules/mlxf/mlxf.mod" DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/mlxf" COMPONENT mlxf)

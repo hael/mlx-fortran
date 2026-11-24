@@ -122,10 +122,12 @@ dependencies. It installs into `.deps/install` and does not replace Homebrew pac
 with extracted historical formulae may be another option, but its bottle availability and dependency
 compatibility must be checked; it is not assumed to reproduce this installation.
 
-Use SIMPLE at the run's pin and verify it before building. For milestone 1 that is Hans's commit of the
-benchmark's FFTW planner option (`fftw_plans`) on top of `ed0aaa3428b7ebe9d834418587f31354850cb99b`
-(milestone decision 22, which replaced `3a595f42f928a366744094a28b62aeb6020099e4`); the run's spec gives its
-hash. SIMPLE requires FFTW in single and double precision, TIFF, JPEG and zlib; it fetches its pinned
+Use SIMPLE at the run's pin and verify it before building. The current milestone comparator is
+`0a8b0903eee151700305399e8e3ff53c2c21caae` (decision 27), including the optimized shift maps and measured
+FFTW planning. Earlier planner-only results at `67c6a05e2` are historical context. The independent M5
+measurement uses mlx-fortran `4706ecb2b8e1a4f77c8e9b67753a66e62b3c3b47`; packaging and parity work belong
+to other source snapshots. If either pin is missing locally, obtain the intended source from the owner
+before proceeding; a nearby commit does not reproduce that comparator. SIMPLE requires FFTW in single and double precision, TIFF, JPEG and zlib; it fetches its pinned
 OpenBLAS 0.3.34 during configuration and builds it into its own cache, so the first build needs network
 access. In the SIMPLE checkout:
 
@@ -137,6 +139,29 @@ git --no-optional-locks log -1 --format='%H %s'
 Build mlx-fortran as in section 3. From Terminal, run `build/bin/mlxf_test_exec test=unit_core` and verify
 that it reports one GPU device and prints its name and architecture. A sandboxed or headless session may
 report zero; that is not a successful GPU validation.
+
+Run `bash scripts/release_gate.sh` for the Debug/Release GPU-visible release checks. It does not include
+the named-only production-geometry shiftmap accuracy check. In both build types also invoke:
+
+```bash
+MLX_ENABLE_TF32=0 OMP_NUM_THREADS=1 OMP_WAIT_POLICY=PASSIVE OMP_THREAD_LIMIT=4 \
+  build/test/mlxf_test_exec test=unit_kernels suite=polar_shiftmap device=all
+MLX_ENABLE_TF32=0 OMP_NUM_THREADS=1 OMP_WAIT_POLICY=PASSIVE OMP_THREAD_LIMIT=4 \
+  build/test/mlxf_test_exec test=unit_kernels suite=polar_shiftmap_accuracy device=all
+```
+
+Substitute the actual build directory. Do not run the memory-scaled `recovery_half` suite on the laptop.
+The stronger shiftmap regression fixtures are supplied as a separate test-only patch, with its SHA-256
+and unchanged-source manifest in the preparation record. Validate that patch in a separate copy of the
+measurement base, then build the measured executable from the unchanged baseline. Retain both source
+manifests and label the correctness supplement separately; installing a newer package or building parity
+work in the measurement source directory would change the experiment.
+
+Future CPU comparisons use `fftw_plans=measure` and `nthr=` set to the machine's full CPU team, with the
+planning log outside the warm loop. Keep `estimate` identity files separate. Use two independent
+invocations, each with its built-in warm-up and three repeats. The launch specification must account for
+both dense scoring and both shiftmap grids, all graph alternatives, requested outputs, memory and source
+provenance before a measurement starts. Laptop correctness checks do not establish M5 launch readiness.
 
 For NAX, record the `architecture` printed by that test and the macOS version. In MLX 0.32.4, device
 information reports `device_name` and `architecture`, but no NAX-in-use key. Its NAX availability check
