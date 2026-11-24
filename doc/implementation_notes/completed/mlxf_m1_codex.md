@@ -1,5 +1,10 @@
 # Codex beside run `mlxf_m1`: CI, the M5 Ultra bring-up, the gfortran reports, a fair FFTW comparator
 
+Archive disposition, 2026-11-24: completed side-work record. Phases 0–4 were delivered on
+2026-11-22; the original plan and dated evidence follow. Keep the recorded CI/device limitations,
+owner-filed compiler reports and paging qualification on the largest planner case. M5 launch readiness
+continues in [the preparation follow-up](../planned/mlxf_m5_preparation.md); this archive does not close it.
+
 Status, 2026-11-22: planned. Decision 6 was ruled by Hans the same day (Phase 4 goes ahead) and decision 2
 was revised by him (he pushes Codex's work to GitHub). Base: the maintainer's commit that adds this plan, on
 top of `0a1eec2`. SIMPLE pin: `3a595f42f928a366744094a28b62aeb6020099e4`, a working point for now
@@ -290,7 +295,7 @@ ratio table exists with spreads; SIMPLE's fast gate passes; the branch's files a
 
 | File | What | Phases |
 | --- | --- | --- |
-| `doc/implementation_notes/planned/mlxf_m1_codex.md` | this plan: Progress only | each |
+| `doc/implementation_notes/completed/mlxf_m1_codex.md` | this plan: Progress only | each |
 | `.github/workflows/ci.yml` | the CI fix | 1 |
 | `cmake/Dependencies.cmake` | dependency discovery, if needed | 1 |
 | `doc/how2s/how2set_up_dev.md` | the section "New Mac for a run" | 2 |

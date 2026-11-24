@@ -1,8 +1,9 @@
 # mlx-fortran: fusing, and what follows the shift maps' particle tiles
 
-Status, 2026-11-23: a roadmap note, not a separate implementation plan. The next graph experiments are
-milestone 1, decision 27 and Phase 5c of `mlxf_milestone1.md`, based on mlx-fortran `c93ee0d` and SIMPLE
-`0a8b0903e`. Metal work remains later, after its wrapper and fresh profiles. Originally written by Claude
+Status, 2026-11-24: active roadmap, not a separate implementation plan. Phase 5c's graph alternatives
+are implemented and validated; their profiling, benchmarking and retention remain deferred in milestone 1,
+decision 27. Completed implementation evidence is in
+[the M2 record](../completed/mlxf_milestone1_m2.md), based on mlx-fortran `c93ee0d` and SIMPLE `0a8b0903e`. Metal work remains later, after its wrapper and fresh profiles. Originally written by Claude
 at Hans's request after decisions 25 and 26; updated by Codex's review of SIMPLE's committed optimizations.
 
 ## 1. Why

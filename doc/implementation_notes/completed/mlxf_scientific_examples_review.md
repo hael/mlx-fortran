@@ -1,5 +1,10 @@
 # Review: the three scientific examples (`mlxf_scientific_examples.md`)
 
+Archive disposition, 2026-11-24: completed review of the original design. Findings and recommendations
+below retain their original date. The durable host-reference work addresses the scratch-evidence issue;
+see [the preparation record](mlxf_scientific_examples_preparation.md). Future implementation and conversion
+to plan form remain in [the active examples note](../planned/mlxf_scientific_examples.md).
+
 Status, 2026-11-22: review of the note at mlx-fortran `2862201`, against SIMPLE `7ec7e2972` (the note's pin;
 the checkout had no later commit). Reviewer: Claude (interactive session), for Hans. **Applied the same
 day:** Hans pulled example 1 into milestone 1 (its decisions 15 to 18, Phase 5b). Findings 1, 2, 5 and 8 are

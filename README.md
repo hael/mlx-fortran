@@ -13,6 +13,7 @@ FFTs, and graph compilation of Fortran callbacks. That set covers the first SIMP
 maps of the polar table), which is measured on the M2 Ultra and goes to the M5 Ultra next. The API grows with
 demonstrated need, so expect it to change. The plan in progress is
 [`doc/implementation_notes/planned/mlxf_milestone1.md`](doc/implementation_notes/planned/mlxf_milestone1.md).
+See the [implementation-notes index](doc/implementation_notes/README.md) for active work and completed records.
 
 ## What it is for
 

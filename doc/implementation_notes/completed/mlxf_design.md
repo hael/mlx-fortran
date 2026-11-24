@@ -1,5 +1,10 @@
 # mlx-fortran: a small Fortran array library, driven by SIMPLE's pipelines
 
+Archive update, 2026-11-24: the consumer-packaging work described in the original Phase 5 is now
+delivered in [laptop preparation Phase 3](mlxf_m5_preparation.md). The active milestone, parity and
+scientific-example work is listed in [the documentation index](../README.md). Original decisions below
+remain numbered historical references; their old roadmap is not a second active implementation plan.
+
 Status, 2026-11-22: **delivered in part, split.** Phases 0 and 1 are delivered (commit `0d3537b`; report
 beside this plan). Phase 2 continues in `doc/implementation_notes/planned/mlxf_milestone1.md`, which cites
 the decisions below by number ("design decision N") and lists which still bind; Phases 3 to 6 are a roadmap

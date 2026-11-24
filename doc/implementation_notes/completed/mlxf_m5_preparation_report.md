@@ -1,7 +1,11 @@
 # M5 preparation: laptop delivery
 
+Archive disposition, 2026-11-24: the laptop delivery report is complete. The outstanding launch
+audit and combined parity validation remain in [the active follow-up](../planned/mlxf_m5_preparation.md).
+Archiving this report does not mark those checks passed.
+
 Status, 2026-11-23: local Phases 0–4 validated on the M3 Pro; combined parity integration and the external
-M5 launch audit remain open. The [living plan](mlxf_m5_preparation.md) owns the detailed contract,
+M5 launch audit remain open. The [completed laptop record](mlxf_m5_preparation.md) owns the original contract,
 command matrix, source hashes and Progress. No benchmark or remote job was run.
 
 ## What was learned
@@ -61,7 +65,8 @@ but the parser hygiene fix remains separate from the pinned benchmark source.
 The matrix contains future commands only; no throughput smoke test was used to validate them.
 
 Claude's parity Phases 1–3 run independently on the M2; their final output is not in this checkout.
-Combined integration validation remains a handoff hold, so plan and report remain in `planned/`.
+Combined integration validation remained a handoff hold at delivery. On 2026-11-24 the completed local
+record/report were archived, with the hold retained in [the active follow-up](../planned/mlxf_m5_preparation.md).
 The separately available scientific-example pin `7ec7e2972` was used to verify its source anchors;
 this does not substitute for the missing measurement comparator. No file outside the table changed.
 
