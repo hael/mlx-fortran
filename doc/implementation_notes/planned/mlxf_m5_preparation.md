@@ -111,6 +111,54 @@ See the completed record/report for 1,364 strengthened shiftmap and 144 sampled-
 build across CPU/Metal, isolated package consumers, 247 host-reference checks, negative controls and
 source hashes. These are historical observed results, not a new validation of the parity-integrated tree.
 
+### Phase 2, launch audit, 2026-11-24 (run `mlxf_m1_m5`, Phase 0, on the M5 Ultra)
+
+**The actual specification** is [`mlxf_m1_m5.md`](mlxf_m1_m5.md) (SHA-256 at launch
+`070eaf1596fbef8fc007e5a5252f55ef14be3283d5e0c62d3c10a38c0574a2c5`), run by arun from
+`~/agent_runs/mlxf_m1_m5/spec/` (`prompt.md` `1600a316856301150c2e3de3fb665079b7b060980526e9f9e2d33a0773fc3210`,
+`phases.md` `145bb8f84efc34d62afaff7ba22d5972b821f25ba5b2afd716949a75dd87302e`, `run.conf`
+`30321134e849672f21284a299b24383c61afe4efa512f513b273a825f024bad6`, `rulings.md`
+`49d4825da946448cbe939c18d1d46b466961a6e52537c9d383dd3c9ca0d64633`, no rulings). Run HEAD `af0c23f`.
+
+**Pins verified** on the M5: `4706ecb2b8e1a4f77c8e9b67753a66e62b3c3b47` exists and is exported to the run's
+`scratch/keep/base_src`; SIMPLE `0a8b0903eee151700305399e8e3ff53c2c21caae` is a commit in `~/src/SIMPLE`, an
+ancestor of its HEAD `d354efee2`, and its `polar_matching_bench` dispatcher has `list`, `block_prod`,
+`check`, `fills`, `neigh` and `shiftmap`. brew mlx 0.32.4 / mlx-c 0.8.0. The measured base built in Debug
+and Release with warnings as errors and passed its fast gate, `recovery_half` and the three named polar
+suites on both devices at the recorded counts (231, 1,308, 144); HEAD's release gate passed
+(`polar_shiftmap` 1,364, `polar_shiftmap_accuracy` 144). Evidence: the run plan's Phase 0 Progress.
+
+**Corrections to the laptop's matrix** (completed Phase 2), all taken by the run plan:
+
+| Matrix | Run plan | Why |
+| --- | --- | --- |
+| `release_gate.sh --jobs 2` on the measured source | Export built by hand with the gate's options and checks; the gate itself on HEAD only, for correctness | the script needs `.git`; an export has none |
+| `nthr=$team` | `nthr=30` (10 for one context row) | the M5 has 30 cores in two levels, no efficiency cores |
+| quarter-memory budget | 25.8 GB, pruned before allocation | `memory_size` 103,079,215,104 B |
+| (not covered) | SIMPLE's OpenBLAS 0.3.34 cache copied from `~/src/SIMPLE/.deps` into the export | the checkout is read-only |
+| Xcode Metal capture, `.gputrace` | `xctrace` "Metal System Trace", after the timed rows, never timed | Xcode 27.2 is installed; `xctrace` lists the template |
+| evidence root `~/agent_work/mlxf_m5_preparation/4706ecb/` | the run's `scratch/keep/` | the laptop root is not on this Mac |
+| `fftw_plans=measure` passed | left to SIMPLE's default | the default is `measure` for both suites |
+| every case, form, tile and sensitivity combination | a stated subset, the rest deferrable | the time boxes of the run's decision 12 |
+
+**Parser findings at `4706ecb`**: every key the run plan uses is parsed. `suite=shiftmap` reads no
+`nthr` (its timing is the GPU with one submitting thread), so the plan's `nthr=30` there is inert;
+`revision=` is echoed, never checked.
+
+**Still to come from the run's Phase 1**: the fresh same-machine case and grid files (`polar_case.txt`,
+`shiftmap_grid.txt`) from SIMPLE's 30-thread rows, with their checksums. NAX eligibility (generation 17,
+macOS 27.2.1) and observed dispatch (the traces) stay separate observations, made in Phases 2 and 3.
+
+Exit: the actual spec and the comparator's pin are verified; the case and grid inputs are pending until the
+run's Phase 1 writes them.
+
+Update, the same day (the run's Phase 4): Phase 1 wrote the inputs, `scratch/keep/polar_case.txt`
+(SHA-256 `90a974fa0842a35d5eee6fe3a07a37405bbbd5849ed3eb7818c129d7dacff1d9`) and `shiftmap_grid.txt`
+(`aa05ca2773e6eb5d688dcd75ef1756a24940bea8d079c7daf59cdf77bc902eca`), from SIMPLE's 30-thread rows; the
+geometry equals the M2's. Phase 2's exit is met. Observed NAX dispatch, recorded apart from eligibility: in
+the accelerated mode only, for the dense and the map workloads (the run's Phases 2 and 3). Phase 5 remains
+open.
+
 ### Documentation split, 2026-11-24
 
 Archived the completed laptop work and kept the unresolved launch audit and integration here. Parity

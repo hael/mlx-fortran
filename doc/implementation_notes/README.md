@@ -7,7 +7,8 @@ Status reviewed on 2026-11-24 at `26387c1`. `planned/` contains active contracts
 
 | Note | Remaining work |
 | --- | --- |
-| [Milestone 1](planned/mlxf_milestone1.md) | Deferred Phase 5c measurements/retention, M5 run and final verdict/report |
+| [Milestone 1](planned/mlxf_milestone1.md) | At the hold: Phases 5c–7 delivered by run `mlxf_m1_m5` (scoring go 4.69; shift maps negative; [report](completed/mlxf_milestone1_report.md)); plans to move to `completed/` |
+| [M5 run `mlxf_m1_m5`](planned/mlxf_m1_m5.md) | Delivered on the M5 Ultra, 2026-11-24; at the hold with milestone 1 |
 | [M5 preparation follow-up](planned/mlxf_m5_preparation.md) | Actual launch-spec/comparator audit and combined validation after parity Phase 3 |
 | [mlx-c parity](planned/mlxf_mlxc_parity.md) | Phases 2–9; Phase 3 API hold unchanged; Phases 0–1 delivered |
 | [Scientific examples](planned/mlxf_scientific_examples.md) | Volume processing, projection/adjoint and tutorials after the milestone-1 hold |

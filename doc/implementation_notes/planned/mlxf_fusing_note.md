@@ -1,8 +1,8 @@
 # mlx-fortran: fusing, and what follows the shift maps' particle tiles
 
 Status, 2026-11-24: active roadmap, not a separate implementation plan. Phase 5c's graph alternatives
-are implemented and validated; their profiling, benchmarking and retention remain deferred in milestone 1,
-decision 27. Completed implementation evidence is in
+are implemented and validated, and run `mlxf_m1_m5` measured them on the M5 Ultra: none is retained, and the
+fresh requested-output profile is section 1a. Completed implementation evidence is in
 [the M2 record](../completed/mlxf_milestone1_m2.md), based on mlx-fortran `c93ee0d` and SIMPLE `0a8b0903e`. Metal work remains later, after its wrapper and fresh profiles. Originally written by Claude
 at Hans's request after decisions 25 and 26; updated by Codex's review of SIMPLE's committed optimizations.
 
@@ -34,6 +34,37 @@ barriers. Its graph alternatives and cutoff handling pass correctness validation
 on this machine on 2026-11-23, so there is no fresh requested-work profile and no measured winner yet. Compilation did not remove all
 intermediates in the measured forms. The profile does not yet establish that a custom kernel is needed;
 the graph experiments below come first.
+
+## 1a. The M5 Ultra's requested-output profile (run `mlxf_m1_m5`, Phase 3)
+
+Measured on the M5 Ultra at mlx-fortran `4706ecb` against SIMPLE `0a8b0903e` (30 threads, measured FFTW plans),
+case 2500_4, all widths, no evidence, full precision, the control graph (weighted-particle contraction, complex
+direction transform) at each map's best particle tile; µs per map of wall time, mean of two invocations
+(*measured*; the GPU's stages from the benchmark's requested-output profile, SIMPLE's as its thread-µs over 30):
+
+| map | side | construction | selection | width reduction | copy-out and host | total | maps/s |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| screen | GPU, ptile 4 | 34.7 | 4.8 | 11.5 | 1.3 | 50.1 | 1.99e4 |
+| screen | SIMPLE | 27.8 | 3.1 | 17.8 | | 48.7 | 2.05e4 |
+| window | GPU, ptile 16 | 9.4 | 1.0 | 1.9 | 1.2 | 13.4 | 7.46e4 |
+| window | SIMPLE | 6.1 | 0.5 | 2.5 | | 9.2 | 1.09e5 |
+
+- The control builds the maps at 0.97 (screen) and 0.68 (window) of SIMPLE's committed kernel on the same
+  machine: the M2's lead (1.69 and 1.10 against the previous SIMPLE kernel at 24 threads) is gone.
+- **Construction dominates** (69 % of the screen's and 70 % of the window's GPU time) and is where the GPU
+  loses: 1.25 times SIMPLE's on the screen, 1.54 times on the window. The width reduction is already faster
+  than SIMPLE's (0.65 and 0.76 times its time). Selection is small. The copy-out is negligible; the fixed
+  host part (about 1.2 µs per map) matters only on the window.
+- **The graph alternatives did not help**: the real-weights contraction is 0.61 to 0.73 of the control on
+  the screen even at its best candidate and order tiles (16 × 8), and the Hermitian direction transform is
+  0.97 to 0.99. The compact radius slots cut executed radius-order slots (screen 363 to 229-265) without
+  making contraction 2 competitive. They are recommended for removal (the run's report names the files).
+- **The accelerated mode** (NAX matrix products, confirmed by trace) raises the rates by 0.3 to 3.5 % and
+  fails the frozen map caps, so it changes nothing here.
+- So the remaining candidate is a **fused construction kernel** (item 3 below): it is the only stage large
+  enough to move either map past SIMPLE (*derived* from the table's stage sums, the other stages unchanged: parity needs
+  construction 10 % shorter on the screen and 46 % shorter on the window; a 2.0 go needs 81 % and 95 %). No speedup is assumed; item 3's 30 % rule and gates stand. A fused selection and reduction
+  (item 4) has at most the reduction's 23 % (screen) to gain.
 
 ## 2. What is needed, in order
 

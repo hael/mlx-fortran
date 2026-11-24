@@ -1,6 +1,12 @@
 # mlx-fortran milestone 1: the Phase 1 follow-ups, the tiled polar pipeline and the shift maps
 
-Current disposition, 2026-11-24: active contract and remaining work. Completed phase instructions
+Status, 2026-11-24 (run `mlxf_m1_m5`): **Phases 5c (performance exit), 6 and 7 delivered by run `mlxf_m1_m5` on the
+M5 Ultra; at the hold of design decision 32.** Scoring verdict 4.69, go; shift maps 0.971 (screen) and 0.683
+(window), negative; no Phase 5c alternative retained. Summary in Progress, report in
+[`completed/mlxf_milestone1_report.md`](../completed/mlxf_milestone1_report.md). Hans moves this plan and
+[`mlxf_m1_m5.md`](mlxf_m1_m5.md) and updates the README status line at the hold (`mlxf_m1_m5` decision 13).
+
+Earlier disposition, 2026-11-24: active contract and remaining work. Completed phase instructions
 and Progress have moved to [the M2 delivery record](../completed/mlxf_milestone1_m2.md).
 Decision numbers, this path and the file table remain stable for the run tooling. The full Phase 5c
 contract below is retained because its performance exit is still open; implementation is already delivered.
@@ -881,3 +887,87 @@ consumer package are recorded in [the completed laptop preparation](../completed
   [the preparation follow-up](mlxf_m5_preparation.md).
 
 Append new execution evidence here. Completed records are linked above rather than duplicated.
+
+### Phases 5c (performance exit), 6 and 7: the M5 Ultra, run `mlxf_m1_m5`, 2026-11-24
+
+The interim summary of Phase 7 step 1. Measured at mlx-fortran `4706ecb2b8e1a4f77c8e9b67753a66e62b3c3b47`
+against SIMPLE `0a8b0903eee151700305399e8e3ff53c2c21caae` on the M5 Ultra (30 cores, 64-core GPU
+`applegpu_g17d`, macOS 27.2.1, MLX 0.32.4 / mlx-c 0.8.0). The evidence is in
+[`mlxf_m1_m5.md`](mlxf_m1_m5.md), Progress, Phases 0 to 3. Every row there is clean (no flagged invocation),
+and every number carries its origin.
+
+- **What milestone 1 proved.**
+  - The tiled polar pipeline, built from public `mlxf` operations, reproduces SIMPLE's block scorer
+    within the frozen gates on both devices on the M5: the 64,000-pair block passes 192 of 192 for B and C.
+  - Schedule identity holds over repeats, outer batches, teams 1 and 24, and two slots.
+  - It scores the verdict case 4.69 times as fast as SIMPLE on all 30 cores.
+  - The shift maps pass their caps on both devices (1,308 and 144 assertions at `4706ecb`; 1,364 at HEAD).
+- **The scoring verdict (decision 14): go.** The slower GPU invocation is 1.76097e7 pairs/s against SIMPLE
+  `block_prod`'s faster 3.75296e6 (B 16, 30 threads), a ratio of 4.69 (*derived*). Spreads are 0.33 % and
+  1.16 %; memory is reconciled.
+  - The other cases give 4.40 (1000_1), 4.73 (1000_4) and 4.83 (2500_1).
+  - The M2 Ultra gave 4.29 to 4.55 against its own 24 cores (context).
+- **The shift maps (decision 18): negative on both maps.** The control graph's slower invocation over
+  SIMPLE's faster at 30 threads:
+  - screen 1.99418e4 / 2.05392e4 = 0.971;
+  - window 7.44959e4 / 1.08994e5 = 0.683.
+
+  SIMPLE's committed kernel (`0a8b0903e`) on 30 cores overtook the GPU graph, which led on the M2 (1.69 and
+  1.10, against SIMPLE's previous kernel on 24 cores). Decision 18's caveats and the omitted
+  production-equivalent cost (w unmeasured) are recorded in the run's Phase 3.
+- **Phase 5c's retention (decision 27): none.** Against the control at its best ptile:
+  - the Hermitian direction transform: 0.966 (screen) and 0.992 (window);
+  - the real-weights contraction: 0.61 to 0.73, even after the candidate/order-tile and compact-radius
+    search (best ctile 16 × otile 8).
+
+  All three alternatives are negative results recommended for removal (the report names the files).
+- **Peak memory.** At the dense verdict configuration MLX's active peak is 10.26 GB against an estimate of
+  7.92 GB, from queued tiles; the process footprint is 21.05 GB. At a map verdict row MLX's peak is
+  10.7 GB and the footprint is 22.7 to 22.9 GB.
+  - All inside the 25.8 GB budget.
+  - Each process footprint is attributed by region: the Metal buffers equal MLX's peak, the live host heap
+    equals the benchmark's data, and the rest is freed host blocks.
+- **Kept formulation and tile plan.** Formulation B with the compiled tail, at the canonical B 64 × R_t 250.
+  - The plan was the fastest timed configuration on the M5 in every case (15 timed at 2500_4).
+  - Formulation C is 0.92 times B in full precision and 0.98 in the accelerated mode, and is recommended
+    for removal (the run's decision 9).
+  - The maps keep the control graph: the screen at particle tile 4, the window at 16. The screen's
+    ptile 64 exceeds the budget.
+- **The accelerated mode (`MLX_ENABLE_TF32=1`): fails the frozen gates.**
+  - Block row error 4.2e-4 (B) and 9.0e-4 (C), against 1.45e-6.
+  - Map suites: 84 of 654 and 44 of 72 assertions fail.
+  - It gains 1 % (dense) and 0.3 to 3.5 % (maps).
+  - Metal System Traces show NAX matrix kernels (`steel_gemm_fused_nax_*`) only in this mode, never in full
+    precision.
+- **Numerical sensitivity per temperature** (accuracy block, seed 2, full precision; device draw against the
+  oracle rows' draw, of 16,000 pairs per temperature):
+
+  | temperature | GPU, B | CPU, B | GPU, accelerated |
+  | --- | --- | --- | --- |
+  | 1 | 0 | 2 | 3 |
+  | 30 | 1 | 0 | 40 |
+  | 420 | 2 | 2 | 49 |
+  | 1e4 | 0 | 0 | 8 |
+
+  - The float32 variate never changes the oracle's draw.
+  - SIMPLE's own `check` differs from production in 107 of 320,000 draws at the particles' temperatures
+    (the M2: 104), as its R7 expects.
+  - The M5's CPU calibration counts n_cpu 3 where 2 is frozen (reported; the judged counts are 0).
+- **Profile gaps.**
+  - Dense, with barriers: the compiled distances and draw take 0.90 s, the products 0.56 s and the inverse
+    FFT 0.42 s; preparation takes 1.09 s per pair of halves; the barriers themselves cost 0.8 s.
+  - Maps: construction is about 70 % of the GPU's time per map, 1.25 (screen) and 1.54 (window) times
+    SIMPLE's; the width reduction is already faster than SIMPLE's. The fusing note's section 1a has the
+    table.
+  - The production shares s, f and w are unmeasured. Decision 5's projection is tabulated in the run's
+    Phase 2 (1.07 at the pre-production s = 0.37, f = 0.23).
+- **What SIMPLE's integration would take.**
+  - A calculator-owned workspace that holds the prepared references across outer batches. Preparation
+    (1.09 s) is 49 % of one 2,000-particle pass and amortises over the batches that share references.
+  - A schedule split into preparation, submission and consumption.
+  - Two slots hide 2.4 % without load.
+  - A concurrent 30-thread CPU memory-streaming load slows the GPU path by 18 %, so SIMPLE's own CPU work
+    beside the GPU should be planned with that cost.
+  - The shift maps stay on SIMPLE's CPU kernel unless a fused construction kernel changes the profile.
+- **Open for the maintainer at the hold:** milestone 2 and parity Phase 4 onward (the hold of design
+  decision 32); the removals; s, f and w; moving both plans and the README status line.

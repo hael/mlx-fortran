@@ -176,5 +176,32 @@ CTest sets it to zero. The pinned sources are
 [`matmul.cpp`](https://github.com/ml-explore/mlx/blob/v0.32.4/mlx/backend/metal/matmul.cpp#L960-L966) and
 [`utils.h`](https://github.com/ml-explore/mlx/blob/v0.32.4/mlx/utils.h#L225-L227).
 
+Corrections from the M5 run (`mlxf_m1_m5`, 2026-11-24):
+
+- `scripts/release_gate.sh` needs `.git` (`rev-parse`). A `git archive` export of the measurement base is
+  configured by hand with the gate's options (`-DBUILD_TESTS=ON -DMLXF_REQUIRE_GPU=ON -DMLXF_WERROR=ON
+  -DFORTLS=OFF`), built, and then given `scripts/run_fast_gate.sh <tree>`. Its checks are then applied: no
+  `SKIP` in `Testing/Temporary/LastTest.log`, "GPU devices: 1", and no compiler warning. The static gate
+  passes without `.git`.
+- SIMPLE builds offline from a `git archive` export once `.deps/downloads` and `.deps/numerics` are copied
+  in from a checkout that built the same compiler's OpenBLAS. Configuration then reports "Reusing the
+  cached OpenBLAS".
+- At `4706ecb`, `bench_polar_table suite=shiftmap` reads no `nthr` (its timing is the GPU with one
+  submitting thread), and `suite=accuracy` uses teams 1 and 24 built in. Pass `nthr` to `time`,
+  `profile`, `overlap` and `stream`.
+- **NAX dispatch from a trace:**
+  - With Xcode installed, no `xcode-select` change is needed:
+
+    ```bash
+    DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer timeout 300 xcrun xctrace record       --template 'Metal System Trace' --time-limit 180s --output <name>.trace --launch -- <wrapper> <args>
+    ```
+
+    `<wrapper>` exports `MLX_ENABLE_TF32` and execs the executable.
+  - Read the trace with `xctrace export --toc`, then export the table `metal-shader-profiler-shader-list`
+    and filter its rows to the launched process. The traced process is named after the wrapper.
+  - On the M5 Ultra (`applegpu_g17d`, macOS 27.2.1) the float32 products dispatch
+    `steel_gemm_fused_nax_nn_float32_*` with `MLX_ENABLE_TF32=1`, and only `steel_gemm_fused_nn_float32_*`
+    with `0`.
+
 For arun itself, follow `SETUP.md` in the `agent_runs` checkout; the run spec supplies the machine-specific
 settings.
