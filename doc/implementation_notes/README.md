@@ -9,6 +9,7 @@ and unfinished work; `completed/` contains delivered records and reviews. A comp
 | --- | --- |
 | [Roadmap](planned/mlxf_roadmap.md) | Ruled 2026-11-24: the priority ranking and the plan that owns each item. Start here. Decision 12 (the dense-driver baseline) is approved; decisions 13 to 15 (from [the review](planned/mlxf_roadmap_review.md)) await ruling |
 | [Kernel families](planned/mlxf_kernel_families.md) | Milestone 2's design note: the toy kernels (polar matching, 3D Fourier gather and scatter, the PCG solve), deliverables K1 to K8; each needs its plan |
+| [dell2 bring-up](planned/mlxf_dell2_bringup.md) | Planned: one phase of probes before any work is sent to dell2 (arun end to end, the static gate under Linux, plain Fortran without MLX) |
 | [M5 preparation follow-up](planned/mlxf_m5_preparation.md) | Actual launch-spec/comparator audit and combined validation after parity Phase 3 |
 | [mlx-c parity](planned/mlxf_mlxc_parity.md) | Phases 2–9 on the M5 Ultra; Phase 3 API hold unchanged; then the kernels' wrappers first (its decisions 26 and 27); Phases 0–1 delivered |
 | [Scientific examples](planned/mlxf_scientific_examples.md) | Re-scoped by the kernel families: its example 3 and PCG fixtures stay the design basis; the filter bank is deferred; tutorials follow the kernels |
