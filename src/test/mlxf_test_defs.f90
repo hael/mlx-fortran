@@ -204,4 +204,71 @@ real(real64), parameter :: POLAR_BLOCK_ERR_CPU = 7.2525524223032628e-07_real64
 integer,      parameter :: POLAR_BLOCK_ROT_CPU = 2
 integer,      parameter :: POLAR_BLOCK_ROT_Q   = 5
 
+! the elementwise testers: points per function, the calibration seed and the seeds it judges
+integer, parameter :: ELEM_NPOINTS          = 1024
+integer, parameter :: ELEM_SEED_CALIBRATION = 1
+integer, parameter :: ELEM_SEEDS_JUDGED(2)  = [2, 3]
+! the ceiling of a float32 tolerance (64 epsilons) and the floors of every tolerance (4 epsilons of the result's
+! kind), errors relative to max(1, |reference|)
+real(real64), parameter :: ELEM_CEILING = 64._real64*real(epsilon(1._real32), real64)
+real(real64), parameter :: ELEM_FLOOR32 = 4._real64*real(epsilon(1._real32), real64)
+real(real64), parameter :: ELEM_FLOOR64 = 4._real64*epsilon(1._real64)
+! a function's largest error relative to max(1, |reference|): f32 for float32 results on either device, f64 for
+! float64 results on the CPU device
+type :: elem_tolerance
+    character(len=24) :: name = ''
+    real(real64)      :: f32  = 0._real64
+    real(real64)      :: f64  = 0._real64
+end type elem_tolerance
+
+! calibrated on seed 1 and frozen: max(2 x the largest error on either device, the floor of the result's
+! kind); a float64 result MLX computes in float32 on the CPU (sin, cos, erf, sigmoid, erfinv, logaddexp) is held
+! to the float32 bound
+type(elem_tolerance), parameter :: ELEM_TOLERANCES(41) = [&
+    &elem_tolerance('abs', 4.768371582e-07_real64, 8.881784197e-16_real64), &
+    &elem_tolerance('sin', 4.768371582e-07_real64, 4.768371582e-07_real64), &
+    &elem_tolerance('cos', 4.768371582e-07_real64, 4.768371582e-07_real64), &
+    &elem_tolerance('tan', 4.768371582e-07_real64, 8.881784197e-16_real64), &
+    &elem_tolerance('sinh', 4.768371582e-07_real64, 8.881784197e-16_real64), &
+    &elem_tolerance('cosh', 4.768371582e-07_real64, 8.881784197e-16_real64), &
+    &elem_tolerance('tanh', 4.768371582e-07_real64, 8.881784197e-16_real64), &
+    &elem_tolerance('log', 4.768371582e-07_real64, 8.881784197e-16_real64), &
+    &elem_tolerance('log10', 4.768371582e-07_real64, 8.881784197e-16_real64), &
+    &elem_tolerance('erf', 1.509527616e-06_real64, 7.614142292e-07_real64), &
+    &elem_tolerance('asin', 4.768371582e-07_real64, 8.881784197e-16_real64), &
+    &elem_tolerance('acos', 4.768371582e-07_real64, 8.881784197e-16_real64), &
+    &elem_tolerance('atan', 4.768371582e-07_real64, 8.881784197e-16_real64), &
+    &elem_tolerance('asinh', 4.768371582e-07_real64, 8.881784197e-16_real64), &
+    &elem_tolerance('acosh', 4.768371582e-07_real64, 8.881784197e-16_real64), &
+    &elem_tolerance('atanh', 4.768371582e-07_real64, 8.881784197e-16_real64), &
+    &elem_tolerance('floor', 4.768371582e-07_real64, 8.881784197e-16_real64), &
+    &elem_tolerance('ceiling', 4.768371582e-07_real64, 8.881784197e-16_real64), &
+    &elem_tolerance('aint', 4.768371582e-07_real64, 8.881784197e-16_real64), &
+    &elem_tolerance('mlx_round', 4.768371582e-07_real64, 8.881784197e-16_real64), &
+    &elem_tolerance('mlx_sign', 4.768371582e-07_real64, 8.881784197e-16_real64), &
+    &elem_tolerance('mlx_sigmoid', 4.768371582e-07_real64, 4.768371582e-07_real64), &
+    &elem_tolerance('mlx_square', 4.768371582e-07_real64, 8.881784197e-16_real64), &
+    &elem_tolerance('mlx_reciprocal', 4.768371582e-07_real64, 8.881784197e-16_real64), &
+    &elem_tolerance('mlx_rsqrt', 4.768371582e-07_real64, 8.881784197e-16_real64), &
+    &elem_tolerance('mlx_expm1', 4.768371582e-07_real64, 8.881784197e-16_real64), &
+    &elem_tolerance('mlx_log1p', 4.768371582e-07_real64, 8.881784197e-16_real64), &
+    &elem_tolerance('mlx_log2', 4.768371582e-07_real64, 8.881784197e-16_real64), &
+    &elem_tolerance('mlx_erfinv', 4.768371582e-07_real64, 4.768371582e-07_real64), &
+    &elem_tolerance('mlx_degrees', 4.768371582e-07_real64, 8.881784197e-16_real64), &
+    &elem_tolerance('mlx_radians', 4.768371582e-07_real64, 8.881784197e-16_real64), &
+    &elem_tolerance('mlx_stop_gradient', 4.768371582e-07_real64, 8.881784197e-16_real64), &
+    &elem_tolerance('mlx_copy', 4.768371582e-07_real64, 8.881784197e-16_real64), &
+    &elem_tolerance('operator(+)', 4.768371582e-07_real64, 8.881784197e-16_real64), &
+    &elem_tolerance('atan2', 4.768371582e-07_real64, 8.881784197e-16_real64), &
+    &elem_tolerance('modulo', 4.768371582e-07_real64, 8.881784197e-16_real64), &
+    &elem_tolerance('min', 4.768371582e-07_real64, 8.881784197e-16_real64), &
+    &elem_tolerance('operator(**)', 4.768371582e-07_real64, 8.881784197e-16_real64), &
+    &elem_tolerance('mlx_logaddexp', 4.768371582e-07_real64, 4.768371582e-07_real64), &
+    &elem_tolerance('mlx_floor_divide', 4.768371582e-07_real64, 8.881784197e-16_real64), &
+    &elem_tolerance('mlx_divmod', 4.768371582e-07_real64, 8.881784197e-16_real64)]
+
+! MLX's GPU expm1 loses accuracy as its argument grows (an upstream defect): its float32 GPU results are held
+! to this separate bound, twice the largest error of seed 1 on the GPU; the CPU keeps its tolerance above
+real(real64), parameter :: ELEM_GPU_EXPM1 = 4.010555858e-05_real64
+
 end module mlxf_test_defs

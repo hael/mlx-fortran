@@ -1,8 +1,9 @@
-!@descr: signature-class helpers for shaped, indexed, reduction and Fourier operations
+!@descr: signature-class helpers for shaped, indexed, closeness, reduction and Fourier operations; power and logic operators
 submodule(mlxf_array) mlxf_array_operations
 use mlxf_c_array,  only: mlxc_array_new, mlxc_array_free
+use mlxf_c_ops,    only: mlxc_power, mlxc_equal, mlxc_logical_xor, mlxc_positive
 use mlxf_c_stream, only: mlxc_stream_free
-use mlxf_c_vector, only: mlxc_vector_array_free
+use mlxf_c_vector, only: mlxc_vector_array_free, mlxc_vector_array_new
 use mlxf_defs,     only: MLX_DTYPES, MLX_FFT_NORMS
 use mlxf_device,   only: mlxf_require_device, mlxf_default_stream
 use mlxf_error,    only: mlxf_check, mlxf_fail
@@ -10,8 +11,21 @@ implicit none
 
 contains
 
-    ! r = f(a, option) on the default device, for every int f(mlx_array* res, const mlx_array a,
-    ! mlx_dtype dtype, const mlx_stream s); option, the dtype, is checked first
+    ! r = f(a, dtype) for every int f(mlx_array* res, const mlx_array a, mlx_dtype dtype, const mlx_stream s):
+    ! the dtype is checked against MLX_DTYPES first, then mlxf_int_op
+    module subroutine mlxf_dtype_op( r, f, a, dtype, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_int_op)          :: f
+        type(mlx_array),  intent(in)    :: a
+        integer,          intent(in)    :: dtype
+        character(len=*), intent(in)    :: proc
+        call mlxf_require_device(proc)
+        call check_dtype(dtype, proc)
+        call mlxf_int_op(r, f, a, dtype, proc)
+    end subroutine mlxf_dtype_op
+
+    ! r = f(a, option) on the default device, for every int f(mlx_array* res, const mlx_array a, int option,
+    ! const mlx_stream s); a dtype option goes through mlxf_dtype_op
     module subroutine mlxf_int_op( r, f, a, option, proc )
         type(mlx_array),  intent(inout) :: r
         procedure(mlxc_int_op)          :: f
@@ -23,7 +37,6 @@ contains
         type(mlxc_stream) :: s
         integer(c_int)    :: ierr
         call mlxf_require_device(proc)
-        call check_dtype(option, proc)
         ha = mlxf_handle(a, proc)
         res = mlxc_array_new()
         s = mlxf_default_stream(proc)
@@ -315,6 +328,207 @@ contains
         call mlxf_check(ierr, proc)
         call adopt(r, res, proc)
     end subroutine mlxf_fft2_op
+
+    ! r = f(a(1), a(2)) with the tolerances of option, for every int f(mlx_array* res, const mlx_array a,
+    ! const mlx_array b, double rtol, double atol, bool equal_nan, const mlx_stream s)
+    module subroutine mlxf_close_op( r, f, a, option, proc )
+        type(mlx_array),       intent(inout) :: r
+        procedure(mlxc_close_op)             :: f
+        type(mlx_array),       intent(in)    :: a(:)
+        type(mlxf_close_spec), intent(in)    :: option
+        character(len=*),      intent(in)    :: proc
+        type(mlxc_array)  :: res
+        type(mlxc_stream) :: s
+        integer(c_int)    :: ierr
+        call mlxf_require_device(proc)
+        res = mlxc_array_new()
+        s = mlxf_default_stream(proc)
+        ierr = f(res, mlxf_handle(a(1), proc), mlxf_handle(a(2), proc), option%rtol, option%atol, &
+            &logical(option%equal_nan, c_bool), s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call adopt(r, res, proc)
+    end subroutine mlxf_close_op
+
+    ! r = f(a(1), a(2)) with NaNs equal when option holds, for every int f(mlx_array* res, const mlx_array a,
+    ! const mlx_array b, bool equal_nan, const mlx_stream s)
+    module subroutine mlxf_compare_op( r, f, a, option, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_compare_op)      :: f
+        type(mlx_array),  intent(in)    :: a(:)
+        logical,          intent(in)    :: option
+        character(len=*), intent(in)    :: proc
+        type(mlxc_array)  :: res
+        type(mlxc_stream) :: s
+        integer(c_int)    :: ierr
+        call mlxf_require_device(proc)
+        res = mlxc_array_new()
+        s = mlxf_default_stream(proc)
+        ierr = f(res, mlxf_handle(a(1), proc), mlxf_handle(a(2), proc), logical(option, c_bool), s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call adopt(r, res, proc)
+    end subroutine mlxf_compare_op
+
+    ! r = f(a) with the replacements of option, for every int f(mlx_array* res, const mlx_array a, float nan,
+    ! mlx_optional_float posinf, mlx_optional_float neginf, const mlx_stream s)
+    module subroutine mlxf_nan_op( r, f, a, option, proc )
+        type(mlx_array),     intent(inout) :: r
+        procedure(mlxc_nan_op)             :: f
+        type(mlx_array),     intent(in)    :: a
+        type(mlxf_nan_spec), intent(in)    :: option
+        character(len=*),    intent(in)    :: proc
+        type(mlxc_array)          :: ha
+        type(mlxc_optional_float) :: posinf, neginf
+        type(mlxc_array)          :: res
+        type(mlxc_stream)         :: s
+        integer(c_int)            :: ierr
+        call mlxf_require_device(proc)
+        ha = mlxf_handle(a, proc)
+        posinf%value = option%posinf
+        posinf%has_value = logical(option%has_posinf, c_bool)
+        neginf%value = option%neginf
+        neginf%has_value = logical(option%has_neginf, c_bool)
+        res = mlxc_array_new()
+        s = mlxf_default_stream(proc)
+        ierr = f(res, ha, option%nan, posinf, neginf, s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call adopt(r, res, proc)
+    end subroutine mlxf_nan_op
+
+    ! the arrays of f(a(1), a(2)), in MLX's order, for every int f(mlx_vector_array* res, const mlx_array a,
+    ! const mlx_array b, const mlx_stream s); the vector is freed after its arrays are adopted
+    module subroutine mlxf_binary_vector_op( r, f, a, proc )
+        type(mlx_array),  allocatable, intent(out) :: r(:)
+        procedure(mlxc_binary_vector_op)           :: f
+        type(mlx_array),  intent(in)               :: a(:)
+        character(len=*), intent(in)               :: proc
+        type(mlxc_vector_array) :: res
+        type(mlxc_stream)       :: s
+        integer(c_int)          :: ierr
+        integer                 :: status
+        call mlxf_require_device(proc)
+        res = mlxc_vector_array_new()
+        s = mlxf_default_stream(proc)
+        ierr = f(res, mlxf_handle(a(1), proc), mlxf_handle(a(2), proc), s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_vector_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call mlxf_vector_import(r, res, status)
+        call mlxf_check(mlxc_vector_array_free(res), proc)
+        if( status /= 0 ) call mlxf_fail(proc, 'the results could not be adopted')
+    end subroutine mlxf_binary_vector_op
+
+    ! r = f(option%shape, a) as option%dtype, the shape reversed to MLX's order, for every int f(mlx_array* res,
+    ! const int* shape, size_t shape_num, const mlx_array vals, mlx_dtype dtype, const mlx_stream s)
+    module subroutine mlxf_full_op( r, f, a, option, proc )
+        type(mlx_array),       intent(inout) :: r
+        procedure(mlxc_full_op)              :: f
+        type(mlx_array),       intent(in)    :: a
+        type(mlxf_shape_spec), intent(in)    :: option
+        character(len=*),      intent(in)    :: proc
+        type(mlxc_array)  :: ha
+        type(mlxc_array)  :: res
+        type(mlxc_stream) :: s
+        integer(c_int)    :: ierr
+        integer           :: n
+        call mlxf_require_device(proc)
+        call check_dtype(option%dtype, proc)
+        ha = mlxf_handle(a, proc)
+        n = size(option%shape)
+        res = mlxc_array_new()
+        s = mlxf_default_stream(proc)
+        ierr = f(res, int(option%shape(n:1:-1), c_int), int(n, c_size_t), ha, int(option%dtype, c_int), s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call adopt(r, res, proc)
+    end subroutine mlxf_full_op
+
+    ! r = f(a(1), a(2), option) for every int f(mlx_array* res, const mlx_array a, const mlx_array b,
+    ! mlx_dtype dtype, const mlx_stream s); option, the dtype, is checked first
+    module subroutine mlxf_binary_int_op( r, f, a, option, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_binary_int_op)   :: f
+        type(mlx_array),  intent(in)    :: a(:)
+        integer,          intent(in)    :: option
+        character(len=*), intent(in)    :: proc
+        type(mlxc_array)  :: res
+        type(mlxc_stream) :: s
+        integer(c_int)    :: ierr
+        call mlxf_require_device(proc)
+        call check_dtype(option, proc)
+        res = mlxc_array_new()
+        s = mlxf_default_stream(proc)
+        ierr = f(res, mlxf_handle(a(1), proc), mlxf_handle(a(2), proc), int(option, c_int), s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call adopt(r, res, proc)
+    end subroutine mlxf_binary_int_op
+
+    ! unary plus: a new node with a's values
+    module function pos_array( a ) result(r)
+        class(mlx_array), intent(in) :: a
+        type(mlx_array) :: r
+        call mlxf_unary(r, mlxc_positive, a, 'operator(+)')
+    end function pos_array
+
+    ! lhs**rhs elementwise; a scalar operand is weak and takes the array's kind
+    module function pow_aa( lhs, rhs ) result(r)
+        class(mlx_array), intent(in) :: lhs, rhs
+        type(mlx_array) :: r
+        call mlxf_binary(r, mlxc_power, lhs, rhs, 'operator(**)')
+    end function pow_aa
+
+    module function pow_as( lhs, rhs ) result(r)
+        class(mlx_array), intent(in) :: lhs
+        real(real32),     intent(in) :: rhs
+        type(mlx_array) :: r, s
+        call mlxf_weak_scalar(s, lhs, real(rhs, real64), 'operator(**)')
+        call mlxf_binary(r, mlxc_power, lhs, s, 'operator(**)')
+    end function pow_as
+
+    module function pow_sa( lhs, rhs ) result(r)
+        real(real32),     intent(in) :: lhs
+        class(mlx_array), intent(in) :: rhs
+        type(mlx_array) :: r, s
+        call mlxf_weak_scalar(s, rhs, real(lhs, real64), 'operator(**)')
+        call mlxf_binary(r, mlxc_power, s, rhs, 'operator(**)')
+    end function pow_sa
+
+    module function pow_ad( lhs, rhs ) result(r)
+        class(mlx_array), intent(in) :: lhs
+        real(real64),     intent(in) :: rhs
+        type(mlx_array) :: r, s
+        call mlxf_weak_scalar(s, lhs, rhs, 'operator(**)')
+        call mlxf_binary(r, mlxc_power, lhs, s, 'operator(**)')
+    end function pow_ad
+
+    module function pow_da( lhs, rhs ) result(r)
+        real(real64),     intent(in) :: lhs
+        class(mlx_array), intent(in) :: rhs
+        type(mlx_array) :: r, s
+        call mlxf_weak_scalar(s, rhs, lhs, 'operator(**)')
+        call mlxf_binary(r, mlxc_power, s, rhs, 'operator(**)')
+    end function pow_da
+
+    ! .eqv. and .neqv. of boolean arrays
+    module function eqv_aa( lhs, rhs ) result(r)
+        class(mlx_array), intent(in) :: lhs, rhs
+        type(mlx_array) :: r
+        call mlxf_binary(r, mlxc_equal, lhs, rhs, 'operator(.eqv.)')
+    end function eqv_aa
+
+    module function neqv_aa( lhs, rhs ) result(r)
+        class(mlx_array), intent(in) :: lhs, rhs
+        type(mlx_array) :: r
+        call mlxf_binary(r, mlxc_logical_xor, lhs, rhs, 'operator(.neqv.)')
+    end function neqv_aa
 
     ! a normalisation outside MLX_FFT_NORMS stops before it reaches mlx-c as an enum value
     subroutine check_fft_norm( norm, proc )

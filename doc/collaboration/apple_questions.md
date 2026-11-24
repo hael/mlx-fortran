@@ -97,6 +97,27 @@ layout does 2.9 million pairs per second on 24 cores; the target machine is an M
    - Meanwhile: correctness is established with `MLX_ENABLE_TF32=0`; the accelerated mode is measured
      separately and must pass the same tests; we benchmark a real-GEMM formulation of our complex product.
 
+20. **float32 `expm1` on the GPU loses accuracy as its argument grows.** Status: open; observed 2026-11-23
+    with MLX 0.32.4 and mlx-c 0.8.0 (Homebrew) on an M2 Ultra.
+    - Ask: is this known? The Metal kernel's comment claims a largest error of 0.997 ulp, but its error against
+      libm's double `expm1` grows with x, while `exp` on the same GPU stays within 1 epsilon. Error relative to
+      `max(1, |expm1(x)|)` in float32 epsilons (2^-23), from `scripts/probes/expm1_gpu_probe.c`:
+
+      | x | -10 | -5 | -1 | -0.25 | 0.25 | 0.5 | 1 | 2 | 3 | 5 | 8 | 9.9 |
+      | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+      | `expm1`, GPU | 0.16 | 0.50 | 4.42 | 0.02 | 0.12 | 19.56 | 18.80 | 41.46 | 50.31 | 84.40 | 143.70 | 167.90 |
+      | `expm1`, CPU | 0.16 | 0.00 | 0.08 | 0.02 | 0.12 | 0.06 | 0.18 | 0.14 | 0.01 | 0.18 | 0.06 | 0.19 |
+      | `exp`, GPU | 0.00 | 0.00 | 0.08 | 0.02 | 0.09 | 0.34 | 0.25 | 0.12 | 0.81 | 0.18 | 0.06 | 0.19 |
+
+      Over 1,024 seeded points of [-10, 10], three seeds, the GPU's largest error is 168.2 epsilons and the
+      CPU's 0.9. Near 0 the GPU is exact to the last bit, as `expm1` should be.
+    - Where: MLX `mlx/backend/metal/kernels/expm1f.h` (`expm1f_scaled_unchecked`, the reconstruction
+      `fma(v, t, x) + y` after the double-float canonicalisation `x = (t - y) - s`), reached through `Expm1` in
+      `unary_ops.h`. We have not isolated which step loses the bits; a compiler that reassociates the
+      canonicalisation would explain an error that grows with 2^i.
+    - Meanwhile: mlx-fortran keeps `mlx_expm1` and documents the GPU bound; its GPU test holds a separate
+      bound (twice the observed seed-1 maximum), the CPU its ordinary one.
+
 ## D. Performance of SIMPLE's kernels
 
 10. **Batched complex GEMM at our shapes.** Status: open.

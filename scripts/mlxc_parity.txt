@@ -18,24 +18,24 @@ _mlx_array_is_contiguous                         internal   -
 _mlx_array_is_row_contiguous                     plumbing   -
 _mlx_array_wait                                  internal   -
 _mlx_error                                       internal   -
-mlx_abs                                          pending 1  abs
+mlx_abs                                          public     abs
 mlx_add                                          public     mlx_array%operator(+)
 mlx_addmm                                        pending 4  mlx_addmm
 mlx_all                                          pending 2  all
 mlx_all_axes                                     pending 2  all
 mlx_all_axis                                     pending 2  all
-mlx_allclose                                     pending 1  mlx_allclose
+mlx_allclose                                     public     mlx_allclose
 mlx_any                                          pending 2  any
 mlx_any_axes                                     pending 2  any
 mlx_any_axis                                     pending 2  any
 mlx_arange                                       public     mlx_arange
-mlx_arccos                                       pending 1  acos
-mlx_arccosh                                      pending 1  acosh
-mlx_arcsin                                       pending 1  asin
-mlx_arcsinh                                      pending 1  asinh
-mlx_arctan                                       pending 1  atan
-mlx_arctan2                                      pending 1  atan2
-mlx_arctanh                                      pending 1  atanh
+mlx_arccos                                       public     acos
+mlx_arccosh                                      public     acosh
+mlx_arcsin                                       public     asin
+mlx_arcsinh                                      public     asinh
+mlx_arctan                                       public     atan
+mlx_arctan2                                      public     atan2
+mlx_arctanh                                      public     atanh
 mlx_argmax                                       pending 2  maxloc
 mlx_argmax_axis                                  pending 2  maxloc
 mlx_argmin                                       pending 2  minloc
@@ -60,7 +60,7 @@ mlx_array_data_uint64                            excluded   unsigned scalars: no
 mlx_array_data_uint8                             excluded   unsigned scalars: no standard Fortran type (device-only dtypes)
 mlx_array_dim                                    internal   -
 mlx_array_dtype                                  plumbing   -
-mlx_array_equal                                  pending 1  mlx_array_equal
+mlx_array_equal                                  public     mlx_array_equal
 mlx_array_eval                                   plumbing   -
 mlx_array_free                                   plumbing   -
 mlx_array_item_bfloat16                          excluded   float16/bfloat16 scalars: no standard Fortran type (device-only dtypes)
@@ -111,19 +111,19 @@ mlx_atleast_1d                                   pending 2  mlx_atleast_1d
 mlx_atleast_2d                                   pending 2  mlx_atleast_2d
 mlx_atleast_3d                                   pending 2  mlx_atleast_3d
 mlx_bartlett                                     pending 2  mlx_bartlett
-mlx_bitwise_and                                  pending 1  iand
-mlx_bitwise_invert                               pending 1  not
-mlx_bitwise_or                                   pending 1  ior
-mlx_bitwise_xor                                  pending 1  ieor
+mlx_bitwise_and                                  public     iand
+mlx_bitwise_invert                               public     not
+mlx_bitwise_or                                   public     ior
+mlx_bitwise_xor                                  public     ieor
 mlx_blackman                                     pending 2  mlx_blackman
 mlx_block_masked_mm                              pending 4  mlx_block_masked_mm
 mlx_broadcast_arrays                             pending 2  mlx_broadcast_arrays
 mlx_broadcast_to                                 pending 2  mlx_broadcast_to
-mlx_ceil                                         pending 1  ceiling
+mlx_ceil                                         public     ceiling
 mlx_checkpoint                                   pending 6  mlx_checkpoint
 mlx_clear_cache                                  public     mlx_clear_cache
 mlx_clear_streams                                excluded   stream registry management: one default stream per device is offered
-mlx_clip                                         pending 1  mlx_clip
+mlx_clip                                         public     mlx_clip
 mlx_closure_apply                                plumbing   -
 mlx_closure_custom_apply                         internal   -
 mlx_closure_custom_free                          internal   -
@@ -175,9 +175,9 @@ mlx_conv_general                                 pending 4  mlx_conv_general
 mlx_conv_transpose1d                             pending 4  mlx_conv_transpose1d
 mlx_conv_transpose2d                             pending 4  mlx_conv_transpose2d
 mlx_conv_transpose3d                             pending 4  mlx_conv_transpose3d
-mlx_copy                                         pending 1  mlx_copy
-mlx_cos                                          pending 1  cos
-mlx_cosh                                         pending 1  cosh
+mlx_copy                                         public     mlx_copy
+mlx_cos                                          public     cos
+mlx_cosh                                         public     cosh
 mlx_count_nonzero                                pending 2  count
 mlx_count_nonzero_axes                           pending 2  count
 mlx_count_nonzero_axis                           pending 2  count
@@ -194,7 +194,7 @@ mlx_custom_function                              pending 6  mlx_custom_function
 mlx_custom_vjp                                   pending 6  mlx_custom_vjp
 mlx_default_cpu_stream_new                       pending 8  mlx_default_stream
 mlx_default_gpu_stream_new                       pending 8  mlx_default_stream
-mlx_degrees                                      pending 1  mlx_degrees
+mlx_degrees                                      public     mlx_degrees
 mlx_depends                                      pending 6  mlx_depends
 mlx_dequantize                                   excluded   decision 2: quantised and fp8 inference formats, no Fortran data type
 mlx_detail_compile                               excluded   detail_: internal API of mlx-c
@@ -243,18 +243,18 @@ mlx_distributed_recv_like                        pending 8  mlx_recv_like
 mlx_distributed_send                             pending 8  mlx_send
 mlx_distributed_sum_scatter                      pending 8  mlx_sum_scatter
 mlx_divide                                       public     mlx_array%operator(/)
-mlx_divmod                                       pending 1  mlx_divmod
+mlx_divmod                                       public     mlx_divmod
 mlx_dtype_size                                   internal   -
 mlx_einsum                                       pending 4  mlx_einsum
 mlx_enable_compile                               pending 6  mlx_enable_compile
 mlx_equal                                        public     mlx_array%operator(==)
-mlx_erf                                          pending 1  erf
-mlx_erfinv                                       pending 1  mlx_erfinv
+mlx_erf                                          public     erf
+mlx_erfinv                                       public     mlx_erfinv
 mlx_eval                                         public     mlx_eval
 mlx_exp                                          public     exp
 mlx_expand_dims                                  pending 2  mlx_expand_dims
 mlx_expand_dims_axes                             pending 2  mlx_expand_dims
-mlx_expm1                                        pending 1  mlx_expm1
+mlx_expm1                                        public     mlx_expm1
 mlx_export_function                              pending 6  mlx_export_function
 mlx_export_function_kwargs                       excluded   keyword-argument closures: Fortran has no keyword dictionaries
 mlx_export_to_dot                                pending 8  mlx_export_to_dot
@@ -312,11 +312,11 @@ mlx_flatten                                      pending 2  mlx_flatten
 mlx_flip                                         pending 2  mlx_flip
 mlx_flip_axes                                    pending 2  mlx_flip
 mlx_flip_axis                                    pending 2  mlx_flip
-mlx_floor                                        pending 1  floor
-mlx_floor_divide                                 pending 1  mlx_floor_divide
+mlx_floor                                        public     floor
+mlx_floor_divide                                 public     mlx_floor_divide
 mlx_from_fp8                                     excluded   decision 2: quantised and fp8 inference formats, no Fortran data type
-mlx_full                                         pending 1  mlx_full
-mlx_full_like                                    pending 1  mlx_full_like
+mlx_full                                         public     mlx_full
+mlx_full_like                                    public     mlx_full_like
 mlx_function_exporter_apply                      pending 6  mlx_function_exporter%apply
 mlx_function_exporter_apply_kwargs               excluded   keyword-argument closures: Fortran has no keyword dictionaries
 mlx_function_exporter_free                       internal   -
@@ -368,15 +368,15 @@ mlx_io_writer_descriptor                         excluded   IO through reader/wr
 mlx_io_writer_free                               excluded   IO through reader/writer vtables: the generator skips mlx_io_vtable
 mlx_io_writer_new                                excluded   IO through reader/writer vtables: the generator skips mlx_io_vtable
 mlx_io_writer_tostring                           excluded   IO through reader/writer vtables: the generator skips mlx_io_vtable
-mlx_isclose                                      pending 1  mlx_isclose
-mlx_isfinite                                     pending 1  mlx_isfinite
-mlx_isinf                                        pending 1  mlx_isinf
-mlx_isnan                                        pending 1  mlx_isnan
-mlx_isneginf                                     pending 1  mlx_isneginf
-mlx_isposinf                                     pending 1  mlx_isposinf
+mlx_isclose                                      public     mlx_isclose
+mlx_isfinite                                     public     mlx_isfinite
+mlx_isinf                                        public     mlx_isinf
+mlx_isnan                                        public     mlx_isnan
+mlx_isneginf                                     public     mlx_isneginf
+mlx_isposinf                                     public     mlx_isposinf
 mlx_jvp                                          pending 6  mlx_jvp
 mlx_kron                                         pending 4  mlx_kron
-mlx_left_shift                                   pending 1  shiftl
+mlx_left_shift                                   public     shiftl
 mlx_less                                         public     mlx_array%operator(<)
 mlx_less_equal                                   public     mlx_array%operator(<=)
 mlx_linalg_cholesky                              pending 4  mlx_cholesky
@@ -407,17 +407,17 @@ mlx_load_gguf                                    pending 8  mlx_load_gguf
 mlx_load_reader                                  excluded   IO through reader/writer vtables: the generator skips mlx_io_vtable
 mlx_load_safetensors                             pending 8  mlx_load_safetensors
 mlx_load_safetensors_reader                      excluded   IO through reader/writer vtables: the generator skips mlx_io_vtable
-mlx_log                                          pending 1  log
-mlx_log10                                        pending 1  log10
-mlx_log1p                                        pending 1  mlx_log1p
-mlx_log2                                         pending 1  mlx_log2
-mlx_logaddexp                                    pending 1  mlx_logaddexp
+mlx_log                                          public     log
+mlx_log10                                        public     log10
+mlx_log1p                                        public     mlx_log1p
+mlx_log2                                         public     mlx_log2
+mlx_logaddexp                                    public     mlx_logaddexp
 mlx_logcumsumexp                                 pending 2  mlx_logcumsumexp
 mlx_logcumsumexp_axis                            pending 2  mlx_logcumsumexp
 mlx_logical_and                                  public     mlx_array%operator(.and.)
 mlx_logical_not                                  public     mlx_array%operator(.not.)
 mlx_logical_or                                   public     mlx_array%operator(.or.)
-mlx_logical_xor                                  pending 1  mlx_array%operator(.neqv.)
+mlx_logical_xor                                  public     mlx_array%operator(.neqv.)
 mlx_logsumexp                                    pending 2  mlx_logsumexp
 mlx_logsumexp_axes                               pending 2  mlx_logsumexp
 mlx_logsumexp_axis                               public     mlx_logsumexp
@@ -459,10 +459,10 @@ mlx_metal_stop_capture                           pending 8  mlx_metal_stop_captu
 mlx_min                                          pending 2  minval
 mlx_min_axes                                     pending 2  minval
 mlx_min_axis                                     public     minval
-mlx_minimum                                      pending 1  min
+mlx_minimum                                      public     min
 mlx_moveaxis                                     pending 2  mlx_movedim
 mlx_multiply                                     public     mlx_array%operator(*)
-mlx_nan_to_num                                   pending 1  mlx_nan_to_num
+mlx_nan_to_num                                   public     mlx_nan_to_num
 mlx_negative                                     public     mlx_array%operator(-)
 mlx_node_namer_free                              internal   -
 mlx_node_namer_get_name                          internal   -
@@ -470,16 +470,16 @@ mlx_node_namer_new                               internal   -
 mlx_node_namer_set_name                          internal   -
 mlx_not_equal                                    public     mlx_array%operator(/=)
 mlx_number_of_elements                           pending 2  mlx_number_of_elements
-mlx_ones                                         pending 1  mlx_ones
-mlx_ones_like                                    pending 1  mlx_ones_like
-mlx_ones_like_dtype                              pending 1  mlx_ones_like
+mlx_ones                                         public     mlx_ones
+mlx_ones_like                                    public     mlx_ones_like
+mlx_ones_like_dtype                              public     mlx_ones_like
 mlx_outer                                        pending 4  mlx_outer
 mlx_pad                                          pending 2  mlx_pad
 mlx_pad_symmetric                                pending 2  mlx_pad
 mlx_partition                                    pending 2  mlx_partition
 mlx_partition_axis                               pending 2  mlx_partition
-mlx_positive                                     pending 1  mlx_array%operator(+)
-mlx_power                                        pending 1  mlx_array%operator(**)
+mlx_positive                                     public     mlx_array%operator(+)
+mlx_power                                        public     mlx_array%operator(**)
 mlx_print_graph                                  pending 8  mlx_print_graph
 mlx_prod                                         pending 2  product
 mlx_prod_axes                                    pending 2  product
@@ -488,7 +488,7 @@ mlx_put_along_axis                               pending 3  mlx_put_along_dim
 mlx_qqmm                                         excluded   decision 2: quantised and fp8 inference formats, no Fortran data type
 mlx_quantize                                     excluded   decision 2: quantised and fp8 inference formats, no Fortran data type
 mlx_quantized_matmul                             excluded   decision 2: quantised and fp8 inference formats, no Fortran data type
-mlx_radians                                      pending 1  mlx_radians
+mlx_radians                                      public     mlx_radians
 mlx_random_bernoulli                             pending 5  mlx_random_bernoulli
 mlx_random_bits                                  pending 5  mlx_random_bits
 mlx_random_categorical                           pending 5  mlx_random_categorical
@@ -509,18 +509,18 @@ mlx_random_split_num                             pending 5  mlx_random_split
 mlx_random_truncated_normal                      pending 5  mlx_random_truncated_normal
 mlx_random_uniform                               pending 5  mlx_random_uniform
 mlx_real                                         public     real
-mlx_reciprocal                                   pending 1  mlx_reciprocal
-mlx_remainder                                    pending 1  modulo
+mlx_reciprocal                                   public     mlx_reciprocal
+mlx_remainder                                    public     modulo
 mlx_repeat                                       pending 2  mlx_repeat
 mlx_repeat_axis                                  pending 2  mlx_repeat
 mlx_reset_peak_memory                            public     mlx_reset_peak_memory
 mlx_reshape                                      public     reshape
-mlx_right_shift                                  pending 1  mlx_right_shift
+mlx_right_shift                                  public     mlx_right_shift
 mlx_roll                                         pending 2  cshift
 mlx_roll_axes                                    pending 2  cshift
 mlx_roll_axis                                    pending 2  cshift
-mlx_round                                        pending 1  mlx_round
-mlx_rsqrt                                        pending 1  mlx_rsqrt
+mlx_round                                        public     mlx_round
+mlx_rsqrt                                        public     mlx_rsqrt
 mlx_save                                         pending 8  mlx_save
 mlx_save_gguf                                    pending 8  mlx_save_gguf
 mlx_save_safetensors                             pending 8  mlx_save_safetensors
@@ -546,10 +546,10 @@ mlx_set_default_stream                           pending 8  mlx_set_default_stre
 mlx_set_error_handler                            plumbing   -
 mlx_set_memory_limit                             public     mlx_set_memory_limit
 mlx_set_wired_limit                              pending 8  mlx_set_wired_limit
-mlx_sigmoid                                      pending 1  mlx_sigmoid
-mlx_sign                                         pending 1  mlx_sign
-mlx_sin                                          pending 1  sin
-mlx_sinh                                         pending 1  sinh
+mlx_sigmoid                                      public     mlx_sigmoid
+mlx_sign                                         public     mlx_sign
+mlx_sin                                          public     sin
+mlx_sinh                                         public     sinh
 mlx_slice                                        public     mlx_slice
 mlx_slice_dynamic                                pending 3  mlx_slice
 mlx_slice_update                                 pending 3  mlx_slice_update
@@ -566,7 +566,7 @@ mlx_sort_axis                                    pending 2  mlx_sort
 mlx_split                                        pending 2  mlx_split
 mlx_split_sections                               pending 2  mlx_split
 mlx_sqrt                                         public     sqrt
-mlx_square                                       pending 1  mlx_square
+mlx_square                                       public     mlx_square
 mlx_squeeze                                      pending 2  mlx_squeeze
 mlx_squeeze_axes                                 pending 2  mlx_squeeze
 mlx_squeeze_axis                                 pending 2  mlx_squeeze
@@ -575,7 +575,7 @@ mlx_stack_axis                                   pending 2  mlx_stack
 mlx_std                                          pending 2  mlx_std
 mlx_std_axes                                     pending 2  mlx_std
 mlx_std_axis                                     pending 2  mlx_std
-mlx_stop_gradient                                pending 1  mlx_stop_gradient
+mlx_stop_gradient                                public     mlx_stop_gradient
 mlx_stream_equal                                 internal   -
 mlx_stream_free                                  plumbing   -
 mlx_stream_from_thread_local                     excluded   one submitting thread: thread-local and thread-unsafe streams excluded
@@ -605,8 +605,8 @@ mlx_synchronize_thread_local                     excluded   one submitting threa
 mlx_take                                         pending 3  mlx_take
 mlx_take_along_axis                              public     mlx_take_along_dim
 mlx_take_axis                                    public     mlx_take
-mlx_tan                                          pending 1  tan
-mlx_tanh                                         pending 1  tanh
+mlx_tan                                          public     tan
+mlx_tanh                                         public     tanh
 mlx_tensordot                                    pending 4  mlx_tensordot
 mlx_tensordot_axis                               pending 4  mlx_tensordot
 mlx_tile                                         pending 2  mlx_tile
@@ -620,7 +620,7 @@ mlx_transpose_axes                               public     mlx_permute
 mlx_tri                                          pending 2  mlx_tri
 mlx_tril                                         pending 2  mlx_tril
 mlx_triu                                         pending 2  mlx_triu
-mlx_trunc                                        pending 1  aint
+mlx_trunc                                        public     aint
 mlx_unflatten                                    pending 2  mlx_unflatten
 mlx_unique                                       pending 3  mlx_unique
 mlx_unstack                                      pending 2  mlx_unstack
@@ -690,5 +690,5 @@ mlx_view                                         public     mlx_bitcast
 mlx_vjp                                          pending 6  mlx_vjp
 mlx_where                                        public     merge
 mlx_zeros                                        public     mlx_zeros
-mlx_zeros_like                                   pending 1  mlx_zeros_like
-mlx_zeros_like_dtype                             pending 1  mlx_zeros_like
+mlx_zeros_like                                   public     mlx_zeros_like
+mlx_zeros_like_dtype                             public     mlx_zeros_like

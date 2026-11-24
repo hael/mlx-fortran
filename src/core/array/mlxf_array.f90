@@ -4,14 +4,15 @@
 ! derived type, allocate(source=), an array intrinsic) is detected through the registry and stops at its next
 ! use. One type and one ownership implementation; the submodules share only what this interface declares.
 module mlxf_array
-use, intrinsic :: iso_c_binding,   only: c_bool, c_int, c_ptr, c_size_t, c_double
+use, intrinsic :: iso_c_binding,   only: c_bool, c_int, c_ptr, c_size_t, c_double, c_float_kind => c_float
 use, intrinsic :: iso_fortran_env, only: int32, int64, real32, real64
-use mlxf_c_types, only: mlxc_array, mlxc_stream, mlxc_vector_array, mlxc_optional_dtype
-use mlxf_defs,    only: mlxf_slice_spec, mlxf_fft_spec, mlxf_range_spec
+use mlxf_c_types, only: mlxc_array, mlxc_stream, mlxc_vector_array, mlxc_optional_dtype, mlxc_optional_float
+use mlxf_defs,    only: mlxf_slice_spec, mlxf_fft_spec, mlxf_range_spec, mlxf_close_spec, mlxf_nan_spec, &
+                        mlxf_shape_spec
 implicit none
 
 public :: mlx_array, mlx_from, mlx_to, mlx_to_alloc, mlx_view, mlx_alloc, mlx_eval, mlx_async_eval
-public :: mlxf_int_op, &
+public :: mlxf_int_op, mlxf_dtype_op, &
     &mlxf_vector_op, &
     &mlxf_reduce_op, &
     &mlxf_ternary_op, &
@@ -22,7 +23,13 @@ public :: mlxf_int_op, &
     &mlxf_zeros_op, &
     &mlxf_range_op, &
     &mlxf_fft_op, &
-    &mlxf_fft2_op
+    &mlxf_fft2_op, &
+    &mlxf_close_op, &
+    &mlxf_compare_op, &
+    &mlxf_nan_op, &
+    &mlxf_binary_vector_op, &
+    &mlxf_full_op, &
+    &mlxf_binary_int_op
 public :: mlxf_vector_import, mlxf_vector_export
 public :: mlxf_weak_scalar
 public :: mlx_synchronize, mlx_is_live, exp, mlxf_handle, mlxf_unary, mlxf_binary, mlxc_unary_op, mlxc_binary_op
@@ -48,7 +55,8 @@ type :: mlx_array
     procedure, private, pass(rhs) :: add_sa
     procedure, private            :: add_ad
     procedure, private, pass(rhs) :: add_da
-    generic                       :: operator(+) => add_aa, add_as, add_sa, add_ad, add_da
+    procedure, private            :: pos_array
+    generic                       :: operator(+) => add_aa, add_as, add_sa, add_ad, add_da, pos_array
     procedure, private            :: sub_aa
     procedure, private            :: sub_as
     procedure, private, pass(rhs) :: sub_sa
@@ -67,6 +75,12 @@ type :: mlx_array
     procedure, private            :: div_ad
     procedure, private, pass(rhs) :: div_da
     generic                       :: operator(/) => div_aa, div_as, div_sa, div_ad, div_da
+    procedure, private            :: pow_aa
+    procedure, private            :: pow_as
+    procedure, private, pass(rhs) :: pow_sa
+    procedure, private            :: pow_ad
+    procedure, private, pass(rhs) :: pow_da
+    generic                       :: operator(**) => pow_aa, pow_as, pow_sa, pow_ad, pow_da
     procedure, private            :: lt_aa
     procedure, private            :: lt_as
     procedure, private, pass(rhs) :: lt_sa
@@ -107,6 +121,10 @@ type :: mlx_array
     generic                       :: operator(.and.) => land_aa
     procedure, private            :: lor_aa
     generic                       :: operator(.or.) => lor_aa
+    procedure, private            :: eqv_aa
+    generic                       :: operator(.eqv.) => eqv_aa
+    procedure, private            :: neqv_aa
+    generic                       :: operator(.neqv.) => neqv_aa
     procedure, private            :: negate_array
     procedure, private            :: not_array
     generic                       :: operator(.not. ) => not_array
@@ -267,6 +285,72 @@ abstract interface
         type(mlxc_stream), value        :: s
         integer(c_int) :: mlxc_fft2_op
     end function mlxc_fft2_op
+    ! int f(mlx_array* res, const mlx_array a, const mlx_array b, double rtol, double atol, bool equal_nan,
+    ! const mlx_stream s)
+    function mlxc_close_op( res, a, b, rtol, atol, equal_nan, s ) bind(c)
+        import
+        type(mlxc_array), intent(inout) :: res
+        type(mlxc_array), value         :: a
+        type(mlxc_array), value         :: b
+        real(c_double), value           :: rtol
+        real(c_double), value           :: atol
+        logical(c_bool), value          :: equal_nan
+        type(mlxc_stream), value        :: s
+        integer(c_int) :: mlxc_close_op
+    end function mlxc_close_op
+    ! int f(mlx_array* res, const mlx_array a, const mlx_array b, bool equal_nan, const mlx_stream s)
+    function mlxc_compare_op( res, a, b, equal_nan, s ) bind(c)
+        import
+        type(mlxc_array), intent(inout) :: res
+        type(mlxc_array), value         :: a
+        type(mlxc_array), value         :: b
+        logical(c_bool), value          :: equal_nan
+        type(mlxc_stream), value        :: s
+        integer(c_int) :: mlxc_compare_op
+    end function mlxc_compare_op
+    ! int f(mlx_array* res, const mlx_array a, float nan, mlx_optional_float posinf, mlx_optional_float neginf,
+    ! const mlx_stream s)
+    function mlxc_nan_op( res, a, nan, posinf, neginf, s ) bind(c)
+        import
+        type(mlxc_array), intent(inout)  :: res
+        type(mlxc_array), value          :: a
+        real(c_float_kind), value        :: nan
+        type(mlxc_optional_float), value :: posinf
+        type(mlxc_optional_float), value :: neginf
+        type(mlxc_stream), value         :: s
+        integer(c_int) :: mlxc_nan_op
+    end function mlxc_nan_op
+    ! int f(mlx_vector_array* res, const mlx_array a, const mlx_array b, const mlx_stream s)
+    function mlxc_binary_vector_op( res, a, b, s ) bind(c)
+        import
+        type(mlxc_vector_array), intent(inout) :: res
+        type(mlxc_array), value                :: a
+        type(mlxc_array), value                :: b
+        type(mlxc_stream), value               :: s
+        integer(c_int) :: mlxc_binary_vector_op
+    end function mlxc_binary_vector_op
+    ! int f(mlx_array* res, const int* shape, size_t shape_num, const mlx_array vals, mlx_dtype dtype,
+    ! const mlx_stream s)
+    function mlxc_full_op( res, shape, shape_num, vals, dtype, s ) bind(c)
+        import
+        type(mlxc_array), intent(inout) :: res
+        integer(c_int), intent(in)      :: shape(*)
+        integer(c_size_t), value        :: shape_num
+        type(mlxc_array), value         :: vals
+        integer(c_int), value           :: dtype
+        type(mlxc_stream), value        :: s
+        integer(c_int) :: mlxc_full_op
+    end function mlxc_full_op
+    ! int f(mlx_array* res, const mlx_array a, const mlx_array b, mlx_dtype dtype, const mlx_stream s)
+    function mlxc_binary_int_op( res, a, b, dtype, s ) bind(c)
+        import
+        type(mlxc_array), intent(inout) :: res
+        type(mlxc_array), value         :: a
+        type(mlxc_array), value         :: b
+        integer(c_int), value           :: dtype
+        type(mlxc_stream), value        :: s
+        integer(c_int) :: mlxc_binary_int_op
+    end function mlxc_binary_int_op
 end interface
 
 interface exp
@@ -827,6 +911,42 @@ interface
         class(mlx_array), intent(in) :: lhs, rhs
         type(mlx_array) :: r
     end function lor_aa
+    module function pos_array( a ) result(r)
+        class(mlx_array), intent(in) :: a
+        type(mlx_array) :: r
+    end function pos_array
+    module function pow_aa( lhs, rhs ) result(r)
+        class(mlx_array), intent(in) :: lhs, rhs
+        type(mlx_array) :: r
+    end function pow_aa
+    module function pow_as( lhs, rhs ) result(r)
+        class(mlx_array), intent(in) :: lhs
+        real(real32),     intent(in) :: rhs
+        type(mlx_array) :: r
+    end function pow_as
+    module function pow_sa( lhs, rhs ) result(r)
+        real(real32),     intent(in) :: lhs
+        class(mlx_array), intent(in) :: rhs
+        type(mlx_array) :: r
+    end function pow_sa
+    module function pow_ad( lhs, rhs ) result(r)
+        class(mlx_array), intent(in) :: lhs
+        real(real64),     intent(in) :: rhs
+        type(mlx_array) :: r
+    end function pow_ad
+    module function pow_da( lhs, rhs ) result(r)
+        real(real64),     intent(in) :: lhs
+        class(mlx_array), intent(in) :: rhs
+        type(mlx_array) :: r
+    end function pow_da
+    module function eqv_aa( lhs, rhs ) result(r)
+        class(mlx_array), intent(in) :: lhs, rhs
+        type(mlx_array) :: r
+    end function eqv_aa
+    module function neqv_aa( lhs, rhs ) result(r)
+        class(mlx_array), intent(in) :: lhs, rhs
+        type(mlx_array) :: r
+    end function neqv_aa
     module function negate_array( a ) result(r)
         class(mlx_array), intent(in) :: a
         type(mlx_array) :: r
@@ -847,6 +967,13 @@ interface
 end interface
 
 interface
+    module subroutine mlxf_dtype_op( r, f, a, dtype, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_int_op)          :: f
+        type(mlx_array),  intent(in)    :: a
+        integer,          intent(in)    :: dtype
+        character(len=*), intent(in)    :: proc
+    end subroutine mlxf_dtype_op
     module subroutine mlxf_int_op( r, f, a, option, proc )
         type(mlx_array),  intent(inout) :: r
         procedure(mlxc_int_op)          :: f
@@ -928,6 +1055,47 @@ interface
         type(mlxf_fft_spec), intent(in)    :: option
         character(len=*),    intent(in)    :: proc
     end subroutine mlxf_fft2_op
+    module subroutine mlxf_close_op( r, f, a, option, proc )
+        type(mlx_array),       intent(inout) :: r
+        procedure(mlxc_close_op)             :: f
+        type(mlx_array),       intent(in)    :: a(:)
+        type(mlxf_close_spec), intent(in)    :: option
+        character(len=*),      intent(in)    :: proc
+    end subroutine mlxf_close_op
+    module subroutine mlxf_compare_op( r, f, a, option, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_compare_op)      :: f
+        type(mlx_array),  intent(in)    :: a(:)
+        logical,          intent(in)    :: option
+        character(len=*), intent(in)    :: proc
+    end subroutine mlxf_compare_op
+    module subroutine mlxf_nan_op( r, f, a, option, proc )
+        type(mlx_array),     intent(inout) :: r
+        procedure(mlxc_nan_op)             :: f
+        type(mlx_array),     intent(in)    :: a
+        type(mlxf_nan_spec), intent(in)    :: option
+        character(len=*),    intent(in)    :: proc
+    end subroutine mlxf_nan_op
+    module subroutine mlxf_binary_vector_op( r, f, a, proc )
+        type(mlx_array),  allocatable, intent(out) :: r(:)
+        procedure(mlxc_binary_vector_op)           :: f
+        type(mlx_array),  intent(in)               :: a(:)
+        character(len=*), intent(in)               :: proc
+    end subroutine mlxf_binary_vector_op
+    module subroutine mlxf_full_op( r, f, a, option, proc )
+        type(mlx_array),       intent(inout) :: r
+        procedure(mlxc_full_op)              :: f
+        type(mlx_array),       intent(in)    :: a
+        type(mlxf_shape_spec), intent(in)    :: option
+        character(len=*),      intent(in)    :: proc
+    end subroutine mlxf_full_op
+    module subroutine mlxf_binary_int_op( r, f, a, option, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_binary_int_op)   :: f
+        type(mlx_array),  intent(in)    :: a(:)
+        integer,          intent(in)    :: option
+        character(len=*), intent(in)    :: proc
+    end subroutine mlxf_binary_int_op
     module subroutine check_dim( a, dim, proc )
         type(mlx_array),  intent(in) :: a
         integer,          intent(in) :: dim

@@ -42,7 +42,9 @@ written, the skill `mlxf-modern-fortran`.
   optional arguments (`mlx_eval`, `mlx_async_eval`; later `mlx_concatenate`, `mlx_stack`). The caller fills the
   array element by element or writes a constructor of variables (section 4).
 - **The public API grows by demonstrated need.** A procedure is wrapped by hand when a pipeline step uses
-  it or a test of such a step needs its sibling; the generated layer's breadth is no reason.
+  it, a test of such a step needs its sibling, or the parity ledger `scripts/mlxc_parity.txt` lists its mlx-c
+  function as pending (parity with mlx-c is a goal: MLX's documented API is the need); the generated layer's
+  breadth is no other reason.
 
 ## 2. Memory order, indices and positions
 
@@ -181,13 +183,21 @@ written, the skill `mlxf-modern-fortran`.
   bool; `a%kind()` returns one of `MLX_DTYPES%bool`, `%int32`, `%int64`, `%float32`, `%float64`,
   `%complex64`. The vocabularies (`MLX_DEVICES`, `MLX_DTYPES`) and `MLXF_HARD_ERROR_STATUS` are declared in
   `mlxf_defs` and reach users through `mlxf`. complex(real64) has no specific. Nothing converts silently except the scalar rule below.
-- On the CPU device MLX computes some float64 operations in float32 (at MLX v0.32.4: `exp`, `sin`, `cos` and
-  every FFT); tests hold them to float32 tolerances. CPU float64 `sqrt` meets the float64 bound
+- On the CPU device MLX computes some float64 operations in float32 (at MLX v0.32.4: `exp`, `sin`, `cos`,
+  `erf`, `mlx_erfinv`, `mlx_sigmoid`, `mlx_logaddexp` and every FFT); tests hold them to float32 tolerances.
+- On the GPU, MLX v0.32.4's float32 `expm1` loses accuracy as its argument grows: an error relative to
+  `max(1, |expm1(x)|)` of about 20 float32 epsilons at x = 0.5 and 168 at x = 10, against below 1 on the CPU
+  (`doc/collaboration/apple_questions.md`, question 20; `scripts/probes/expm1_gpu_probe.c`). `mlx_expm1` is
+  kept; where a GPU result near 1e-5 relative is not good enough, compute it on the CPU device. CPU float64 `sqrt` meets the float64 bound
   `1e-12 * max(1, abs(sqrt(x)))` against a double-precision reference. A float64 operation built on the
   GPU stops (Metal has no float64): a guard of `object_contracts`.
 - **Scalar operands are weak**: a Fortran scalar takes the array's kind when the array is real or complex; a
   real scalar with a complex64 array becomes complex64; an integer or boolean array with a real scalar gives
-  float32. A real64 literal never makes a float64 graph. Arithmetic, comparisons and `max` accept real32 and real64 scalars on either side.
+  float32. A real64 literal never makes a float64 graph. Arithmetic (`**` included), comparisons, `max`, `min`,
+  `atan2`, `modulo`, `mlx_logaddexp`, `mlx_floor_divide` and `mlx_clip`'s bounds accept real32 and real64
+  scalars on either side, in the intrinsic's argument order. The bitwise functions (`iand`, `ior`, `ieor` on
+  either side; `shiftl`, `mlx_right_shift` as the shift) accept a default integer scalar, which takes the
+  array's integer kind.
   A real32 scalar widened for a float64 array retains its original real32 rounding; a real64 scalar is
   rounded to the array kind. Integer and boolean arrays combined with real scalars produce float32.
 
@@ -291,7 +301,31 @@ written, the skill `mlxf-modern-fortran`.
   returns zeros of the reduced shape, as Fortran's `minloc` does, where MLX's argmin refuses the array. `mlx_logsumexp` uses
   MLX's stable reduction; its test bound is `1e-5 * max(1, abs(logsumexp(x)))`, in log units,
   including CPU float64 (the exponential uses float32 precision). `mlx_cumsum(a,dim)` preserves shape and is forward and inclusive.
-- `mlx_zeros(shape[,dtype])` defaults to float32. `mlx_arange(start,stop[,step,dtype])` takes real64
+- **Elementwise functions** keep the intrinsic's name where the value semantics agree, with an array result
+  whose kind follows MLX's rules: `abs`, `sin`, `cos`, `tan`, `sinh`, `cosh`, `tanh`, `log`, `log10`, `erf`,
+  `asin`, `acos`, `atan`, `asinh`, `acosh`, `atanh`, `atan2(y,x)`, `modulo(a,p)`, `min(a,b)`, `iand`, `ior`,
+  `ieor`, `not`, `shiftl`, and the operators `**`, `.eqv.`, `.neqv.` and unary `+`. `floor`, `ceiling` and
+  `aint` (truncation) keep the input's float kind, unlike Fortran's integer `floor` and `ceiling`.
+  `modulo` takes the divisor's sign, as Fortran's; `mlx_floor_divide(a,b)` is `floor(a/b)` and
+  `call mlx_divmod(a,b,quotient,remainder)` returns both from one node. `mlx_round(a[,decimals])` rounds
+  halves to even (0.5 to 0, 2.5 to 2), unlike `anint` and `nint`; `mlx_sign(a)` is the signum of one argument,
+  unlike Fortran's `sign(a,b)`. `mlx_right_shift` is arithmetic on signed integers (Fortran's `shifta`, not
+  the logical `shiftr`). The other names are MLX's: `mlx_sigmoid`, `mlx_square`, `mlx_reciprocal`,
+  `mlx_rsqrt`, `mlx_expm1`, `mlx_log1p`, `mlx_log2`, `mlx_erfinv`, `mlx_degrees`, `mlx_radians`,
+  `mlx_logaddexp`, `mlx_clip(a,a_min,a_max)`, `mlx_nan_to_num(a[,nan,posinf,neginf])` (NaN to 0 and the
+  infinities to the kind's largest finite values by default), `mlx_stop_gradient` and `mlx_copy` (a new
+  graph node; assignment shares the node instead).
+- **Predicates and tests** return boolean arrays: `mlx_isnan`, `mlx_isinf`, `mlx_isfinite`, `mlx_isposinf`,
+  `mlx_isneginf`; `mlx_isclose(a,b[,rtol,atol,equal_nan])` is `|a-b| <= atol + rtol*|b|` with NumPy's
+  defaults rtol = 1e-5, atol = 1e-8 and NaNs unequal; `mlx_allclose` (same arguments) and
+  `mlx_array_equal(a,b[,equal_nan])` (same shape and values, any dtypes) return rank-0 boolean arrays.
+- **Dimension 1 by default.** A function whose MLX default is the last axis (a softmax, the norms and
+  `rope` of `fast`, attention) acts on Fortran dimension 1, the contiguous one, when no dimension is given.
+- `mlx_zeros(shape[,dtype])` and `mlx_ones(shape[,dtype])` default to float32.
+  `mlx_full(shape,vals[,dtype])` takes an array (broadcast with leading dimensions aligned, of its kind by
+  default) or a scalar (float32 for a real value, int32 for an integer one, by default).
+  `mlx_zeros_like(a[,dtype])`, `mlx_ones_like(a[,dtype])` and `mlx_full_like(a,vals[,dtype])` take `a`'s shape
+  and, by default, its kind. A float64 fill keeps a real32 value's rounding. `mlx_arange(start,stop[,step,dtype])` takes real64
   scalar bounds, defaults to unit step and float32, and excludes `stop`; negative steps are supported.
 - `matmul(a,b)` multiplies Fortran dimensions 1 and 2 and broadcasts dimensions 3 and above. Complex
   multiplication does not conjugate either operand; use `conjg` explicitly when needed.

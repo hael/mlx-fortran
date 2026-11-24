@@ -62,10 +62,12 @@ The full contract is [`doc/policies/binding_contract_policy.md`](doc/policies/bi
 
 | area | names |
 | --- | --- |
-| arrays | `mlx_array`, `mlx_from`, `mlx_to`, `mlx_to_alloc`, `mlx_view`, `mlx_alloc`, `mlx_is_live`, `mlx_astype`, `mlx_zeros`, `mlx_arange` |
+| arrays | `mlx_array`, `mlx_from`, `mlx_to`, `mlx_to_alloc`, `mlx_view`, `mlx_alloc`, `mlx_is_live`, `mlx_astype`, `mlx_copy`, `mlx_zeros`, `mlx_ones`, `mlx_full`, `mlx_zeros_like`, `mlx_ones_like`, `mlx_full_like`, `mlx_arange` |
 | evaluation | `mlx_eval`, `mlx_async_eval`, `mlx_synchronize` |
-| operators | `+ - * /`, `< <= > >= == /=`, `.and. .or. .not.` on arrays and scalars |
-| elementwise | `exp`, `sqrt`, `real`, `aimag`, `conjg`, `cmplx`, `max`, `merge` |
+| operators | `+ - * / **`, `< <= > >= == /=`, `.and. .or. .not. .eqv. .neqv.` on arrays and scalars |
+| elementwise | `abs`, `exp`, `sqrt`, `log`, `log10`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`, `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh`, `erf`, `floor`, `ceiling`, `aint`, `modulo`, `min`, `max`, `merge`, `real`, `aimag`, `conjg`, `cmplx`, `mlx_round`, `mlx_sign`, `mlx_sigmoid`, `mlx_square`, `mlx_reciprocal`, `mlx_rsqrt`, `mlx_expm1`, `mlx_log1p`, `mlx_log2`, `mlx_erfinv`, `mlx_degrees`, `mlx_radians`, `mlx_logaddexp`, `mlx_floor_divide`, `mlx_divmod`, `mlx_clip`, `mlx_nan_to_num`, `mlx_stop_gradient` |
+| tests and predicates | `mlx_isnan`, `mlx_isinf`, `mlx_isfinite`, `mlx_isposinf`, `mlx_isneginf`, `mlx_isclose`, `mlx_allclose`, `mlx_array_equal` |
+| integers and bits | `iand`, `ior`, `ieor`, `not`, `shiftl`, `mlx_right_shift` (arithmetic) |
 | shape and indexing | `reshape`, `transpose`, `mlx_permute`, `mlx_concatenate`, `mlx_slice`, `mlx_take_along_dim`, `mlx_take`, `mlx_bitcast` |
 | reductions and scans | `sum`, `minval`, `minloc`, `mlx_logsumexp`, `mlx_cumsum` |
 | linear algebra | `matmul` (batched) |

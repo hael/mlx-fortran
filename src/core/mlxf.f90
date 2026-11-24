@@ -14,7 +14,14 @@ use mlxf_array,    only: mlx_array, mlx_from, mlx_to, mlx_to_alloc, mlx_view, ml
                          mlx_synchronize, mlx_is_live, exp
 use mlxf_ops,      only: real, aimag, conjg, sqrt, mlx_astype, mlx_bitcast, max, merge, cmplx, reshape, mlx_permute, &
                          transpose, mlx_concatenate, mlx_slice, mlx_take_along_dim, mlx_take, sum, minval, &
-                         mlx_logsumexp, mlx_cumsum, minloc, mlx_zeros, mlx_arange
+                         mlx_logsumexp, mlx_cumsum, minloc, mlx_zeros, mlx_arange, abs, sin, cos, tan, sinh, cosh, &
+                         tanh, log, log10, erf, asin, acos, atan, asinh, acosh, atanh, floor, ceiling, aint, mlx_sign, &
+                         mlx_sigmoid, mlx_square, mlx_reciprocal, mlx_rsqrt, mlx_expm1, mlx_log1p, mlx_log2, &
+                         mlx_erfinv, mlx_degrees, mlx_radians, mlx_stop_gradient, mlx_copy, mlx_isnan, mlx_isinf, &
+                         mlx_isfinite, mlx_isposinf, mlx_isneginf, mlx_round, mlx_clip, mlx_nan_to_num, atan2, modulo, &
+                         min, mlx_logaddexp, mlx_floor_divide, mlx_divmod, mlx_isclose, mlx_allclose, mlx_array_equal, &
+                         iand, ior, ieor, not, shiftl, mlx_right_shift, mlx_ones, mlx_full, mlx_zeros_like, &
+                         mlx_ones_like, mlx_full_like
 use mlxf_linalg,   only: matmul
 use mlxf_fft,      only: mlx_fft, mlx_ifft, mlx_rfft, mlx_irfft, mlx_fft2, mlx_ifft2
 use mlxf_compile,  only: mlx_function, mlx_compile
@@ -51,6 +58,66 @@ public :: real, &
     &minloc, &
     &mlx_zeros, &
     &mlx_arange, &
+    &abs, &
+    &sin, &
+    &cos, &
+    &tan, &
+    &sinh, &
+    &cosh, &
+    &tanh, &
+    &log, &
+    &log10, &
+    &erf, &
+    &asin, &
+    &acos, &
+    &atan, &
+    &asinh, &
+    &acosh, &
+    &atanh, &
+    &floor, &
+    &ceiling, &
+    &aint, &
+    &mlx_sign, &
+    &mlx_sigmoid, &
+    &mlx_square, &
+    &mlx_reciprocal, &
+    &mlx_rsqrt, &
+    &mlx_expm1, &
+    &mlx_log1p, &
+    &mlx_log2, &
+    &mlx_erfinv, &
+    &mlx_degrees, &
+    &mlx_radians, &
+    &mlx_stop_gradient, &
+    &mlx_copy, &
+    &mlx_isnan, &
+    &mlx_isinf, &
+    &mlx_isfinite, &
+    &mlx_isposinf, &
+    &mlx_isneginf, &
+    &mlx_round, &
+    &mlx_clip, &
+    &mlx_nan_to_num, &
+    &atan2, &
+    &modulo, &
+    &min, &
+    &mlx_logaddexp, &
+    &mlx_floor_divide, &
+    &mlx_divmod, &
+    &mlx_isclose, &
+    &mlx_allclose, &
+    &mlx_array_equal, &
+    &iand, &
+    &ior, &
+    &ieor, &
+    &not, &
+    &shiftl, &
+    &mlx_right_shift, &
+    &mlx_ones, &
+    &mlx_full, &
+    &mlx_zeros_like, &
+    &mlx_ones_like, &
+    &mlx_full_like, &
     &matmul, &
     &mlx_fft, &
     &mlx_ifft, &

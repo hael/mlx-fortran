@@ -104,7 +104,7 @@ MAX_DUMMIES = 5
 DEFS_EXCEPTIONS = {}
 ENTRY_CALLS = ('mlxf_enter', 'mlxf_guard_thread', 'mlxf_require_device')
 # helpers an entry may call first instead: each must itself open with an entry call
-ENTRY_HELPERS = ('mlxf_unary', 'mlxf_binary', 'mlxf_weak_scalar', 'mlxf_int_op', 'mlxf_vector_op', 'mlxf_reduce_op', 'mlxf_ternary_op', 'mlxf_take_op', 'mlxf_scan_op', 'mlxf_slice_op', 'mlxf_concat_op', 'mlxf_zeros_op', 'mlxf_range_op', 'mlxf_fft_op', 'mlxf_fft2_op')
+ENTRY_HELPERS = ('mlxf_unary', 'mlxf_binary', 'mlxf_weak_scalar', 'mlxf_int_op', 'mlxf_dtype_op', 'mlxf_vector_op', 'mlxf_reduce_op', 'mlxf_ternary_op', 'mlxf_take_op', 'mlxf_scan_op', 'mlxf_slice_op', 'mlxf_concat_op', 'mlxf_zeros_op', 'mlxf_range_op', 'mlxf_fft_op', 'mlxf_fft2_op', 'mlxf_close_op', 'mlxf_compare_op', 'mlxf_nan_op', 'mlxf_binary_vector_op', 'mlxf_full_op', 'mlxf_binary_int_op')
 # the lifetime bindings touch shared state only through a live handle: they may open with the one-thread guard
 # conditional on one (between empty handles they run anywhere; nothing they do needs initialisation)
 ENTRY_IF_LIVE = ('assign_array', 'kill_array', 'function_assign', 'function_kill')
@@ -127,7 +127,7 @@ PARITY_PHASES = range(1, 9)
 # the mlx-c release the ledger lists: the minimum; a newer one's differences are warnings, an older one fails
 PARITY_MLXC_VERSION = '0.8.0'
 # the pending lines of the ledger; may only shrink
-PARITY_PENDING = 339
+PARITY_PENDING = 274
 
 
 def sources(root):

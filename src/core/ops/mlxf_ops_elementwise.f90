@@ -3,7 +3,7 @@ submodule(mlxf_ops) mlxf_ops_elementwise
 use mlxf_c_ops,  only: mlxc_add, mlxc_astype, mlxc_conjugate, mlxc_imag, mlxc_maximum, mlxc_real, mlxc_sqrt, mlxc_view, &
                        mlxc_where
 use mlxf_defs,   only: MLX_DTYPES
-use mlxf_array,  only: mlx_from, mlxf_binary, mlxf_int_op, mlxf_ternary_op, mlxf_unary, mlxf_weak_scalar
+use mlxf_array,  only: mlx_from, mlxf_binary, mlxf_dtype_op, mlxf_ternary_op, mlxf_unary, mlxf_weak_scalar
 use mlxf_device, only: mlxf_enter
 implicit none
 
@@ -17,7 +17,7 @@ contains
         if( a%kind() == MLX_DTYPES%complex64 )then
             call mlxf_unary(r, mlxc_real, a, 'real')
         else
-            call mlxf_int_op(r, mlxc_astype, a, MLX_DTYPES%float32, 'real')
+            call mlxf_dtype_op(r, mlxc_astype, a, MLX_DTYPES%float32, 'real')
         endif
     end function real_array
 
@@ -47,7 +47,7 @@ contains
         type(mlx_array), intent(in) :: a
         integer,         intent(in) :: dtype
         type(mlx_array) :: r
-        call mlxf_int_op(r, mlxc_astype, a, dtype, 'mlx_astype')
+        call mlxf_dtype_op(r, mlxc_astype, a, dtype, 'mlx_astype')
     end function mlx_astype
 
     ! a's bytes read as dtype, one of MLX_DTYPES (MLX's view; mlx_view is the Fortran pointer view): no value
@@ -57,7 +57,7 @@ contains
         type(mlx_array), intent(in) :: a
         integer,         intent(in) :: dtype
         type(mlx_array) :: r
-        call mlxf_int_op(r, mlxc_view, a, dtype, 'mlx_bitcast')
+        call mlxf_dtype_op(r, mlxc_view, a, dtype, 'mlx_bitcast')
     end function mlx_bitcast
 
     ! Fortran's max(a, b) elementwise; a scalar operand is weak and takes the array's kind
