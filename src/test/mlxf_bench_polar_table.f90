@@ -1,25 +1,26 @@
 !@descr: benchmark of the polar table workspace at SIMPLE's sizes: accuracy block, timing sweep, profile, overlap, shift maps
 ! mlxf_test_exec test=bench_polar_table suite=<accuracy|time|profile|overlap|stream|shiftmap> [key=value ...]. The
 ! case geometry comes from a key = value file of SIMPLE's measured cases (cases=, case=), the shift maps' grid from
-! another (grid=, maps=); the data are synthetic: reference rings, particles as CTF times a rotated reference plus
-! noise, memos by a double-precision DFT. The accuracy mode holds the 64,000-pair block to its DFT-matrix oracle
-! and the frozen bounds; the other modes append measure-only rows to ./bench_polar_table*.tsv.
+! another (grid=, maps=); the data are synthetic. Every suite hands the rings to the toy calculator and fills
+! its tables through the toy driver; a key the suite does not read stops the program. The accuracy mode holds the 64,000-pair block to its oracle and the frozen bounds; the others append
+! measure-only rows to ./bench_polar_table*.tsv. suite=time scores one part (nparts=, part=) after a go file (go=).
 module mlxf_bench_polar_table
-use, intrinsic :: iso_fortran_env, only: int64, real32, real64
+use, intrinsic :: iso_fortran_env, only: int32, int64, real32, real64
 use, intrinsic :: iso_c_binding,   only: c_int, c_double
-!$ use omp_lib,               only: omp_get_max_threads
-use mlxf,                     only: mlx_set_default_device, mlx_default_device, mlx_peak_memory, mlx_reset_peak_memory, &
-                                    mlx_synchronize, mlx_clear_cache, mlx_device_info_size, MLX_DEVICES, &
-                                    mlx_active_memory, mlx_cache_memory
-use mlxf_test_defs,           only: POLAR_ROW_FACTOR, POLAR_BLOCK_ERR_CPU, POLAR_BLOCK_ROT_CPU, POLAR_BLOCK_ROT_Q, &
-                                    POLAR_SEED_CALIBRATION, POLAR_SEED_JUDGED, POLAR_GRID_B, POLAR_GRID_R, &
-                                    POLAR_BUDGET_SHARE, POLAR_CANON_BT, POLAR_CANON_RT, POLAR_BLOCK_BT, POLAR_BLOCK_RT, &
-                                    POLAR_PROB_BETA, polar_table_refs, polar_table_block, polar_table_entries, &
-                                    polar_map_spec, polar_map_block, polar_map_results, polar_row_check
-use mlxf_kernel_polar_table,  only: polar_table
-use mlxf_kernel_polar_oracle, only: polar_dft_matrix, polar_keyed_u, polar_compare_rows, polar_draws_off, &
-                                    polar_report_draws, polar_memo_rows
-use mlxf_test_utils,          only: assert_true, assert_int, test_devices, device_name, set_fixed_seed, bits_equal
+!$ use omp_lib,            only: omp_get_max_threads
+use mlxf,                  only: mlx_set_default_device, mlx_default_device, mlx_peak_memory, mlx_reset_peak_memory, &
+                                 mlx_synchronize, mlx_clear_cache, mlx_device_info_size, MLX_DEVICES, &
+                                 mlx_active_memory, mlx_cache_memory
+use mlxf_test_defs,        only: POLAR_ROW_FACTOR, POLAR_BLOCK_ERR_CPU, POLAR_BLOCK_ROT_CPU, POLAR_BLOCK_ROT_Q, &
+                                 POLAR_SEED_CALIBRATION, POLAR_SEED_JUDGED, POLAR_GRID_B, POLAR_GRID_R, &
+                                 POLAR_BUDGET_SHARE, POLAR_CANON_BT, POLAR_CANON_RT, POLAR_BLOCK_BT, POLAR_BLOCK_RT, &
+                                 POLAR_PROB_BETA, polar_table_refs, polar_table_block, polar_table_entries, &
+                                 polar_map_results, polar_row_check, parameters, SHIFTMAP_SCREEN, SHIFTMAP_WINDOW
+use mlxf_toy_polarft_calc, only: polarft_calc
+use mlxf_toy_eul_prob_tab, only: eul_prob_tab
+use mlxf_oracle_polar,     only: polar_dft_matrix, polar_keyed_u, polar_compare_rows, polar_draws_off, &
+                                 polar_report_draws, polar_memo_rows
+use mlxf_test_utils,       only: assert_true, assert_int, test_devices, device_name, set_fixed_seed, bits_equal
 implicit none
 private
 
@@ -36,6 +37,11 @@ real(real32), parameter :: TEMP_LEVELS(4) = [1._real32, 30._real32, 420._real32,
 integer, parameter :: TAIL_ROWS = 12
 ! the formulation the dense rows record: packed real products, the inverse real FFT and the compiled tail
 character(len=*), parameter :: FORMULATION = 'B+compiled'
+! the digest's starting state (any non-zero value), the go file's polling interval in microseconds and the
+! seconds after which a process that was never told to go gives up
+integer(int64), parameter :: DIGEST_START = 88172645463325252_int64
+integer,        parameter :: GO_POLL_US   = 10000
+real(real64),   parameter :: GO_WAIT_MAX  = 3600._real64
 
 ! one of SIMPLE's measured cases
 type :: bench_case
@@ -47,7 +53,17 @@ type :: bench_case
     integer           :: pftsz   = 0
     integer           :: kfrom   = 0
     integer           :: kto     = 0
+    integer           :: box     = 0
 end type bench_case
+
+! the keys each suite reads, blank separated; test and suite belong to the executable
+character(len=*), parameter :: SUITE_KEYS(6) = [character(len=96) :: &
+    &'accuracy cases case bt rt device', &
+    &'time cases case cases_list bt rt device nthr nparts part go', &
+    &'profile cases case bt rt device nthr', &
+    &'overlap cases case bt rt device nthr outer load', &
+    &'stream seconds nthr', &
+    &'shiftmap cases case grid maps ptiles device evidence widths revision nthr']
 
 ! one shift map of SIMPLE's measured grid (blocks [map name]) and SIMPLE's full-team rate on it (two invocations)
 type :: bench_map
@@ -90,11 +106,19 @@ type :: map_timing
     character(len=:), allocatable :: status
 end type map_timing
 
-! the synthetic data of a case: each half's references (memos, global IDs 1..nrefs) and every particle's memos,
-! weighted square sum over all shells (wsq) and square sum of each shell's half ring (psq)
+! the synthetic data of a case: the references' global IDs 1..nrefs and their distinct rings per half (rpool,
+! reused in turn), every particle's ring (x), CTF, weighted square sum over all shells (wsq) and square sum of
+! each shell's half ring (psq); pfromto is the range of global particle IDs this process scores (the whole case
+! unless it is one part of several). The memos (refs, ctf2, xctf) are made only for the oracle; the rings are
+! not kept when a calculator takes them as they are made.
 type :: bench_data
     type(bench_case)             :: cs
     integer                      :: seed = 0
+    integer                      :: pfromto(2) = 0
+    integer,         allocatable :: ids(:)
+    complex(real64), allocatable :: rpool(:,:,:,:)
+    complex(real32), allocatable :: x(:,:,:)
+    real(real32),    allocatable :: ctf(:,:,:)
     type(polar_table_refs)       :: refs(2)
     real(real32),    allocatable :: w(:,:)
     complex(real32), allocatable :: ctf2(:,:,:)
@@ -104,22 +128,26 @@ type :: bench_data
     real(real32),    allocatable :: temps(:)
 end type bench_data
 
-! how a half is scored: the particles of one call (outer), the CPU team of the host preparation and
-! consumption, one or two slots, rows wanted, stages profiled
+! how a range is filled: the particles of one block (outer), the CPU team of the host preparation, one or two
+! blocks in flight, rows wanted, stages profiled, the draws reported per temperature
 type :: score_plan
     integer :: outer   = 0
     integer :: team    = 1
     integer :: nslots  = 1
     logical :: rows    = .false.
     logical :: profile = .false.
+    logical :: report  = .false.
 end type score_plan
 
-! a half's entries by (reference in prepared order, particle of the half in order), rows when asked, and the
-! seconds of the host's preparation and consumption
+! a filled range's entries by (reference, particle in the batch's order: the n1 particles of half 1, then half
+! 2's, each in the range's order), rows when asked, the place of each column's particle in the range, and the
+! fill's host seconds of the variates and of the submissions
 type :: half_table
     real(real32), allocatable :: dists(:,:)
     integer,      allocatable :: irots(:,:)
     real(real32), allocatable :: rows(:,:,:)
+    integer,      allocatable :: order(:)
+    integer                   :: n1       = 0
     real(real64)              :: cpu_s    = 0._real64
     real(real64)              :: submit_s = 0._real64
 end type half_table
@@ -136,6 +164,10 @@ interface
         real(c_double) :: loadavg(*)
         integer(c_int), value :: nelem
     end function getloadavg
+    integer(c_int) function usleep( useconds ) bind(c, name='usleep')
+        import :: c_int
+        integer(c_int), value :: useconds
+    end function usleep
 end interface
 
 contains
@@ -144,6 +176,7 @@ contains
         character(len=*), intent(in)  :: suite
         logical,          intent(out) :: found
         found = .true.
+        call check_keys(suite)
         select case( trim(suite) )
             case( 'accuracy' )
                 call bench_accuracy
@@ -188,6 +221,31 @@ contains
             if( index(arg, key//'=') == 1 ) arg_given = .true.
         end do
     end function arg_given
+
+    ! every key=value of the command line is one the suite reads; another stops the program with the key's name,
+    ! a benchmark's usage error (an unknown suite is the caller's to report)
+    subroutine check_keys( suite )
+        character(len=*), intent(in) :: suite
+        character(len=512) :: arg
+        character(len=96)  :: keys
+        integer            :: i, ieq
+        keys = ''
+        do i = 1, size(SUITE_KEYS)
+            if( index(SUITE_KEYS(i), trim(suite)//' ') == 1 ) keys = SUITE_KEYS(i)(len_trim(suite) + 1:)
+        end do
+        if( len_trim(keys) == 0 ) return
+        do i = 1, command_argument_count()
+            call get_command_argument(i, arg)
+            ieq = index(arg, '=')
+            if( ieq > 1 )then
+                if( arg(1:ieq-1) == 'test' .or. arg(1:ieq-1) == 'suite' ) cycle
+                if( index(' '//trim(keys)//' ', ' '//arg(1:ieq-1)//' ') > 0 ) cycle
+            endif
+            write(*,'(a)') 'bench_polar_table: suite='//trim(suite)//' does not read '//trim(arg)//' (its keys:'//&
+                &trim(keys)//')'
+            error stop 2
+        end do
+    end subroutine check_keys
 
     ! the integer value of key=value on the command line, or dflt when the key is absent; a value that is not
     ! an optionally signed integer stops, a benchmark's usage error
@@ -281,6 +339,132 @@ contains
         pids = [(i, i = half, nptcls, 2)]
     end function half_ptcls
 
+    ! the particles of a half that this process scores: those of the half inside the data's range
+    function part_ptcls( d, half ) result(pids)
+        type(bench_data), intent(in) :: d
+        integer,          intent(in) :: half
+        integer, allocatable :: pids(:), all_pids(:)
+        all_pids = half_ptcls(d%cs%nptcls, half)
+        pids     = pack(all_pids, all_pids >= d%pfromto(1) .and. all_pids <= d%pfromto(2))
+    end function part_ptcls
+
+    ! the range of particles of part= among nparts= balanced contiguous parts, as SIMPLE splits a population:
+    ! every part takes nptcls / nparts, and the first mod(nptcls, nparts) parts one more. A part outside
+    ! 1..nparts, or more parts than pairs of particles, is a benchmark's usage error
+    function part_range( nptcls ) result(pfromto)
+        integer, intent(in) :: nptcls
+        integer :: pfromto(2)
+        integer :: nparts, part, q, r
+        nparts = arg_int('nparts', 1)
+        part   = arg_int('part', 1)
+        if( nparts < 1 .or. part < 1 .or. part > nparts .or. 2 * nparts > nptcls )then
+            write(*,'(a,i0,a)') 'bench_polar_table: nparts= and part= need 1 <= part <= nparts <= ', nptcls / 2, &
+                &' (two particles per part at least)'
+            error stop 2
+        endif
+        q       = nptcls / nparts
+        r       = nptcls - q * nparts
+        pfromto = [(part - 1) * q + min(part - 1, r) + 1, part * q + min(part, r)]
+        write(*,'(4(a,i0))') '    part ', part, ' of ', nparts, ': particles ', pfromto(1), ' to ', pfromto(2)
+    end function part_range
+
+    ! with go=<file>: the data are ready, so <file>.ready.<part> is written, and the process waits until <file>
+    ! exists; simultaneous processes then start scoring together. Without the key it returns at once
+    subroutine wait_for_go
+        character(len=:), allocatable :: go
+        character(len=16)             :: part
+        real(real64)                  :: t0
+        integer                       :: u
+        integer(c_int)                :: rc
+        logical                       :: l_go
+        if( .not. arg_given('go') ) return
+        go = arg_str('go', '')
+        write(part, '(i0)') arg_int('part', 1)
+        open(newunit=u, file=go//'.ready.'//trim(part), action='write', status='replace')
+        write(u,'(a)') 'ready'
+        close(u)
+        write(*,'(a)') '    ready; waiting for '//go
+        flush(6)
+        t0 = clock_s()
+        do
+            inquire(file=go, exist=l_go)
+            if( l_go ) exit
+            if( clock_s() - t0 > GO_WAIT_MAX )then
+                write(*,'(a)') 'bench_polar_table: no go file '//go//' appeared'
+                error stop 2
+            endif
+            rc = usleep(int(GO_POLL_US, c_int))
+        end do
+    end subroutine wait_for_go
+
+    ! the digest after the bit patterns of bits, in order: each pattern enters by exclusive or and the state
+    ! then takes one 64-bit shift-register step, so a changed bit or a changed order changes the digest
+    pure subroutine digest_bits( h, bits )
+        integer(int64), intent(inout) :: h
+        integer(int32), intent(in)    :: bits(:)
+        integer :: i
+        do i = 1, size(bits)
+            h = ieor(h, iand(int(bits(i), int64), 4294967295_int64))
+            h = ieor(h, ishft(h, 13))
+            h = ieor(h, ishft(h, -7))
+            h = ieor(h, ishft(h, 17))
+        end do
+    end subroutine digest_bits
+
+    ! the digest after a table's entries: the distances' bit patterns, then the rotations
+    pure subroutine digest_entries( h, dists, irots )
+        integer(int64), intent(inout) :: h
+        real(real32),   intent(in)    :: dists(:,:)
+        integer,        intent(in)    :: irots(:,:)
+        call digest_bits(h, transfer(dists, [0_int32]))
+        call digest_bits(h, int(reshape(irots, [size(irots)]), int32))
+    end subroutine digest_entries
+
+    ! the digest after the shift-map results of the particles c0..c1 (columns): loss, width, the mode's
+    ! rotation, radius and direction, and the log evidence when it was asked for
+    pure subroutine digest_maps( h, res, c0, c1 )
+        integer(int64),          intent(inout) :: h
+        type(polar_map_results), intent(in)    :: res
+        integer,                 intent(in)    :: c0, c1
+        integer :: n
+        n = size(res%loss, 1) * (c1 - c0 + 1)
+        call digest_bits(h, transfer(res%loss(:, c0:c1), [0_int32]))
+        call digest_bits(h, transfer(res%sdev(:, c0:c1), [0_int32]))
+        call digest_bits(h, int(reshape(res%irot(:, c0:c1), [n]), int32))
+        call digest_bits(h, int(reshape(res%irho(:, c0:c1), [n]), int32))
+        call digest_bits(h, int(reshape(res%ialpha(:, c0:c1), [n]), int32))
+        if( allocated(res%logz) ) call digest_bits(h, transfer(res%logz(:, c0:c1), [0_int32]))
+    end subroutine digest_maps
+
+    ! a digest line: the suite, what was scored, the device, and the digest in hexadecimal
+    subroutine report_digest( suite, what, h )
+        character(len=*), intent(in) :: suite, what
+        integer(int64),   intent(in) :: h
+        write(*,'(a,z16.16)') '    digest '//suite//' '//what//' '//device_name(mlx_default_device())//' ', h
+    end subroutine report_digest
+
+    ! a tile plan and a scoring schedule as a digest line's label
+    function plan_label( cfg, plan ) result(label)
+        type(bench_config), intent(in) :: cfg
+        type(score_plan),   intent(in) :: plan
+        character(len=:), allocatable :: label
+        character(len=96)             :: buf
+        write(buf, '(4(a,i0))') 'B=', cfg%bt, ' R=', cfg%rt, ' outer=', plan%outer, ' slots=', plan%nslots
+        label = trim(buf)
+    end function plan_label
+
+    ! the digest of a filled range's entries: half 1's distances and rotations, then half 2's
+    function digest_halves( tab ) result(h)
+        type(half_table), intent(in) :: tab
+        integer(int64) :: h
+        integer        :: n
+        h = DIGEST_START
+        if( .not. allocated(tab%dists) ) return
+        n = size(tab%dists, 2)
+        if( tab%n1 > 0 ) call digest_entries(h, tab%dists(:, 1:tab%n1), tab%irots(:, 1:tab%n1))
+        if( tab%n1 < n ) call digest_entries(h, tab%dists(:, tab%n1+1:n), tab%irots(:, tab%n1+1:n))
+    end function digest_halves
+
     ! the first size(e,1) bins of the forward DFT of the full ring of half ring z (the samples, then their
     ! conjugates), summed in ring order as polar_dft_bins sums them; no allocation (OpenMP regions call it)
     pure subroutine ring_bins( e, z, y )
@@ -299,26 +483,36 @@ contains
         end do
     end subroutine ring_bins
 
-    ! the synthetic data of a case: references per half (POOL_RINGS distinct rings, reused in turn), particles as CTF
-    ! times a rotated reference of their half plus noise, shell weights k / sigma2, inverse temperatures in turn
-    function make_data( cs, seed ) result(d)
-        type(bench_case), intent(in) :: cs
-        integer,          intent(in) :: seed
-        type(bench_data)             :: d
-        complex(real64), allocatable :: e(:,:), rpool(:,:,:,:), zw(:,:), yw(:,:)
+    ! the synthetic data of a case: per half POOL_RINGS distinct reference rings (larger reference sets reuse
+    ! them in turn), particles as CTF times a rotated reference of their half plus noise, shell weights
+    ! k / sigma2, inverse temperatures in turn; with l_memos also the memos of the references and particles by a
+    ! double-precision DFT (what the oracle is handed). With pftc the rings go
+    ! to that calculator as they are made, memoized, and are not kept.
+    subroutine make_data( d, cs, seed, l_memos, pftc )
+        type(bench_data),             intent(out)   :: d
+        type(bench_case),             intent(in)    :: cs
+        integer,                      intent(in)    :: seed
+        logical,                      intent(in)    :: l_memos
+        type(polarft_calc), optional, intent(inout) :: pftc
+        complex(real64), allocatable :: e(:,:), zw(:,:), yw(:,:)
         complex(real32), allocatable :: m1(:,:,:,:), m2(:,:,:,:)
         real(real32),    allocatable :: re(:,:), im(:,:), s2(:,:), ctf(:,:), noise(:,:,:)
         complex(real64), allocatable :: x(:,:), z(:)
         real(real64)                 :: amp
-        integer                      :: nk, n1, nrots, npool, h, r, k, i, j, src, shift, ithr, nthr, idx
-        nk    = cs%kto - cs%kfrom + 1
-        n1    = cs%pftsz + 1
-        nrots = 2 * cs%pftsz
-        npool = min(POOL_RINGS, cs%nrefs)
-        d%cs   = cs
-        d%seed = seed
+        integer                      :: nk, n1, nrots, npool, h, r, k, i, j, src, shift, ithr, nthr, idx, nbad
+        logical                      :: l_feed
+        l_feed = present(pftc)
+        nbad   = 0
+        nk     = cs%kto - cs%kfrom + 1
+        n1     = cs%pftsz + 1
+        nrots  = 2 * cs%pftsz
+        npool  = min(POOL_RINGS, cs%nrefs)
+        d%cs      = cs
+        d%seed    = seed
+        d%pfromto = [1, cs%nptcls]
+        d%ids     = [(r, r = 1, cs%nrefs)]
         call set_fixed_seed(seed)
-        allocate(s2(nk, 2), re(cs%pftsz, nk), im(cs%pftsz, nk), rpool(cs%pftsz, nk, npool, 2), d%w(nk, 2))
+        allocate(s2(nk, 2), re(cs%pftsz, nk), im(cs%pftsz, nk), d%rpool(cs%pftsz, nk, npool, 2), d%w(nk, 2))
         call random_number(s2)
         do h = 1, 2
             do k = 1, nk
@@ -329,46 +523,51 @@ contains
                 call random_number(im)
                 do k = 1, nk
                     amp = exp(-real(k - 1, real64) / real(max(1, nk / 2), real64))
-                    rpool(:, k, r, h) = cmplx(real(2*re(:, k) - 1, real64) * amp, real(2*im(:, k) - 1, real64) * amp, &
+                    d%rpool(:, k, r, h) = cmplx(real(2*re(:, k) - 1, real64) * amp, real(2*im(:, k) - 1, real64) * amp, &
                         &real64)
                 end do
             end do
         end do
-        e = polar_dft_matrix(nrots, n1)
+        if( l_feed ) call begin_calc(pftc, d)
         nthr = 1
         !$ nthr = omp_get_max_threads()
-        allocate(zw(cs%pftsz, nthr), yw(n1, nthr), m1(n1, nk, npool, 2), m2(n1, nk, npool, 2))
-        ! the pool's memos: ft_ref the transform of the ring, ft_ref2 the conjugated transform of |ring|^2
-        !$omp parallel do default(shared) private(idx, h, r, k, ithr) schedule(dynamic, 16) proc_bind(close)
-        do idx = 1, 2 * npool * nk
-            ithr = thread_index()
-            h = (idx - 1) / (npool * nk) + 1
-            r = mod((idx - 1) / nk, npool) + 1
-            k = mod(idx - 1, nk) + 1
-            zw(:, ithr) = rpool(:, k, r, h)
-            call ring_bins(e, zw(:, ithr), yw(:, ithr))
-            m1(:, k, r, h) = cmplx(yw(:, ithr), kind=real32)
-            zw(:, ithr) = cmplx(abs(rpool(:, k, r, h))**2, 0._real64, real64)
-            call ring_bins(e, zw(:, ithr), yw(:, ithr))
-            m2(:, k, r, h) = cmplx(conjg(yw(:, ithr)), kind=real32)
-        end do
-        !$omp end parallel do
-        do h = 1, 2
-            d%refs(h)%pftsz = cs%pftsz
-            d%refs(h)%nk    = nk
-            d%refs(h)%half  = h
-            d%refs(h)%ids   = [(r, r = 1, cs%nrefs)]
-            allocate(d%refs(h)%ft_ref(n1, nk, cs%nrefs), d%refs(h)%ft_ref2(n1, nk, cs%nrefs))
-            do r = 1, cs%nrefs
-                d%refs(h)%ft_ref(:, :, r)  = m1(:, :, mod(r - 1, npool) + 1, h)
-                d%refs(h)%ft_ref2(:, :, r) = m2(:, :, mod(r - 1, npool) + 1, h)
+        allocate(zw(cs%pftsz, nthr), yw(n1, nthr))
+        if( l_memos )then
+            e = polar_dft_matrix(nrots, n1)
+            allocate(m1(n1, nk, npool, 2), m2(n1, nk, npool, 2))
+            ! the pool's memos: ft_ref the transform of the ring, ft_ref2 the conjugated transform of |ring|^2
+            !$omp parallel do default(shared) private(idx, h, r, k, ithr) schedule(dynamic, 16) proc_bind(close)
+            do idx = 1, 2 * npool * nk
+                ithr = thread_index()
+                h = (idx - 1) / (npool * nk) + 1
+                r = mod((idx - 1) / nk, npool) + 1
+                k = mod(idx - 1, nk) + 1
+                zw(:, ithr) = d%rpool(:, k, r, h)
+                call ring_bins(e, zw(:, ithr), yw(:, ithr))
+                m1(:, k, r, h) = cmplx(yw(:, ithr), kind=real32)
+                zw(:, ithr) = cmplx(abs(d%rpool(:, k, r, h))**2, 0._real64, real64)
+                call ring_bins(e, zw(:, ithr), yw(:, ithr))
+                m2(:, k, r, h) = cmplx(conjg(yw(:, ithr)), kind=real32)
             end do
-        end do
-        deallocate(m1, m2)
+            !$omp end parallel do
+            do h = 1, 2
+                d%refs(h)%pftsz = cs%pftsz
+                d%refs(h)%nk    = nk
+                d%refs(h)%half  = h
+                d%refs(h)%ids   = d%ids
+                allocate(d%refs(h)%ft_ref(n1, nk, cs%nrefs), d%refs(h)%ft_ref2(n1, nk, cs%nrefs))
+                do r = 1, cs%nrefs
+                    d%refs(h)%ft_ref(:, :, r)  = m1(:, :, mod(r - 1, npool) + 1, h)
+                    d%refs(h)%ft_ref2(:, :, r) = m2(:, :, mod(r - 1, npool) + 1, h)
+                end do
+            end do
+            deallocate(m1, m2)
+            allocate(d%ctf2(n1, nk, cs%nptcls), d%xctf(n1, nk, cs%nptcls))
+        endif
         ! the particles: CTF in [0.2, 1), the source ring rotated by shift samples, noise at 0.3 of the shell's
         ! amplitude; wsq = sum_k w_k sum |X|^2 over the half ring
-        allocate(d%ctf2(n1, nk, cs%nptcls), d%xctf(n1, nk, cs%nptcls), d%wsq(cs%nptcls), d%psq(nk, cs%nptcls), &
-            &d%temps(cs%nptcls))
+        allocate(d%wsq(cs%nptcls), d%psq(nk, cs%nptcls), d%temps(cs%nptcls))
+        if( .not. l_feed ) allocate(d%x(cs%pftsz, nk, cs%nptcls), d%ctf(cs%pftsz, nk, cs%nptcls))
         allocate(ctf(cs%pftsz, nk), noise(cs%pftsz, nk, 2), x(cs%pftsz, nk), z(nrots))
         do i = 1, cs%nptcls
             h        = half_of(i)
@@ -380,8 +579,8 @@ contains
             d%wsq(i) = 0._real64
             do k = 1, nk
                 amp = exp(-real(k - 1, real64) / real(max(1, nk / 2), real64))
-                z(1:cs%pftsz)       = rpool(:, k, src, h)
-                z(cs%pftsz+1:nrots) = conjg(rpool(:, k, src, h))
+                z(1:cs%pftsz)       = d%rpool(:, k, src, h)
+                z(cs%pftsz+1:nrots) = conjg(d%rpool(:, k, src, h))
                 do j = 1, cs%pftsz
                     x(j, k) = real(ctf(j, k), real64) * z(1 + mod(j - 1 - shift + nrots, nrots)) + 0.3_real64 * amp * &
                         &cmplx(real(2*noise(j, k, 1) - 1, real64), real(2*noise(j, k, 2) - 1, real64), real64)
@@ -390,17 +589,97 @@ contains
                 d%psq(k, i) = sum(abs(x(:, k))**2)
                 d%wsq(i)    = d%wsq(i) + real(d%w(k, h), real64) * d%psq(k, i)
             end do
-            do k = 1, nk
-                zw(:, 1) = cmplx(real(ctf(:, k), real64)**2, 0._real64, real64)
-                call ring_bins(e, zw(:, 1), yw(:, 1))
-                d%ctf2(:, k, i) = cmplx(yw(:, 1), kind=real32)
-                zw(:, 1) = x(:, k) * real(ctf(:, k), real64)
-                call ring_bins(e, zw(:, 1), yw(:, 1))
-                d%xctf(:, k, i) = cmplx(yw(:, 1), kind=real32)
-            end do
+            if( l_feed )then
+                nbad = nbad + set_ptcl(pftc, i, cmplx(x, kind=real32), ctf)
+            else
+                d%x(:, :, i)   = cmplx(x, kind=real32)
+                d%ctf(:, :, i) = ctf
+            endif
+            if( l_memos )then
+                do k = 1, nk
+                    zw(:, 1) = cmplx(real(ctf(:, k), real64)**2, 0._real64, real64)
+                    call ring_bins(e, zw(:, 1), yw(:, 1))
+                    d%ctf2(:, k, i) = cmplx(yw(:, 1), kind=real32)
+                    zw(:, 1) = x(:, k) * real(ctf(:, k), real64)
+                    call ring_bins(e, zw(:, 1), yw(:, 1))
+                    d%xctf(:, k, i) = cmplx(yw(:, 1), kind=real32)
+                end do
+            endif
             d%temps(i) = TEMP_LEVELS(mod(i - 1, size(TEMP_LEVELS)) + 1)
         end do
-    end function make_data
+        if( .not. l_feed ) return
+        call pftc%memoize_ptcls
+        call assert_int(0, nbad + refused(pftc), 'bench_polar_table: the particles are set and memoized: '//&
+            &pftc%message())
+        deallocate(d%rpool)
+    end subroutine make_data
+
+    ! 1 when the calculator refused its last call, else 0
+    integer function refused( pftc )
+        type(polarft_calc), intent(in) :: pftc
+        refused = merge(1, 0, len(pftc%message()) > 0)
+    end function refused
+
+    ! one parity's references set in the order of order (reference i is ring mod(order(i) - 1, pool) + 1 of the
+    ! half) and memoized
+    subroutine set_refs( pftc, d, half, order )
+        type(polarft_calc), intent(inout) :: pftc
+        type(bench_data),   intent(in)    :: d
+        integer,            intent(in)    :: half, order(:)
+        integer :: i, npool, nbad
+        npool = size(d%rpool, 3)
+        nbad  = 0
+        do i = 1, size(order)
+            call pftc%set_ref_pft(i, d%rpool(:, :, mod(order(i) - 1, npool) + 1, half), half == 1)
+            nbad = nbad + refused(pftc)
+        end do
+        call pftc%memoize_refs
+        call assert_int(0, nbad + refused(pftc), 'bench_polar_table: the references are set and memoized: '//&
+            &pftc%message())
+    end subroutine set_refs
+
+    ! a calculator of the data's geometry with its shell weights and both parities' references, memoized
+    subroutine begin_calc( pftc, d )
+        type(polarft_calc), intent(inout) :: pftc
+        type(bench_data),   intent(in)    :: d
+        integer :: h, nbad
+        call pftc%new(parameters(pftsz=d%cs%pftsz, box=d%cs%box), d%cs%nrefs, [1, d%cs%nptcls], [d%cs%kfrom, d%cs%kto])
+        nbad = refused(pftc)
+        call pftc%set_sigma2_weights(real(d%w, real64))
+        call assert_int(0, nbad + refused(pftc), 'bench_polar_table: the calculator is made: '//pftc%message())
+        do h = 1, 2
+            call set_refs(pftc, d, h, d%ids)
+        end do
+    end subroutine begin_calc
+
+    ! particle i's half, CTF and ring handed to the calculator; the calls that were refused
+    integer function set_ptcl( pftc, i, x, ctf ) result(nbad)
+        type(polarft_calc), intent(inout) :: pftc
+        integer,            intent(in)    :: i
+        complex(real32),    intent(in)    :: x(:,:)
+        real(real32),       intent(in)    :: ctf(:,:)
+        call pftc%set_eo(i, half_of(i) == 1)
+        nbad = refused(pftc)
+        call pftc%set_ptcl_ctfmat(i, ctf)
+        nbad = nbad + refused(pftc)
+        call pftc%set_ptcl_pft(i, x)
+        nbad = nbad + refused(pftc)
+    end function set_ptcl
+
+    ! the calculator of data that kept its rings: both parities' references and every particle, set and memoized
+    subroutine feed_calc( pftc, d )
+        type(polarft_calc), intent(inout) :: pftc
+        type(bench_data),   intent(in)    :: d
+        integer :: i, nbad
+        call begin_calc(pftc, d)
+        nbad = 0
+        do i = 1, d%cs%nptcls
+            nbad = nbad + set_ptcl(pftc, i, d%x(:, :, i), d%ctf(:, :, i))
+        end do
+        call pftc%memoize_ptcls
+        call assert_int(0, nbad + refused(pftc), 'bench_polar_table: the particles are set and memoized: '//&
+            &pftc%message())
+    end subroutine feed_calc
 
     ! the calling thread's number from 1 (OpenMP), 1 without OpenMP
     integer function thread_index()
@@ -409,8 +688,8 @@ contains
         !$ thread_index = omp_get_thread_num() + 1
     end function thread_index
 
-    ! the block of particles pids (global IDs) of one half, prepared by a CPU team of team threads: memos,
-    ! weights, wsq, temperatures and the pairs' variates keyed by global IDs
+    ! the oracle's block of particles pids (global IDs) of one half, prepared by a CPU team of team threads:
+    ! memos, weights, wsq, temperatures and the pairs' variates keyed by global IDs
     function make_block( d, half, pids, generation, team ) result(blk)
         type(bench_data), intent(in) :: d
         integer,          intent(in) :: half, pids(:), team
@@ -440,83 +719,71 @@ contains
         !$omp end parallel do
     end function make_block
 
-    ! a half scored in outer batches of plan%outer particles, one slot or two in flight; the entries are
-    ! consumed into the half's table by the CPU team (by the particle's place in the half)
-    function score_half( ws, d, half, plan ) result(tab)
-        class(polar_table), intent(inout) :: ws
+    ! a driver of the particles pids on the data's calculator under plan: its draws keyed by the data's seed and
+    ! the references' global IDs, the particles' temperatures the data's
+    subroutine make_driver( tab, pftc, d, pids, plan )
+        type(eul_prob_tab), intent(inout) :: tab
+        type(polarft_calc), intent(inout) :: pftc
         type(bench_data),   intent(in)    :: d
-        integer,            intent(in)    :: half
+        integer,            intent(in)    :: pids(:)
         type(score_plan),   intent(in)    :: plan
-        type(half_table)          :: tab
-        type(polar_table_block)   :: blk
+        type(parameters) :: params
+        integer          :: nbad
+        params%pftsz = d%cs%pftsz
+        params%box   = d%cs%box
+        params%nthr  = plan%team
+        call tab%new_pipeline(params, pftc, pids)
+        nbad = merge(1, 0, len(tab%message()) > 0)
+        if( nbad == 0 )then
+            call tab%set_draw_keys(d%seed, d%ids)
+            nbad = nbad + merge(1, 0, len(tab%message()) > 0)
+            call tab%set_temps(d%temps(pids))
+            nbad = nbad + merge(1, 0, len(tab%message()) > 0)
+            call tab%set_fill_options(plan%outer, plan%nslots, plan%rows, plan%profile)
+            nbad = nbad + merge(1, 0, len(tab%message()) > 0)
+        endif
+        call assert_int(0, nbad, 'bench_polar_table: the driver is made: '//tab%message())
+    end subroutine make_driver
+
+    ! the driver's whole range filled and its entries handed over: half 1's particles, then half 2's
+    subroutine fill_table( tab, pids, t )
+        type(eul_prob_tab), intent(inout) :: tab
+        integer,            intent(in)    :: pids(:)
+        type(half_table),   intent(out)   :: t
+        real(real64) :: s0(4), s1(4)
+        integer      :: j
+        s0 = tab%fill_seconds()
+        call tab%fill_tab_range(1, size(pids))
+        call assert_int(0, len(tab%message()), 'bench_polar_table: the range is filled: '//tab%message())
+        if( len(tab%message()) > 0 ) return
+        s1 = tab%fill_seconds()
+        call tab%batch_entries(t%dists, t%irots, t%order)
+        call tab%batch_full_rows(t%rows)
+        t%n1       = 0
+        do j = 1, size(t%order)
+            if( half_of(pids(t%order(j))) == 1 ) t%n1 = t%n1 + 1
+        end do
+        t%cpu_s    = s1(1) - s0(1)
+        t%submit_s = s1(2) - s0(2)
+    end subroutine fill_table
+
+    ! the entries and rows of the columns c0..c1 of a filled range
+    function entries_of( t, c0, c1 ) result(ent)
+        type(half_table), intent(in) :: t
+        integer,          intent(in) :: c0, c1
         type(polar_table_entries) :: ent
-        integer, allocatable      :: pids(:), first(:)
-        integer                   :: nb, k, nbat, st, slot, nr
-        real(real64)              :: t0
-        pids = half_ptcls(d%cs%nptcls, half)
-        nr   = size(d%refs(half)%ids)
-        nbat = (size(pids) + plan%outer - 1) / plan%outer
-        allocate(tab%dists(nr, size(pids)), tab%irots(nr, size(pids)), first(nbat + 1))
-        if( plan%rows ) allocate(tab%rows(2 * d%cs%pftsz, nr, size(pids)))
-        do k = 1, nbat + 1
-            first(k) = min((k - 1) * plan%outer + 1, size(pids) + 1)
-        end do
-        ! slot k of batch k: with two slots, batch k+1 is queued before batch k is collected
-        do k = 1, nbat
-            slot = 1
-            if( plan%nslots == 2 ) slot = mod(k - 1, 2) + 1
-            t0  = clock_s()
-            blk = make_block(d, half, pids(first(k):first(k+1)-1), 1_int64, plan%team)
-            blk%rows    = plan%rows
-            blk%profile = plan%profile
-            tab%cpu_s   = tab%cpu_s + (clock_s() - t0)
-            t0 = clock_s()
-            call ws%submit(blk, slot, st)
-            tab%submit_s = tab%submit_s + (clock_s() - t0)
-            call assert_int(0, st, 'bench_polar_table: a batch is submitted: '//ws%message())
-            if( st /= 0 ) return
-            if( plan%nslots == 2 .and. k > 1 ) call collect_batch(k - 1)
-            if( plan%nslots == 1 ) call collect_batch(k)
-        end do
-        if( plan%nslots == 2 ) call collect_batch(nbat)
+        ent%dists = t%dists(:, c0:c1)
+        ent%irots = t%irots(:, c0:c1)
+        if( allocated(t%rows) ) ent%rows = t%rows(:, :, c0:c1)
+    end function entries_of
 
-      contains
-
-        subroutine collect_batch( kb )
-            integer, intent(in) :: kb
-            integer :: cslot, b, b0
-            cslot = 1
-            if( plan%nslots == 2 ) cslot = mod(kb - 1, 2) + 1
-            call ws%collect(cslot, ent, st)
-            call assert_int(0, st, 'bench_polar_table: a batch is collected: '//ws%message())
-            if( st /= 0 ) return
-            t0 = clock_s()
-            nb = first(kb+1) - first(kb)
-            b0 = first(kb) - 1
-            !$omp parallel do num_threads(plan%team) default(shared) private(b) schedule(static) proc_bind(close)
-            do b = 1, nb
-                tab%dists(:, b0 + b) = ent%dists(:, b)
-                tab%irots(:, b0 + b) = ent%irots(:, b)
-                if( plan%rows ) tab%rows(:, :, b0 + b) = ent%rows(:, :, b)
-            end do
-            !$omp end parallel do
-            tab%cpu_s = tab%cpu_s + (clock_s() - t0)
-        end subroutine collect_batch
-
-    end function score_half
-
-    ! a workspace of half's references under cfg; generation 1
-    subroutine prepare( ws, d, half, cfg )
-        class(polar_table), intent(inout) :: ws
-        type(bench_data),   intent(inout) :: d
-        integer,            intent(in)    :: half
+    ! the calculator's reference bins under cfg, on the current device
+    subroutine prepare( pftc, cfg )
+        type(polarft_calc), intent(inout) :: pftc
         type(bench_config), intent(in)    :: cfg
-        integer :: st
-        d%refs(half)%rt         = cfg%rt
-        d%refs(half)%bt         = cfg%bt
-        d%refs(half)%generation = 1_int64
-        call ws%new(d%refs(half), st)
-        call assert_int(0, st, 'bench_polar_table: the references are prepared: '//ws%message())
+        call pftc%set_tile_plan(cfg%bt, cfg%rt)
+        call pftc%memoize_ref_bins
+        call assert_int(0, refused(pftc), 'bench_polar_table: the references are prepared: '//pftc%message())
     end subroutine prepare
 
     real(real64) function clock_s()
@@ -545,10 +812,12 @@ contains
 
     ! the 64,000-pair block (BLOCK_NPTCLS particles, BLOCK_NREFS references per half, the case's geometry):
     ! the CPU calibration (block seed 1, reported) and, on every device, seed 2 against the DFT-matrix oracle and
-    ! the frozen bounds, the sensitivities and schedule identity
+    ! the frozen bounds, the sensitivities and schedule identity; one calculator per seed, its reference bins
+    ! made again on each device
     subroutine bench_accuracy
         type(bench_case)          :: cs
         type(bench_data)          :: d1, d2
+        type(polarft_calc)        :: pftc1, pftc2
         type(bench_config)        :: cfg
         real(real64), allocatable :: or1(:,:,:,:), or2(:,:,:,:)
         integer, allocatable      :: devs(:)
@@ -560,23 +829,29 @@ contains
         cfg       = arg_config(bench_config())
         call test_devices(devs)
         original = mlx_default_device()
-        d2  = make_data(cs, POLAR_SEED_JUDGED)
+        call make_data(d2, cs, POLAR_SEED_JUDGED, .true.)
         or2 = oracle_halves(d2)
+        call feed_calc(pftc2, d2)
         do i = 1, size(devs)
             call mlx_set_default_device(devs(i))
             write(*,'(a)') '  on the '//device_name(devs(i))//', formulation '//FORMULATION
             if( devs(i) == MLX_DEVICES%cpu )then
                 if( .not. allocated(or1) )then
-                    d1  = make_data(cs, POLAR_SEED_CALIBRATION)
+                    call make_data(d1, cs, POLAR_SEED_CALIBRATION, .true.)
                     or1 = oracle_halves(d1)
+                    call feed_calc(pftc1, d1)
                 endif
-                call report_block_calibration(d1, or1, cfg)
+                call report_block_calibration(pftc1, d1, or1, cfg)
+                call pftc1%kill_ref_bins
             endif
-            call judge_block(device_name(devs(i)), d2, or2, cfg)
-            call block_sensitivity(device_name(devs(i)), d2, or2, cfg)
-            call block_identity(device_name(devs(i)), d2, cfg)
+            call judge_block(pftc2, d2, or2, cfg)
+            call block_sensitivity(pftc2, d2, or2, cfg)
+            call block_identity(pftc2, d2, cfg)
+            call pftc2%kill_ref_bins
         end do
         call mlx_set_default_device(original)
+        call pftc1%kill
+        call pftc2%kill
     end subroutine bench_accuracy
 
     ! the DFT-matrix oracle's rows of both halves: (nrots, nrefs, particles of the half, half)
@@ -592,28 +867,29 @@ contains
         end do
     end function oracle_halves
 
-    ! both halves scored under cfg with rows, compared with the oracle; the totals of both halves
-    function score_and_compare( d, dor, cfg, plan, report ) result(chk)
-        type(bench_data),   intent(inout) :: d
+    ! every particle filled under cfg with rows, each half compared with the oracle; the totals of both halves
+    function score_and_compare( pftc, d, dor, cfg, plan ) result(chk)
+        type(polarft_calc), intent(inout) :: pftc
+        type(bench_data),   intent(in)    :: d
         real(real64),       intent(in)    :: dor(:,:,:,:)
         type(bench_config), intent(in)    :: cfg
         type(score_plan),   intent(in)    :: plan
-        logical,            intent(in)    :: report
         type(polar_row_check)     :: chk
         type(polar_row_check)     :: c
-        type(polar_table)         :: ws
-        type(half_table)          :: tab
+        type(eul_prob_tab)        :: tab
+        type(half_table)          :: t
         type(polar_table_entries) :: ent
         type(polar_table_block)   :: blk
-        integer                   :: h
+        character(len=16)         :: seed
+        integer                   :: h, i, c0, c1
+        call prepare(pftc, cfg)
+        call make_driver(tab, pftc, d, [(i, i = 1, d%cs%nptcls)], plan)
+        call fill_table(tab, [(i, i = 1, d%cs%nptcls)], t)
+        if( .not. allocated(t%rows) ) return
         do h = 1, 2
-            call prepare(ws, d, h, cfg)
-            tab = score_half(ws, d, h, plan)
-            call ws%kill()
-            if( .not. allocated(tab%rows) ) return
-            ent%dists = tab%dists
-            ent%irots = tab%irots
-            ent%rows  = tab%rows
+            c0  = merge(1, t%n1 + 1, h == 1)
+            c1  = merge(t%n1, size(t%dists, 2), h == 1)
+            ent = entries_of(t, c0, c1)
             blk = make_block(d, h, half_ptcls(d%cs%nptcls, h), 1_int64, 1)
             c   = polar_compare_rows(dor(:, :, :, h), ent)
             c%draws_bad = polar_draws_off(ent, blk%temps, blk%u)
@@ -624,8 +900,10 @@ contains
             chk%draws_bad  = chk%draws_bad + c%draws_bad
             chk%mixed      = chk%mixed + c%mixed
             chk%invalid    = chk%invalid + c%invalid
-            if( report ) call polar_report_draws('block', d%seed, dor(:, :, :, h), ent, blk)
+            if( plan%report ) call polar_report_draws('block', d%seed, dor(:, :, :, h), ent, blk)
         end do
+        write(seed, '(i0)') d%seed
+        call report_digest('accuracy', 'block seed='//trim(seed)//' '//plan_label(cfg, plan), digest_halves(t))
     end function score_and_compare
 
     function canonical_plan( rows ) result(plan)
@@ -638,12 +916,13 @@ contains
     end function canonical_plan
 
     ! the block calibration on the CPU device, block seed 1: e_cpu and n_cpu, reported
-    subroutine report_block_calibration( d, dor, cfg )
-        type(bench_data),   intent(inout) :: d
+    subroutine report_block_calibration( pftc, d, dor, cfg )
+        type(polarft_calc), intent(inout) :: pftc
+        type(bench_data),   intent(in)    :: d
         real(real64),       intent(in)    :: dor(:,:,:,:)
         type(bench_config), intent(in)    :: cfg
         type(polar_row_check) :: chk
-        chk = score_and_compare(d, dor, cfg, canonical_plan(.true.), .false.)
+        chk = score_and_compare(pftc, d, dor, cfg, canonical_plan(.true.))
         write(*,'(a,es23.16,a,i0,a,i0,a,i0,a,i0,a,i0)') '    calibration (block seed 1, cpu, '//FORMULATION// &
             &'): e_cpu = ', chk%err, ', n_cpu = ', chk%argmin_off, ' of ', chk%npairs, ' pairs; validity off ', &
             &chk%valid_off, ', draws off ', chk%draws_bad, ', mixed rows ', chk%mixed
@@ -651,15 +930,18 @@ contains
 
     ! block seed 2 on the current device against the oracle: validity, the draw on the device's rows, and the
     ! block's frozen bounds; the draws reported per temperature
-    subroutine judge_block( dev, d, dor, cfg )
-        character(len=*),   intent(in)    :: dev
-        type(bench_data),   intent(inout) :: d
+    subroutine judge_block( pftc, d, dor, cfg )
+        type(polarft_calc), intent(inout) :: pftc
+        type(bench_data),   intent(in)    :: d
         real(real64),       intent(in)    :: dor(:,:,:,:)
         type(bench_config), intent(in)    :: cfg
-        type(polar_row_check) :: chk
-        type(score_plan)      :: plan
+        character(len=:), allocatable :: dev
+        type(polar_row_check)         :: chk
+        type(score_plan)              :: plan
+        dev  = device_name(mlx_default_device())
         plan = canonical_plan(.true.)
-        chk  = score_and_compare(d, dor, cfg, plan, .true.)
+        plan%report = .true.
+        chk  = score_and_compare(pftc, d, dor, cfg, plan)
         write(*,'(a,es10.3,a,i0,a,i0,a)') '    block seed 2 ('//dev//', '//FORMULATION//'): row error ', chk%err, &
             &', minimising rotation differs in ', chk%argmin_off, ' of ', chk%npairs, ' pairs'
         call assert_int(BLOCK_NPTCLS * BLOCK_NREFS, chk%npairs, 'the accuracy block scores 64,000 pairs')
@@ -683,57 +965,72 @@ contains
 
     ! tile shape, partial edges, particle position and a shuffled reference list, each
     ! judged against the frozen bounds and reported against the canonical configuration
-    subroutine block_sensitivity( dev, d, dor, cfg )
-        character(len=*),   intent(in)    :: dev
-        type(bench_data),   intent(inout) :: d
+    subroutine block_sensitivity( pftc, d, dor, cfg )
+        type(polarft_calc), intent(inout) :: pftc
+        type(bench_data),   intent(in)    :: d
         real(real64),       intent(in)    :: dor(:,:,:,:)
         type(bench_config), intent(in)    :: cfg
-        type(bench_config)    :: v
-        type(polar_row_check) :: chk
+        character(len=:), allocatable :: dev
+        type(bench_config)            :: v
+        type(polar_row_check)         :: chk
+        dev  = device_name(mlx_default_device())
         v    = cfg
         v%bt = 32
         v%rt = 1000
-        chk  = score_and_compare(d, dor, v, canonical_plan(.true.), .false.)
+        chk  = score_and_compare(pftc, d, dor, v, canonical_plan(.true.))
         call assert_int(0, chk%valid_off + chk%draws_bad, dev//' tile shape 32 x 1000: validity and draws hold')
         call assert_block_bounds(dev//' tile shape 32 x 1000', chk)
         v    = cfg
         v%bt = 12
         v%rt = 300
-        chk  = score_and_compare(d, dor, v, canonical_plan(.true.), .false.)
+        chk  = score_and_compare(pftc, d, dor, v, canonical_plan(.true.))
         call assert_int(0, chk%valid_off + chk%draws_bad, dev//' partial edges 12 x 300: validity and draws hold')
         call assert_block_bounds(dev//' partial edges 12 x 300', chk)
-        call position_and_list(dev, d, dor, cfg)
+        call position_and_list(pftc, d, dor, cfg)
     end subroutine block_sensitivity
 
-    ! the particles in reversed order (every tile position changes) and the references prepared in a shuffled
-    ! order (global IDs kept): judged against the bounds, entries compared by global pair with the canonical run
-    subroutine position_and_list( dev, d, dor, cfg )
-        character(len=*),   intent(in)    :: dev
-        type(bench_data),   intent(inout) :: d
+    ! the particles in reversed order (every tile position changes) and the references set in a shuffled
+    ! order (global IDs kept): one block per half, judged against the bounds, entries compared by global pair with
+    ! the canonical run
+    subroutine position_and_list( pftc, d, dor, cfg )
+        type(polarft_calc), intent(inout) :: pftc
+        type(bench_data),   intent(in)    :: d
         real(real64),       intent(in)    :: dor(:,:,:,:)
         type(bench_config), intent(in)    :: cfg
-        type(polar_table)         :: ws
-        type(polar_table_block)   :: blk
-        type(polar_table_entries) :: e0, e1
-        type(polar_table_refs)    :: shuffled
-        type(polar_row_check)     :: chk
-        real(real64), allocatable :: dsub(:,:,:)
-        integer, allocatable      :: pids(:), perm(:)
-        integer                   :: st, h, n, i, r, ndiff_pos, ndiff_list
+        character(len=:), allocatable :: dev
+        type(eul_prob_tab)            :: tab
+        type(score_plan)              :: plan
+        type(half_table)              :: t
+        type(polar_table_block)       :: blk
+        type(polar_table_entries)     :: e0, e1
+        type(polar_row_check)         :: chk
+        real(real64), allocatable     :: dsub(:,:,:)
+        integer, allocatable          :: pids(:), perm(:)
+        integer(int64)                :: dig(3)
+        integer                       :: h, n, i, r, ndiff_pos, ndiff_list
+        dev        = device_name(mlx_default_device())
         ndiff_pos  = 0
         ndiff_list = 0
+        dig        = DIGEST_START
         do h = 1, 2
             pids = half_ptcls(d%cs%nptcls, h)
             n    = size(pids)
-            call prepare(ws, d, h, cfg)
-            blk      = make_block(d, h, pids, 1_int64, 1)
-            blk%rows = .true.
-            call ws%score(blk, e0, st)
-            blk      = make_block(d, h, pids(n:1:-1), 1_int64, 1)
-            blk%rows = .true.
-            call ws%score(blk, e1, st)
-            call assert_int(0, st, dev//' reversed particles are scored')
-            if( st /= 0 ) return
+            plan = canonical_plan(.true.)
+            plan%outer = n
+            call prepare(pftc, cfg)
+            call make_driver(tab, pftc, d, pids, plan)
+            call fill_table(tab, pids, t)
+            if( allocated(t%rows) )then
+                e0 = entries_of(t, 1, n)
+                call digest_entries(dig(1), e0%dists, e0%irots)
+            endif
+            call make_driver(tab, pftc, d, pids(n:1:-1), plan)
+            call fill_table(tab, pids(n:1:-1), t)
+            call assert_true(allocated(t%rows), dev//' reversed particles are scored')
+            if( .not. allocated(t%rows) .or. .not. allocated(e0%dists) ) return
+            e1  = entries_of(t, 1, n)
+            blk = make_block(d, h, pids(n:1:-1), 1_int64, 1)
+            call digest_entries(dig(2), e1%dists, e1%irots)
             dsub = dor(:, :, n:1:-1, h)
             chk  = polar_compare_rows(dsub, e1)
             call assert_int(0, chk%valid_off + polar_draws_off(e1, blk%temps, blk%u), dev//' reversed particles: '//&
@@ -742,80 +1039,83 @@ contains
             do i = 1, n
                 ndiff_pos = ndiff_pos + count(.not. bits_equal(e1%dists(:, n + 1 - i), e0%dists(:, i)))
             end do
-            call ws%kill()
             ! the references in a shuffled order, IDs kept: entries come back in that order
-            perm = [(mod(37 * i, size(d%refs(h)%ids)) + 1, i = 0, size(d%refs(h)%ids) - 1)]
-            shuffled            = d%refs(h)
-            shuffled%ids        = d%refs(h)%ids(perm)
-            shuffled%ft_ref     = d%refs(h)%ft_ref(:, :, perm)
-            shuffled%ft_ref2    = d%refs(h)%ft_ref2(:, :, perm)
-            shuffled%rt         = cfg%rt
-            shuffled%bt         = cfg%bt
-            shuffled%generation = 1_int64
-            call ws%new(shuffled, st)
-            blk          = make_block(d, h, pids, 1_int64, 1)
-            blk%ref_ids  = shuffled%ids
+            perm = [(mod(37 * i, d%cs%nrefs) + 1, i = 0, d%cs%nrefs - 1)]
+            call set_refs(pftc, d, h, perm)
+            call prepare(pftc, cfg)
+            call make_driver(tab, pftc, d, pids, plan)
+            call tab%set_draw_keys(d%seed, d%ids(perm))
+            call fill_table(tab, pids, t)
+            call assert_true(allocated(t%rows), dev//' shuffled references are scored')
+            if( .not. allocated(t%rows) ) return
+            e1          = entries_of(t, 1, n)
+            blk         = make_block(d, h, pids, 1_int64, 1)
+            blk%ref_ids = d%ids(perm)
             do i = 1, n
                 do r = 1, size(perm)
-                    blk%u(r, i) = real(polar_keyed_u(d%seed, pids(i), shuffled%ids(r)), real32)
+                    blk%u(r, i) = real(polar_keyed_u(d%seed, pids(i), blk%ref_ids(r)), real32)
                 end do
             end do
-            blk%rows = .true.
-            call ws%score(blk, e1, st)
-            call assert_int(0, st, dev//' shuffled references are scored')
-            if( st /= 0 ) return
+            call digest_entries(dig(3), e1%dists, e1%irots)
             dsub = dor(:, perm, :, h)
             chk  = polar_compare_rows(dsub, e1)
             call assert_int(0, chk%valid_off + polar_draws_off(e1, blk%temps, blk%u), dev//' shuffled references: '//&
                 &'validity and draws hold')
             call assert_block_bounds(dev//' shuffled references', chk)
             ndiff_list = ndiff_list + count(.not. bits_equal(e1%dists, e0%dists(perm, :)))
-            call ws%kill()
+            ! the half's references in their own order again
+            call set_refs(pftc, d, h, d%ids)
         end do
         write(*,'(a,i0,a,i0,a)') '    '//dev//' entries differing from the canonical run by global pair: reversed '//&
             &'particles ', ndiff_pos, ', shuffled references ', ndiff_list, ' (reported)'
+        call report_digest('accuracy', 'one call, particles in order', dig(1))
+        call report_digest('accuracy', 'one call, particles reversed', dig(2))
+        call report_digest('accuracy', 'one call, references shuffled', dig(3))
     end subroutine position_and_list
 
-    ! schedule identity on the block, exact: three repeats, outer batches of 32 and 16, CPU teams 1 and 24, and
-    ! synchronous against two slots give identical entries by global pair
-    subroutine block_identity( dev, d, cfg )
-        character(len=*),   intent(in)    :: dev
-        type(bench_data),   intent(inout) :: d
+    ! schedule identity on the block, exact: three repeats, blocks of 32 and 16, CPU teams 1 and 24, and
+    ! one block against two in flight give identical entries by global pair
+    subroutine block_identity( pftc, d, cfg )
+        type(polarft_calc), intent(inout) :: pftc
+        type(bench_data),   intent(in)    :: d
         type(bench_config), intent(in)    :: cfg
-        type(polar_table) :: ws
-        type(half_table)  :: t0, t
-        type(score_plan)  :: plan
-        integer           :: h, rep
-        logical           :: same_rep, same_outer, same_team, same_slots
-        same_rep   = .true.
-        same_outer = .true.
-        same_team  = .true.
-        same_slots = .true.
-        do h = 1, 2
-            call prepare(ws, d, h, cfg)
-            plan = canonical_plan(.false.)
-            t0   = score_half(ws, d, h, plan)
-            do rep = 1, 3
-                t = score_half(ws, d, h, plan)
-                same_rep = same_rep .and. same_table(t, t0)
-            end do
-            plan%outer = BLOCK_NPTCLS / 4
-            t          = score_half(ws, d, h, plan)
-            same_outer = same_outer .and. same_table(t, t0)
-            plan%team  = 24
-            t          = score_half(ws, d, h, plan)
-            same_team  = same_team .and. same_table(t, t0)
-            plan%team   = 1
-            plan%outer  = BLOCK_NPTCLS / 4
-            plan%nslots = 2
-            t           = score_half(ws, d, h, plan)
-            same_slots  = same_slots .and. same_table(t, t0)
-            call ws%kill()
+        character(len=:), allocatable :: dev
+        type(eul_prob_tab)            :: tab
+        type(half_table)              :: t0, t
+        type(score_plan)              :: plan
+        integer, allocatable          :: pids(:)
+        integer                       :: rep, i
+        logical                       :: same_rep, same_outer, same_team, same_slots
+        dev      = device_name(mlx_default_device())
+        pids     = [(i, i = 1, d%cs%nptcls)]
+        same_rep = .true.
+        call prepare(pftc, cfg)
+        plan = canonical_plan(.false.)
+        call make_driver(tab, pftc, d, pids, plan)
+        call fill_table(tab, pids, t0)
+        do rep = 1, 3
+            call fill_table(tab, pids, t)
+            same_rep = same_rep .and. same_table(t, t0)
         end do
+        plan%outer = BLOCK_NPTCLS / 4
+        call make_driver(tab, pftc, d, pids, plan)
+        call fill_table(tab, pids, t)
+        same_outer = same_table(t, t0)
+        plan%team  = 24
+        call make_driver(tab, pftc, d, pids, plan)
+        call fill_table(tab, pids, t)
+        same_team   = same_table(t, t0)
+        plan%team   = 1
+        plan%outer  = BLOCK_NPTCLS / 4
+        plan%nslots = 2
+        call make_driver(tab, pftc, d, pids, plan)
+        call fill_table(tab, pids, t)
+        same_slots = same_table(t, t0)
         call assert_true(same_rep, dev//' block identity: three repeats give identical entries')
         call assert_true(same_outer, dev//' block identity: outer batches of 32 and 16 give identical entries')
         call assert_true(same_team, dev//' block identity: CPU teams of 1 and 24 give identical entries')
         call assert_true(same_slots, dev//' block identity: two slots give the synchronous entries')
+        call report_digest('accuracy', 'identity '//plan_label(cfg, canonical_plan(.false.)), digest_halves(t0))
     end subroutine block_identity
 
     logical function same_table( a, b )
@@ -853,6 +1153,7 @@ contains
     subroutine bench_time
         type(bench_case)              :: cs
         type(bench_data)              :: d
+        type(polarft_calc)            :: pftc
         type(bench_config)            :: cfg
         character(len=:), allocatable :: names
         integer,          allocatable :: bs(:), rs(:)
@@ -872,15 +1173,18 @@ contains
             endif
             cs = read_case(arg_str('cases', 'polar_case.txt'), names(i0:ic-1))
             i0 = ic + 1
-            d  = make_data(cs, POLAR_SEED_JUDGED)
+            call make_data(d, cs, POLAR_SEED_JUDGED, .false., pftc=pftc)
+            d%pfromto = part_range(cs%nptcls)
+            call wait_for_go
             do ib = 1, size(bs)
                 do ir = 1, size(rs)
                     cfg    = arg_config(bench_config())
                     cfg%bt = bs(ib)
                     cfg%rt = rs(ir)
-                    call time_config(d, cfg)
+                    call time_config(pftc, d, cfg)
                 end do
             end do
+            call pftc%kill
         end do
     end subroutine bench_time
 
@@ -910,18 +1214,22 @@ contains
     end function device_of_arg
 
     ! one configuration of the sweep: pruned with its reason, or timed; one row of bench_polar_table.tsv
-    subroutine time_config( d, cfg )
-        type(bench_data),   intent(inout) :: d
+    subroutine time_config( pftc, d, cfg )
+        type(polarft_calc), intent(inout) :: pftc
+        type(bench_data),   intent(in)    :: d
         type(bench_config), intent(in)    :: cfg
-        type(polar_table)             :: ws(2)
-        type(half_table)              :: tab
+        type(eul_prob_tab)            :: tab
+        type(half_table)              :: t
         type(score_plan)              :: plan
         character(len=:), allocatable :: status
+        integer,          allocatable :: pids(:)
         real(real64)                  :: walls(3), t0, prep, est, cpu_s
         real(real64)                  :: peak, cache
         real                          :: load1
-        integer                       :: h, rep, nh
+        integer                       :: i, rep, nh
+        ! one call per half: the whole case's half, or the larger half of a part
         nh     = d%cs%nptcls / 2
+        if( d%pfromto(2) - d%pfromto(1) + 1 < d%cs%nptcls ) nh = max(size(part_ptcls(d, 1)), size(part_ptcls(d, 2)))
         est    = estimate_bytes(d%cs, cfg, 1)
         status = 'timed'
         if( cfg%bt > nh ) status = 'pruned: B above the particles per half'
@@ -938,30 +1246,26 @@ contains
         if( status == 'timed' )then
             plan%outer = nh
             plan%team  = arg_int('nthr', 24)
-            t0 = clock_s()
-            do h = 1, 2
-                call prepare(ws(h), d, h, cfg)
-            end do
+            pids = [(i, i = d%pfromto(1), d%pfromto(2))]
+            t0   = clock_s()
+            call prepare(pftc, cfg)
+            call make_driver(tab, pftc, d, pids, plan)
             call mlx_synchronize()
             prep = clock_s() - t0
-            do h = 1, 2
-                tab = score_half(ws(h), d, h, plan)
-            end do
+            call fill_table(tab, pids, t)
             call mlx_synchronize()
             call mlx_reset_peak_memory()
             do rep = 1, 3
                 t0 = clock_s()
-                do h = 1, 2
-                    tab   = score_half(ws(h), d, h, plan)
-                    cpu_s = cpu_s + tab%cpu_s
-                end do
+                call fill_table(tab, pids, t)
+                cpu_s      = cpu_s + t%cpu_s
                 walls(rep) = clock_s() - t0
             end do
             peak  = real(mlx_peak_memory(), real64)
             cache = real(mlx_cache_memory(), real64)
-            do h = 1, 2
-                call ws(h)%kill()
-            end do
+            call report_digest('time', trim(d%cs%name)//' '//plan_label(cfg, plan), digest_halves(t))
+            call tab%kill
+            call pftc%kill_ref_bins
             call mlx_clear_cache()
         endif
         call write_time_row(d, cfg, [walls, prep, est, peak, cache, cpu_s / 3._real64], load1, status)
@@ -979,14 +1283,15 @@ contains
         character(len=*), parameter :: TSV = 'bench_polar_table.tsv'
         character(len=1), parameter :: T = achar(9)
         real(real64)                :: wall, pairs, padded
-        integer                     :: u, nrots, rpad, bpad
+        integer                     :: u, nrots, rpad, bpad, np
         logical                     :: l_new
         nrots  = 2 * d%cs%pftsz
         wall   = -1._real64
         if( all(vals(1:3) > 0._real64) ) wall = minval(vals(1:3))
-        pairs  = real(d%cs%nrefs, real64) * real(d%cs%nptcls, real64)
+        np     = d%pfromto(2) - d%pfromto(1) + 1
+        pairs  = real(d%cs%nrefs, real64) * real(np, real64)
         rpad   = ((d%cs%nrefs + cfg%rt - 1) / cfg%rt) * cfg%rt
-        bpad   = ((d%cs%nptcls / 2 + cfg%bt - 1) / cfg%bt) * cfg%bt
+        bpad   = ((np / 2 + cfg%bt - 1) / cfg%bt) * cfg%bt
         padded = 2._real64 * real(rpad, real64) * real(bpad, real64)
         inquire(file=TSV, exist=l_new)
         l_new = .not. l_new
@@ -1016,38 +1321,38 @@ contains
         type(bench_case)            :: cs
         type(bench_data)            :: d
         type(bench_config)          :: cfg
-        type(polar_table)           :: ws(2)
-        type(half_table)            :: tab
+        type(polarft_calc)          :: pftc
+        type(eul_prob_tab)          :: tab
+        type(half_table)            :: tb
         type(score_plan)            :: plan
         character(len=1), parameter :: T = achar(9)
+        integer,        allocatable :: pids(:)
         real(real64)                :: st0(5), st(5), best(5), wall, wbest, t0, prep, cold
-        integer                     :: h, rep, u
+        integer                     :: i, rep, u
         logical                     :: l_new
         write(*,'(a)') '**** bench_polar_table suite=profile ****'
         call mlx_set_default_device(device_of_arg())
         cs  = read_case(arg_str('cases', 'polar_case.txt'), arg_str('case', '2500_4'))
-        d   = make_data(cs, POLAR_SEED_JUDGED)
+        call make_data(d, cs, POLAR_SEED_JUDGED, .false., pftc=pftc)
         cfg = arg_config(bench_config(bt=POLAR_CANON_BT, rt=POLAR_CANON_RT))
         t0  = clock_s()
-        do h = 1, 2
-            call prepare(ws(h), d, h, cfg)
-        end do
+        call prepare(pftc, cfg)
         call mlx_synchronize()
         prep = clock_s() - t0
         cold = 0._real64
         plan%outer   = cs%nptcls / 2
         plan%team    = arg_int('nthr', 24)
         plan%profile = .true.
+        pids  = [(i, i = 1, cs%nptcls)]
+        call make_driver(tab, pftc, d, pids, plan)
         wbest = huge(wbest)
         best  = 0._real64
         do rep = 0, 3
-            st0 = ws(1)%stage_seconds() + ws(2)%stage_seconds()
+            st0 = pftc%stage_seconds()
             t0  = clock_s()
-            do h = 1, 2
-                tab = score_half(ws(h), d, h, plan)
-            end do
+            call fill_table(tab, pids, tb)
             wall = clock_s() - t0
-            st   = ws(1)%stage_seconds() + ws(2)%stage_seconds() - st0
+            st   = pftc%stage_seconds() - st0
             if( rep == 0 ) cold = wall
             if( rep > 0 .and. wall < wbest )then
                 wbest = wall
@@ -1067,9 +1372,8 @@ contains
         close(u)
         write(*,'(a,f9.4,a,5f9.4,a,f9.4)') '    profile wall ', wbest, ' s; stages ', best, '; rest (copy-out, host) ', &
             &wbest - sum(best)
-        do h = 1, 2
-            call ws(h)%kill()
-        end do
+        call report_digest('profile', trim(cs%name)//' '//plan_label(cfg, plan), digest_halves(tb))
+        call pftc%kill
     end subroutine bench_profile
 
     ! ---- overlap -------------------------------------------------------------------------------------------
@@ -1082,38 +1386,36 @@ contains
         type(bench_case)            :: cs
         type(bench_data)            :: d
         type(bench_config)          :: cfg
-        type(polar_table)           :: ws(2)
-        type(half_table)            :: tab
+        type(polarft_calc)          :: pftc
+        type(eul_prob_tab)          :: tab
+        type(half_table)            :: tb
         type(score_plan)            :: plan
         character(len=1), parameter :: T = achar(9)
+        integer,        allocatable :: pids(:)
         real(real64)                :: wsync, wover, cpu_sync, sub_sync, wall, cpu, sub, t0
-        integer                     :: h, rep, u, ns
+        integer                     :: i, rep, u, ns
         logical                     :: l_new
         write(*,'(a)') '**** bench_polar_table suite=overlap ****'
         call mlx_set_default_device(device_of_arg())
         cs  = read_case(arg_str('cases', 'polar_case.txt'), arg_str('case', '2500_4'))
-        d   = make_data(cs, POLAR_SEED_JUDGED)
+        call make_data(d, cs, POLAR_SEED_JUDGED, .false., pftc=pftc)
         cfg = arg_config(bench_config(bt=POLAR_CANON_BT, rt=POLAR_CANON_RT))
-        do h = 1, 2
-            call prepare(ws(h), d, h, cfg)
-        end do
+        call prepare(pftc, cfg)
         plan%outer = arg_int('outer', 250)
         plan%team  = arg_int('nthr', 24)
         wsync      = huge(wsync)
         wover      = huge(wover)
         cpu_sync   = 0._real64
         sub_sync   = 0._real64
+        pids = [(i, i = 1, cs%nptcls)]
         do ns = 1, 2
             plan%nslots = ns
+            call make_driver(tab, pftc, d, pids, plan)
             do rep = 0, 3
-                cpu = 0._real64
-                sub = 0._real64
                 t0  = clock_s()
-                do h = 1, 2
-                    tab = score_half(ws(h), d, h, plan)
-                    cpu = cpu + tab%cpu_s
-                    sub = sub + tab%submit_s
-                end do
+                call fill_table(tab, pids, tb)
+                cpu  = tb%cpu_s
+                sub  = tb%submit_s
                 wall = clock_s() - t0
                 if( rep == 0 ) cycle
                 if( ns == 1 .and. wall < wsync )then
@@ -1123,6 +1425,7 @@ contains
                 endif
                 if( ns == 2 ) wover = min(wover, wall)
             end do
+            call report_digest('overlap', trim(cs%name)//' '//plan_label(cfg, plan), digest_halves(tb))
         end do
         inquire(file='bench_polar_table_overlap.tsv', exist=l_new)
         l_new = .not. l_new
@@ -1138,9 +1441,7 @@ contains
         write(*,'(a,f9.4,a,f9.4,a,f9.4,a,f9.4,a,f7.3)') '    overlap: synchronous ', wsync, ' s, two slots ', &
             &wover, ' s; host in the synchronous run: preparation and consumption ', cpu_sync, ' s, staging and '//&
             &'graph building ', sub_sync, ' s; hidden share ', (wsync - wover) / max(cpu_sync + sub_sync, 1.e-9_real64)
-        do h = 1, 2
-            call ws(h)%kill()
-        end do
+        call pftc%kill
     end subroutine bench_overlap
 
     ! a CPU memory-streaming load for seconds= with nthr= threads (a triad over arrays far beyond the caches);
@@ -1179,6 +1480,7 @@ contains
     subroutine bench_shiftmap
         type(bench_case)              :: cs
         type(bench_data)              :: d
+        type(polarft_calc)            :: pftc
         character(len=:), allocatable :: names, grid
         integer,          allocatable :: ptiles(:)
         integer                       :: ic, i0
@@ -1201,9 +1503,10 @@ contains
             if( ic <= len(names) )then
                 if( names(ic:ic) /= ',' ) cycle
             endif
-            call time_map(d, read_map(grid, names(i0:ic-1)), ptiles)
+            call time_map(pftc, d, read_map(grid, names(i0:ic-1)), ptiles)
             i0 = ic + 1
         end do
+        call pftc%kill
     end subroutine bench_shiftmap
 
     ! the integers of a comma list (unreadable items skipped)
@@ -1304,83 +1607,65 @@ contains
         endif
     end subroutine check_map_case
 
-    ! a half's map preparation: the box from the grid's step (box / kscreen / 4), radii (i-1) rho_max / (nrho-1),
-    ! the half's shell weights over the band kfrom..kscreen, the prior's weight (zero on the window)
-    function map_spec( d, mp, half ) result(spec)
-        type(bench_data), intent(in) :: d
-        type(bench_map),  intent(in) :: mp
-        integer,          intent(in) :: half
-        type(polar_map_spec) :: spec
-        integer              :: i, nkb
-        nkb          = mp%kscreen - mp%kfrom + 1
-        spec%box     = nint(4._real64 * real(mp%kscreen, real64) * mp%rho_max / real(mp%nrho - 1, real64))
-        spec%kfrom   = mp%kfrom
-        spec%kstop   = mp%kscreen
-        spec%nalpha  = mp%nalpha
-        spec%prior_w = mp%prior_w
-        spec%rho     = [(real(i - 1, real64) * mp%rho_max / real(mp%nrho - 1, real64), i = 1, mp%nrho)]
-        spec%weights = real(d%w(1:nkb, half), real64)
-    end function map_spec
+    ! the box of a map's grid, from its step (box / kscreen / 4)
+    pure integer function map_box( mp )
+        type(bench_map), intent(in) :: mp
+        map_box = nint(4._real64 * real(mp%kscreen, real64) * mp%rho_max / real(mp%nrho - 1, real64))
+    end function map_box
 
-    ! a half's particles with their ncand candidates 1 + mod(i - 1 + (c - 1) (nrefs / ncand), nrefs) of particle
-    ! i, the weighted square sum over the band and production's temperatures: physical pi wsq_band / (2 pftsz),
-    ! tempered POLAR_PROB_BETA times it; neither maps nor evidence
-    function map_block( d, mp, half ) result(mb)
+    ! the calculator's map of the grid file's map: the screen's or the window's
+    pure integer function map_index( mp )
+        type(bench_map), intent(in) :: mp
+        map_index = SHIFTMAP_WINDOW
+        if( trim(mp%name) == 'screen' ) map_index = SHIFTMAP_SCREEN
+    end function map_index
+
+    ! every particle's ncand candidates: 1 + mod(i - 1 + (c - 1) (nrefs / ncand), nrefs) of particle i
+    function map_candidates( d, mp ) result(cands)
         type(bench_data), intent(in) :: d
         type(bench_map),  intent(in) :: mp
-        integer,          intent(in) :: half
-        type(polar_map_block) :: mb
-        integer, allocatable  :: pids(:)
-        real(real32)          :: tphys
-        integer               :: b, c, i, nb, nkb, stride
-        pids   = half_ptcls(d%cs%nptcls, half)
-        nb     = size(pids)
-        nkb    = mp%kscreen - mp%kfrom + 1
+        integer :: cands(mp%ncand, d%cs%nptcls)
+        integer :: i, c, stride
         stride = d%cs%nrefs / mp%ncand
-        mb%half       = half
-        mb%generation = 1_int64
-        mb%ptcl_ids   = pids
-        mb%ctf2       = d%ctf2(:, :, pids)
-        mb%xctf       = d%xctf(:, :, pids)
-        allocate(mb%cands(mp%ncand, nb), mb%ptclpow(nb), mb%temps(nb), mb%temps_phys(nb))
-        do b = 1, nb
-            i = pids(b)
+        do i = 1, d%cs%nptcls
             do c = 1, mp%ncand
-                mb%cands(c, b) = 1 + modulo(i - 1 + (c - 1) * stride, d%cs%nrefs)
+                cands(c, i) = 1 + modulo(i - 1 + (c - 1) * stride, d%cs%nrefs)
             end do
-            mb%ptclpow(b)    = sum(real(d%w(1:nkb, half), real64) * d%psq(1:nkb, i))
-            tphys            = real(acos(-1._real64) * mb%ptclpow(b) / (2._real64 * real(d%cs%pftsz, real64)), real32)
-            mb%temps(b)      = real(POLAR_PROB_BETA * real(tphys, real64), real32)
-            mb%temps_phys(b) = tphys
         end do
-    end function map_block
+    end function map_candidates
 
-    ! both halves' blocks scored, the results kept per half
-    subroutine score_maps_pass( ws, mb, res )
-        type(polar_table),       intent(inout) :: ws(2)
-        type(polar_map_block),   intent(in)    :: mb(2)
-        type(polar_map_results), intent(inout) :: res(2)
-        integer :: h, st
-        do h = 1, 2
-            call ws(h)%score_maps(mb(h), res(h), st)
-            call assert_int(0, st, 'bench_polar_table: a half''s shift maps are scored: '//ws(h)%message())
-        end do
+    ! one fill of the maps' stage: every particle's candidates read on the map, the results handed over
+    ! (candidate, particle in the batch's order: half 1's particles, then half 2's)
+    subroutine score_maps_pass( tab, nptcls, res )
+        type(eul_prob_tab),      intent(inout) :: tab
+        integer,                 intent(in)    :: nptcls
+        type(polar_map_results), intent(out)   :: res
+        call tab%fill_tab_range(1, nptcls)
+        call assert_int(0, len(tab%message()), 'bench_polar_table: the shift maps are filled: '//tab%message())
+        call tab%batch_map_results(res)
     end subroutine score_maps_pass
 
-    ! one map on the case: the references and the maps prepared per half (timed apart), then each tile of pairs
-    ! timed (warm-up, best of 3, MLX peak) and profiled once; every result in range
-    subroutine time_map( d, mp, ptiles )
-        type(bench_data), intent(inout) :: d
-        type(bench_map),  intent(in)    :: mp
-        integer,          intent(in)    :: ptiles(:)
-        type(polar_table)       :: ws(2)
-        type(polar_map_block)   :: mb(2)
-        type(polar_map_results) :: res(2)
-        type(map_timing)        :: tm
-        real(real64)            :: t0, st0(4)
-        integer                 :: h, ip, rep, st
-        logical                 :: fits, l_evidence
-        real(real64)            :: trial_bytes, budget
+    ! one map on the case: the calculator's reference bins and the map made (timed apart), then each tile of
+    ! pairs timed (warm-up, best of 3, MLX peak) and profiled once; every result in range. The calculator is fed
+    ! at the first map, and again when a map's box differs.
+    subroutine time_map( pftc, d, mp, ptiles )
+        type(polarft_calc), intent(inout) :: pftc
+        type(bench_data),   intent(inout) :: d
+        type(bench_map),    intent(in)    :: mp
+        integer,            intent(in)    :: ptiles(:)
+        type(eul_prob_tab)        :: tab
+        type(parameters)          :: params
+        type(polar_map_results)   :: res
+        type(map_timing)          :: tm
+        real(real32), allocatable :: cut(:,:)
+        type(bench_case)          :: cs
+        character(len=32)         :: tile
+        real(real64), allocatable :: rho(:)
+        real(real64)              :: t0, st0(4)
+        integer(int64)            :: dig
+        integer                   :: ip, rep, i, imap, n, n1
+        logical                   :: fits, l_evidence
+        real(real64)              :: trial_bytes, budget
         call check_map_case(d%cs, mp)
         ! read before any staging: a malformed value stops here, not after the data are made
         l_evidence = arg_int('evidence', 0) /= 0
@@ -1401,28 +1686,40 @@ contains
             return
         endif
         ! The recorded grid order allows rejecting an impossible sweep before staging even the host memos.
-        if( .not. allocated(d%xctf) ) d = make_data(d%cs, POLAR_SEED_JUDGED)
-        t0 = clock_s()
-        do h = 1, 2
-            call prepare(ws(h), d, h, bench_config(bt=POLAR_CANON_BT, rt=POLAR_CANON_RT))
-        end do
+        if( .not. allocated(d%wsq) .or. d%cs%box /= map_box(mp) )then
+            cs     = d%cs
+            cs%box = map_box(mp)
+            call make_data(d, cs, POLAR_SEED_JUDGED, .false., pftc=pftc)
+        endif
+        imap = map_index(mp)
+        t0   = clock_s()
+        call prepare(pftc, bench_config(bt=POLAR_CANON_BT, rt=POLAR_CANON_RT))
         call mlx_synchronize()
         tm%prep(1) = clock_s() - t0
-        t0 = clock_s()
-        do h = 1, 2
-            call ws(h)%prepare_maps(d%refs(h), map_spec(d, mp, h), st)
-            call assert_int(0, st, 'bench_polar_table: a half''s maps are prepared: '//ws(h)%message())
-            if( st /= 0 ) return
-            mb(h) = map_block(d, mp, h)
-            mb(h)%evidence = l_evidence
-            call set_width_mode(mb(h), arg_str('widths', 'all'))
-        end do
+        t0  = clock_s()
+        rho = [(real(i - 1, real64) * mp%rho_max / real(mp%nrho - 1, real64), i = 1, mp%nrho)]
+        call pftc%new_shiftmap(imap, rho, mp%nalpha, mp%kscreen)
+        call assert_int(0, refused(pftc), 'bench_polar_table: the map is made: '//pftc%message())
+        if( refused(pftc) /= 0 ) return
+        ! the driver: every particle's candidates on this map, the maps' stage alone, one block per half
+        n            = d%cs%nptcls
+        n1           = size(half_ptcls(n, 1))
+        params%pftsz = d%cs%pftsz
+        params%box   = d%cs%box
+        call tab%new_pipeline(params, pftc, [(i, i = 1, n)])
+        call tab%set_candidates(map_candidates(d, mp))
+        call tab%set_fill_stages(.false., .true.)
+        call tab%use_shiftmap(imap, mp%prior_w)
+        call tab%set_fill_options(n, 1, .false., .false.)
+        call assert_int(0, len(tab%message()), 'bench_polar_table: the driver is made: '//tab%message())
+        call set_width_mode(cut, arg_str('widths', 'all'), mp%ncand, n)
+        if( allocated(cut) ) call tab%set_width_cutoffs(cut)
         call mlx_synchronize()
         tm%prep(2)     = clock_s() - t0
-        tm%norder_used = ws(1)%map_order()
-        tm%terms = ws(1)%map_term_counts()
+        tm%norder_used = pftc%shiftmap_order(imap)
+        tm%terms = pftc%shiftmap_term_counts(imap)
         tm%resident = real(mlx_active_memory(), real64)
-        tm%host_bytes = map_host_bytes(d, mb)
+        tm%host_bytes = map_host_bytes(d%cs)
         do ip = 1, size(ptiles)
             tm%ptcl_tile  = ptiles(ip)
             tm%load1      = load_average()
@@ -1439,37 +1736,40 @@ contains
                 call write_map_row(d, mp, tm)
                 cycle
             endif
-            mb(:)%ptcl_tile = ptiles(ip)
-            mb(:)%profile = .false.
+            call pftc%set_shiftmap_options(ptiles(ip), .false., l_evidence, .false.)
             t0 = clock_s()
-            call score_maps_pass(ws, mb, res)
+            call score_maps_pass(tab, n, res)
             call mlx_synchronize()
             tm%cold = clock_s() - t0
             call mlx_reset_peak_memory()
             do rep = 1, 3
                 t0 = clock_s()
-                call score_maps_pass(ws, mb, res)
+                call score_maps_pass(tab, n, res)
                 tm%walls(rep) = clock_s() - t0
             end do
             tm%peak       = real(mlx_peak_memory(), real64)
             tm%cache      = real(mlx_cache_memory(), real64)
-            mb(:)%profile = .true.
-            st0 = ws(1)%map_seconds() + ws(2)%map_seconds()
+            call pftc%set_shiftmap_options(ptiles(ip), .false., l_evidence, .true.)
+            st0 = pftc%shiftmap_seconds()
             t0  = clock_s()
-            call score_maps_pass(ws, mb, res)
+            call score_maps_pass(tab, n, res)
             tm%pwall  = clock_s() - t0
-            tm%stages = ws(1)%map_seconds() + ws(2)%map_seconds() - st0
-            tm%width_pairs = count(res(1)%sdev >= 0._real32) + count(res(2)%sdev >= 0._real32)
-            do h = 1, 2
-                call assert_true(results_in_range(res(h), mp), 'bench_polar_table: every '//trim(mp%name)//&
-                    &' result is finite and on the grid')
-            end do
-                call write_map_row(d, mp, tm)
+            tm%stages = pftc%shiftmap_seconds() - st0
+            if( .not. allocated(res%loss) ) return
+            tm%width_pairs = count(res%sdev >= 0._real32)
+            call assert_true(results_in_range(res, mp), 'bench_polar_table: every '//trim(mp%name)//&
+                &' result is finite and on the grid')
+            call write_map_row(d, mp, tm)
+            dig = DIGEST_START
+            call digest_maps(dig, res, 1, n1)
+            call digest_maps(dig, res, n1 + 1, n)
+            write(tile, '(a,i0)') ' ptcl_tile=', ptiles(ip)
+            call report_digest('shiftmap', trim(mp%name)//trim(tile), dig)
             call mlx_clear_cache()
         end do
-        do h = 1, 2
-            call ws(h)%kill()
-        end do
+        call tab%kill
+        call pftc%kill_shiftmap
+        call pftc%kill_ref_bins
         call mlx_clear_cache()
     end subroutine time_map
 
@@ -1499,20 +1799,22 @@ contains
         map_estimate_bytes = resident + 2._real64 * real(ptcl_tile, real64) * per_ptcl
     end function map_estimate_bytes
 
-    ! Synthetic sensitivity modes: predetermined survivors, not a production best-so-far shortlist.
-    subroutine set_width_mode( mb, mode )
-        type(polar_map_block), intent(inout) :: mb
-        character(len=*),      intent(in)    :: mode
+    ! Synthetic sensitivity modes: predetermined survivors, not a production best-so-far shortlist. cut is left
+    ! unallocated when every width is wanted.
+    subroutine set_width_mode( cut, mode, ncand, nptcls )
+        real(real32), allocatable, intent(out) :: cut(:,:)
+        character(len=*),          intent(in)  :: mode
+        integer,                   intent(in)  :: ncand, nptcls
         integer :: c
         select case(mode)
             case('all')
                 return
             case('none', 'quarter')
-                allocate(mb%width_cutoff(size(mb%cands, 1), size(mb%cands, 2)))
-                mb%width_cutoff = -huge(1._real32)
+                allocate(cut(ncand, nptcls))
+                cut = -huge(1._real32)
                 if( mode == 'quarter' )then
-                    do c = 4, size(mb%cands, 1), 4
-                        mb%width_cutoff(c, :) = huge(1._real32)
+                    do c = 4, ncand, 4
+                        cut(c, :) = huge(1._real32)
                     end do
                 endif
             case default
@@ -1520,18 +1822,15 @@ contains
         end select
     end subroutine set_width_mode
 
-    real(real64) function map_host_bytes( d, mb ) result(bytes)
-        type(bench_data),      intent(in) :: d
-        type(polar_map_block), intent(in) :: mb(2)
-        integer :: h
-        bytes = real(8_int64 * (size(d%ctf2, kind=int64) + size(d%xctf, kind=int64) + &
-            &size(d%wsq, kind=int64) + size(d%psq, kind=int64)) + 4_int64 * &
-            &(size(d%w, kind=int64) + size(d%temps, kind=int64)), real64)
-        do h = 1, 2
-            bytes = bytes + real(8_int64 * (size(d%refs(h)%ft_ref, kind=int64) + &
-                &size(d%refs(h)%ft_ref2, kind=int64) + size(mb(h)%ctf2, kind=int64) + &
-                &size(mb(h)%xctf, kind=int64) + size(mb(h)%ptclpow, kind=int64)), real64)
-        end do
+    ! the host bytes the route holds for a case: the calculator's memos of both parities' references and of the
+    ! particles, the particles' shell and weighted square sums, the shell weights and the temperatures
+    real(real64) function map_host_bytes( cs ) result(bytes)
+        type(bench_case), intent(in) :: cs
+        integer(int64) :: n1, nk
+        n1    = int(cs%pftsz + 1, int64)
+        nk    = int(cs%kto - cs%kfrom + 1, int64)
+        bytes = real(8_int64 * (4_int64 * n1 * nk * int(cs%nrefs, int64) + 2_int64 * n1 * nk * int(cs%nptcls, int64) + &
+            &(nk + 2_int64) * int(cs%nptcls, int64)) + 4_int64 * (6_int64 * nk + int(cs%nptcls, int64)), real64)
     end function map_host_bytes
 
     logical function results_in_range( res, mp )

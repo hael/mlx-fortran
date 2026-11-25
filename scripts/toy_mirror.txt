@@ -1,0 +1,86 @@
+# toy_mirror.txt -- the mirror ledger of the toys (doc/policies/toy_example_policy.md, section 4).
+#
+# One line per public type and per public type-bound procedure of every toy module (mlxf_toy_<stem>, src/test):
+#     <toy module> <name> <SIMPLE module> <name>      mirrored: the name is SIMPLE's, and so is the dummy list
+#     <toy module> <name> addition <reason>           no counterpart in SIMPLE: named for what it does
+# A name is a type T or a binding T%binding. Rule `mirror` of scripts/check_rules.py holds the ledger to the
+# code; rule `arity` exempts the mirrored procedures from the five-dummy limit and no others.
+#
+# Read from SIMPLE commit d354efee2 (src/main/pftc/simple_polarft_calc.f90 and its submodules).
+
+# ---- the polar calculator ----
+mlxf_toy_polarft_calc polarft_calc simple_polarft_calc polarft_calc
+mlxf_toy_polarft_calc polarft_calc%new simple_polarft_calc polarft_calc%new
+mlxf_toy_polarft_calc polarft_calc%kill simple_polarft_calc polarft_calc%kill
+mlxf_toy_polarft_calc polarft_calc%reallocate_ptcls simple_polarft_calc polarft_calc%reallocate_ptcls
+mlxf_toy_polarft_calc polarft_calc%set_ref_pft simple_polarft_calc polarft_calc%set_ref_pft
+mlxf_toy_polarft_calc polarft_calc%set_ptcl_pft simple_polarft_calc polarft_calc%set_ptcl_pft
+mlxf_toy_polarft_calc polarft_calc%set_ptcl_ctfmat simple_polarft_calc polarft_calc%set_ptcl_ctfmat
+mlxf_toy_polarft_calc polarft_calc%set_eo simple_polarft_calc polarft_calc%set_eo
+mlxf_toy_polarft_calc polarft_calc%memoize_refs simple_polarft_calc polarft_calc%memoize_refs
+mlxf_toy_polarft_calc polarft_calc%memoize_ptcls simple_polarft_calc polarft_calc%memoize_ptcls
+mlxf_toy_polarft_calc polarft_calc%memoize_ref_bins simple_polarft_calc polarft_calc%memoize_ref_bins
+mlxf_toy_polarft_calc polarft_calc%score_block_posterior simple_polarft_calc polarft_calc%score_block_posterior
+mlxf_toy_polarft_calc polarft_calc%get_nrefs simple_polarft_calc polarft_calc%get_nrefs
+mlxf_toy_polarft_calc polarft_calc%get_pftsz simple_polarft_calc polarft_calc%get_pftsz
+mlxf_toy_polarft_calc polarft_calc%ptcl_iseven simple_polarft_calc polarft_calc%ptcl_iseven
+mlxf_toy_polarft_calc polarft_calc%wsqsum_ptcl_band simple_polarft_calc polarft_calc%wsqsum_ptcl_band
+mlxf_toy_polarft_calc polarft_calc%new_shiftmap simple_polarft_calc polarft_calc%new_shiftmap
+mlxf_toy_polarft_calc polarft_calc%setup_shiftmaps simple_polarft_calc polarft_calc%setup_shiftmaps
+mlxf_toy_polarft_calc polarft_calc%kill_shiftmap simple_polarft_calc polarft_calc%kill_shiftmap
+mlxf_toy_polarft_calc polarft_calc%gen_shiftmap simple_polarft_calc polarft_calc%gen_shiftmap
+mlxf_toy_polarft_calc polarft_calc%shiftmap_mode simple_polarft_calc polarft_calc%shiftmap_mode
+mlxf_toy_polarft_calc polarft_calc%set_sigma2_weights addition the fixtures have the shell weights k / sigma2 themselves; SIMPLE derives them from the spectra of assign_sigma2_noise in memoize_sigma2_weights
+mlxf_toy_polarft_calc polarft_calc%set_tile_plan addition the particles and references of a workspace tile; no SIMPLE procedure or parameter carries the GPU route's layout
+mlxf_toy_polarft_calc polarft_calc%kill_ref_bins addition releases the device's tiles and keeps the host memos, so that a benchmark can change the tile plan or the device
+mlxf_toy_polarft_calc polarft_calc%ref_bins_current addition inquiry: the reference bins are those of the memoized references and tile plan (SIMPLE compares ref_gen_bins with ref_gen and stops)
+mlxf_toy_polarft_calc polarft_calc%message addition inquiry: the reason of the last refusal; a mirrored procedure has no status argument and SIMPLE stops where the toy refuses
+mlxf_toy_polarft_calc polarft_calc%set_block_variates addition the fixture owns each pair's keyed variate; SIMPLE draws them inside the scorer from the scope of set_rnd_scope
+mlxf_toy_polarft_calc polarft_calc%set_block_banks addition the seed banks of a block queued by submit_block, which is held to five dummies
+mlxf_toy_polarft_calc polarft_calc%set_block_options addition the full rows of distances for the oracle's comparison, and the profiled stages
+mlxf_toy_polarft_calc polarft_calc%submit_block addition queues a block on the device and returns: the GPU batch in flight has no counterpart in SIMPLE
+mlxf_toy_polarft_calc polarft_calc%collect_block addition waits for a queued block and copies its entries out: the one place the host waits for the device
+mlxf_toy_polarft_calc polarft_calc%block_rows addition hands over the full rows of the last collected block, which the testers hold to the oracle
+mlxf_toy_polarft_calc polarft_calc%stage_seconds addition inquiry: the profiled stages' seconds of the benchmark's profile suite
+mlxf_toy_polarft_calc polarft_calc%set_shiftmap_options addition the particles of one device graph, and the outputs SIMPLE's test hooks give: every map, the log evidence, the profiled stages
+mlxf_toy_polarft_calc polarft_calc%shiftmap_evidence addition hands over the log evidence of the last modes, which the testers hold to the oracle
+mlxf_toy_polarft_calc polarft_calc%shiftmap_maps addition hands over the maps of the last modes, which the testers hold to the oracle (SIMPLE: the private shiftmap_objfun_grid)
+mlxf_toy_polarft_calc polarft_calc%shiftmap_kstop addition inquiry: the last shell of a map's band, which the driver needs for a map the fixture handed in (SIMPLE's setup returns kscreen)
+mlxf_toy_polarft_calc polarft_calc%shiftmap_order addition inquiry: the Bessel orders a map keeps, which the folding test and the benchmark's rows read
+mlxf_toy_polarft_calc polarft_calc%shiftmap_term_counts addition inquiry: the radius-order terms kept and executed, a column of the benchmark's rows
+mlxf_toy_polarft_calc polarft_calc%shiftmap_seconds addition inquiry: the profiled map stages' seconds of the benchmark's rows
+
+# ---- the table driver (src/main/strategies/search/probabilistic/simple_eul_prob_tab.f90) ----
+mlxf_toy_eul_prob_tab eul_prob_tab simple_eul_prob_tab eul_prob_tab
+mlxf_toy_eul_prob_tab eul_prob_tab%new_pipeline simple_eul_prob_tab eul_prob_tab%new_pipeline
+mlxf_toy_eul_prob_tab eul_prob_tab%fill_tab_range simple_eul_prob_tab eul_prob_tab%fill_tab_range
+mlxf_toy_eul_prob_tab eul_prob_tab%kill simple_eul_prob_tab eul_prob_tab%kill
+mlxf_toy_eul_prob_tab eul_prob_tab%set_draw_keys addition the seed and each reference's full index of the keyed draws; SIMPLE takes its scope from the iteration (prob_rnd_scope) and the index from ref_full
+mlxf_toy_eul_prob_tab eul_prob_tab%set_temps addition the fixtures give each particle's inverse temperature; SIMPLE's fill takes it from the calculator (ptcl_posterior_temp)
+mlxf_toy_eul_prob_tab eul_prob_tab%set_candidates addition the candidates of the shift maps come from the fixture; SIMPLE's pool selects them from the dense rows
+mlxf_toy_eul_prob_tab eul_prob_tab%set_width_cutoffs addition the fixture's loss above which a pair's width is skipped; SIMPLE takes it from the best widths so far
+mlxf_toy_eul_prob_tab eul_prob_tab%use_shiftmap addition reads the candidates on a map the fixture made on its own grid; SIMPLE's fill sets its two maps up by rule and chooses per particle
+mlxf_toy_eul_prob_tab eul_prob_tab%set_fill_options addition the particles of a block, one or two blocks in flight on the device, the full rows, the profile
+mlxf_toy_eul_prob_tab eul_prob_tab%set_fill_stages addition the benchmark times the dense score and the maps apart; SIMPLE's fill always runs both
+mlxf_toy_eul_prob_tab eul_prob_tab%batch_entries addition hands over the batch's dense rows; SIMPLE keeps them for the batch's own selection (keep_batch_rows)
+mlxf_toy_eul_prob_tab eul_prob_tab%batch_full_rows addition hands over every rotation's distance, which the testers hold to the oracle
+mlxf_toy_eul_prob_tab eul_prob_tab%batch_map_results addition hands over the maps' modes, losses and widths; SIMPLE refines them in the cell and keeps the refined entries
+mlxf_toy_eul_prob_tab eul_prob_tab%fill_seconds addition inquiry: the fill's host seconds by stage, the benchmark's columns (SIMPLE: get_fill_profile)
+mlxf_toy_eul_prob_tab eul_prob_tab%message addition inquiry: the reason of the last refusal; SIMPLE stops where the toy refuses
+
+# ---- its GPU workspace: everything here is the toy's own (the seam, policy section 2, point 6) ----
+mlxf_toy_polarft_workspace polarft_workspace addition the one type that holds MLX handles and compiled functions: one parity's resident reference tiles and the blocks in flight
+mlxf_toy_polarft_workspace polarft_workspace%new addition the resident tiles of one parity's reference memos under a tile plan
+mlxf_toy_polarft_workspace polarft_workspace%kill addition releases the tiles and the blocks in flight
+mlxf_toy_polarft_workspace polarft_workspace%submit addition validates a block against the tiles and queues its graph in a slot
+mlxf_toy_polarft_workspace polarft_workspace%collect addition waits for a slot's block and copies its entries to the host
+mlxf_toy_polarft_workspace polarft_workspace%take_rows addition hands over the full rows of the last block collected with them
+mlxf_toy_polarft_workspace polarft_workspace%message addition inquiry: the reason of the last refusal or failure
+mlxf_toy_polarft_workspace polarft_workspace%stage_seconds addition inquiry: the profiled stages' accumulated seconds
+mlxf_toy_polarft_workspace polarft_workspace%prepare_maps addition one map's grid and resident data from one parity's reference memos
+mlxf_toy_polarft_workspace polarft_workspace%score_maps addition the maps of a block's pairs, built and reduced on the device to modes, widths and evidence
+mlxf_toy_polarft_workspace polarft_workspace%kill_map addition releases one map's resident data
+mlxf_toy_polarft_workspace polarft_workspace%kill_maps addition releases every map
+mlxf_toy_polarft_workspace polarft_workspace%map_order addition inquiry: the Bessel orders a map keeps
+mlxf_toy_polarft_workspace polarft_workspace%map_term_counts addition inquiry: the radius-order terms kept and executed
+mlxf_toy_polarft_workspace polarft_workspace%map_seconds addition inquiry: the profiled map stages' accumulated seconds

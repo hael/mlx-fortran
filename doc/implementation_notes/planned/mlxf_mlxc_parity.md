@@ -261,6 +261,8 @@ Decisions 1 to 4 were ruled by Hans on 2026-11-23, each as recommended. None is 
       `src/test/mlxf_test_defs.f90` and `src/test/mlxf_test_registry.f90`.
     - **Starts when the maintainer has released the Phase 3 hold,** with whatever the read changed applied
       first.
+      - (2026-11-24, Hans: "Release it") The hold is released. No change to the API of Phases 2 and 3 was
+        asked for.
     - **Order inside the phase:** the Metal kernel, then the FFT lines, then the three matrix products. Each
       part ends with its area passing on both devices before the next begins, so that a stop leaves whole
       parts.

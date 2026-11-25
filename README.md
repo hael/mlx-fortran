@@ -12,7 +12,9 @@ verification: an interface is proven against the C library only where a test cal
 arithmetic and comparisons, shape and indexing operations, reductions and scans, batched `matmul`, 1D and 2D
 FFTs, and graph compilation of Fortran callbacks. That set covers the first SIMPLE-shaped pipeline (scoring
 and shift maps of the polar table), measured on the M2 and M5 Ultra
-([report](doc/implementation_notes/completed/mlxf_milestone1_report.md)). The API is still growing, so expect
+([report](doc/implementation_notes/completed/mlxf_milestone1_report.md)); its test-only model is a miniature of
+SIMPLE's `polarft_calc` with the table driver `eul_prob_tab`
+([report](doc/implementation_notes/completed/mlxf_toy_architecture_report.md)). The API is still growing, so expect
 it to change. The work to come is ranked in the
 [roadmap](doc/implementation_notes/planned/mlxf_roadmap.md).
 See the [implementation-notes index](doc/implementation_notes/README.md) for active work and completed records.
@@ -115,7 +117,7 @@ failure on any skip; its log names the commit, the toolchain, MLX and the device
 | --- | --- |
 | `src/defs/` | `mlxf_defs`: constants and vocabularies more than one module uses |
 | `src/core/` | the Fortran layer, by capability: `runtime/`, `array/`, `ops/`, `linalg/`, `fft/`, `compile/`; `mlxf.f90` is the user module |
-| `src/test/` | test infrastructure and SIMPLE-shaped kernels and benchmarks, built only with tests |
+| `src/test/` | test infrastructure, the toys that mirror SIMPLE's classes (`polarft_calc`, `eul_prob_tab`) and their benchmark, built only with tests |
 | `test/` | `mlxf_test_exec`, the one test executable, and the CTest entries |
 | `scripts/` | the static gate, the formatters, the compile helpers, the dependency build, the C-layer generator |
 | `build/gen/` | generated at build time: the `bind(c)` layer from the mlx-c headers that are linked |

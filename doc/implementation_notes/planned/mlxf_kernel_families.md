@@ -53,15 +53,15 @@ of `d354efee2` added.
 
 | Family | Domain object (SIMPLE's class) | Methods kept | Driver (SIMPLE's caller) |
 | --- | --- | --- | --- |
-| A | `polarft_calc` (`pftc/simple_polarft_calc.f90` and its submodules) | `new`, `kill`, `set_ref_pft`, `set_ptcl_pft`, `memoize_refs`, `memoize_ptcls`, `score_block_posterior`, `setup_shiftmaps`, `gen_shiftmap`, `shiftmap_mode` | `eul_prob_tab%fill_tab_range` with its seed, score and `finish_particle_map` steps; later `eul_prob_tab_neigh` and `shiftmap_srch` |
+| A | `polarft_calc` (`pftc/simple_polarft_calc.f90` and its submodules) | `new`, `kill`, `reallocate_ptcls`, `set_ref_pft`, `set_ptcl_pft`, `set_ptcl_ctfmat`, `set_eo`, `memoize_refs`, `memoize_ptcls`, `memoize_ref_bins`, `score_block_posterior`, `new_shiftmap`, `setup_shiftmaps`, `kill_shiftmap`, `gen_shiftmap`, `shiftmap_mode`, and the inquiries `get_nrefs`, `get_pftsz`, `ptcl_iseven`, `wsqsum_ptcl_band` (built: `src/test/mlxf_toy_polarft_calc.f90`) | `eul_prob_tab` with `new_pipeline`, `fill_tab_range` (its steps `cut_blocks`, `process_block`, `finish_particle_map`) and `kill` (built: `src/test/mlxf_toy_eul_prob_tab.f90`); later `eul_prob_tab_neigh` and `shiftmap_srch` |
 | B1 | `projector` (`image/simple_projector.f90`, `simple_projector_pft_batch.f90`) | `fproject_polar_batch_opt` | the reprojection model's `vol_pad2ref_pfts_opt`, which fills `polarft_calc` through `set_ref_pft` |
 | B2 | `cartft_calc` (`cftc/simple_cartft_calc.f90`) | `new`, `kill`, `set_ref`, `new_ptcls`, the particle setters, `pose_normal_terms`, `shift_normal_terms` | `cartft_pose_opt` (`cftc/simple_cartft_pose_opt.f90`) |
 | C | `reconstructor` (`volume/simple_reconstructor.f90`) | `insert_plane_oversamp`, `compress_exp`, `sampl_dens_correct` | `calc_3Drec` (`strategies/search/simple_matcher_3Drec.f90`) with its batches of prepared planes |
 | D | `reconstructor_pcg` (`volume/simple_reconstructor_pcg.f90`) | `apply_normal_kernel`, `apply_precond`, `dot_real_volume` | `pcg_solve` (`opt/simple_pcg_solver.f90`) |
 
 For each toy, its plan fixes the seam (which component holds the MLX state, what stays resident, where the
-host waits) and lists the differences from SIMPLE. Milestone 1's polar kernels predate the policy; the
-roadmap's rank 0b refactors them before K1.
+host waits) and lists the differences from SIMPLE. Family A's toy was refactored to this form by the roadmap's
+rank 0b (run `mlxf_toy_arch`, 2026-11-24); its seam and its differences are in section 3.
 
 ## 3. Family A: polar matching
 
@@ -99,10 +99,66 @@ has both ([`mlxf_oracles2.md`](mlxf_oracles2.md), section 9.1.4).
     optional evidence.
   - Per particle, across references: the best, the best k, or a draw.
 
-**What exists.** `src/test/mlxf_kernel_polar_table*.f90` (the dense score with its compiled tail, lifecycle
-and tiling), `mlxf_kernel_polar_table_shiftmap.f90` (the Fourier-Bessel maps), `mlxf_kernel_polar_oracle.f90`,
-and `mlxf_bench_polar_table.f90`. They are refactored into the toy `polarft_calc` first (roadmap rank 0b). The unit fixture keeps SIMPLE's structure at small size (pftsz 32, 10
-shells).
+**What exists.** In `src/test/`:
+- `mlxf_toy_polarft_calc.f90`, the toy `polarft_calc`, with its submodules `mlxf_toy_polarft_core` (`new`,
+  `kill`), `_memo` (the setters and the memoization), `_block` (`score_block_posterior`, the submission and
+  collection of a block) and `_shiftmap` (`new_shiftmap`, `setup_shiftmaps`, `gen_shiftmap`, `shiftmap_mode`);
+- `mlxf_toy_polarft_workspace.f90`, the type `polarft_workspace` that holds every MLX handle and compiled
+  function, with its submodules `_lifecycle`, `_score` (the dense score with its compiled tail and tiling) and
+  `_shiftmap` (the Fourier-Bessel maps);
+- `mlxf_toy_eul_prob_tab.f90`, the driver `eul_prob_tab` with `fill_tab_range`;
+- `mlxf_oracle_polar.f90`, the oracle, and `mlxf_bench_polar_table.f90`, the benchmark, whose suites fill
+  their tables through the driver.
+
+The unit fixture keeps SIMPLE's structure at small size (pftsz 32, 10 shells).
+
+**The seam** (measured at case `2500_4`: 10,000 references per half, 2,000 particles, pftsz 182, 61 shells,
+tile plan 64 by 250, on the M5 Ultra):
+- **Who owns the device state.** `polarft_calc%ws`, one `polarft_workspace` per reference parity, made in
+  `new` and released in `kill`. Nothing else holds an MLX handle: the driver and the fixtures hold none.
+- **What is resident, and from when.** The reference tiles of both parities, 7.14e9 B (*derived*: 2 parities
+  of 40 tiles of 244 by 500 by 183 single-precision values), from `memoize_ref_bins` until `kill_ref_bins`,
+  `kill` or the next `memoize_ref_bins`: one iteration of a part process. A shift map adds 2.63e9 B for both
+  parities (*measured*: 9.77e9 B of active memory with the tiles) from `new_shiftmap` or `setup_shiftmaps`
+  until `kill_shiftmap`. A block in flight holds its graph: the MLX peak is 10.26e9 B while a half of 1,000
+  particles is scored, and MLX keeps 3.28e9 B in its cache afterwards (*measured*).
+- **What stays on the host.** The memos of the references (`ft_ref`, `ft_ref2`, both parities: 3.57e9 B) and
+  of the particles (0.36e9 B) (*derived*). The raw sections do not stay: the setters stage 64 at a time and
+  memoize them.
+- **Where the host waits.** In `memoize_ref_bins` and `new_shiftmap` (the tiles and the maps' tables are
+  evaluated), in `collect_block` (a block's entries are copied out; `score_block_posterior` is a submission
+  and its collection), and in `shiftmap_mode`, once per tile of particles. `submit_block` returns while the
+  device works, so one block or two can be in flight.
+- **What a part process holds.** 20.81e9 B of peak footprint for all 2,000 particles and 20.11e9 B for a third
+  of them (*measured*): the references dominate, and each part holds all of them.
+
+**Differences from SIMPLE** (read at `d354efee2`; the ledger `scripts/toy_mirror.txt` lists every procedure
+as mirrored or as an addition with its reason):
+- **Dummies dropped:** `new` has no `nmany_refs` and `fftw_measure`; `memoize_refs` no `eulspace`;
+  `new_pipeline` no `block_memo`. `params` is the record `parameters` of the test definitions, with SIMPLE's
+  member names for the members read (`pftsz`, `box`, `nthr`, `prob_beta`, `shift_sigma`, `smpd`, `trs`).
+- **Kinds:** `set_ref_pft` takes its section in `complex(real64)`, because the benchmark's reference rings
+  are double precision and rounding them changes the scores' bits; `parameters%prob_beta` is `real(real64)`.
+- **Shapes:** a section spans the shells `kfromto(1):kfromto(2)` (SIMPLE's reach `interpklim`). `gen_shiftmap`
+  and `shiftmap_mode` take the pairs of a block as rank-1 arrays, every particle's candidates in turn.
+- **Public where SIMPLE's are private:** `set_ptcl_ctfmat`, `new_shiftmap`, `kill_shiftmap`. The fixtures hand
+  their map grids in through `new_shiftmap`; `setup_shiftmaps` builds SIMPLE's grids by SIMPLE's rule.
+- **Staging:** `pfts_refs`, `pfts_ptcls` and `ctfmats` hold 64 sections, not every section, and a particle's
+  CTF is set before its section. The weighted square sum is made in `memoize_ptcls`.
+- **The block:** all the references in their order (`irefs` = 1..`nrefs`; arbitrary lists are deliverable
+  K3's), any number of particles of one half, tiled by `set_tile_plan`; SIMPLE's block is at most 16
+  particles against tiles of 32 references.
+- **What the fixture hands in through additions:** the shell weights `k / sigma2` (`set_sigma2_weights`;
+  SIMPLE is given the spectra), the keys of the draws (`set_draw_keys`; SIMPLE takes its scope from the
+  iteration), the dense temperatures (`set_temps`), the maps' candidates (`set_candidates`; SIMPLE's pool
+  selects them) and, when it has one, its own map (`use_shiftmap`).
+- **The maps:** they are built on the device when `shiftmap_mode` reads them, tile by tile; `gen_shiftmap`
+  records the pairs. There is no `shiftmap_shift`, no `shiftmap_draw` and no in-cell refinement.
+- **The driver:** one thread walks the blocks, one or two in flight on the device (SIMPLE: an OpenMP loop
+  over the blocks); `new_pipeline` takes the calculator where SIMPLE takes its builder; no assignment, no
+  states, no diagnostics. `set_fill_stages` lets the benchmark run the dense score or the maps alone.
+- **Refusals:** where SIMPLE stops, the toy returns with a reason in `message()` and SIMPLE's invalid values
+  in the results. The types have a `final` procedure where the house rule asks for one.
 
 **What is new** (the deliverables of section 8):
 - **A1, the fused tail.** One Metal kernel per pair row: the inverse real transform, the finishing formula

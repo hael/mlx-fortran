@@ -1,18 +1,18 @@
-!@descr: tests of the polar table's shift maps: analytic ring fixtures, the direct residual oracle, mode, width, evidence
+!@descr: tests of the toy polar calculator's shift maps: analytic ring fixtures, the direct residual oracle, mode, width, evidence
 ! The fixtures are analytic (no random numbers): low-harmonic Friedel-symmetric reference rings, angularly varying
-! CTFs, particles as a reference shifted in its own frame, rotated and multiplied by its CTF. The oracle evaluates
-! the normalised residual L = sum w |X - C R_pose|^2 / sum w |X|^2 directly at every grid point in real64, with no
-! Bessel table and no transform, and the mode, width and evidence from those maps on the host.
-module mlxf_kernel_polar_table_shiftmap_tester
+! CTFs, particles as a reference shifted in its own frame, rotated and multiplied by its CTF; the calculator is
+! handed the rings and memoizes them. The oracle evaluates the normalised residual L = sum w |X - C R_pose|^2 /
+! sum w |X|^2 directly at every grid point in real64, with no Bessel table and no transform, and the mode, width
+! and evidence from those maps on the host.
+module mlxf_toy_polarft_shiftmap_tester
 use, intrinsic :: iso_fortran_env, only: int64, real32, real64
-use mlxf,                     only: mlx_set_default_device, mlx_default_device, mlx_live_count, mlx_active_memory, &
-                                    mlx_synchronize, mlx_clear_cache
-use mlxf_test_defs,           only: POLAR_MAP_CAP_L2, POLAR_MAP_CAP_LOG, POLAR_MAP_CAP_VAR, POLAR_MAP_LOG_CUT, &
-                                    polar_table_refs, polar_table_block, polar_table_entries, polar_map_spec, &
-                                    polar_map_block, polar_map_results
-use mlxf_kernel_polar_table,  only: polar_table
-use mlxf_kernel_polar_oracle, only: polar_full_ring, polar_dft_matrix, polar_dft_bins
-use mlxf_test_utils,          only: assert_true, assert_int, device_name, bits_equal, test_devices
+use mlxf,                  only: mlx_set_default_device, mlx_default_device, mlx_live_count, mlx_active_memory, &
+                                 mlx_synchronize, mlx_clear_cache
+use mlxf_test_defs,        only: POLAR_MAP_CAP_L2, POLAR_MAP_CAP_LOG, POLAR_MAP_CAP_VAR, POLAR_MAP_LOG_CUT, &
+                                 SHIFTMAP_FULL, SHIFTMAP_SCREEN, NSHIFTMAPS, parameters, polar_map_results
+use mlxf_toy_polarft_calc, only: polarft_calc
+use mlxf_oracle_polar,     only: polar_full_ring
+use mlxf_test_utils,       only: assert_true, assert_int, device_name, bits_equal, test_devices
 implicit none
 private
 public :: run_all_polar_shiftmap_tests, run_all_polar_shiftmap_accuracy_tests
@@ -28,8 +28,10 @@ integer, parameter :: CANDS(3, 3) = reshape([7, 2, 5, 5, 7, 2, 2, 2, 7], [3, 3])
 real(real32), parameter :: TEMP_T = 9._real32
 real(real32), parameter :: TEMP_PHYS = 30._real32
 real(real64), parameter :: PRIOR_SCREEN = 0.5_real64
+! the map the tests build on their own grid over every shell: the calculator's full-band map
+integer, parameter :: IMAP = SHIFTMAP_FULL
 
-! one analytic fixture: rings (half ring, rounded), CTFs, weights per half, the memos, the grid
+! one analytic fixture: rings (half ring, rounded), CTFs, weights per half, the grid
 type :: map_fixture
     integer                      :: nrot = 0, pftsz = 0, nk = 0, box = 0, nalpha = 0, kfrom = 1
     logical                      :: perturbed = .false.
@@ -38,12 +40,23 @@ type :: map_fixture
     complex(real32), allocatable :: rref(:,:,:,:)
     complex(real32), allocatable :: x(:,:,:)
     real(real32),    allocatable :: ctf(:,:,:)
-    real(real64),    allocatable :: ptclpow(:)
-    complex(real32), allocatable :: ft_ref(:,:,:,:)
-    complex(real32), allocatable :: ft_ref2(:,:,:,:)
-    complex(real32), allocatable :: ctf2(:,:,:)
-    complex(real32), allocatable :: xctf(:,:,:)
 end type map_fixture
+
+! a block of maps as the tests ask for it: the particles pids (one half), each one's candidate references
+! cands(:, b), a tempered and a physical inverse temperature per particle, the prior's weight, the options, and
+! per pair the loss above which its width is skipped
+type :: map_request
+    integer                   :: ptcl_tile = 16
+    logical                   :: maps      = .true.
+    logical                   :: evidence  = .true.
+    logical                   :: profile   = .false.
+    real(real64)              :: prior_w   = 0._real64
+    integer,      allocatable :: ptcl_ids(:)
+    integer,      allocatable :: cands(:,:)
+    real(real32), allocatable :: temps(:)
+    real(real32), allocatable :: temps_phys(:)
+    real(real32), allocatable :: width_cutoff(:,:)
+end type map_request
 
 ! the host's mode, width and evidence of a map
 type :: map_summary
@@ -81,8 +94,8 @@ contains
 
     subroutine run_all_polar_shiftmap_accuracy_tests
         type(map_fixture)       :: fx
-        type(polar_table)       :: ws
-        type(polar_map_block)   :: mb
+        type(polarft_calc)      :: pftc
+        type(map_request)       :: mb
         type(polar_map_results) :: res
         integer, allocatable    :: devs(:)
         integer                 :: original, d, grid, h, c, sample, pose(3), st
@@ -95,9 +108,10 @@ contains
             do d = 1, size(devs)
                 call mlx_set_default_device(devs(d))
                 do h = 1, 2
-                    call prepare_half(fx, h, PRIOR_SCREEN, ws)
-                    mb = map_block(fx, [h], reshape([2, 7], [2, 1]), [TEMP_T, TEMP_PHYS])
-                    call ws%score_maps(mb, res, st)
+                    call prepare_half(fx, pftc)
+                    mb = map_block([h], reshape([2, 7], [2, 1]), [TEMP_T, TEMP_PHYS])
+                    mb%prior_w = PRIOR_SCREEN
+                    call score_maps(pftc, mb, res, st)
                     call assert_int(0, st, 'production-geometry sample scores')
                     if( st /= 0 ) cycle
                     err2 = 0._real64
@@ -121,7 +135,7 @@ contains
                 end do
             end do
         end do
-        call ws%kill()
+        call pftc%kill
         call mlx_set_default_device(original)
     end subroutine run_all_polar_shiftmap_accuracy_tests
 
@@ -248,8 +262,7 @@ contains
         fx%rho       = rho
         fx%nalpha    = nalpha
         fx%perturbed = perturbed
-        allocate(fx%w(nk, 2), fx%rref(fx%pftsz, nk, NREF, 2), fx%x(fx%pftsz, nk, NPTCL), fx%ctf(fx%pftsz, nk, NPTCL), &
-            &fx%ptclpow(NPTCL))
+        allocate(fx%w(nk, 2), fx%rref(fx%pftsz, nk, NREF, 2), fx%x(fx%pftsz, nk, NPTCL), fx%ctf(fx%pftsz, nk, NPTCL))
         do k = 1, nk
             fx%w(k, 1) = real(k, real64) / (.5_real64 + .1_real64 * k)
             fx%w(k, 2) = real(k, real64) / (.8_real64 + .05_real64 * k)
@@ -286,42 +299,7 @@ contains
                 fx%x(:, k, i) = cmplx(p(1:fx%pftsz), kind=real32)
             end do
         end do
-        call fixture_memos(fx)
     end function make_map_fixture
-
-    ! the memos by a double-precision DFT of the rounded rings, rounded once; the particles' weighted powers
-    subroutine fixture_memos( fx )
-        type(map_fixture), intent(inout) :: fx
-        complex(real64), allocatable :: e(:,:), z(:)
-        integer                      :: h, j, k, i, n1
-        n1 = fx%pftsz + 1
-        allocate(e(n1, fx%nrot))
-        e  = polar_dft_matrix(fx%nrot, n1)
-        if( allocated(fx%ft_ref) ) deallocate(fx%ft_ref, fx%ft_ref2, fx%ctf2, fx%xctf)
-        allocate(fx%ft_ref(n1, fx%nk, NREF, 2), fx%ft_ref2(n1, fx%nk, NREF, 2), fx%ctf2(n1, fx%nk, NPTCL), &
-            &fx%xctf(n1, fx%nk, NPTCL))
-        do h = 1, 2
-            do j = 1, NREF
-                do k = 1, fx%nk
-                    z = cmplx(fx%rref(:, k, j, h), kind=real64)
-                    fx%ft_ref(:, k, j, h)  = cmplx(polar_dft_bins(e, polar_full_ring(z)), kind=real32)
-                    z = cmplx(abs(z)**2, 0._real64, real64)
-                    fx%ft_ref2(:, k, j, h) = cmplx(conjg(polar_dft_bins(e, polar_full_ring(z))), kind=real32)
-                end do
-            end do
-        end do
-        do i = 1, NPTCL
-            h = 2 - mod(i, 2)
-            fx%ptclpow(i) = 0._real64
-            do k = 1, fx%nk
-                z = cmplx(real(fx%ctf(:, k, i), real64)**2, 0._real64, real64)
-                fx%ctf2(:, k, i) = cmplx(polar_dft_bins(e, polar_full_ring(z)), kind=real32)
-                z = cmplx(fx%x(:, k, i), kind=real64) * real(fx%ctf(:, k, i), real64)
-                fx%xctf(:, k, i) = cmplx(polar_dft_bins(e, polar_full_ring(z)), kind=real32)
-                fx%ptclpow(i) = fx%ptclpow(i) + fx%w(k, h) * sum(abs(cmplx(fx%x(:, k, i), kind=real64))**2)
-            end do
-        end do
-    end subroutine fixture_memos
 
     ! ---- the oracle ------------------------------------------------------------------------------------
 
@@ -449,73 +427,151 @@ contains
         sm%logz = lmax + log(s) - lse
     end function summarize
 
-    ! ---- the workspace ---------------------------------------------------------------------------------
+    ! ---- the calculator --------------------------------------------------------------------------------
 
-    ! the references of half h as the workspace takes them
-    function half_refs( fx, h ) result(refs)
-        type(map_fixture), intent(in) :: fx
-        integer,           intent(in) :: h
-        type(polar_table_refs) :: refs
-        integer                :: j
-        refs%pftsz      = fx%pftsz
-        refs%nk         = fx%nk
-        refs%half       = h
-        refs%rt         = 4
-        refs%bt         = 2
-        refs%generation = 1_int64
-        refs%ids        = [(j, j = 1, NREF)]
-        refs%ft_ref     = fx%ft_ref(:, :, :, h)
-        refs%ft_ref2    = fx%ft_ref2(:, :, :, h)
-    end function half_refs
+    ! 1 when the calculator refused its last call, else 0
+    integer function refused( pftc )
+        type(polarft_calc), intent(in) :: pftc
+        refused = merge(1, 0, len(pftc%message()) > 0)
+    end function refused
 
-    ! the maps' grid over every shell of half h, prior prior_w
-    function half_spec( fx, h, prior_w ) result(spec)
-        type(map_fixture), intent(in) :: fx
-        integer,           intent(in) :: h
-        real(real64),      intent(in) :: prior_w
-        type(polar_map_spec) :: spec
-        spec%box     = fx%box
-        spec%kfrom   = fx%kfrom
-        spec%kstop   = fx%kfrom + fx%nk - 1
-        spec%nalpha  = fx%nalpha
-        spec%prior_w = prior_w
-        spec%rho     = fx%rho
-        spec%weights = fx%w(:, h)
-    end function half_spec
+    ! whether the calculator refused its last call for a reason that names word
+    logical function refused_for( pftc, word )
+        type(polarft_calc), intent(in) :: pftc
+        character(len=*),   intent(in) :: word
+        refused_for = index(pftc%message(), word) > 0
+    end function refused_for
 
-    ! the references of half h prepared, then the maps over every shell, prior prior_w
-    subroutine prepare_half( fx, h, prior_w, ws )
-        type(map_fixture), intent(in)    :: fx
-        integer,           intent(in)    :: h
-        real(real64),      intent(in)    :: prior_w
-        type(polar_table), intent(inout) :: ws
-        integer :: st
-        call ws%new(half_refs(fx, h), st)
-        call assert_int(0, st, 'the references are prepared: '//ws%message())
-        call ws%prepare_maps(half_refs(fx, h), half_spec(fx, h, prior_w), st)
-        call assert_int(0, st, 'the maps are prepared: '//ws%message())
+    ! the fixture's references of half h, set (not yet memoized); the calls that were refused
+    integer function set_refs( pftc, fx, h ) result(nbad)
+        type(polarft_calc), intent(inout) :: pftc
+        type(map_fixture),  intent(in)    :: fx
+        integer,            intent(in)    :: h
+        integer :: j
+        nbad = 0
+        do j = 1, NREF
+            call pftc%set_ref_pft(j, cmplx(fx%rref(:, 1:fx%nk, j, h), kind=real64), h == 1)
+            nbad = nbad + refused(pftc)
+        end do
+    end function set_refs
+
+    ! particle i's half, CTF and ring, set (not yet memoized); the calls that were refused
+    integer function set_ptcl( pftc, fx, i ) result(nbad)
+        type(polarft_calc), intent(inout) :: pftc
+        type(map_fixture),  intent(in)    :: fx
+        integer,            intent(in)    :: i
+        call pftc%set_eo(i, mod(i, 2) == 1)
+        nbad = refused(pftc)
+        call pftc%set_ptcl_ctfmat(i, fx%ctf(:, 1:fx%nk, i))
+        nbad = nbad + refused(pftc)
+        call pftc%set_ptcl_pft(i, fx%x(:, 1:fx%nk, i))
+        nbad = nbad + refused(pftc)
+    end function set_ptcl
+
+    ! a calculator of the fixture: both halves' references and every particle, set and memoized, the reference
+    ! bins made under a tile plan of 4 references and 2 particles; nbad counts the calls that were refused
+    subroutine feed_calc( pftc, fx, nbad )
+        type(polarft_calc), intent(inout) :: pftc
+        type(map_fixture),  intent(in)    :: fx
+        integer,            intent(out)   :: nbad
+        integer :: h, i
+        call pftc%new(parameters(pftsz=fx%pftsz, box=fx%box), NREF, [1, NPTCL], [fx%kfrom, fx%kfrom + fx%nk - 1])
+        nbad = refused(pftc)
+        call pftc%set_sigma2_weights(fx%w(1:fx%nk, :))
+        nbad = nbad + refused(pftc)
+        call pftc%set_tile_plan(2, 4)
+        nbad = nbad + refused(pftc)
+        do h = 1, 2
+            nbad = nbad + set_refs(pftc, fx, h)
+        end do
+        do i = 1, NPTCL
+            nbad = nbad + set_ptcl(pftc, fx, i)
+        end do
+        call pftc%memoize_refs
+        nbad = nbad + refused(pftc)
+        call pftc%memoize_ptcls
+        nbad = nbad + refused(pftc)
+        call pftc%memoize_ref_bins
+        nbad = nbad + refused(pftc)
+    end subroutine feed_calc
+
+    ! the fixture's calculator with its map over every shell on the fixture's grid
+    subroutine prepare_half( fx, pftc )
+        type(map_fixture),  intent(in)    :: fx
+        type(polarft_calc), intent(inout) :: pftc
+        integer :: nbad
+        call feed_calc(pftc, fx, nbad)
+        call assert_int(0, nbad, 'the references and particles are set and memoized: '//pftc%message())
+        call pftc%new_shiftmap(IMAP, fx%rho, fx%nalpha, fx%kfrom + fx%nk - 1)
+        call assert_int(0, refused(pftc), 'the maps are prepared: '//pftc%message())
     end subroutine prepare_half
 
-    ! the dense block of particles pids (one half) against every reference, zero temperature, rows kept
-    function dense_block( fx, pids ) result(blk)
-        type(map_fixture), intent(in) :: fx
-        integer,           intent(in) :: pids(:)
-        type(polar_table_block) :: blk
-        integer                 :: j, h
-        h              = 2 - mod(pids(1), 2)
-        blk%half       = h
-        blk%generation = 1_int64
-        blk%ref_ids    = [(j, j = 1, NREF)]
-        blk%ptcl_ids   = pids
-        blk%weights    = real(fx%w(:, h), real32)
-        blk%ctf2       = fx%ctf2(:, :, pids)
-        blk%xctf       = fx%xctf(:, :, pids)
-        blk%wsq        = fx%ptclpow(pids)
-        allocate(blk%temps(size(pids)), blk%u(NREF, size(pids)))
-        blk%temps = 0._real32
-        blk%u     = 0.5_real32
-        blk%rows  = .true.
-    end function dense_block
+    ! the dense rows of particles pids (one half) against every reference, zero temperature; st is 0 unless the
+    ! block was refused
+    subroutine dense_rows( pftc, pids, rows, st )
+        type(polarft_calc),        intent(inout) :: pftc
+        integer,                   intent(in)    :: pids(:)
+        real(real32), allocatable, intent(out)   :: rows(:,:,:)
+        integer,                   intent(out)   :: st
+        real(real32), allocatable :: u(:,:), dists(:,:), temps(:)
+        integer,      allocatable :: irots(:,:)
+        integer                   :: j
+        allocate(u(NREF, size(pids)), dists(NREF, size(pids)), irots(NREF, size(pids)), temps(size(pids)))
+        u     = 0.5_real32
+        temps = 0._real32
+        call pftc%set_block_options(.true., .false.)
+        call pftc%set_block_variates(u)
+        call pftc%score_block_posterior(size(pids), pids, NREF, [(j, j = 1, NREF)], temps, dists, irots)
+        st = refused(pftc)
+        if( st == 0 ) call pftc%block_rows(rows)
+    end subroutine dense_rows
+
+    ! the maps of a request on the calculator's map: every particle's candidates in turn are generated, their
+    ! modes read, and the results laid out (candidate, particle); st is 0 unless a call was refused
+    subroutine score_maps( pftc, mb, res, st )
+        type(polarft_calc),      intent(inout) :: pftc
+        type(map_request),       intent(in)    :: mb
+        type(polar_map_results), intent(out)   :: res
+        integer,                 intent(out)   :: st
+        real(real64), allocatable :: temp(:), tph(:)
+        real(real32), allocatable :: loss(:), sdev(:), logz(:), maps(:,:,:,:)
+        integer,      allocatable :: iref(:), iptcl(:), irot(:), irho(:), ialpha(:)
+        integer                   :: ncand, nb, np, p, shp(4)
+        ncand = size(mb%cands, 1)
+        nb    = size(mb%cands, 2)
+        np    = ncand * nb
+        allocate(iptcl(np), temp(np), tph(np), irot(np), irho(np), ialpha(np), loss(np), sdev(np))
+        iref = reshape(mb%cands, [np])
+        do p = 1, np
+            iptcl(p) = mb%ptcl_ids((p - 1) / ncand + 1)
+            temp(p)  = real(mb%temps((p - 1) / ncand + 1), real64)
+            tph(p)   = real(mb%temps_phys((p - 1) / ncand + 1), real64)
+        end do
+        call pftc%set_shiftmap_options(mb%ptcl_tile, mb%maps, mb%evidence, mb%profile)
+        call pftc%gen_shiftmap(IMAP, iref, iptcl)
+        st = refused(pftc)
+        if( st /= 0 ) return
+        if( allocated(mb%width_cutoff) )then
+            call pftc%shiftmap_mode(IMAP, temp, mb%prior_w, irot, irho, ialpha, loss, temp_phys=tph, sdev=sdev, &
+                &width_cutoff=reshape(mb%width_cutoff, [size(mb%width_cutoff)]))
+        else
+            call pftc%shiftmap_mode(IMAP, temp, mb%prior_w, irot, irho, ialpha, loss, temp_phys=tph, sdev=sdev)
+        endif
+        st = refused(pftc)
+        if( st /= 0 ) return
+        res%loss   = reshape(loss, [ncand, nb])
+        res%sdev   = reshape(sdev, [ncand, nb])
+        res%irot   = reshape(irot, [ncand, nb])
+        res%irho   = reshape(irho, [ncand, nb])
+        res%ialpha = reshape(ialpha, [ncand, nb])
+        call pftc%shiftmap_evidence(logz)
+        if( allocated(logz) ) res%logz = reshape(logz, [ncand, nb])
+        call pftc%shiftmap_maps(maps)
+        if( allocated(maps) )then
+            shp      = shape(maps)
+            res%maps = reshape(maps, [shp(1), shp(2), shp(3), ncand, nb])
+        endif
+    end subroutine score_maps
 
     ! the largest error of the returned losses against the direct residual at the returned pose, relative to
     ! max(1, |residual|), over every pair of a block; a pose outside the grid counts as an infinite error
@@ -541,24 +597,16 @@ contains
         end do
     end function loss_error
 
-    ! the map block of particles pids (one half) against candidate lists cands(:, b)
-    function map_block( fx, pids, cands, temps ) result(mb)
-        type(map_fixture), intent(in) :: fx
-        integer,           intent(in) :: pids(:), cands(:,:)
-        real(real32),      intent(in) :: temps(2)
-        type(polar_map_block) :: mb
-        mb%half       = 2 - mod(pids(1), 2)
-        mb%generation = 1_int64
-        mb%ptcl_ids   = pids
-        mb%cands      = cands
-        mb%ctf2       = fx%ctf2(:, :, pids)
-        mb%xctf       = fx%xctf(:, :, pids)
-        mb%ptclpow    = fx%ptclpow(pids)
+    ! the request of particles pids (one half) against candidate lists cands(:, b), no prior, maps and evidence
+    function map_block( pids, cands, temps ) result(mb)
+        integer,      intent(in) :: pids(:), cands(:,:)
+        real(real32), intent(in) :: temps(2)
+        type(map_request) :: mb
+        mb%ptcl_ids = pids
+        mb%cands    = cands
         allocate(mb%temps(size(pids)), mb%temps_phys(size(pids)))
         mb%temps      = temps(1)
         mb%temps_phys = temps(2)
-        mb%maps       = .true.
-        mb%evidence   = .true.
     end function map_block
 
     ! every candidate list the same for the particles of half h
@@ -586,8 +634,8 @@ contains
         integer, intent(in) :: dev
         logical, intent(in) :: perturbed
         type(map_fixture)             :: fx
-        type(polar_table)             :: ws
-        type(polar_map_block)         :: mb
+        type(polarft_calc)            :: pftc
+        type(map_request)             :: mb
         type(polar_map_results)       :: res
         type(map_summary)             :: sm
         real(real64),     allocatable :: lor(:,:,:)
@@ -608,10 +656,10 @@ contains
         nrecovered = 0
         do h = 1, 2
             pids = half_pids(h)
-            call prepare_half(fx, h, 0._real64, ws)
-            mb = map_block(fx, pids, same_cands(CANDS(:, 1), size(pids)), [TEMP_T, TEMP_PHYS])
-            call ws%score_maps(mb, res, st)
-            call assert_int(0, st, device_name(dev)//' maps are scored: '//ws%message())
+            call prepare_half(fx, pftc)
+            mb = map_block(pids, same_cands(CANDS(:, 1), size(pids)), [TEMP_T, TEMP_PHYS])
+            call score_maps(pftc, mb, res, st)
+            call assert_int(0, st, device_name(dev)//' maps are scored: '//pftc%message())
             if( st /= 0 ) return
             worst_loss = max(worst_loss, loss_error(fx, pids, same_cands(CANDS(:, 1), size(pids)), res))
             do b = 1, size(pids)
@@ -632,7 +680,7 @@ contains
             ! the known pose at a high temperature, where the area's weight is negligible
             if( .not. perturbed )then
                 mb%temps = 1.e4_real32
-                call ws%score_maps(mb, res, st)
+                call score_maps(pftc, mb, res, st)
                 do b = 1, size(pids)
                     do c = 1, size(CANDS, 1)
                         if( CANDS(c, 1) /= POSES(1, pids(b)) ) cycle
@@ -645,7 +693,7 @@ contains
                     end do
                 end do
             endif
-            call ws%kill()
+            call pftc%kill
         end do
         write(*,'(a,es10.3,a,es10.3,a,i0,a,i0,a)') '    '//label//': largest map error ', worst_rel, &
             &' (normalised L2), ', worst_abs, ' (absolute); modes judged ', njudged, ', equal ', nmodes, ''
@@ -667,32 +715,30 @@ contains
     subroutine test_zero_radius( dev )
         integer, intent(in) :: dev
         type(map_fixture)         :: fx
-        type(polar_table)         :: ws
-        type(polar_map_block)     :: mb
+        type(polarft_calc)        :: pftc
+        type(map_request)         :: mb
         type(polar_map_results)   :: res
-        type(polar_table_block)   :: blk
-        type(polar_table_entries) :: ent
+        real(real32), allocatable :: rows(:,:,:)
         real(real64)              :: dmax, worst, spread
-        integer, allocatable      :: pids(:)
+        integer,      allocatable :: pids(:)
         integer                   :: st, b, c, ir, j
         write(*,'(a)') 'test_zero_radius'
         fx   = make_map_fixture(.false., .true.)
         pids = half_pids(1)
-        call prepare_half(fx, 1, 0._real64, ws)
-        mb = map_block(fx, pids, same_cands([(j, j = 1, NREF)], size(pids)), [TEMP_T, TEMP_PHYS])
-        call ws%score_maps(mb, res, st)
-        blk = dense_block(fx, pids)
-        call ws%score(blk, ent, st)
+        call prepare_half(fx, pftc)
+        mb = map_block(pids, same_cands([(j, j = 1, NREF)], size(pids)), [TEMP_T, TEMP_PHYS])
+        call score_maps(pftc, mb, res, st)
+        call dense_rows(pftc, pids, rows, st)
         call assert_int(0, st, 'the dense rows are scored')
         if( st /= 0 ) return
         worst  = 0._real64
         spread = 0._real64
         do b = 1, size(pids)
             do c = 1, NREF
-                dmax = maxval(abs(real(ent%rows(:, c, b), real64)))
+                dmax = maxval(abs(real(rows(:, c, b), real64)))
                 do ir = 1, fx%nrot
                     worst  = max(worst, abs(real(res%maps(1, ir, 1, c, b), real64) - &
-                        &real(ent%rows(ir, c, b), real64)) / dmax)
+                        &real(rows(ir, c, b), real64)) / dmax)
                     spread = max(spread, real(maxval(res%maps(:, ir, 1, c, b)) - minval(res%maps(:, ir, 1, c, b)), &
                         &real64) / dmax)
                 end do
@@ -703,7 +749,7 @@ contains
         call assert_true(worst <= POLAR_MAP_CAP_L2, device_name(dev)//': the zero-radius map is the dense unshifted row')
         call assert_true(spread <= POLAR_MAP_CAP_L2, device_name(dev)//': the zero-radius map does not depend on the '//&
             &'direction')
-        call ws%kill()
+        call pftc%kill
     end subroutine test_zero_radius
 
     ! the folding case: 8 ring positions, box 16, shells 1..3, radii 0, 4, 8, 7 directions: the kept orders exceed
@@ -711,8 +757,8 @@ contains
     subroutine test_folding( dev )
         integer, intent(in) :: dev
         type(map_fixture)         :: fx
-        type(polar_table)         :: ws
-        type(polar_map_block)     :: mb
+        type(polarft_calc)        :: pftc
+        type(map_request)         :: mb
         type(polar_map_results)   :: res
         real(real64), allocatable :: lor(:,:,:)
         real(real64)              :: worst
@@ -723,12 +769,12 @@ contains
         worst = 0._real64
         do h = 1, 2
             pids = half_pids(h)
-            call prepare_half(fx, h, 0._real64, ws)
-            norder = ws%map_order()
+            call prepare_half(fx, pftc)
+            norder = pftc%shiftmap_order(IMAP)
             call assert_true(norder > max(fx%nalpha, fx%nrot), 'the folding case keeps orders beyond both '//&
                 &'transform axes')
-            mb = map_block(fx, pids, same_cands(CANDS(:, 1), size(pids)), [TEMP_T, TEMP_PHYS])
-            call ws%score_maps(mb, res, st)
+            mb = map_block(pids, same_cands(CANDS(:, 1), size(pids)), [TEMP_T, TEMP_PHYS])
+            call score_maps(pftc, mb, res, st)
             call assert_int(0, st, 'the folding case is scored')
             if( st /= 0 ) return
             do b = 1, size(pids)
@@ -737,7 +783,7 @@ contains
                     worst = max(worst, sqrt(sum((real(res%maps(:, :, :, c, b), real64) - lor)**2)) / sqrt(sum(lor**2)))
                 end do
             end do
-            call ws%kill()
+            call pftc%kill
         end do
         write(*,'(a,i0,a,es10.3)') '    folding: orders 0..', norder, ' kept; largest map error ', worst
         call assert_true(worst <= POLAR_MAP_CAP_L2, device_name(dev)//': the folded maps match the direct residual')
@@ -747,8 +793,8 @@ contains
     subroutine test_nyquist( dev )
         integer, intent(in) :: dev
         type(map_fixture)       :: fx
-        type(polar_table)       :: ws
-        type(polar_map_block)   :: mb
+        type(polarft_calc)      :: pftc
+        type(map_request)       :: mb
         type(polar_map_results) :: res
         integer                 :: st, k, m
         write(*,'(a)') 'test_nyquist'
@@ -760,10 +806,9 @@ contains
             fx%x(:, k, 1)   = fx%rref(:, k, 1, 1)
             fx%ctf(:, k, 1) = 1._real32
         end do
-        call fixture_memos(fx)
-        call prepare_half(fx, 1, 0._real64, ws)
-        mb = map_block(fx, [1], reshape([1], [1, 1]), [TEMP_T, TEMP_PHYS])
-        call ws%score_maps(mb, res, st)
+        call prepare_half(fx, pftc)
+        mb = map_block([1], reshape([1], [1, 1]), [TEMP_T, TEMP_PHYS])
+        call score_maps(pftc, mb, res, st)
         call assert_int(0, st, 'the Nyquist ring is scored')
         if( st /= 0 ) return
         write(*,'(a,es12.5,a,es12.5)') '    Nyquist ring: loss at the identity ', res%maps(1, 1, 1, 1, 1), &
@@ -772,7 +817,7 @@ contains
             &device_name(dev)//': the Nyquist ring has loss 0 at the identity')
         call assert_true(abs(res%maps(1, 2, 1, 1, 1) - 4._real32) <= 4._real32 * real(POLAR_MAP_CAP_L2, real32), &
             &device_name(dev)//': the Nyquist ring has loss 4 one angular step away')
-        call ws%kill()
+        call pftc%kill
     end subroutine test_nyquist
 
     ! the log evidence and the width against the host's log-sum-exp and grid moments of the oracle's maps: no
@@ -781,8 +826,8 @@ contains
     subroutine test_evidence_width( dev )
         integer, intent(in) :: dev
         type(map_fixture)         :: fx
-        type(polar_table)         :: ws
-        type(polar_map_block)     :: mb
+        type(polarft_calc)        :: pftc
+        type(map_request)         :: mb
         type(polar_map_results)   :: res
         type(map_summary)         :: sm, smt
         real(real64), allocatable :: lor(:,:,:)
@@ -802,9 +847,10 @@ contains
             worst_logz = 0._real64
             worst_var  = 0._real64
             pids = half_pids(1)
-            call prepare_half(fx, 1, prior_w, ws)
-            mb = map_block(fx, pids, same_cands(CANDS(:, 1), size(pids)), temps)
-            call ws%score_maps(mb, res, st)
+            call prepare_half(fx, pftc)
+            mb = map_block(pids, same_cands(CANDS(:, 1), size(pids)), temps)
+            mb%prior_w = prior_w
+            call score_maps(pftc, mb, res, st)
             call assert_int(0, st, 'the evidence case is scored')
             if( st /= 0 ) return
             do b = 1, size(pids)
@@ -827,7 +873,7 @@ contains
                 &'host''s log-sum-exp')
             call assert_true(worst_var <= varcap, device_name(dev)//': the physical width''s variance matches the '//&
                 &'host''s grid moments')
-            call ws%kill()
+            call pftc%kill
         end do
         call assert_true(tdiff > 10._real64 * varcap, 'the physical and the tempered temperatures give widths '//&
             &'the variance cap tells apart')
@@ -841,8 +887,8 @@ contains
         integer,      parameter   :: LISTS(7, 3) = reshape([7, 2, 5, 2, 7, 5, 1, &
             &1, 5, 7, 5, 2, 1, 7, 3, 7, 2, 3, 5, 2, 1], [7, 3])
         type(map_fixture)         :: fx
-        type(polar_table)         :: ws
-        type(polar_map_block)     :: mb
+        type(polarft_calc)        :: pftc
+        type(map_request)         :: mb
         type(polar_map_results)   :: res, again
         type(map_summary)         :: sm(7, 3)
         real(real64), allocatable :: expected(:,:,:,:,:)
@@ -851,8 +897,9 @@ contains
         write(*,'(a)') 'test_broadband_maps'
         do grid = 1, 2
             fx = make_map_fixture(grid == 2, .true., broadband=.true.)
-            call prepare_half(fx, 1, PRIOR_SCREEN, ws)
-            mb = map_block(fx, half_pids(1), LISTS, [TEMP_T, TEMP_PHYS])
+            call prepare_half(fx, pftc)
+            mb = map_block(half_pids(1), LISTS, [TEMP_T, TEMP_PHYS])
+            mb%prior_w = PRIOR_SCREEN
             mb%temps = [3._real32, 9._real32, 27._real32]
             mb%temps_phys = [7._real32, 30._real32, 90._real32]
             mb%ptcl_tile = 2
@@ -863,7 +910,7 @@ contains
                     sm(c, b) = summarize(fx, expected(:,:,:, c, b), [mb%temps(b), mb%temps_phys(b)], PRIOR_SCREEN)
                 end do
             end do
-            call ws%score_maps(mb, res, st)
+            call score_maps(pftc, mb, res, st)
             call assert_int(0, st, 'the broadband block scores')
             if( st /= 0 ) return
             rel = 0._real64
@@ -896,19 +943,19 @@ contains
             call assert_int(njudged, nmodes, 'the broadband clear-margin modes equal the oracle''s')
             write(*,'(a,i0,a,i0)') '    grid ', grid, ' modes judged ', njudged
             call assert_true(njudged > 0, 'the broadband fixture has clear-margin modes to judge')
-            call ws%score_maps(mb, again, st)
+            call score_maps(pftc, mb, again, st)
             call assert_true(all(bits_equal(res%loss, again%loss)) .and. all(bits_equal(res%sdev, again%sdev)) .and. &
                 &all(bits_equal(res%logz, again%logz)), 'a repeated fixed configuration is bit-identical')
             deallocate(expected)
         end do
-        call ws%kill()
+        call pftc%kill
     end subroutine test_broadband_maps
 
     subroutine test_width_cutoff( dev )
         integer, intent(in) :: dev
         type(map_fixture)         :: fx
-        type(polar_table)         :: ws
-        type(polar_map_block)     :: mb
+        type(polarft_calc)        :: pftc
+        type(map_request)         :: mb
         type(polar_map_results)   :: base, res
         type(map_summary)         :: sm
         real(real64), allocatable :: expected(:,:,:)
@@ -917,12 +964,13 @@ contains
         logical                   :: keep(3, 3)
         write(*,'(a)') 'test_width_cutoff'
         fx = make_map_fixture(.false., .true.)
-        call prepare_half(fx, 1, PRIOR_SCREEN, ws)
-        mb = map_block(fx, half_pids(1), same_cands(CANDS(:, 1), 3), [TEMP_T, TEMP_PHYS])
+        call prepare_half(fx, pftc)
+        mb = map_block(half_pids(1), same_cands(CANDS(:, 1), 3), [TEMP_T, TEMP_PHYS])
+        mb%prior_w = PRIOR_SCREEN
         mb%temps = [3._real32, 9._real32, 27._real32]
         mb%temps_phys = [7._real32, 30._real32, 90._real32]
         mb%ptcl_tile = 2
-        call ws%score_maps(mb, base, st)
+        call score_maps(pftc, mb, base, st)
         call assert_int(0, st, 'cutoff-disabled reference succeeds')
         if( st /= 0 ) return
         varerr = 0._real64
@@ -951,7 +999,7 @@ contains
             ! Exact equality uses the same rounded loss as the cutoff contract; it must retain every width.
             if( mode == 4 ) mb%width_cutoff = base%loss
             mb%profile = mod(mode, 2) == 0
-            call ws%score_maps(mb, res, st)
+            call score_maps(pftc, mb, res, st)
             call assert_int(0, st, 'width cutoff succeeds')
             call assert_true(all(bits_equal(res%loss, base%loss)) .and. all(res%irot == base%irot) .and. &
                 &all(res%ialpha == base%ialpha) .and. all(res%irho == base%irho), 'cutoffs preserve the tempered mode')
@@ -961,18 +1009,18 @@ contains
             call assert_true(all(bits_equal(res%logz, base%logz)), 'cutoffs preserve requested tempered evidence')
         end do
         mb%width_cutoff = reshape([0._real32], [1, 1])
-        call ws%score_maps(mb, res, st)
-        call assert_true(st /= 0 .and. index(ws%message(), 'cutoff') > 0, 'a mismatched cutoff shape is refused')
-        call ws%kill()
+        call score_maps(pftc, mb, res, st)
+        call assert_true(st /= 0 .and. index(pftc%message(), 'cutoff') > 0, 'a mismatched cutoff shape is refused')
+        call pftc%kill
     end subroutine test_width_cutoff
 
+    ! changed shell weights, a changed grid and a shorter band replace the map of the same references; unsorted
+    ! radii are refused and leave no map
     subroutine test_map_repreparation( dev )
         integer, intent(in) :: dev
         type(map_fixture)         :: fx, changed
-        type(polar_table)         :: ws
-        type(polar_table_refs)    :: refs
-        type(polar_map_spec)      :: spec
-        type(polar_map_block)     :: mb
+        type(polarft_calc)        :: pftc
+        type(map_request)         :: mb
         type(polar_map_results)   :: res
         real(real64), allocatable :: expected(:,:,:)
         real(real64)              :: worst
@@ -980,8 +1028,7 @@ contains
         write(*,'(a)') 'test_map_repreparation'
         fx = make_map_fixture(.false., .true.)
         do h = 1, 2
-            call prepare_half(fx, h, PRIOR_SCREEN, ws)
-            refs = half_refs(fx, h)
+            call prepare_half(fx, pftc)
             do mode = 1, 3
                 changed = fx
                 if( mode == 1 ) changed%w(2, h) = 3._real64 * changed%w(2, h)
@@ -990,14 +1037,13 @@ contains
                     changed%rho = [0._real64, .3_real64, .8_real64]
                 endif
                 if( mode == 3 ) changed%nk = fx%nk - 1
-                call fixture_memos(changed)
-                spec = half_spec(changed, h, PRIOR_SCREEN)
-                spec%weights = changed%w(1:changed%nk, h)
-                call ws%prepare_maps(refs, spec, st)
-                call assert_int(0, st, 'same-generation maps accept changed weights, grid or band')
-                mb = map_block(fx, half_pids(h), same_cands(CANDS(:, 1), size(half_pids(h))), [TEMP_T, TEMP_PHYS])
-                mb%ptclpow = changed%ptclpow(half_pids(h))
-                call ws%score_maps(mb, res, st)
+                call pftc%set_sigma2_weights(changed%w(1:fx%nk, :))
+                call pftc%memoize_ptcls
+                call pftc%new_shiftmap(IMAP, changed%rho, changed%nalpha, fx%kfrom + changed%nk - 1)
+                call assert_int(0, refused(pftc), 'the same references'' maps accept changed weights, grid or band')
+                mb = map_block(half_pids(h), same_cands(CANDS(:, 1), size(half_pids(h))), [TEMP_T, TEMP_PHYS])
+                mb%prior_w = PRIOR_SCREEN
+                call score_maps(pftc, mb, res, st)
                 call assert_int(0, st, 'rebuilt map state scores successfully')
                 worst = 0._real64
                 do b = 1, size(mb%ptcl_ids)
@@ -1009,35 +1055,35 @@ contains
                 end do
                 call assert_true(worst <= POLAR_MAP_CAP_L2, device_name(dev)//': rebuilt metadata follows the direct oracle')
             end do
-            spec%rho = [1._real64, 0._real64]
-            call ws%prepare_maps(refs, spec, st)
-            call assert_true(st /= 0 .and. index(ws%message(), 'ascend') > 0, 'unsorted radii are explicitly refused')
-            call ws%score_maps(mb, res, st)
+            call pftc%new_shiftmap(IMAP, [1._real64, 0._real64], changed%nalpha, fx%kfrom + changed%nk - 1)
+            call assert_true(refused_for(pftc, 'ascend'), 'unsorted radii are explicitly refused')
+            call score_maps(pftc, mb, res, st)
             call assert_true(st /= 0, 'an unsorted replacement leaves no stale map state')
         end do
-        call ws%kill()
+        call pftc%kill
     end subroutine test_map_repreparation
 
     subroutine test_requested_outputs( dev )
         integer, intent(in) :: dev
         type(map_fixture)       :: fx
-        type(polar_table)       :: ws
-        type(polar_map_block)   :: mb
+        type(polarft_calc)      :: pftc
+        type(map_request)       :: mb
         type(polar_map_results) :: base, profiled
         integer                 :: st, mode
         write(*,'(a)') 'test_requested_outputs'
         fx = make_map_fixture(.false., .true.)
-        call prepare_half(fx, 1, PRIOR_SCREEN, ws)
-        mb = map_block(fx, half_pids(1), same_cands(CANDS(:, 1), 3), [TEMP_T, TEMP_PHYS])
+        call prepare_half(fx, pftc)
+        mb = map_block(half_pids(1), same_cands(CANDS(:, 1), 3), [TEMP_T, TEMP_PHYS])
+        mb%prior_w = PRIOR_SCREEN
         mb%ptcl_tile = 2
         do mode = 0, 3
             mb%maps = btest(mode, 0)
             mb%evidence = btest(mode, 1)
             mb%profile = .false.
-            call ws%score_maps(mb, base, st)
+            call score_maps(pftc, mb, base, st)
             call assert_int(0, st, 'unprofiled requested outputs succeed')
             mb%profile = .true.
-            call ws%score_maps(mb, profiled, st)
+            call score_maps(pftc, mb, profiled, st)
             call assert_int(0, st, 'profiled requested outputs succeed')
             call assert_true(allocated(profiled%maps) .eqv. mb%maps, 'profiling returns maps only when requested')
             call assert_true(allocated(profiled%logz) .eqv. mb%evidence, 'profiling returns evidence only when requested')
@@ -1048,7 +1094,7 @@ contains
             if( mb%evidence ) call assert_true(all(bits_equal(base%logz, profiled%logz)), 'profiling preserves evidence')
             if( mb%maps ) call assert_true(all(bits_equal(base%maps, profiled%maps)), 'profiling preserves maps')
         end do
-        call ws%kill()
+        call pftc%kill
     end subroutine test_requested_outputs
 
     ! candidate permutations and duplicates give the same entry for the same pair, tiles of one and of two
@@ -1057,8 +1103,8 @@ contains
     subroutine test_candidates_and_tiles( dev )
         integer, intent(in) :: dev
         type(map_fixture)       :: fx
-        type(polar_table)       :: ws
-        type(polar_map_block)   :: mb
+        type(polarft_calc)      :: pftc
+        type(map_request)       :: mb
         type(polar_map_results) :: r0, r1, r2
         integer, allocatable    :: pids(:)
         integer                 :: st, b, c, c2, rep, ptile
@@ -1066,10 +1112,11 @@ contains
         write(*,'(a)') 'test_candidates_and_tiles'
         fx   = make_map_fixture(.false., .true.)
         pids = half_pids(1)
-        call prepare_half(fx, 1, PRIOR_SCREEN, ws)
-        mb = map_block(fx, pids, same_cands(CANDS(:, 1), size(pids)), [TEMP_T, TEMP_PHYS])
+        call prepare_half(fx, pftc)
+        mb = map_block(pids, same_cands(CANDS(:, 1), size(pids)), [TEMP_T, TEMP_PHYS])
+        mb%prior_w = PRIOR_SCREEN
         mb%maps = .false.
-        call ws%score_maps(mb, r0, st)
+        call score_maps(pftc, mb, r0, st)
         call assert_true(loss_error(fx, pids, mb%cands, r0) <= POLAR_MAP_CAP_L2, device_name(dev)//': without maps, '//&
             &'every returned loss is the direct residual at the returned pose')
         ! the same pairs in another order and with a duplicate
@@ -1077,7 +1124,7 @@ contains
         same_vals = .true.
         do rep = 2, 3
             mb%cands = same_cands(CANDS(:, rep), size(pids))
-            call ws%score_maps(mb, r1, st)
+            call score_maps(pftc, mb, r1, st)
             do b = 1, size(pids)
                 do c = 1, 3
                     c2 = findloc(CANDS(:, 1), CANDS(c, rep), dim=1)
@@ -1096,7 +1143,7 @@ contains
         same_vals = .true.
         do ptile = 1, 2
             mb%ptcl_tile = ptile
-            call ws%score_maps(mb, r1, st)
+            call score_maps(pftc, mb, r1, st)
             same_idx  = same_idx .and. all(r1%irot == r0%irot) .and. all(r1%irho == r0%irho) .and. &
                 &all(r1%ialpha == r0%ialpha)
             same_vals = same_vals .and. all(abs(r1%loss - r0%loss) <= real(POLAR_MAP_CAP_L2, real32) * &
@@ -1108,88 +1155,80 @@ contains
         mb%ptcl_tile = 16
         ident    = .true.
         do rep = 1, 3
-            call ws%score_maps(mb, r2, st)
+            call score_maps(pftc, mb, r2, st)
             ident = ident .and. all(bits_equal(r2%loss, r0%loss)) .and. all(bits_equal(r2%sdev, r0%sdev)) .and. &
                 &all(bits_equal(r2%logz, r0%logz)) .and. all(r2%irot == r0%irot) .and. all(r2%irho == r0%irho) .and. &
                 &all(r2%ialpha == r0%ialpha)
         end do
         call assert_true(ident, device_name(dev)//': three repeats give identical results')
-        call ws%kill()
+        call pftc%kill
     end subroutine test_candidates_and_tiles
 
-    ! mismatches are refused; maps need prepared references and their own preparation; references that change
-    ! are invalidated, prepared again with their maps, and match the oracle of the new references
+    ! what does not match the calculator's state is refused; maps need memoized references and particles and
+    ! their own preparation; references that change are memoized again with their maps, which then match the
+    ! oracle of the new references
     subroutine test_refusals_rebuild( dev )
         integer, intent(in) :: dev
         type(map_fixture)         :: fx, fb
-        type(polar_table)         :: ws
-        type(polar_map_block)     :: mb, bad
+        type(polarft_calc)        :: pftc
+        type(map_request)         :: mb, bad
         type(polar_map_results)   :: res
-        type(polar_table_refs)    :: refs, badrefs
-        type(polar_map_spec)      :: spec
-        type(polar_table_entries) :: ent
+        real(real32), allocatable :: rows(:,:,:)
         real(real64), allocatable :: lor(:,:,:)
         real(real64)              :: worst
         integer,      allocatable :: pids(:)
-        integer                   :: st, b, c
+        integer                   :: st, b, c, nbad, kstop
         write(*,'(a)') 'test_refusals_rebuild'
-        fx   = make_map_fixture(.false., .true.)
-        pids = half_pids(1)
-        mb   = map_block(fx, pids, same_cands(CANDS(:, 1), size(pids)), [TEMP_T, TEMP_PHYS])
-        call ws%score_maps(mb, res, st)
-        call assert_true(st /= 0, device_name(dev)//': a workspace without references refuses maps')
-        call prepare_half(fx, 1, 0._real64, ws)
+        fx    = make_map_fixture(.false., .true.)
+        pids  = half_pids(1)
+        kstop = fx%kfrom + fx%nk - 1
+        mb    = map_block(pids, same_cands(CANDS(:, 1), size(pids)), [TEMP_T, TEMP_PHYS])
+        call feed_calc(pftc, fx, nbad)
+        call score_maps(pftc, mb, res, st)
+        call assert_true(st /= 0, device_name(dev)//': a calculator without maps refuses them')
+        call prepare_half(fx, pftc)
         bad = mb
-        bad%half = 2
-        call ws%score_maps(bad, res, st)
-        call assert_true(st /= 0 .and. index(ws%message(), 'half') > 0, device_name(dev)//': maps of the other '//&
-            &'half are refused')
-        bad = mb
-        bad%generation = 2_int64
-        call ws%score_maps(bad, res, st)
-        call assert_true(st /= 0 .and. index(ws%message(), 'generation') > 0, device_name(dev)//': maps of '//&
-            &'another reference generation are refused')
+        bad%ptcl_ids(1) = 2
+        call score_maps(pftc, bad, res, st)
+        call assert_true(st /= 0 .and. refused_for(pftc, 'halves'), device_name(dev)//': maps of particles of '//&
+            &'both halves are refused')
+        nbad = set_ptcl(pftc, fx, pids(1))
+        call score_maps(pftc, mb, res, st)
+        call assert_true(st /= 0 .and. refused_for(pftc, 'memoize_ptcls'), device_name(dev)//': maps are refused '//&
+            &'when a particle was set and the particles were not memoized again')
+        call pftc%memoize_ptcls
         bad = mb
         bad%cands(1, 1) = NREF + 1
-        call ws%score_maps(bad, res, st)
-        call assert_true(st /= 0 .and. index(ws%message(), 'candidate') > 0, device_name(dev)//': a candidate '//&
-            &'outside the prepared references is refused')
-        ! a refused replacement of the maps leaves no maps and the dense scoring intact; memos of another shape
-        ! and another geometry are refused before any of them is read
-        refs    = half_refs(fx, 1)
-        spec    = half_spec(fx, 1, 0._real64)
-        badrefs = refs
-        badrefs%ft_ref = refs%ft_ref(:, 1:fx%nk - 1, :)
-        call ws%prepare_maps(badrefs, spec, st)
-        call assert_true(st /= 0 .and. index(ws%message(), 'memos') > 0, device_name(dev)//': reference memos '//&
-            &'(ft_ref) of another shape are refused')
-        call ws%score_maps(mb, res, st)
+        call score_maps(pftc, bad, res, st)
+        call assert_true(st /= 0 .and. refused_for(pftc, 'candidate'), device_name(dev)//': a candidate '//&
+            &'outside the calculator''s references is refused')
+        ! a refused replacement of the map leaves no map and the dense scoring intact
+        call pftc%new_shiftmap(IMAP, fx%rho, fx%nalpha, kstop + 1)
+        call assert_true(refused_for(pftc, 'band'), device_name(dev)//': a map whose last shell is beyond '//&
+            &'the band is refused')
+        call score_maps(pftc, mb, res, st)
         call assert_true(st /= 0, device_name(dev)//': after a refused preparation the earlier maps are gone')
-        call ws%score(dense_block(fx, pids), ent, st)
+        call dense_rows(pftc, pids, rows, st)
         call assert_int(0, st, device_name(dev)//': a refused map preparation leaves the dense scoring intact')
-        badrefs = refs
-        badrefs%ft_ref2 = refs%ft_ref2(:, :, 1:NREF - 1)
-        call ws%prepare_maps(badrefs, spec, st)
-        call assert_true(st /= 0 .and. index(ws%message(), 'memos') > 0, device_name(dev)//': reference memos '//&
-            &'(ft_ref2) of another shape are refused')
-        badrefs = refs
-        badrefs%pftsz = refs%pftsz + 2
-        call ws%prepare_maps(badrefs, spec, st)
-        call assert_true(st /= 0 .and. index(ws%message(), 'geometry') > 0, device_name(dev)//': references of '//&
-            &'another geometry are refused')
-        call ws%prepare_maps(refs, spec, st)
-        call assert_int(0, st, device_name(dev)//': the maps are prepared again after the refusals')
-        call ws%score_maps(mb, res, st)
+        call pftc%new_shiftmap(IMAP, fx%rho, 0, kstop)
+        call assert_true(refused_for(pftc, 'direction'), device_name(dev)//': a map without a direction '//&
+            &'is refused')
+        call pftc%new_shiftmap(NSHIFTMAPS + 1, fx%rho, fx%nalpha, kstop)
+        call assert_true(refused_for(pftc, 'no such shift map'), device_name(dev)//': a map outside the '//&
+            &'calculator''s maps is refused')
+        call pftc%new_shiftmap(IMAP, fx%rho, fx%nalpha, kstop)
+        call assert_int(0, refused(pftc), device_name(dev)//': the maps are prepared again after the refusals')
+        call score_maps(pftc, mb, res, st)
         call assert_int(0, st, device_name(dev)//': the maps prepared again are scored')
-        call ws%invalidate()
-        call ws%score_maps(mb, res, st)
-        call assert_true(st /= 0, device_name(dev)//': after invalidation maps are refused')
-        ! the references change: rings scaled by 1.1 under a new generation
+        ! the references change (rings scaled by 1.1): memoized again, their maps are stale until made again
         fb = fx
         fb%rref = 1.1_real32 * fx%rref
-        call fixture_memos(fb)
-        call prepare_half(fb, 1, 0._real64, ws)
-        call ws%score_maps(mb, res, st)
+        nbad = set_refs(pftc, fb, 1) + set_refs(pftc, fb, 2)
+        call pftc%memoize_refs
+        call score_maps(pftc, mb, res, st)
+        call assert_true(st /= 0, device_name(dev)//': after the references are memoized again their maps are refused')
+        call prepare_half(fb, pftc)
+        call score_maps(pftc, mb, res, st)
         call assert_int(0, st, 'the rebuilt maps are scored')
         if( st /= 0 ) return
         worst = 0._real64
@@ -1200,7 +1239,7 @@ contains
             end do
         end do
         call assert_true(worst <= POLAR_MAP_CAP_L2, device_name(dev)//': the rebuilt maps follow the new references')
-        call ws%kill()
+        call pftc%kill
     end subroutine test_refusals_rebuild
 
     ! after a warm cycle, 100 create/use/kill cycles of the workspace with maps return the live count and the
@@ -1229,18 +1268,32 @@ contains
             &'value')
     end subroutine test_lifecycle
 
+    ! one calculator: fed, the two coarse maps set up on SIMPLE's grid (the band's last shell and the prior's
+    ! weight as SIMPLE defines them), the screen's maps of two particles read, killed; nbad counts what failed
+    ! after the setup
     subroutine map_cycle( fx, nbad )
         type(map_fixture), intent(in)    :: fx
         integer,           intent(inout) :: nbad
-        type(polar_table)       :: ws
-        type(polar_map_results) :: res
-        type(polar_map_block)   :: mb
-        integer                 :: st
-        call prepare_half(fx, 1, PRIOR_SCREEN, ws)
-        mb = map_block(fx, [1, 3], same_cands(CANDS(:, 1), 2), [TEMP_T, TEMP_PHYS])
-        call ws%score_maps(mb, res, st)
-        nbad = nbad + merge(1, 0, st /= 0 .or. .not. allocated(res%loss))
-        call ws%kill()
+        type(polarft_calc)   :: pftc
+        real(real64)         :: prior_w, temp(6), tph(6), sigma_px
+        real(real32)         :: loss(6), sdev(6)
+        integer              :: irot(6), irho(6), ialpha(6), kscreen, n
+        call feed_calc(pftc, fx, n)
+        call assert_int(0, n, 'the references and particles are set and memoized: '//pftc%message())
+        sigma_px = 2._real64
+        call pftc%setup_shiftmaps(sigma_px, 3._real64 * sigma_px, 4._real64, prior_w, kscreen)
+        call assert_int(0, refused(pftc), 'the two coarse maps are set up: '//pftc%message())
+        if( kscreen /= max(fx%kfrom + 1, (fx%kfrom + fx%nk - 1) / 2) ) nbad = nbad + 1
+        if( abs(prior_w - 1._real64 / (2._real64 * sigma_px**2)) > 1.e-15_real64 ) nbad = nbad + 1
+        temp = real(TEMP_T, real64)
+        tph  = real(TEMP_PHYS, real64)
+        call pftc%gen_shiftmap(SHIFTMAP_SCREEN, [CANDS(:, 1), CANDS(:, 1)], [1, 1, 1, 3, 3, 3])
+        nbad = nbad + refused(pftc)
+        call pftc%shiftmap_mode(SHIFTMAP_SCREEN, temp, prior_w, irot, irho, ialpha, loss, temp_phys=tph, sdev=sdev)
+        nbad = nbad + refused(pftc)
+        if( any(irot < 1 .or. irot > fx%nrot) .or. any(irho < 1) .or. any(ialpha < 1) .or. any(sdev < 0._real32) ) &
+            &nbad = nbad + 1
+        call pftc%kill
     end subroutine map_cycle
 
-end module mlxf_kernel_polar_table_shiftmap_tester
+end module mlxf_toy_polarft_shiftmap_tester

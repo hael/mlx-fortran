@@ -32,7 +32,9 @@ Rules:
              nothing (doc/architecture_principles.md, section 2, lists the allowed state)
   arity      no procedure has more than five dummy arguments; one that needs more takes a spec type.
              Exempt: every bind(c) procedure and interface (the generated layer's, and callbacks whose
-             signature C fixes; a bind(c) procedure written for any other reason is a review finding)
+             signature C fixes; a bind(c) procedure written for any other reason is a review finding), and a
+             procedure of a toy module (mlxf_toy_*) that the mirror ledger lists as mirrored: it keeps
+             SIMPLE's dummy list, as a bind(c) procedure keeps C's. An addition obeys the rule
   ctorcall   no array constructor holds a reference to a library function by name: the mlx_* and mlxf_*
              names of src/core/mlxf.f90's public statements (the generics that keep an intrinsic's name,
              real, max, sum, ..., are left to ctorexpr, as plain Fortran uses them in constructors too):
@@ -73,6 +75,13 @@ Rules:
              src/defs, testers aside) calls the function; a pending line names a phase of the parity plan
              that its Progress has not closed; and the count of pending lines equals PARITY_PENDING (a ratchet:
              lower it in the same change)
+  mirror     scripts/toy_mirror.txt, the mirror ledger (doc/policies/toy_example_policy.md), has one line per
+             public type and per public type-bound procedure of every toy module (a module mlxf_toy_<stem>
+             under src/test): the toy's module and name (T, or T%binding), then SIMPLE's module and name, or
+             `addition` and a reason. A type or binding without a line fails; so does a line that names
+             nothing the code has, a name listed twice, a mirrored line whose toy name differs from SIMPLE's or
+             whose module is not mlxf_toy_<stem> beside simple_<stem>, an addition without a reason, and a
+             ledger whose header does not record the SIMPLE commit that was read
 
 Python 3.7 or newer, standard library only; it runs before the compile.
 """
@@ -128,6 +137,11 @@ PARITY_PHASES = range(1, 9)
 PARITY_MLXC_VERSION = '0.8.0'
 # the pending lines of the ledger; may only shrink
 PARITY_PENDING = 128
+MIRROR_LEDGER = 'scripts/toy_mirror.txt'
+TOY_DIR = 'src/test/'
+TOY_PREFIX = 'mlxf_toy_'
+SIMPLE_PREFIX = 'simple_'
+MIRROR_COMMIT = re.compile(r'^#.*\bSIMPLE\b.*\bcommit\s+[0-9a-f]{7,40}\b', re.I)
 
 
 def sources(root):
@@ -408,10 +422,13 @@ def dummies_of(stmt, name):
     return [d.strip() for d in inner.split(',') if d.strip()]
 
 
-def check_arity(rel, lines, out):
+def check_arity(rel, lines, out, mirrored=()):
+    """mirrored: the procedures of this file's toy module that keep SIMPLE's dummy list"""
     for start, stmt in logical_lines([code_of(l) for l in lines]):
         m = PROC_HEAD.match(stmt)
         if not m or re.search(r'\bbind\s*\(\s*c\b', stmt, re.I):
+            continue
+        if m.group(2).lower() in mirrored:
             continue
         n = len(dummies_of(stmt, m.group(2)))
         if n > MAX_DUMMIES:
@@ -1054,6 +1071,162 @@ def check_parity(root, files, api, out):
                    % (rel, pending, PARITY_PENDING))
 
 
+def toy_module(lines):
+    """(name, is_submodule) of the toy module a file belongs to: its module, or the ancestor of its submodule;
+    ('', False) when it is not one"""
+    for s in statements(lines):
+        m = re.match(r'^submodule\s*\(\s*(\w+)', s, re.I)
+        if m:
+            name = m.group(1).lower()
+            return (name, True) if name.startswith(TOY_PREFIX) else ('', False)
+        m = re.match(r'^module\s+(\w+)$', s, re.I)
+        if m:
+            name = m.group(1).lower()
+            return (name, False) if name.startswith(TOY_PREFIX) else ('', False)
+    return ('', False)
+
+
+def split_names(text):
+    return [n.strip().lower() for n in text.split(',') if n.strip()]
+
+
+def toy_surface(lines):
+    """the public types of a module and their public bindings: {type: {binding: implementing procedure}}"""
+    types, default_public, listed_public, listed_private = {}, True, set(), set()
+    cur, in_bindings, bindings_private, type_public, depth = None, False, False, {}, 0
+    for s in statements(lines):
+        low = s.lower()
+        if cur is None:
+            if re.match(r'^contains\b', low):
+                break
+            if re.match(r'^(abstract\s+)?interface\b', low):
+                depth += 1
+                continue
+            if re.match(r'^end\s*interface\b', low):
+                depth -= 1
+                continue
+            if depth:
+                continue
+            m = re.match(r'^type\s*((?:,\s*[\w()]+\s*)*)(?:::)?\s*(\w+)$', low)
+            if m and not low.startswith('type('):
+                cur = m.group(2)
+                attrs = split_names(m.group(1))
+                type_public[cur] = True if 'public' in attrs else False if 'private' in attrs else None
+                types[cur] = {}
+                in_bindings = bindings_private = False
+            elif low == 'private':
+                default_public = False
+            elif re.match(r'^public\s*::', low):
+                listed_public.update(split_names(low.split('::', 1)[1]))
+            elif re.match(r'^private\s*::', low):
+                listed_private.update(split_names(low.split('::', 1)[1]))
+            continue
+        if re.match(r'^end\s*type\b', low):
+            cur = None
+        elif low == 'contains':
+            in_bindings = True
+        elif in_bindings and low == 'private':
+            bindings_private = True
+        elif in_bindings:
+            m = re.match(r'^(procedure|generic)\s*(?:\([^)]*\)\s*)?((?:,\s*[\w()]+\s*)*)::\s*(.*)$', low)
+            if not m:
+                continue
+            attrs = split_names(m.group(2))
+            private = 'private' in attrs or (bindings_private and 'public' not in attrs)
+            if private:
+                continue
+            if m.group(1) == 'generic':
+                types[cur][m.group(3).split('=>')[0].strip()] = ''
+                continue
+            for item in split_names(m.group(3)):
+                name, _, impl = [x.strip() for x in item.partition('=>')]
+                types[cur][name] = impl or name
+    out = {}
+    for t, bindings in types.items():
+        public = type_public[t]
+        if public is None:
+            public = t in listed_public or (default_public and t not in listed_private)
+        if public:
+            out[t] = bindings
+    return out
+
+
+def read_mirror(root, out):
+    """the ledger's lines: {(toy module, toy name): (line number, 'mirrored' or 'addition', SIMPLE's module, SIMPLE's
+    name or the reason)}; None when there is no ledger"""
+    rel = MIRROR_LEDGER
+    if not os.path.isfile(os.path.join(root, rel)):
+        return None
+    entries, has_commit = {}, False
+    for k, raw in enumerate(read(root, rel).split('\n'), 1):
+        line = raw.strip()
+        if line.startswith('#'):
+            has_commit = has_commit or bool(MIRROR_COMMIT.match(line))
+            continue
+        if not line:
+            continue
+        words = line.split()
+        if len(words) < 3:
+            out.append('%s:%d: mirror: a line is `<toy module> <name> <SIMPLE module> <name>` or '
+                       '`<toy module> <name> addition <reason>`' % (rel, k))
+            continue
+        key = (words[0].lower(), words[1].lower())
+        if key in entries:
+            out.append('%s:%d: mirror: %s %s listed twice' % (rel, k, words[0], words[1]))
+            continue
+        if words[2].lower() == 'addition':
+            if len(words) < 4:
+                out.append('%s:%d: mirror: %s %s is an addition without a reason' % (rel, k, words[0], words[1]))
+            entries[key] = (k, 'addition', '', ' '.join(words[3:]))
+            continue
+        if len(words) != 4:
+            out.append('%s:%d: mirror: a mirrored line is `<toy module> <name> <SIMPLE module> <name>`' % (rel, k))
+            continue
+        entries[key] = (k, 'mirrored', words[2].lower(), words[3].lower())
+        if key[1] != words[3].lower():
+            out.append('%s:%d: mirror: %s is listed as mirroring %s: a mirrored name is SIMPLE\'s'
+                       % (rel, k, words[1], words[3]))
+        if not (key[0].startswith(TOY_PREFIX) and words[2].lower() == SIMPLE_PREFIX + key[0][len(TOY_PREFIX):]):
+            out.append('%s:%d: mirror: %s is listed beside %s: the module of a mirrored name is %s<stem> beside '
+                       '%s<stem>' % (rel, k, words[0], words[2], TOY_PREFIX, SIMPLE_PREFIX))
+    if not has_commit:
+        out.append('%s: mirror: the header does not record the SIMPLE commit that was read '
+                   '(`# ... SIMPLE commit <hash>`)' % rel)
+    return entries
+
+
+def check_mirror(root, files, out):
+    """the mirror ledger against the toy modules; returns {toy module: the procedures that keep SIMPLE's dummy
+    list}, for rule arity"""
+    surfaces = {}
+    for rel in files:
+        if not rel.startswith(TOY_DIR):
+            continue
+        lines = read(root, rel).split('\n')
+        name, is_sub = toy_module(lines)
+        if name and not is_sub:
+            surfaces[name] = (rel, toy_surface(lines))
+    entries = read_mirror(root, out)
+    if entries is None:
+        if surfaces:
+            out.append('%s: mirror: the ledger is missing, and %d toy module(s) exist' % (MIRROR_LEDGER, len(surfaces)))
+        return {}
+    known, exempt = set(), {}
+    for module, (rel, types) in sorted(surfaces.items()):
+        for t, bindings in sorted(types.items()):
+            for name, impl in [(t, '')] + [('%s%%%s' % (t, b), i) for b, i in sorted(bindings.items())]:
+                known.add((module, name))
+                if (module, name) not in entries:
+                    out.append('%s: mirror: %s of %s has no line in %s' % (rel, name, module, MIRROR_LEDGER))
+                elif entries[(module, name)][1] == 'mirrored' and impl:
+                    exempt.setdefault(module, set()).add(impl)
+    for (module, name), entry in sorted(entries.items(), key=lambda e: e[1][0]):
+        if (module, name) not in known:
+            out.append('%s:%d: mirror: %s %s is not a public type or binding of a toy module'
+                       % (MIRROR_LEDGER, entry[0], module, name))
+    return exempt
+
+
 def ledger_check(rule, counts, ledger, out):
     for rel, n in sorted(counts.items()):
         if rel not in ledger:
@@ -1075,6 +1248,7 @@ def main():
     cbind, libc, prints, state = {}, {}, {}, {}
     api = public_names(root)
     check_reexport_mlxc(root, out)
+    mirrored = check_mirror(root, files, out)
     for rel in files:
         lines = read(root, rel).split('\n')
         codes = [code_of(l) for l in lines]
@@ -1082,7 +1256,7 @@ def main():
         check_layout(rel, lines, out)
         check_ctor(rel, codes, out)
         check_cbstop(rel, lines, out)
-        check_arity(rel, lines, out)
+        check_arity(rel, lines, out, mirrored.get(toy_module(lines)[0], ()) if rel.startswith(TOY_DIR) else ())
         check_ctorcall(rel, lines, api, out)
         check_ctorexpr(rel, lines, out)
         n = sum(1 for r in raws if BIND_MLX.search(r))

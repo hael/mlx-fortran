@@ -93,10 +93,15 @@ points of section 7 the same day.
 
 ## 6. Existing code
 
-Milestone 1's kernels (`src/test/mlxf_kernel_polar_table*.f90`) predate this policy. They model a GPU
-workspace beside SIMPLE's calculator, under their own names (`polar_table`, `score`, `prepare_maps`,
-`score_maps`). The roadmap's rank 0b refactors them into a miniature `polarft_calc` with a driver. Until that
-lands they are exempt, and no new toy is written in their form.
+Milestone 1's kernels predated this policy: they modelled a GPU workspace beside SIMPLE's calculator, under
+their own names (`polar_table`, `score`, `prepare_maps`, `score_maps`). The roadmap's rank 0b refactored them
+(run `mlxf_toy_arch`, 2026-11-24): the polar toy is now `polarft_calc` (`src/test/mlxf_toy_polarft_calc.f90`
+with its submodules `_core`, `_memo`, `_block`, `_shiftmap`), its GPU workspace `polarft_workspace`
+(`mlxf_toy_polarft_workspace.f90` and its submodules) and the driver `eul_prob_tab`
+(`mlxf_toy_eul_prob_tab.f90`). No code is exempt any more: the ledger `scripts/toy_mirror.txt` lists every
+public type and binding of the three modules, and rule `mirror` holds it to the code. The toy's differences
+from SIMPLE are in [`mlxf_kernel_families.md`](../implementation_notes/planned/mlxf_kernel_families.md),
+section 3.
 
 ## 7. Names, arity and drivers (Hans, 2026-11-24: "Accept all three")
 

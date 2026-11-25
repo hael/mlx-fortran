@@ -4,31 +4,32 @@
 ! A guard member is a stop the library makes by contract: it runs in a child process (mlxf_test_exec
 ! expect_aborts <group>) and its last reachable statement is the guarded call.
 module mlxf_test_registry
-use, intrinsic :: iso_fortran_env,           only: real32, real64
-use mlxf,                                    only: mlx_array, mlx_from, mlx_eval, mlx_live_count, mlx_last_error, &
-                                                   mlx_set_default_device, MLX_DEVICES, exp, mlx_fft, mlx_fft2, &
-                                                   mlx_astype, mlx_zeros, mlx_arange
-use mlxf_array_tester,                       only: run_all_array_tests
-use mlxf_device_tester,                      only: run_all_device_tests
-use mlxf_error_tester,                       only: run_all_error_tests, run_all_recovery_half_tests
-use mlxf_memory_tester,                      only: run_all_memory_tests
-use mlxf_registry_tester,                    only: run_all_registry_tests
-use mlxf_version_tester,                     only: run_all_version_tests
-use mlxf_ops_tester,                         only: run_all_ops_tests
-use mlxf_ops_math_tester,                    only: run_all_ops_math_tests
-use mlxf_ops_logic_tester,                   only: run_all_ops_logic_tests
-use mlxf_ops_create_tester,                  only: run_all_ops_create_tests
-use mlxf_ops_reduce_tester,                  only: run_all_ops_reduce_tests
-use mlxf_ops_sort_tester,                    only: run_all_ops_sort_tests
-use mlxf_ops_shape_tester,                   only: run_all_ops_shape_tests
-use mlxf_ops_index_tester,                   only: run_all_ops_index_tests
-use mlxf_linalg_tester,                      only: run_all_linalg_tests
-use mlxf_fft_tester,                         only: run_all_fft_tests
-use mlxf_compile_tester,                     only: run_all_compile_tests
-use mlxf_kernel_polar_table_tester,          only: run_all_polar_table_tests
-use mlxf_kernel_polar_table_shiftmap_tester, only: run_all_polar_shiftmap_tests, run_all_polar_shiftmap_accuracy_tests
-use mlxf_bench_polar_table,                  only: run_bench_polar_table
-use mlxf_test_utils,                         only: begin_test_suite, end_test_suite
+use, intrinsic :: iso_fortran_env,    only: real32, real64
+use mlxf,                             only: mlx_array, mlx_from, mlx_eval, mlx_live_count, mlx_last_error, &
+                                            mlx_set_default_device, MLX_DEVICES, exp, mlx_fft, mlx_fft2, mlx_astype, &
+                                            mlx_zeros, mlx_arange
+use mlxf_array_tester,                only: run_all_array_tests
+use mlxf_device_tester,               only: run_all_device_tests
+use mlxf_error_tester,                only: run_all_error_tests, run_all_recovery_half_tests
+use mlxf_memory_tester,               only: run_all_memory_tests
+use mlxf_registry_tester,             only: run_all_registry_tests
+use mlxf_version_tester,              only: run_all_version_tests
+use mlxf_ops_tester,                  only: run_all_ops_tests
+use mlxf_ops_math_tester,             only: run_all_ops_math_tests
+use mlxf_ops_logic_tester,            only: run_all_ops_logic_tests
+use mlxf_ops_create_tester,           only: run_all_ops_create_tests
+use mlxf_ops_reduce_tester,           only: run_all_ops_reduce_tests
+use mlxf_ops_sort_tester,             only: run_all_ops_sort_tests
+use mlxf_ops_shape_tester,            only: run_all_ops_shape_tests
+use mlxf_ops_index_tester,            only: run_all_ops_index_tests
+use mlxf_linalg_tester,               only: run_all_linalg_tests
+use mlxf_fft_tester,                  only: run_all_fft_tests
+use mlxf_compile_tester,              only: run_all_compile_tests
+use mlxf_toy_polarft_calc_tester,     only: run_all_polarft_calc_tests
+use mlxf_toy_polarft_shiftmap_tester, only: run_all_polar_shiftmap_tests, run_all_polar_shiftmap_accuracy_tests
+use mlxf_toy_eul_prob_tab_tester,     only: run_all_eul_prob_tab_tests
+use mlxf_bench_polar_table,           only: run_bench_polar_table
+use mlxf_test_utils,                  only: begin_test_suite, end_test_suite
 implicit none
 private
 
@@ -101,9 +102,10 @@ contains
             case('compile')
                 call run_suite('compile', run_all_compile_tests, suite, ran)
             case('kernels')
-                call run_suite('polar_table', run_all_polar_table_tests, suite, ran)
+                call run_suite('polarft_calc', run_all_polarft_calc_tests, suite, ran)
                 call run_suite('polar_shiftmap', run_all_polar_shiftmap_tests, suite, ran)
                 call run_suite('polar_shiftmap_accuracy', run_all_polar_shiftmap_accuracy_tests, suite, ran)
+                call run_suite('eul_prob_tab', run_all_eul_prob_tab_tests, suite, ran)
             case default
                 found = .false.
                 return

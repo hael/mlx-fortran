@@ -1,24 +1,23 @@
-!@descr: tests of the polar table workspace: the fixture, the ring oracle, the draw, the contract, schedule identity
+!@descr: tests of the toy polar calculator's dense route: the fixture, the ring oracle, the draw, the contract, schedule identity
 ! The fixture is analytic in its rules and seeded in its values: references, particles and CTFs on rings of
-! PFTSZ samples (half of the full ring, the other half the conjugate), memos by a double-precision DFT rounded
-! once to single precision. The ring oracle computes every rotation's distance directly on the full rings, in
-! double precision, with no transform; the draw is checked in double precision on the device's own rows.
-module mlxf_kernel_polar_table_tester
+! PFTSZ samples (half of the full ring, the other half the conjugate), handed to the calculator through its
+! setters; the calculator memoizes them. The ring oracle computes every rotation's distance directly on the full
+! rings, in double precision, with no transform; the draw is checked in double precision on the device's own rows.
+module mlxf_toy_polarft_calc_tester
 use, intrinsic :: iso_fortran_env, only: int64, real32, real64
-use mlxf,                     only: mlx_set_default_device, mlx_default_device, mlx_live_count, mlx_active_memory, &
-                                    mlx_synchronize, mlx_clear_cache, MLX_DEVICES
-use mlxf_test_defs,           only: POLAR_DIST_MAX, POLAR_DIST_INVALID, POLAR_DIST_VALID, POLAR_FIXTURE_ERR_CPU, &
-                                    POLAR_FIXTURE_ROT_CPU, POLAR_ROW_FACTOR, POLAR_FIXTURE_ROT_Q, &
-                                    POLAR_SEED_CALIBRATION, POLAR_SEED_JUDGED, polar_table_refs, polar_table_block, &
-                                    polar_table_entries, polar_row_check
-use mlxf_kernel_polar_table,  only: polar_table
-use mlxf_kernel_polar_oracle, only: polar_full_ring, polar_dft_matrix, polar_dft_bins, polar_keyed_u, polar_first_min, &
-                                    polar_row_weights, polar_compare_rows, polar_draws_off, polar_report_draws
-use mlxf_test_utils,          only: assert_true, assert_false, assert_int, device_name, set_fixed_seed, bits_equal, &
-                                    test_devices
+use mlxf,                  only: mlx_set_default_device, mlx_default_device, mlx_live_count, mlx_active_memory, &
+                                 mlx_synchronize, mlx_clear_cache, MLX_DEVICES
+use mlxf_test_defs,        only: POLAR_DIST_MAX, POLAR_DIST_INVALID, POLAR_DIST_VALID, POLAR_FIXTURE_ERR_CPU, &
+                                 POLAR_FIXTURE_ROT_CPU, POLAR_ROW_FACTOR, POLAR_FIXTURE_ROT_Q, POLAR_SEED_CALIBRATION, &
+                                 POLAR_SEED_JUDGED, parameters, polar_table_block, polar_table_entries, polar_row_check
+use mlxf_toy_polarft_calc, only: polarft_calc
+use mlxf_oracle_polar,     only: polar_full_ring, polar_dft_matrix, polar_dft_bins, polar_keyed_u, polar_first_min, &
+                                 polar_row_weights, polar_compare_rows, polar_draws_off, polar_report_draws
+use mlxf_test_utils,       only: assert_true, assert_false, assert_int, device_name, set_fixed_seed, bits_equal, &
+                                 test_devices
 implicit none
 private
-public :: run_all_polar_table_tests
+public :: run_all_polarft_calc_tests
 
 integer, parameter :: PFTSZ  = 32
 integer, parameter :: NK     = 10
@@ -47,7 +46,8 @@ real(real64), parameter :: MIXED_DIST = 24._real64
 integer, parameter :: RT = 3
 integer, parameter :: BT = 4
 
-! one seeded fixture: rings of the references (per half), the particles, their banks and CTFs, and the memos
+! one seeded fixture: rings of the references (per half), the particles, their banks and CTFs, and the banks'
+! memos (the calculator is handed a seed bank as its memo)
 type :: fixture
     integer                      :: seed = 0
     real(real32),    allocatable :: w(:,:)
@@ -59,14 +59,11 @@ type :: fixture
     logical,         allocatable :: l_bank(:)
     real(real32),    allocatable :: temps(:)
     real(real64),    allocatable :: wsq(:)
-    complex(real32), allocatable :: ft_ref(:,:,:,:)
-    complex(real32), allocatable :: ft_ref2(:,:,:,:)
-    complex(real32), allocatable :: ctf2(:,:,:)
-    complex(real32), allocatable :: xctf(:,:,:)
     complex(real32), allocatable :: banks(:,:,:)
 end type fixture
 
-! a scored case: one half's references ids (global, in order) and particles pids under the tile plan (rt, bt)
+! a scored case: one half's references ids (global, in order) and the batch of particles pids under the tile
+! plan (rt, bt)
 type :: selection
     integer              :: half     = 1
     integer, allocatable :: ids(:)
@@ -76,10 +73,10 @@ end type selection
 
 contains
 
-    subroutine run_all_polar_table_tests
+    subroutine run_all_polarft_calc_tests
         integer, allocatable :: devs(:)
         integer              :: i, original
-        write(*,'(a)') '**** running all polar_table tests ****'
+        write(*,'(a)') '**** running all polarft_calc tests ****'
         call test_devices(devs)
         original = mlx_default_device()
         call test_oracle_self_check
@@ -98,7 +95,7 @@ contains
             call test_lifecycle(devs(i))
         end do
         call mlx_set_default_device(original)
-    end subroutine run_all_polar_table_tests
+    end subroutine run_all_polarft_calc_tests
 
     ! ---- the fixture -------------------------------------------------------------------------------------
 
@@ -195,7 +192,7 @@ contains
                 fx%wsq(i) = fx%wsq(i) + real(fx%w(k, h), real64) * sum(abs(cmplx(fx%xring(:, k, i), kind=real64))**2)
             end do
         end do
-        call make_memos(fx)
+        call make_banks(fx)
     end function make_fixture
 
     ! the translation by shift (pixels) in a ring's own frame, per ring position and shell: the production
@@ -215,79 +212,21 @@ contains
         end do
     end function translation_phase
 
-    ! the production memos of the rings by double-precision DFTs, rounded once to single precision
-    subroutine make_memos( fx )
+    ! the seed banks' memos: the transform of the bank times the CTF by a double-precision DFT, rounded once to
+    ! single precision
+    subroutine make_banks( fx )
         type(fixture), intent(inout) :: fx
         complex(real64) :: z(PFTSZ), emat(NBINS, NROTS)
-        integer         :: h, r, i, k
+        integer         :: i, k
         emat = polar_dft_matrix(NROTS, NBINS)
-        allocate(fx%ft_ref(NBINS, NK, NREFS, 2), fx%ft_ref2(NBINS, NK, NREFS, 2), fx%ctf2(NBINS, NK, NPTCLS), &
-            &fx%xctf(NBINS, NK, NPTCLS), fx%banks(NBINS, NK, NPTCLS))
-        do h = 1, 2
-            do r = 1, NREFS
-                do k = 1, NK
-                    z = cmplx(fx%rring(:, k, r, h), kind=real64)
-                    fx%ft_ref(:, k, r, h)  = cmplx(polar_dft_bins(emat, polar_full_ring(z)), kind=real32)
-                    z = cmplx(abs(z)**2, 0._real64, real64)
-                    fx%ft_ref2(:, k, r, h) = cmplx(conjg(polar_dft_bins(emat, polar_full_ring(z))), kind=real32)
-                end do
-            end do
-        end do
+        allocate(fx%banks(NBINS, NK, NPTCLS))
         do i = 1, NPTCLS
             do k = 1, NK
-                z = cmplx(real(fx%ctf(:, k, i), real64)**2, 0._real64, real64)
-                fx%ctf2(:, k, i)  = cmplx(polar_dft_bins(emat, polar_full_ring(z)), kind=real32)
-                z = cmplx(fx%xring(:, k, i), kind=real64) * real(fx%ctf(:, k, i), real64)
-                fx%xctf(:, k, i)  = cmplx(polar_dft_bins(emat, polar_full_ring(z)), kind=real32)
                 z = cmplx(fx%bring(:, k, i), kind=real64) * real(fx%ctf(:, k, i), real64)
                 fx%banks(:, k, i) = cmplx(polar_dft_bins(emat, polar_full_ring(z)), kind=real32)
             end do
         end do
-    end subroutine make_memos
-
-    ! the preparation of one half's references ids under the tile plan (rt, bt)
-    function make_refs( fx, half, ids, tiles, generation ) result(refs)
-        type(fixture),  intent(in) :: fx
-        integer,        intent(in) :: half, ids(:), tiles(2)
-        integer(int64), intent(in) :: generation
-        type(polar_table_refs) :: refs
-        refs%pftsz      = PFTSZ
-        refs%nk         = NK
-        refs%half       = half
-        refs%rt         = tiles(1)
-        refs%bt         = tiles(2)
-        refs%generation = generation
-        refs%ids        = ids
-        refs%ft_ref     = fx%ft_ref(:, :, ids, half)
-        refs%ft_ref2    = fx%ft_ref2(:, :, ids, half)
-    end function make_refs
-
-    ! the block of particles pids of one half against the references ids, its variates keyed by global IDs
-    function make_block( fx, half, ids, pids, generation ) result(blk)
-        type(fixture),  intent(in) :: fx
-        integer,        intent(in) :: half, ids(:), pids(:)
-        integer(int64), intent(in) :: generation
-        type(polar_table_block) :: blk
-        integer                 :: r, b
-        blk%half       = half
-        blk%generation = generation
-        blk%ref_ids    = ids
-        blk%ptcl_ids   = pids
-        blk%weights    = fx%w(:, half)
-        blk%ctf2       = fx%ctf2(:, :, pids)
-        blk%xctf       = fx%xctf(:, :, pids)
-        blk%banks      = fx%banks(:, :, pids)
-        blk%l_bank     = fx%l_bank(pids)
-        blk%wsq        = fx%wsq(pids)
-        blk%temps      = fx%temps(pids)
-        allocate(blk%u(size(ids), size(pids)))
-        do b = 1, size(pids)
-            do r = 1, size(ids)
-                blk%u(r, b) = real(polar_keyed_u(fx%seed, pids(b), ids(r)), real32)
-            end do
-        end do
-        blk%rows = .true.
-    end function make_block
+    end subroutine make_banks
 
     ! ---- the ring oracle ---------------------------------------------------------------------------------
 
@@ -404,24 +343,152 @@ contains
         call assert_int(size(PTCL_BANK), nlow, 'every bank aligns better than its translated particle does')
     end subroutine test_bank_fixture
 
-    ! ---- comparisons -------------------------------------------------------------------------------------
+    ! ---- the calculator of a case ----------------------------------------------------------------------------
+
+    ! 1 when the calculator refused its last call, else 0
+    integer function refused( pftc )
+        type(polarft_calc), intent(in) :: pftc
+        refused = merge(1, 0, len(pftc%message()) > 0)
+    end function refused
+
+    ! whether the calculator refused its last call for a reason that names word
+    logical function refused_for( pftc, word )
+        type(polarft_calc), intent(in) :: pftc
+        character(len=*),   intent(in) :: word
+        refused_for = index(pftc%message(), word) > 0
+    end function refused_for
+
+    ! a calculator of the references sel%ids of sel%half (its references 1.., in that order) and the batch of
+    ! particles sel%pids under the tile plan, set and memoized up to the reference bins; nbad counts the
+    ! calls that were refused
+    subroutine feed_calc( pftc, fx, sel, nbad )
+        type(polarft_calc), intent(inout) :: pftc
+        type(fixture),      intent(in)    :: fx
+        type(selection),    intent(in)    :: sel
+        integer,            intent(out)   :: nbad
+        integer :: j, b, pid
+        call pftc%new(parameters(pftsz=PFTSZ), size(sel%ids), [1, NPTCLS], [KFROM, KFROM + NK - 1])
+        nbad = refused(pftc)
+        call pftc%set_sigma2_weights(real(fx%w, real64))
+        nbad = nbad + refused(pftc)
+        call pftc%set_tile_plan(sel%tiles(2), sel%tiles(1))
+        nbad = nbad + refused(pftc)
+        call pftc%set_block_options(.true., .false.)
+        do j = 1, size(sel%ids)
+            call pftc%set_ref_pft(j, cmplx(fx%rring(:, :, sel%ids(j), sel%half), kind=real64), sel%half == 1)
+            nbad = nbad + refused(pftc)
+        end do
+        call pftc%reallocate_ptcls(size(sel%pids), sel%pids)
+        nbad = nbad + refused(pftc)
+        do b = 1, size(sel%pids)
+            pid = sel%pids(b)
+            call pftc%set_eo(pid, half_of(pid) == 1)
+            nbad = nbad + refused(pftc)
+            call set_ptcl(pftc, fx, pid)
+            nbad = nbad + refused(pftc)
+        end do
+        call pftc%memoize_refs
+        nbad = nbad + refused(pftc)
+        call pftc%memoize_ptcls
+        nbad = nbad + refused(pftc)
+    end subroutine feed_calc
+
+    ! particle pid's CTF and polar section, as the fixture has them
+    subroutine set_ptcl( pftc, fx, pid )
+        type(polarft_calc), intent(inout) :: pftc
+        type(fixture),      intent(in)    :: fx
+        integer,            intent(in)    :: pid
+        call pftc%set_ptcl_ctfmat(pid, fx%ctf(:, :, pid))
+        call pftc%set_ptcl_pft(pid, fx%xring(:, :, pid))
+    end subroutine set_ptcl
+
+    ! feed_calc, then the reference bins
+    subroutine make_calc( pftc, fx, sel, nbad )
+        type(polarft_calc), intent(inout) :: pftc
+        type(fixture),      intent(in)    :: fx
+        type(selection),    intent(in)    :: sel
+        integer,            intent(out)   :: nbad
+        call feed_calc(pftc, fx, sel, nbad)
+        call pftc%memoize_ref_bins
+        nbad = nbad + refused(pftc)
+    end subroutine make_calc
+
+    ! the block of particles pids of one half against the references ids: its temperatures, the variates keyed
+    ! by global IDs, and the seed banks' memos
+    function make_block( fx, ids, pids ) result(blk)
+        type(fixture), intent(in) :: fx
+        integer,       intent(in) :: ids(:), pids(:)
+        type(polar_table_block) :: blk
+        integer                 :: r, b
+        blk%ref_ids  = ids
+        blk%ptcl_ids = pids
+        blk%banks    = fx%banks(:, :, pids)
+        blk%l_bank   = fx%l_bank(pids)
+        blk%temps    = fx%temps(pids)
+        allocate(blk%u(size(ids), size(pids)))
+        do b = 1, size(pids)
+            do r = 1, size(ids)
+                blk%u(r, b) = real(polar_keyed_u(fx%seed, pids(b), ids(r)), real32)
+            end do
+        end do
+    end function make_block
+
+    ! the block scored synchronously against the calculator's references 1..: its entries, and its rows when
+    ! the calculator keeps them; a refused block leaves SIMPLE's invalid entries
+    subroutine score_block( pftc, blk, ent )
+        type(polarft_calc),        intent(inout) :: pftc
+        type(polar_table_block),   intent(in)    :: blk
+        type(polar_table_entries), intent(out)   :: ent
+        real(real32), allocatable :: u(:,:)
+        integer                   :: nr, nb, i
+        nr = size(blk%ref_ids)
+        nb = size(blk%ptcl_ids)
+        u  = blk%u
+        allocate(ent%dists(nr, nb), ent%irots(nr, nb))
+        call pftc%set_block_variates(u)
+        call pftc%score_block_posterior(nb, blk%ptcl_ids, nr, [(i, i = 1, nr)], blk%temps, ent%dists, ent%irots, &
+            &banks=blk%banks, l_bank=blk%l_bank)
+        if( refused(pftc) == 0 ) call pftc%block_rows(ent%rows)
+    end subroutine score_block
+
+    ! the block queued in slot, its variates and banks set first
+    subroutine submit( pftc, blk, slot )
+        type(polarft_calc),      intent(inout) :: pftc
+        type(polar_table_block), intent(in)    :: blk
+        integer,                 intent(in)    :: slot
+        real(real32), allocatable :: u(:,:)
+        u = blk%u
+        call pftc%set_block_variates(u)
+        call pftc%set_block_banks(blk%banks, blk%l_bank)
+        call pftc%submit_block(slot, size(blk%ptcl_ids), blk%ptcl_ids, blk%temps)
+    end subroutine submit
+
+    ! slot's block collected into entries of the block's shape
+    subroutine collect( pftc, blk, slot, ent )
+        type(polarft_calc),        intent(inout) :: pftc
+        type(polar_table_block),   intent(in)    :: blk
+        integer,                   intent(in)    :: slot
+        type(polar_table_entries), intent(out)   :: ent
+        allocate(ent%dists(size(blk%ref_ids), size(blk%ptcl_ids)), ent%irots(size(blk%ref_ids), size(blk%ptcl_ids)))
+        call pftc%collect_block(slot, ent%dists, ent%irots)
+    end subroutine collect
 
     ! ---- scoring a case ----------------------------------------------------------------------------------
 
-    ! one workspace: the half's references sel%ids prepared, the particles sel%pids scored synchronously
+    ! one calculator: the half's references sel%ids memoized, the particles sel%pids scored synchronously
     subroutine score_case( fx, sel, blk, ent )
         type(fixture),             intent(in)  :: fx
         type(selection),           intent(in)  :: sel
         type(polar_table_block),   intent(out) :: blk
         type(polar_table_entries), intent(out) :: ent
-        type(polar_table) :: ws
-        integer           :: st
-        call ws%new(make_refs(fx, sel%half, sel%ids, sel%tiles, 1_int64), st)
-        call assert_int(0, st, 'the references are prepared: '//ws%message())
-        blk = make_block(fx, sel%half, sel%ids, sel%pids, 1_int64)
-        call ws%score(blk, ent, st)
-        call assert_int(0, st, 'the block is scored: '//ws%message())
-        call ws%kill()
+        type(polarft_calc) :: pftc
+        integer            :: nbad
+        call make_calc(pftc, fx, sel, nbad)
+        call assert_int(0, nbad, 'the references and particles are set and memoized: '//pftc%message())
+        blk = make_block(fx, sel%ids, sel%pids)
+        call score_block(pftc, blk, ent)
+        call assert_int(0, refused(pftc), 'the block is scored: '//pftc%message())
+        call pftc%kill
     end subroutine score_case
 
     function selection_of( half, ids, pids, tiles ) result(sel)
@@ -512,20 +579,20 @@ contains
     subroutine test_fallbacks( dev )
         integer, intent(in) :: dev
         type(fixture)             :: fx
-        type(polar_table)         :: ws
+        type(polarft_calc)        :: pftc
         type(polar_table_block)   :: blk
         type(polar_table_entries) :: ent
         real(real64)              :: w(NROTS), row(NROTS), d2
-        integer                   :: st, ir, b, nfirst, nmin, ninv, nrows_valid, m, imin, i2, pick_r, pick_b
+        integer                   :: nbad, ir, b, nfirst, nmin, ninv, nrows_valid, m, imin, i2, pick_r, pick_b
         write(*,'(a)') 'test_fallbacks'
         fx = make_fixture(POLAR_SEED_JUDGED)
-        call ws%new(make_refs(fx, 1, ALL_REFS, [RT, BT], 1_int64), st)
-        call assert_int(0, st, 'the references are prepared')
-        blk   = make_block(fx, 1, ALL_REFS, half_ptcls(1), 1_int64)
+        call make_calc(pftc, fx, selection_of(1, ALL_REFS, half_ptcls(1), [RT, BT]), nbad)
+        call assert_int(0, nbad, 'the references and particles are set and memoized')
+        blk   = make_block(fx, ALL_REFS, half_ptcls(1))
         blk%u = 0._real32
-        call ws%score(blk, ent, st)
-        call assert_int(0, st, 'u = 0 is scored')
-        if( st /= 0 ) return
+        call score_block(pftc, blk, ent)
+        call assert_int(0, refused(pftc), 'u = 0 is scored')
+        if( refused(pftc) /= 0 ) return
         nfirst      = 0
         ninv        = 0
         nrows_valid = 0
@@ -548,9 +615,9 @@ contains
         call assert_true(ninv >= NREFS, 'the invalid particle''s rows have no valid rotation')
         call assert_int(nrows_valid, nfirst, device_name(dev)//': u = 0 draws the first rotation of positive weight')
         blk%u = 1.5_real32
-        call ws%score(blk, ent, st)
-        call assert_int(0, st, 'u = 1.5 is scored')
-        if( st /= 0 ) return
+        call score_block(pftc, blk, ent)
+        call assert_int(0, refused(pftc), 'u = 1.5 is scored')
+        if( refused(pftc) /= 0 ) return
         nmin = 0
         do b = 1, size(ent%irots, 2)
             do ir = 1, size(ent%irots, 1)
@@ -586,12 +653,12 @@ contains
         d2   = minval(row, mask=[(m /= imin, m = 1, NROTS)])
         blk%temps(pick_b) = real(82._real64 / (d2 - row(imin)), real32)
         blk%u = 0._real32
-        call ws%score(blk, ent, st)
-        call assert_int(0, st, 'the cutoff case is scored')
-        if( st /= 0 ) return
+        call score_block(pftc, blk, ent)
+        call assert_int(0, refused(pftc), 'the cutoff case is scored')
+        if( refused(pftc) /= 0 ) return
         call assert_int(imin, ent%irots(pick_r, pick_b), device_name(dev)//': a rotation whose weight argument '//&
             &'reaches the cutoff (82 >= 80) has no weight: u = 0 draws the minimum, not the earlier rotation')
-        call ws%kill()
+        call pftc%kill
     end subroutine test_fallbacks
 
     ! the rotation convention against the construction: an ordinary particle built from reference src rotated
@@ -624,8 +691,8 @@ contains
             &'samples has its minimum at rotation shift + 1')
     end subroutine test_convention
 
-    ! ordered reference lists with global IDs: one state's references (1..4), the shared representatives
-    ! [7, 2, 5] in that order, and full tiles (rt 8, bt 6) instead of partial ones: each held to the oracle
+    ! ordered reference lists: one state's references (1..4), the shared representatives [7, 2, 5] in that
+    ! order, and full tiles (rt 8, bt 6) instead of partial ones: each held to the oracle
     subroutine test_lists_and_tiles( dev )
         integer, intent(in) :: dev
         type(fixture)         :: fx
@@ -643,113 +710,130 @@ contains
         call assert_int(NREFS*6, chk%npairs, 'full tiles score 48 pairs')
     end subroutine test_lists_and_tiles
 
-    ! mismatches are refused before scoring, and a refused block queues nothing
+    ! what does not match the memoized state is refused before scoring, and a refused block queues nothing
     subroutine test_refusals( dev )
         integer, intent(in) :: dev
         type(fixture)             :: fx
-        type(polar_table)         :: ws
+        type(polarft_calc)        :: pftc
         type(polar_table_block)   :: blk, bad
         type(polar_table_entries) :: ent
-        integer                   :: st, live0
+        real(real32), allocatable :: u(:,:)
+        real(real32)              :: d3(3, 6)
+        integer                   :: i3(3, 6), nbad, live0, pid
         write(*,'(a)') 'test_refusals'
         fx  = make_fixture(POLAR_SEED_JUDGED)
-        blk = make_block(fx, 1, ALL_REFS, half_ptcls(1), 7_int64)
-        call ws%score(blk, ent, st)
-        call assert_true(st /= 0, device_name(dev)//': a workspace without references refuses a block')
-        call ws%new(make_refs(fx, 1, ALL_REFS, [RT, BT], 7_int64), st)
+        blk = make_block(fx, ALL_REFS, half_ptcls(1))
+        call feed_calc(pftc, fx, selection_of(1, ALL_REFS, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], [RT, BT]), nbad)
+        call score_block(pftc, blk, ent)
+        call assert_true(refused_for(pftc, 'memoize_ref_bins'), device_name(dev)//': a calculator without '//&
+            &'reference bins refuses a block')
+        call pftc%memoize_ref_bins
+        call pftc%memoize_refs
+        call score_block(pftc, blk, ent)
+        call assert_true(refused_for(pftc, 'memoize_ref_bins'), device_name(dev)//': a block is refused when the '//&
+            &'references were memoized again and their bins were not')
+        call pftc%memoize_ref_bins
         live0 = mlx_live_count()
-        bad   = blk
-        bad%generation = 8_int64
-        call ws%score(bad, ent, st)
-        call assert_true(st /= 0 .and. index(ws%message(), 'generation') > 0, device_name(dev)//': a block of '//&
-            &'another reference generation is refused')
-        bad      = make_block(fx, 2, ALL_REFS, half_ptcls(2), 7_int64)
-        call ws%score(bad, ent, st)
-        call assert_true(st /= 0 .and. index(ws%message(), 'half') > 0, device_name(dev)//': a block of the '//&
-            &'other half is refused')
-        bad      = blk
-        bad%ctf2 = blk%ctf2(:, 1:NK-1, :)
-        call ws%score(bad, ent, st)
-        call assert_true(st /= 0 .and. index(ws%message(), 'shapes') > 0, device_name(dev)//': a block of '//&
-            &'another shape is refused')
-        bad         = blk
-        bad%ref_ids = [2, 1, 3, 4, 5, 6, 7, 8]
-        call ws%score(bad, ent, st)
-        call assert_true(st /= 0 .and. index(ws%message(), 'list') > 0, device_name(dev)//': a block naming '//&
-            &'the references in another order is refused')
-        bad         = blk
-        bad%ref_ids = [1, 2, 3]
-        call ws%score(bad, ent, st)
-        call assert_true(st /= 0 .and. index(ws%message(), 'list') > 0, device_name(dev)//': a block naming '//&
-            &'another list of references is refused')
-        bad = blk
-        deallocate(bad%l_bank)
-        call ws%score(bad, ent, st)
-        call assert_true(st /= 0 .and. index(ws%message(), 'banks') > 0, device_name(dev)//': banks without '//&
-            &'their flags are refused')
-        bad        = blk
-        bad%wsq(2) = 0._real64
-        call ws%score(bad, ent, st)
-        call assert_true(st /= 0 .and. index(ws%message(), 'square sum') > 0, device_name(dev)//': a particle '//&
+        bad   = make_block(fx, ALL_REFS, [1, 3, 5, 7, 9, 2])
+        call score_block(pftc, bad, ent)
+        call assert_true(refused_for(pftc, 'halves'), device_name(dev)//': a block of particles of both halves '//&
+            &'is refused')
+        u = blk%u
+        call pftc%set_block_variates(u)
+        call pftc%score_block_posterior(6, blk%ptcl_ids, NREFS, ALL_REFS, blk%temps, ent%dists, ent%irots, &
+            &banks=blk%banks(:, 1:NK-1, :), l_bank=blk%l_bank)
+        call assert_true(refused_for(pftc, 'shapes'), device_name(dev)//': seed banks of another shape are refused')
+        u = blk%u
+        call pftc%set_block_variates(u)
+        call pftc%score_block_posterior(6, blk%ptcl_ids, NREFS, [2, 1, 3, 4, 5, 6, 7, 8], blk%temps, ent%dists, &
+            &ent%irots, banks=blk%banks, l_bank=blk%l_bank)
+        call assert_true(refused_for(pftc, 'reference list'), device_name(dev)//': a block naming the references '//&
+            &'in another order is refused')
+        u = blk%u
+        call pftc%set_block_variates(u)
+        call pftc%score_block_posterior(6, blk%ptcl_ids, 3, [1, 2, 3], blk%temps, d3, i3, banks=blk%banks, &
+            &l_bank=blk%l_bank)
+        call assert_true(refused_for(pftc, 'reference list'), device_name(dev)//': a block naming another list '//&
+            &'of references is refused')
+        u = blk%u
+        call pftc%set_block_variates(u)
+        call pftc%score_block_posterior(6, blk%ptcl_ids, NREFS, ALL_REFS, blk%temps, ent%dists, ent%irots, &
+            &banks=blk%banks)
+        call assert_true(refused_for(pftc, 'go together'), device_name(dev)//': banks without their flags are '//&
+            &'refused')
+        ! a particle whose section is zero has no weighted square sum
+        pid = blk%ptcl_ids(2)
+        call pftc%set_ptcl_ctfmat(pid, fx%ctf(:, :, pid))
+        call pftc%set_ptcl_pft(pid, 0._real32 * fx%xring(:, :, pid))
+        call pftc%memoize_ptcls
+        call score_block(pftc, blk, ent)
+        call assert_true(refused_for(pftc, 'square sum'), device_name(dev)//': a particle '//&
             &'without a positive weighted square sum is refused')
+        call set_ptcl(pftc, fx, pid)
+        call pftc%memoize_ptcls
         bad             = blk
         bad%ptcl_ids(1) = 0
-        call ws%score(bad, ent, st)
-        call assert_true(st /= 0 .and. index(ws%message(), 'particle IDs') > 0, device_name(dev)//': particle '//&
-            &'IDs that are not global and positive are refused')
-        call ws%submit(blk, 3, st)
-        call assert_true(st /= 0 .and. index(ws%message(), 'slot') > 0, device_name(dev)//': a slot outside 1..2 '//&
-            &'is refused')
-        call ws%collect(0, ent, st)
-        call assert_true(st /= 0 .and. index(ws%message(), 'slot') > 0, device_name(dev)//': collecting a slot '//&
-            &'outside 1..2 is refused')
+        call score_block(pftc, bad, ent)
+        call assert_true(refused_for(pftc, 'particle index'), device_name(dev)//': a particle index outside the '//&
+            &'calculator''s range is refused')
+        call submit(pftc, blk, 3)
+        call assert_true(refused_for(pftc, 'slot'), device_name(dev)//': a slot outside 1..2 is refused')
+        call collect(pftc, blk, 0, ent)
+        call assert_true(refused_for(pftc, 'slot'), device_name(dev)//': collecting a slot outside 1..2 is refused')
         call assert_int(live0, mlx_live_count(), device_name(dev)//': refused blocks queue no array')
-        call ws%submit(blk, 1, st)
-        call assert_int(0, st, 'a matching block is queued')
-        call ws%submit(blk, 1, st)
-        call assert_true(st /= 0, device_name(dev)//': a busy slot refuses a second block')
-        call ws%collect(1, ent, st)
-        call assert_int(0, st, 'the queued block is collected')
-        call ws%collect(1, ent, st)
-        call assert_true(st /= 0, device_name(dev)//': an empty slot has nothing to collect')
-        call ws%kill()
+        call submit(pftc, blk, 1)
+        call assert_int(0, refused(pftc), 'a matching block is queued')
+        call submit(pftc, blk, 1)
+        call assert_true(refused(pftc) /= 0, device_name(dev)//': a busy slot refuses a second block')
+        call collect(pftc, blk, 1, ent)
+        call assert_int(0, refused(pftc), 'the queued block is collected')
+        call collect(pftc, blk, 1, ent)
+        call assert_true(refused(pftc) /= 0, device_name(dev)//': an empty slot has nothing to collect')
+        call pftc%kill
     end subroutine test_refusals
 
-    ! references that change are invalidated and prepared again: the old generation is refused, the new one
-    ! matches the oracle of the new references and differs from the old entries
+    ! references that change are memoized again and their bins made again; a particle set again is memoized
+    ! again: until then blocks are refused, afterwards the entries match the oracle of the new references and
+    ! differ from the old ones
     subroutine test_rebuild( dev )
         integer, intent(in) :: dev
         type(fixture)             :: fa, fb
-        type(polar_table)         :: ws
+        type(polarft_calc)        :: pftc
         type(polar_table_block)   :: blk
         type(polar_table_entries) :: ea, eb
         real(real64), allocatable :: dor(:,:,:)
         type(polar_row_check)     :: chk
-        integer                   :: st
+        integer                   :: nbad, j, pid
         write(*,'(a)') 'test_rebuild'
         fa  = make_fixture(POLAR_SEED_JUDGED)
         fb  = make_fixture(POLAR_SEED_JUDGED + 10)
-        call ws%new(make_refs(fa, 2, ALL_REFS, [RT, BT], 1_int64), st)
-        call assert_int(0, st, 'the first references are prepared')
-        blk = make_block(fa, 2, ALL_REFS, half_ptcls(2), 1_int64)
-        call ws%score(blk, ea, st)
-        call assert_int(0, st, 'the first generation is scored')
-        if( st /= 0 ) return
-        call ws%invalidate()
-        call assert_false(ws%prepared_now(), device_name(dev)//': an invalidated workspace holds no references')
-        call ws%score(blk, eb, st)
-        call assert_true(st /= 0 .and. index(ws%message(), 'no prepared') > 0, device_name(dev)//': after '//&
-            &'invalidation a block is refused')
-        ! the particles stay; the references change (fixture B's) under generation 2
-        call ws%new(make_refs(fb, 2, ALL_REFS, [RT, BT], 2_int64), st)
-        call assert_int(0, st, 'the changed references are prepared')
-        call ws%score(blk, eb, st)
-        call assert_true(st /= 0 .and. index(ws%message(), 'generation') > 0, device_name(dev)//': a block of '//&
-            &'the old generation is refused by the rebuilt references')
-        blk%generation = 2_int64
-        call ws%score(blk, eb, st)
-        call assert_int(0, st, 'the new generation is scored')
-        if( st /= 0 ) return
+        call make_calc(pftc, fa, selection_of(2, ALL_REFS, half_ptcls(2), [RT, BT]), nbad)
+        call assert_int(0, nbad, 'the first references are memoized')
+        blk = make_block(fa, ALL_REFS, half_ptcls(2))
+        call score_block(pftc, blk, ea)
+        call assert_int(0, refused(pftc), 'the first references are scored')
+        if( refused(pftc) /= 0 ) return
+        ! the particles stay; the references change (fixture B's)
+        do j = 1, NREFS
+            call pftc%set_ref_pft(j, cmplx(fb%rring(:, :, j, 2), kind=real64), .false.)
+        end do
+        call pftc%memoize_refs
+        call assert_false(pftc%ref_bins_current(), device_name(dev)//': after the references are memoized again '//&
+            &'their bins are not current')
+        call score_block(pftc, blk, eb)
+        call assert_true(refused_for(pftc, 'memoize_ref_bins'), device_name(dev)//': a block is refused until '//&
+            &'the changed references'' bins are made')
+        call pftc%memoize_ref_bins
+        call assert_int(0, refused(pftc), 'the changed references'' bins are made')
+        pid = blk%ptcl_ids(1)
+        call set_ptcl(pftc, fa, pid)
+        call score_block(pftc, blk, eb)
+        call assert_true(refused_for(pftc, 'memoize_ptcls'), device_name(dev)//': a block is refused when a '//&
+            &'particle was set and the particles were not memoized again')
+        call pftc%memoize_ptcls
+        call score_block(pftc, blk, eb)
+        call assert_int(0, refused(pftc), 'the changed references are scored')
+        if( refused(pftc) /= 0 ) return
         fb%xring = fa%xring
         fb%bring = fa%bring
         fb%ctf   = fa%ctf
@@ -761,7 +845,7 @@ contains
         call assert_within_fixture_bounds(device_name(dev)//' rebuilt', chk)
         call assert_true(any(.not. bits_equal(ea%rows, eb%rows)), device_name(dev)//': the rebuilt rows differ '//&
             &'from the old ones')
-        call ws%kill()
+        call pftc%kill
     end subroutine test_rebuild
 
     ! with inputs, variates and the canonical tile plan fixed, entries are identical by global pair in three
@@ -769,57 +853,54 @@ contains
     subroutine test_schedule_identity( dev )
         integer, intent(in) :: dev
         type(fixture)             :: fx
-        type(polar_table)         :: ws
+        type(polarft_calc)        :: pftc
         type(polar_table_block)   :: blk, b1, b2
         type(polar_table_entries) :: e0, e, e1, e2
-        integer                   :: h, rep, st, nbad, pids(6)
+        integer                   :: h, rep, nbad, nb0, pids(6)
         logical                   :: same
         write(*,'(a)') 'test_schedule_identity'
         fx = make_fixture(POLAR_SEED_JUDGED)
         do h = 1, 2
             pids = half_ptcls(h)
-            nbad = 0
-            call ws%new(make_refs(fx, h, ALL_REFS, [RT, BT], 1_int64), st)
-            nbad = nbad + merge(1, 0, st /= 0)
-            blk      = make_block(fx, h, ALL_REFS, pids, 1_int64)
-            blk%rows = .false.
-            call ws%score(blk, e0, st)
-            nbad = nbad + merge(1, 0, st /= 0)
+            call make_calc(pftc, fx, selection_of(h, ALL_REFS, pids, [RT, BT]), nbad)
+            call pftc%set_block_options(.false., .false.)
+            blk = make_block(fx, ALL_REFS, pids)
+            call score_block(pftc, blk, e0)
+            nbad = nbad + refused(pftc)
             same = nbad == 0
             do rep = 1, 3
-                call ws%score(blk, e, st)
-                if( st /= 0 .or. .not. same )then
+                call score_block(pftc, blk, e)
+                if( refused(pftc) /= 0 .or. .not. same )then
                     same = .false.
                     cycle
                 endif
                 same = all(bits_equal(e%dists, e0%dists)) .and. all(e%irots == e0%irots)
             end do
             call assert_true(same, device_name(dev)//': three repeats give identical entries')
-            b1      = make_block(fx, h, ALL_REFS, pids(1:4), 1_int64)
-            b2      = make_block(fx, h, ALL_REFS, pids(5:6), 1_int64)
-            b1%rows = .false.
-            b2%rows = .false.
-            call ws%score(b1, e1, st)
-            nbad = nbad + merge(1, 0, st /= 0)
-            call ws%score(b2, e2, st)
-            nbad = nbad + merge(1, 0, st /= 0)
+            b1 = make_block(fx, ALL_REFS, pids(1:4))
+            b2 = make_block(fx, ALL_REFS, pids(5:6))
+            call score_block(pftc, b1, e1)
+            nbad = nbad + refused(pftc)
+            call score_block(pftc, b2, e2)
+            nbad = nbad + refused(pftc)
             call assert_int(0, nbad, device_name(dev)//': the identity runs are scored')
             if( nbad /= 0 ) return
             call assert_true(same_entries(e1, e2, e0), device_name(dev)//': outer batches of 6 and of 4 give '//&
                 &'identical entries by global pair')
-            call ws%submit(b1, 1, st)
-            nbad = nbad + merge(1, 0, st /= 0)
-            call ws%submit(b2, 2, st)
-            nbad = nbad + merge(1, 0, st /= 0)
-            call ws%collect(1, e1, st)
-            nbad = nbad + merge(1, 0, st /= 0)
-            call ws%collect(2, e2, st)
-            nbad = nbad + merge(1, 0, st /= 0)
-            call assert_int(0, nbad, device_name(dev)//': both slots are submitted and collected')
+            nb0 = nbad
+            call submit(pftc, b1, 1)
+            nbad = nbad + refused(pftc)
+            call submit(pftc, b2, 2)
+            nbad = nbad + refused(pftc)
+            call collect(pftc, b1, 1, e1)
+            nbad = nbad + refused(pftc)
+            call collect(pftc, b2, 2, e2)
+            nbad = nbad + refused(pftc)
+            call assert_int(nb0, nbad, device_name(dev)//': both slots are submitted and collected')
             if( nbad /= 0 ) return
             call assert_true(same_entries(e1, e2, e0), device_name(dev)//': two slots in flight give the '//&
                 &'synchronous entries')
-            call ws%kill()
+            call pftc%kill
         end do
     end subroutine test_schedule_identity
 
@@ -832,7 +913,7 @@ contains
         if( same_entries ) same_entries = all(e2%irots == e0%irots(:, 5:6))
     end function same_entries
 
-    ! after a warm cycle, create/use/kill cycles and a workspace left to finalization return the live count and
+    ! after a warm cycle, create/use/kill cycles and a calculator left to finalization return the live count and
     ! the active memory to their warm values; kill twice is harmless
     subroutine test_lifecycle( dev )
         integer, intent(in) :: dev
@@ -853,37 +934,37 @@ contains
         call lifecycle_cycle(fx, .false., nbad)
         call mlx_synchronize()
         call mlx_clear_cache()
-        call assert_int(0, nbad, device_name(dev)//': every cycle prepares, submits and collects')
+        call assert_int(0, nbad, device_name(dev)//': every cycle memoizes, submits and collects')
         call assert_int(live0, mlx_live_count(), device_name(dev)//': the live count returns to its warm value')
         call assert_true(mlx_active_memory() == mem0, device_name(dev)//': the active memory returns to its warm '//&
             &'value')
     end subroutine test_lifecycle
 
-    ! one workspace: prepared, a block queued in each slot and collected; killed twice, or left to finalization;
-    ! nbad counts the calls that failed
+    ! one calculator: memoized, a block queued in each slot and collected; killed twice, or left to
+    ! finalization; nbad counts the calls that were refused
     subroutine lifecycle_cycle( fx, l_kill, nbad )
         type(fixture), intent(in)    :: fx
         logical,       intent(in)    :: l_kill
         integer,       intent(inout) :: nbad
-        type(polar_table)         :: ws
+        type(polarft_calc)        :: pftc
         type(polar_table_block)   :: blk
         type(polar_table_entries) :: e
-        integer                   :: st
-        call ws%new(make_refs(fx, 1, ALL_REFS, [RT, BT], 1_int64), st)
-        nbad = nbad + merge(1, 0, st /= 0)
-        blk = make_block(fx, 1, ALL_REFS, half_ptcls(1), 1_int64)
-        call ws%submit(blk, 1, st)
-        nbad = nbad + merge(1, 0, st /= 0)
-        call ws%submit(blk, 2, st)
-        nbad = nbad + merge(1, 0, st /= 0)
-        call ws%collect(2, e, st)
-        nbad = nbad + merge(1, 0, st /= 0 .or. .not. allocated(e%dists))
-        call ws%collect(1, e, st)
-        nbad = nbad + merge(1, 0, st /= 0 .or. .not. allocated(e%dists))
+        integer                   :: n
+        call make_calc(pftc, fx, selection_of(1, ALL_REFS, half_ptcls(1), [RT, BT]), n)
+        nbad = nbad + n
+        blk  = make_block(fx, ALL_REFS, half_ptcls(1))
+        call submit(pftc, blk, 1)
+        nbad = nbad + refused(pftc)
+        call submit(pftc, blk, 2)
+        nbad = nbad + refused(pftc)
+        call collect(pftc, blk, 2, e)
+        nbad = nbad + refused(pftc)
+        call collect(pftc, blk, 1, e)
+        nbad = nbad + refused(pftc)
         if( l_kill )then
-            call ws%kill()
-            call ws%kill()
+            call pftc%kill
+            call pftc%kill
         endif
     end subroutine lifecycle_cycle
 
-end module mlxf_kernel_polar_table_tester
+end module mlxf_toy_polarft_calc_tester

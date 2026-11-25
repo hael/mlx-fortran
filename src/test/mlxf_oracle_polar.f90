@@ -2,7 +2,7 @@
 ! Double precision throughout. The memo-level oracle evaluates every rotation's distance from the memos by a
 ! direct inverse real DFT (no FFT), as the production scorer defines it; the checks hold a device's rows to an
 ! oracle's and its draws to its own rows. Used by the workspace's tester and by the benchmark.
-module mlxf_kernel_polar_oracle
+module mlxf_oracle_polar
 use, intrinsic :: iso_fortran_env, only: int64, real32, real64
 !$ use omp_lib,      only: omp_get_thread_num, omp_get_max_threads
 use mlxf_test_defs,  only: POLAR_DIST_MAX, POLAR_DIST_INVALID, POLAR_DIST_VALID, POLAR_ARG_CUTOFF, POLAR_DRAW_FLOOR, &
@@ -311,4 +311,4 @@ contains
         !$omp end parallel do
     end function polar_memo_rows
 
-end module mlxf_kernel_polar_oracle
+end module mlxf_oracle_polar

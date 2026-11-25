@@ -87,43 +87,6 @@ type :: polar_table_entries
     real(real32), allocatable :: rows(:,:,:)
 end type polar_table_entries
 
-! a shift map's grid for the prepared references of one half: box (pixels the shifts are in), the absolute
-! shell numbers kfrom (the references' first shell) and kstop (the band's last), the radii rho (pixels,
-! ascending) and nalpha directions over the turn, the prior's weight on rho^2, and the half's shell weights
-! over the band (real64)
-type :: polar_map_spec
-    integer                   :: box     = 0
-    integer                   :: kfrom   = 0
-    integer                   :: kstop   = 0
-    integer                   :: nalpha  = 0
-    real(real64)              :: prior_w = 0._real64
-    real(real64), allocatable :: rho(:)
-    real(real64), allocatable :: weights(:)
-end type polar_map_spec
-
-! the shift maps of particles against ordered candidate references (global IDs of the prepared list, cands
-! (ncand, nptcls), repeats allowed): xctf and ctf2 as a scoring block's, ptclpow the weighted square sum over
-! the map's band, temps the tempered and temps_phys the physical inverse temperatures; maps asks for every map
-! (nalpha, nrots, nrho) as well, evidence for the log evidence; ptcl_tile is the particles of one graph, each
-! with all its candidates
-type :: polar_map_block
-    integer                      :: half       = 0
-    integer(int64)               :: generation = 0_int64
-    integer                      :: ptcl_tile  = 16
-    logical                      :: maps       = .false.
-    logical                      :: evidence   = .false.
-    logical                      :: profile    = .false.
-    integer,         allocatable :: ptcl_ids(:)
-    integer,         allocatable :: cands(:,:)
-    complex(real32), allocatable :: ctf2(:,:,:)
-    complex(real32), allocatable :: xctf(:,:,:)
-    real(real64),    allocatable :: ptclpow(:)
-    real(real32),    allocatable :: temps(:)
-    real(real32),    allocatable :: temps_phys(:)
-    ! If present, skip physical moments when the selected loss strictly exceeds this per-pair cutoff.
-    real(real32), allocatable :: width_cutoff(:,:)
-end type polar_map_block
-
 ! per (candidate, particle): the mode's loss, rotation, radius and direction (1-based), the physical width
 ! (pixels), the log evidence when asked, and the full maps (nalpha, nrots, nrho, ncand, nptcls) when asked
 type :: polar_map_results
@@ -135,6 +98,91 @@ type :: polar_map_results
     integer,      allocatable :: ialpha(:,:)
     real(real32), allocatable :: maps(:,:,:,:,:)
 end type polar_map_results
+
+! the references, and the particles, the toy calculator's setters stage before it memoizes them: a staging
+! array of every section, once released, would stay in the process's footprint
+integer, parameter :: POLARFT_STAGE_N = 64
+
+! the shift maps a polar calculator holds, SIMPLE's: the full band's, the screen's over the disk, the window's
+integer, parameter :: SHIFTMAP_FULL   = 1
+integer, parameter :: SHIFTMAP_SCREEN = 2
+integer, parameter :: SHIFTMAP_WINDOW = 3
+integer, parameter :: NSHIFTMAPS      = 3
+
+! the members of SIMPLE's parameters object that the polar toy reads, under SIMPLE's names: the polar section's
+! half ring, the box whose pixels the shifts are in, the host team, the tempering factor of the shift maps, and
+! what sets up the two coarse maps: the shift prior's width and the window's radius (Angstrom and pixels) and
+! the sampling distance
+type :: parameters
+    integer      :: pftsz       = 0
+    integer      :: box         = 0
+    integer      :: nthr        = 1
+    real(real64) :: prob_beta   = POLAR_PROB_BETA
+    real(real32) :: shift_sigma = 0._real32
+    real(real32) :: smpd        = 1._real32
+    real(real32) :: trs         = 0._real32
+end type parameters
+
+! a shift map's grid for a workspace: which map, the box (pixels the shifts are in), the absolute shell numbers
+! kfrom (the references' first shell) and kstop (the band's last), the radii rho (pixels, ascending), nalpha
+! directions over the turn, and the parity's shell weights over the band (real64)
+type :: polarft_map_spec
+    integer                   :: imap   = 0
+    integer                   :: box    = 0
+    integer                   :: kfrom  = 0
+    integer                   :: kstop  = 0
+    integer                   :: nalpha = 0
+    real(real64), allocatable :: rho(:)
+    real(real64), allocatable :: weights(:)
+end type polarft_map_spec
+
+! one block of shift maps for a workspace: the map, the batch slots of its particles in the calculator's memos,
+! each particle's candidate references (ncand, particles; repeats allowed) and weighted square sum over the
+! map's band, the prior's weight on the squared radius, and per pair (candidate, particle) the tempered and the
+! physical inverse temperatures and, when present, the loss above which a pair's width is skipped; widths asks
+! for the widths at the physical temperature, maps for every map (nalpha, nrots, nrho) as well, evidence for the
+! log evidence; ptcl_tile is the particles of one graph, each with all its candidates
+type :: polarft_map_block
+    integer                   :: imap      = 0
+    integer                   :: ptcl_tile = 16
+    logical                   :: widths    = .false.
+    logical                   :: maps      = .false.
+    logical                   :: evidence  = .false.
+    logical                   :: profile   = .false.
+    real(real64)              :: prior_w   = 0._real64
+    integer,      allocatable :: islots(:)
+    integer,      allocatable :: cands(:,:)
+    real(real64), allocatable :: ptclpow(:)
+    real(real32), allocatable :: temps(:,:)
+    real(real32), allocatable :: temps_phys(:,:)
+    real(real32), allocatable :: width_cutoff(:,:)
+end type polarft_map_block
+
+! the tile plan a workspace's reference tiles are prepared under: the polar geometry (pftsz, nk shells) and the
+! references and particles per tile, every tile padded to them
+type :: polarft_tile_spec
+    integer :: pftsz = 0
+    integer :: nk    = 0
+    integer :: rt    = 0
+    integer :: bt    = 0
+end type polarft_tile_spec
+
+! one block for a workspace: the slot it is queued in, the batch slots of its particles in the calculator's
+! memos, their parity's shell weights, weighted square sums and inverse temperatures, each pair's variate
+! (references, particles), and the seed banks that replace a particle's memo where l_bank; rows asks for the
+! full rows of distances as well; profile evaluates after every stage and adds the stages' seconds
+type :: polarft_block_spec
+    integer                      :: slot    = 1
+    logical                      :: rows    = .false.
+    logical                      :: profile = .false.
+    integer,         allocatable :: islots(:)
+    real(real32),    allocatable :: weights(:)
+    real(real64),    allocatable :: wsq(:)
+    real(real32),    allocatable :: temps(:)
+    real(real32),    allocatable :: u(:,:)
+    complex(real32), allocatable :: banks(:,:,:)
+    logical,         allocatable :: l_bank(:)
+end type polarft_block_spec
 
 ! the comparison of a block's device rows and entries with an oracle
 type :: polar_row_check

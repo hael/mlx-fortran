@@ -1,10 +1,10 @@
-!@descr: the polar table workspace's scoring: block validation, the per-tile graph, the draw, copy-out
+!@descr: the polar workspace's scoring: block validation, the per-tile graph, the draw, copy-out
 ! Per particle tile and reference tile, every angular bin's complex sums of the particle terms (bt, 2nk) and the
 ! tile (2nk, rt) are one real product of packed (Re, Im) parts, batched over the bins; the inverse real FFT
 ! gives the rows, and the compiled tail (the distances and the posterior draw) picks each pair's rotation on
 ! the device. Tiles are always full (padded), so a pair's entry depends on its tile position only, never on the
 ! outer batch or slot.
-submodule (mlxf_kernel_polar_table) mlxf_kernel_polar_table_score
+submodule (mlxf_toy_polarft_workspace) mlxf_toy_polarft_workspace_score
 use, intrinsic :: iso_fortran_env, only: int64
 use mlxf,           only: mlx_from, mlx_to, mlx_eval, mlx_async_eval, mlx_slice, mlx_permute, mlx_concatenate, reshape, &
                           matmul, mlx_irfft, merge, minval, minloc, sum, max, exp, real, aimag, cmplx, mlx_cumsum, &
@@ -37,11 +37,11 @@ end type tail_outputs
 
 contains
 
-    module subroutine polar_table_submit( self, blk, slot, status )
-        class(polar_table),      intent(inout) :: self
-        type(polar_table_block), intent(in)    :: blk
-        integer,                 intent(in)    :: slot
-        integer,                 intent(out)   :: status
+    module subroutine polarft_workspace_submit( self, blk, ft_ctf2, ft_ptcl_ctf, status )
+        class(polarft_workspace), intent(inout) :: self
+        type(polarft_block_spec), intent(in)    :: blk
+        complex(real32),          intent(in)    :: ft_ctf2(:,:,:), ft_ptcl_ctf(:,:,:)
+        integer,                  intent(out)   :: status
         complex(real32), allocatable :: ctf2(:,:,:), xctf(:,:,:)
         real(real32),    allocatable :: iw(:), temps(:), u(:,:)
         type(mlx_array), allocatable :: dcol(:), icol(:), rcol(:), drow(:), irow(:), rrow(:)
@@ -50,19 +50,20 @@ contains
         type(tail_inputs)            :: tin
         type(tail_outputs)           :: tout
         real(real64)                 :: t0
-        integer                      :: nb, n1, nbt, bpad, rpad, j, t, b, b0, b1, r0, ierr, gk, gr
+        integer                      :: nb, n1, nbt, bpad, rpad, j, t, b, b0, b1, r0, ierr, gk, gr, slot
         status = 1
-        call check_block(self, blk, slot, self%msg)
+        call check_block(self, blk, shape(ft_ctf2), shape(ft_ptcl_ctf), self%msg)
         if( len(self%msg) > 0 ) return
+        slot = blk%slot
         n1   = self%pftsz + 1
-        nb   = size(blk%ctf2, 3)
+        nb   = size(blk%islots)
         nbt  = (nb + self%bt - 1) / self%bt
         bpad = nbt * self%bt
         rpad = self%ntiles * self%rt
         ! the block staged on the host, padded to whole tiles: padded particles score zero sums
         allocate(ctf2(n1, self%nk, bpad), xctf(n1, self%nk, bpad), iw(bpad), temps(bpad), u(rpad, bpad), stat=ierr)
         if( ierr /= 0 )then
-            self%msg = 'polar_table%submit: the host staging of the block could not be allocated'
+            self%msg = 'polarft_workspace%submit: the host staging of the block could not be allocated'
             return
         endif
         ctf2  = cmplx(0._real32, 0._real32, real32)
@@ -71,8 +72,8 @@ contains
         temps = 0._real32
         u     = 0._real32
         do b = 1, nb
-            ctf2(:,:, b) = blk%ctf2(:,:, b)
-            xctf(:,:, b) = blk%xctf(:,:, b)
+            ctf2(:,:, b) = ft_ctf2(:,:, blk%islots(b))
+            xctf(:,:, b) = ft_ptcl_ctf(:,:, blk%islots(b))
             if( allocated(blk%l_bank) )then
                 if( blk%l_bank(b) ) xctf(:,:, b) = blk%banks(:,:, b)
             endif
@@ -154,7 +155,7 @@ contains
         self%slots(slot)%rpad   = rpad
         self%slots(slot)%bpad   = bpad
         status = 0
-    end subroutine polar_table_submit
+    end subroutine polarft_workspace_submit
 
     ! seconds of a monotonic clock
     real(real64) function clock_s()
@@ -165,10 +166,10 @@ contains
 
     ! a profiled stage: its arrays evaluated (a barrier), its seconds added to stage_s(i)
     subroutine stage_done( self, i, t0, arrays )
-        class(polar_table), intent(inout) :: self
-        integer,            intent(in)    :: i
-        real(real64),       intent(in)    :: t0
-        type(mlx_array),    intent(in)    :: arrays(:)
+        class(polarft_workspace), intent(inout) :: self
+        integer,                  intent(in)    :: i
+        real(real64),             intent(in)    :: t0
+        type(mlx_array),          intent(in)    :: arrays(:)
         call mlx_eval(arrays)
         self%stage_s(i) = self%stage_s(i) + (clock_s() - t0)
     end subroutine stage_done
@@ -187,8 +188,8 @@ contains
     ! the rows (nrots, rt, bt) of a tile's packed sums (bt, 2rt, P): recombined to complex sums, then the
     ! inverse real FFT
     function inverse_transform( self, prod ) result(raw)
-        class(polar_table), intent(in) :: self
-        type(mlx_array),    intent(in) :: prod
+        class(polarft_workspace), intent(in) :: self
+        type(mlx_array),          intent(in) :: prod
         type(mlx_array) :: raw
         type(mlx_array) :: c, re, im
         integer         :: shp(3), bt, rt, n1
@@ -204,14 +205,14 @@ contains
 
     ! the tail of a tile through the compiled function
     subroutine apply_tail( self, tin, tout, status )
-        class(polar_table), intent(inout) :: self
-        type(tail_inputs),  intent(in)    :: tin
-        type(tail_outputs), intent(out)   :: tout
-        integer,            intent(out)   :: status
+        class(polarft_workspace), intent(inout) :: self
+        type(tail_inputs),        intent(in)    :: tin
+        type(tail_outputs),       intent(out)   :: tout
+        integer,                  intent(out)   :: status
         type(mlx_array), allocatable :: outs(:)
         call self%tail%apply([tin%raw, tin%iw, tin%temps, tin%u], outs, status)
         if( status /= 0 )then
-            self%msg = 'polar_table%submit: the compiled distances and draw failed'
+            self%msg = 'polarft_workspace%submit: the compiled distances and draw failed'
             return
         endif
         tout%rows  = outs(1)
@@ -280,116 +281,106 @@ contains
         tout%irots = irot
     end subroutine tail_graph
 
-    ! the reason blk cannot be scored in slot, or an empty string: nothing about the block is assumed
-    subroutine check_block( self, blk, slot, msg )
-        class(polar_table),            intent(in)  :: self
-        type(polar_table_block),       intent(in)  :: blk
-        integer,                       intent(in)  :: slot
+    ! the reason blk cannot be scored, or an empty string: nothing about the block is assumed; shp2 and shpx are
+    ! the shapes of the particles' memos
+    subroutine check_block( self, blk, shp2, shpx, msg )
+        class(polarft_workspace),      intent(in)  :: self
+        type(polarft_block_spec),      intent(in)  :: blk
+        integer,                       intent(in)  :: shp2(3), shpx(3)
         character(len=:), allocatable, intent(out) :: msg
         integer :: n1, nb
         msg = ''
-        if( slot < 1 .or. slot > POLAR_TABLE_NSLOTS )then
-            msg = 'polar_table%submit: no such slot'
-        else if( self%slots(slot)%busy )then
-            msg = 'polar_table%submit: the slot holds a block not yet collected'
+        if( blk%slot < 1 .or. blk%slot > POLARFT_NSLOTS )then
+            msg = 'polarft_workspace%submit: no such slot'
+            return
+        endif
+        if( self%slots(blk%slot)%busy )then
+            msg = 'polarft_workspace%submit: the slot holds a block not yet collected'
         else if( .not. self%prepared )then
-            msg = 'polar_table%submit: refused: no prepared references (new after invalidation)'
-        else if( blk%generation /= self%generation )then
-            msg = 'polar_table%submit: refused: the block''s reference generation differs from the prepared one'
-        else if( blk%half /= self%half )then
-            msg = 'polar_table%submit: refused: the block''s half differs from the prepared one'
-        else if( .not. allocated(blk%ref_ids) )then
-            msg = 'polar_table%submit: refused: the block names no reference list'
+            msg = 'polarft_workspace%submit: refused: no prepared reference tiles'
+        else if( .not. allocated(blk%islots) .or. .not. allocated(blk%weights) .or. .not. allocated(blk%wsq) .or. &
+            &.not. allocated(blk%temps) .or. .not. allocated(blk%u) )then
+            msg = 'polarft_workspace%submit: refused: the block lacks an input'
         endif
         if( len(msg) > 0 ) return
-        if( size(blk%ref_ids) /= self%nrefs )then
-            msg = 'polar_table%submit: refused: the block''s reference list differs from the prepared one'
-            return
-        endif
-        if( any(blk%ref_ids /= self%ids) )then
-            msg = 'polar_table%submit: refused: the block''s reference list differs from the prepared one'
-            return
-        endif
-        if( .not. allocated(blk%ctf2) .or. .not. allocated(blk%xctf) .or. .not. allocated(blk%weights) .or. &
-            &.not. allocated(blk%wsq) .or. .not. allocated(blk%temps) .or. .not. allocated(blk%u) .or. &
-            &.not. allocated(blk%ptcl_ids) )then
-            msg = 'polar_table%submit: refused: the block lacks an input'
-            return
-        endif
         n1 = self%pftsz + 1
-        nb = size(blk%ctf2, 3)
-        if( nb < 1 .or. any(shape(blk%ctf2) /= [n1, self%nk, nb]) .or. any(shape(blk%xctf) /= [n1, self%nk, nb]) &
-            &.or. size(blk%weights) /= self%nk .or. size(blk%wsq) /= nb .or. size(blk%temps) /= nb .or. &
-            &size(blk%ptcl_ids) /= nb .or. any(shape(blk%u) /= [self%nrefs, nb]) )then
-            msg = 'polar_table%submit: refused: the block''s shapes do not match the prepared references'
+        nb = size(blk%islots)
+        if( nb < 1 .or. any(shp2 /= [n1, self%nk, shp2(3)]) .or. any(shpx /= shp2) .or. &
+            &size(blk%weights) /= self%nk .or. size(blk%wsq) /= nb .or. size(blk%temps) /= nb .or. &
+            &any(shape(blk%u) /= [self%nrefs, nb]) )then
+            msg = 'polarft_workspace%submit: refused: the block''s shapes do not match the prepared references'
+            return
+        endif
+        if( any(blk%islots < 1 .or. blk%islots > shp2(3)) )then
+            msg = 'polarft_workspace%submit: refused: a particle of the block is outside the batch'
             return
         endif
         if( allocated(blk%banks) .neqv. allocated(blk%l_bank) )then
-            msg = 'polar_table%submit: refused: banks and l_bank go together'
+            msg = 'polarft_workspace%submit: refused: banks and l_bank go together'
             return
         endif
         if( allocated(blk%banks) )then
             if( any(shape(blk%banks) /= [n1, self%nk, nb]) .or. size(blk%l_bank) /= nb )then
-                msg = 'polar_table%submit: refused: the banks do not match the block'
+                msg = 'polarft_workspace%submit: refused: the banks'' shapes do not match the block'
                 return
             endif
         endif
         if( any(.not. (blk%wsq > 0._real64)) )then
-            msg = 'polar_table%submit: refused: a particle''s weighted square sum is not positive'
-        else if( any(blk%ptcl_ids < 1) )then
-            msg = 'polar_table%submit: refused: particle IDs are global and positive'
+            msg = 'polarft_workspace%submit: refused: a particle''s weighted square sum is not positive'
         endif
     end subroutine check_block
 
-    module subroutine polar_table_collect( self, slot, entries, status )
-        class(polar_table),        intent(inout) :: self
-        integer,                   intent(in)    :: slot
-        type(polar_table_entries), intent(out)   :: entries
-        integer,                   intent(out)   :: status
+    module subroutine polarft_workspace_collect( self, slot, dists, irots, status )
+        class(polarft_workspace), intent(inout) :: self
+        integer,                  intent(in)    :: slot
+        real(real32),             intent(inout) :: dists(:,:)
+        integer,                  intent(inout) :: irots(:,:)
+        integer,                  intent(out)   :: status
         real(real32), allocatable :: dd(:,:), rr(:,:,:)
         integer,      allocatable :: ii(:,:)
         integer                   :: nr, nb
         status = 1
-        if( slot < 1 .or. slot > POLAR_TABLE_NSLOTS )then
-            self%msg = 'polar_table%collect: no such slot'
+        if( slot < 1 .or. slot > POLARFT_NSLOTS )then
+            self%msg = 'polarft_workspace%collect: no such slot'
             return
         endif
         if( .not. self%slots(slot)%busy )then
-            self%msg = 'polar_table%collect: the slot holds no block'
+            self%msg = 'polarft_workspace%collect: the slot holds no block'
             return
         endif
+        if( allocated(self%rows_host) ) deallocate(self%rows_host)
         associate( s => self%slots(slot) )
             nr = s%nrefs
             nb = s%nptcls
-            allocate(dd(s%rpad, s%bpad), ii(s%rpad, s%bpad))
-            call mlx_to(dd, s%dists, status=status)
-            if( status == 0 ) call mlx_to(ii, s%irots, status=status)
-            if( status == 0 .and. s%l_rows )then
-                allocate(rr(s%nrots, s%rpad, s%bpad))
-                call mlx_to(rr, s%rows, status=status)
-            endif
-            if( status == 0 )then
-                entries%dists = dd(1:nr, 1:nb)
-                entries%irots = ii(1:nr, 1:nb)
-                if( s%l_rows ) entries%rows = rr(:, 1:nr, 1:nb)
+            if( any(shape(dists) /= [nr, nb]) .or. any(shape(irots) /= [nr, nb]) )then
+                self%msg = 'polarft_workspace%collect: the entries'' shapes are not (references, particles of the block)'
             else
-                self%msg = 'polar_table%collect: the block could not be evaluated'
+                allocate(dd(s%rpad, s%bpad), ii(s%rpad, s%bpad))
+                call mlx_to(dd, s%dists, status=status)
+                if( status == 0 ) call mlx_to(ii, s%irots, status=status)
+                if( status == 0 .and. s%l_rows )then
+                    allocate(rr(s%nrots, s%rpad, s%bpad))
+                    call mlx_to(rr, s%rows, status=status)
+                endif
+                if( status == 0 )then
+                    dists = dd(1:nr, 1:nb)
+                    irots = ii(1:nr, 1:nb)
+                    if( s%l_rows ) self%rows_host = rr(:, 1:nr, 1:nb)
+                else
+                    self%msg = 'polarft_workspace%collect: the block could not be evaluated'
+                endif
             endif
             call s%dists%kill()
             call s%irots%kill()
             call s%rows%kill()
             s%busy = .false.
         end associate
-    end subroutine polar_table_collect
+    end subroutine polarft_workspace_collect
 
-    module subroutine polar_table_score( self, blk, entries, status )
-        class(polar_table),        intent(inout) :: self
-        type(polar_table_block),   intent(in)    :: blk
-        type(polar_table_entries), intent(out)   :: entries
-        integer,                   intent(out)   :: status
-        call self%submit(blk, 1, status)
-        if( status /= 0 ) return
-        call self%collect(1, entries, status)
-    end subroutine polar_table_score
+    module subroutine take_rows( self, rows )
+        class(polarft_workspace),  intent(inout) :: self
+        real(real32), allocatable, intent(out)   :: rows(:,:,:)
+        if( allocated(self%rows_host) ) call move_alloc(self%rows_host, rows)
+    end subroutine take_rows
 
-end submodule mlxf_kernel_polar_table_score
+end submodule mlxf_toy_polarft_workspace_score

@@ -880,7 +880,7 @@ reading, the Mac Debug and Release build under GNU Fortran 16.2, and the toys' t
 
 ### The Mac integration at the review (2026-11-24, 20:30, the M5 Ultra, Claude in the maintainer's session)
 
-Decision 8, done in a scratch copy of the checkout at `3b3f4fd` with the run's `full.diff` applied
+Decision 8, done in a scratch copy of the checkout at `c129772` with the run's `full.diff` applied
 (*measured*):
 
 - **Standalone, decision 6's recipe under GNU Fortran 16.2.0** (`-std=f2018 -Wall -Wextra -Werror`, at
