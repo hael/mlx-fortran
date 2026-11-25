@@ -1,9 +1,11 @@
 !@descr: signature-class helpers for shaped, indexed, closeness, reduction and Fourier operations; power and logic operators
 submodule(mlxf_array) mlxf_array_operations
-use, intrinsic :: iso_c_binding, only: c_null_char, c_null_ptr
+use, intrinsic :: iso_c_binding, only: c_null_char, c_null_ptr, c_associated
+use mlxf_c_types,  only: mlxc_device, MLXC_CPU
 use mlxf_c_array,  only: mlxc_array_new, mlxc_array_free
-use mlxf_c_ops,    only: mlxc_power, mlxc_equal, mlxc_logical_xor, mlxc_positive
-use mlxf_c_stream, only: mlxc_stream_free
+use mlxf_c_device, only: mlxc_device_new_type, mlxc_device_free
+use mlxf_c_ops,    only: mlxc_power, mlxc_equal, mlxc_logical_xor, mlxc_positive, mlxc_subtract, mlxc_astype, mlxc_add
+use mlxf_c_stream, only: mlxc_stream_free, mlxc_stream_new, mlxc_get_default_stream
 use mlxf_c_vector, only: mlxc_vector_array_free, mlxc_vector_array_new
 use mlxf_defs,     only: MLX_DTYPES, MLX_FFT_NORMS
 use mlxf_device,   only: mlxf_require_device, mlxf_default_stream
@@ -21,7 +23,7 @@ contains
         integer,          intent(in)    :: dtype
         character(len=*), intent(in)    :: proc
         call mlxf_require_device(proc)
-        call check_dtype(dtype, proc)
+        call mlxf_check_dtype(dtype, proc)
         call mlxf_int_op(r, f, a, dtype, proc)
     end subroutine mlxf_dtype_op
 
@@ -229,7 +231,7 @@ contains
         type(mlxc_stream) :: s
         integer(c_int)    :: ierr
         call mlxf_require_device(proc)
-        call check_dtype(dtype, proc)
+        call mlxf_check_dtype(dtype, proc)
         res = mlxc_array_new()
         s = mlxf_default_stream(proc)
         ierr = f(res, int(shape(size(shape):1:-1), c_int), int(size(shape), c_size_t), int(dtype, c_int), s)
@@ -250,7 +252,7 @@ contains
         type(mlxc_stream) :: s
         integer(c_int)    :: ierr
         call mlxf_require_device(proc)
-        call check_dtype(option%dtype, proc)
+        call mlxf_check_dtype(option%dtype, proc)
         res = mlxc_array_new()
         s = mlxf_default_stream(proc)
         ierr = f(res, option%start, option%stop, option%step, int(option%dtype, c_int), s)
@@ -285,32 +287,55 @@ contains
         call adopt(r, res, proc)
     end subroutine mlxf_fft_op
 
-    ! r = f(a) over Fortran dimensions option%dims with lengths option%n, for every int f(mlx_array* res,
-    ! const mlx_array a, const int* n, size_t n_num, const int* axes, size_t axes_num, mlx_fft_norm norm,
-    ! const mlx_stream s)
-    module subroutine mlxf_fft2_op( r, f, a, option, proc )
-        type(mlx_array),     intent(inout) :: r
-        procedure(mlxc_fft2_op)            :: f
-        type(mlx_array),     intent(in)    :: a
-        type(mlxf_fft_spec), intent(in)    :: option
-        character(len=*),    intent(in)    :: proc
-        type(mlxc_array)  :: ha
-        type(mlxc_array)  :: res
-        type(mlxc_stream) :: s
-        integer(c_int)    :: ierr
+    ! r = f(a) over the Fortran dimensions option%dims with the lengths option%n, in the order given (MLX halves a
+    ! real transform along the last), for every int f(mlx_array* res, const mlx_array a, const int* n, size_t n_num,
+    ! const int* axes, size_t axes_num, mlx_fft_norm norm, const mlx_stream s); the norm is checked first
+    module subroutine mlxf_fftn_op( r, f, a, option, proc )
+        type(mlx_array),      intent(inout) :: r
+        procedure(mlxc_fftn_op)             :: f
+        type(mlx_array),      intent(in)    :: a
+        type(mlxf_fftn_spec), intent(in)    :: option
+        character(len=*),     intent(in)    :: proc
+        type(mlxc_array)            :: ha
+        integer(c_int), allocatable :: axes(:)
+        integer(c_size_t)           :: n
+        type(mlxc_array)            :: res
+        type(mlxc_stream)           :: s
+        integer(c_int)              :: ierr
         call mlxf_require_device(proc)
         call check_fft_norm(option%norm, proc)
         ha = mlxf_handle(a, proc)
-        call check_dim(a, option%dims(1), proc)
-        call check_dim(a, option%dims(2), proc)
+        if( size(option%n) /= size(option%dims) ) call mlxf_fail(proc, 'one length per transformed dimension is needed')
+        axes = mlxf_axes_of(a, option%dims, proc)
+        n = int(size(axes), c_size_t)
         res = mlxc_array_new()
         s = mlxf_default_stream(proc)
-        ierr = f(res, ha, int(option%n, c_int), 2_c_size_t, int(a%ndim()-option%dims, c_int), 2_c_size_t, int(option%norm, c_int), s)
+        ierr = f(res, ha, int(option%n, c_int), n, axes, n, int(option%norm, c_int), s)
         call mlxf_check(mlxc_stream_free(s), proc)
         if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
         call mlxf_check(ierr, proc)
         call adopt(r, res, proc)
-    end subroutine mlxf_fft2_op
+    end subroutine mlxf_fftn_op
+
+    ! r = f(n, d) for every int f(mlx_array* res, int n, double d, const mlx_stream s)
+    module subroutine mlxf_freq_op( r, f, n, d, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_freq_op)         :: f
+        integer,          intent(in)    :: n
+        real(c_double),   intent(in)    :: d
+        character(len=*), intent(in)    :: proc
+        type(mlxc_array)  :: res
+        type(mlxc_stream) :: s
+        integer(c_int)    :: ierr
+        call mlxf_require_device(proc)
+        res = mlxc_array_new()
+        s = mlxf_default_stream(proc)
+        ierr = f(res, int(n, c_int), d, s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call adopt(r, res, proc)
+    end subroutine mlxf_freq_op
 
     ! r = f(a(1), a(2)) with the tolerances of option, for every int f(mlx_array* res, const mlx_array a,
     ! const mlx_array b, double rtol, double atol, bool equal_nan, const mlx_stream s)
@@ -420,7 +445,7 @@ contains
         integer(c_int)    :: ierr
         integer           :: n
         call mlxf_require_device(proc)
-        call check_dtype(option%dtype, proc)
+        call mlxf_check_dtype(option%dtype, proc)
         ha = mlxf_handle(a, proc)
         n = size(option%shape)
         res = mlxc_array_new()
@@ -444,7 +469,7 @@ contains
         type(mlxc_stream) :: s
         integer(c_int)    :: ierr
         call mlxf_require_device(proc)
-        call check_dtype(option, proc)
+        call mlxf_check_dtype(option, proc)
         res = mlxc_array_new()
         s = mlxf_default_stream(proc)
         ierr = f(res, mlxf_handle(a(1), proc), mlxf_handle(a(2), proc), int(option, c_int), s)
@@ -493,7 +518,7 @@ contains
         integer(c_int), allocatable :: axes(:)
         call mlxf_require_device(proc)
         ha = mlxf_handle(a, proc)
-        axes = axes_of(a, option%dims, proc)
+        axes = mlxf_axes_of(a, option%dims, proc)
         res = mlxc_array_new()
         s = mlxf_default_stream(proc)
         ierr = f(res, ha, axes, int(size(axes), c_size_t), logical(option%keepdims, c_bool), s)
@@ -566,7 +591,7 @@ contains
         integer(c_int), allocatable :: axes(:)
         call mlxf_require_device(proc)
         ha = mlxf_handle(a, proc)
-        axes = axes_of(a, option%dims, proc)
+        axes = mlxf_axes_of(a, option%dims, proc)
         res = mlxc_array_new()
         s = mlxf_default_stream(proc)
         ierr = f(res, ha, axes, int(size(axes), c_size_t), logical(option%keepdims, c_bool), int(option%ddof, c_int), s)
@@ -637,7 +662,7 @@ contains
         integer(c_int)    :: ierr
         call mlxf_require_device(proc)
         ha = mlxf_handle(a, proc)
-        call check_dtype(option(4), proc)
+        call mlxf_check_dtype(option(4), proc)
         res = mlxc_array_new()
         s = mlxf_default_stream(proc)
         ierr = f(res, ha, int(option(1), c_int), int(option(2), c_int), int(option(3), c_int), int(option(4), c_int), s)
@@ -839,8 +864,8 @@ contains
         integer(c_int), allocatable :: axes(:)
         call mlxf_require_device(proc)
         ha = mlxf_handle(a, proc)
-        call check_dtype(option%dtype, proc)
-        axes = axes_of(a, option%dims, proc)
+        call mlxf_check_dtype(option%dtype, proc)
+        axes = mlxf_axes_of(a, option%dims, proc)
         res = mlxc_array_new()
         s = mlxf_default_stream(proc)
         ierr = f(res, ha, axes, int(size(axes), c_size_t), logical(option%inverted, c_bool), int(option%dtype, c_int), s)
@@ -880,7 +905,7 @@ contains
         type(mlxc_stream) :: s
         integer(c_int)    :: ierr
         call mlxf_require_device(proc)
-        call check_dtype(option(2), proc)
+        call mlxf_check_dtype(option(2), proc)
         res = mlxc_array_new()
         s = mlxf_default_stream(proc)
         ierr = f(res, int(option(1), c_int), int(option(2), c_int), s)
@@ -901,7 +926,7 @@ contains
         type(mlxc_stream) :: s
         integer(c_int)    :: ierr
         call mlxf_require_device(proc)
-        call check_dtype(option(4), proc)
+        call mlxf_check_dtype(option(4), proc)
         res = mlxc_array_new()
         s = mlxf_default_stream(proc)
         ierr = f(res, int(option(1), c_int), int(option(2), c_int), int(option(3), c_int), int(option(4), c_int), s)
@@ -922,7 +947,7 @@ contains
         type(mlxc_stream) :: s
         integer(c_int)    :: ierr
         call mlxf_require_device(proc)
-        call check_dtype(option%dtype, proc)
+        call mlxf_check_dtype(option%dtype, proc)
         res = mlxc_array_new()
         s = mlxf_default_stream(proc)
         ierr = f(res, option%start, option%stop, int(option%num, c_int), int(option%dtype, c_int), s)
@@ -943,7 +968,7 @@ contains
         type(mlxc_stream) :: s
         integer(c_int)    :: ierr
         call mlxf_require_device(proc)
-        call check_dtype(option%dtype, proc)
+        call mlxf_check_dtype(option%dtype, proc)
         res = mlxc_array_new()
         s = mlxf_default_stream(proc)
         ierr = f(res, option%start, option%stop, int(option%num, c_int), logical(option%endpoint, c_bool), int(option%dtype, c_int), s)
@@ -1447,6 +1472,733 @@ contains
         if( status /= 0 ) call mlxf_fail(proc, 'the results could not be adopted')
     end subroutine mlxf_unique_op
 
+    ! r = f(a(1), a(2)) with the matrices of each operand chosen by the 0-based index arrays a(3) and a(4), an
+    ! empty one being none, for every int f(mlx_array* res, const mlx_array a, const mlx_array b,
+    ! const mlx_array lhs_indices, const mlx_array rhs_indices, bool sorted_indices, const mlx_stream s)
+    module subroutine mlxf_gather_mm_op( r, f, a, option, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_gather_mm_op)    :: f
+        type(mlx_array),  intent(in)    :: a(4)
+        logical,          intent(in)    :: option
+        character(len=*), intent(in)    :: proc
+        type(mlxc_array)  :: h(4)
+        type(mlxc_array)  :: res
+        type(mlxc_stream) :: s
+        integer(c_int)    :: ierr
+        integer           :: i
+        call mlxf_require_device(proc)
+        do i = 1, 4
+            if( i <= 2 .or. c_associated(a(i)%h%ctx) ) h(i) = mlxf_handle(a(i), proc)
+        end do
+        res = mlxc_array_new()
+        s = mlxf_default_stream(proc)
+        ierr = f(res, h(1), h(2), h(3), h(4), logical(option, c_bool), s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call adopt(r, res, proc)
+    end subroutine mlxf_gather_mm_op
+
+    ! r = f(a(1), a(2)) with blocks of option rows and columns masked: a(3) masks the result, a(4) and a(5) the
+    ! operands, an empty one being none, for every int f(mlx_array* res, const mlx_array a, const mlx_array b,
+    ! int block_size, const mlx_array mask_out, const mlx_array mask_lhs, const mlx_array mask_rhs, const mlx_stream s)
+    module subroutine mlxf_masked_mm_op( r, f, a, option, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_masked_mm_op)    :: f
+        type(mlx_array),  intent(in)    :: a(5)
+        integer,          intent(in)    :: option
+        character(len=*), intent(in)    :: proc
+        type(mlxc_array)  :: h(5)
+        type(mlxc_array)  :: res
+        type(mlxc_stream) :: s
+        integer(c_int)    :: ierr
+        integer           :: i
+        call mlxf_require_device(proc)
+        do i = 1, 5
+            if( i <= 2 .or. c_associated(a(i)%h%ctx) ) h(i) = mlxf_handle(a(i), proc)
+        end do
+        res = mlxc_array_new()
+        s = mlxf_default_stream(proc)
+        ierr = f(res, h(1), h(2), int(option, c_int), h(3), h(4), h(5), s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call adopt(r, res, proc)
+    end subroutine mlxf_masked_mm_op
+
+    ! r = f(a) on the CPU's default stream whatever the default device, for a function of mlxc_unary_op's signature
+    ! that MLX implements on the CPU only
+    module subroutine mlxf_cpu_unary( r, f, a, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_unary_op)        :: f
+        type(mlx_array),  intent(in)    :: a
+        character(len=*), intent(in)    :: proc
+        type(mlxc_array)  :: ha
+        type(mlxc_array)  :: res
+        type(mlxc_stream) :: s
+        integer(c_int)    :: ierr
+        call mlxf_require_device(proc)
+        ha = mlxf_handle(a, proc)
+        res = mlxc_array_new()
+        s = cpu_stream(proc)
+        ierr = f(res, ha, s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call adopt(r, res, proc)
+    end subroutine mlxf_cpu_unary
+
+    ! r = f(a, b) on the CPU's default stream, for a function of mlxc_binary_op's signature that MLX implements on
+    ! the CPU only
+    module subroutine mlxf_cpu_binary( r, f, a, b, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_binary_op)       :: f
+        type(mlx_array),  intent(in)    :: a, b
+        character(len=*), intent(in)    :: proc
+        type(mlxc_array)  :: ha, hb
+        type(mlxc_array)  :: res
+        type(mlxc_stream) :: s
+        integer(c_int)    :: ierr
+        call mlxf_require_device(proc)
+        ha = mlxf_handle(a, proc)
+        hb = mlxf_handle(b, proc)
+        res = mlxc_array_new()
+        s = cpu_stream(proc)
+        ierr = f(res, ha, hb, s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call adopt(r, res, proc)
+    end subroutine mlxf_cpu_binary
+
+    ! r = f(a, option) on the CPU's default stream, for every int f(mlx_array* res, const mlx_array a, bool flag,
+    ! const mlx_stream s) that MLX implements on the CPU only; the flag goes to MLX as given
+    module subroutine mlxf_cpu_flag_op( r, f, a, option, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_flag_op)         :: f
+        type(mlx_array),  intent(in)    :: a
+        logical,          intent(in)    :: option
+        character(len=*), intent(in)    :: proc
+        type(mlxc_array)  :: ha
+        type(mlxc_array)  :: res
+        type(mlxc_stream) :: s
+        integer(c_int)    :: ierr
+        call mlxf_require_device(proc)
+        ha = mlxf_handle(a, proc)
+        res = mlxc_array_new()
+        s = cpu_stream(proc)
+        ierr = f(res, ha, logical(option, c_bool), s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call adopt(r, res, proc)
+    end subroutine mlxf_cpu_flag_op
+
+    ! r = f(a(1), a(2), option) on the CPU's default stream, for every int f(mlx_array* res, const mlx_array a,
+    ! const mlx_array b, bool flag, const mlx_stream s) that MLX implements on the CPU only
+    module subroutine mlxf_cpu_compare_op( r, f, a, option, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_compare_op)      :: f
+        type(mlx_array),  intent(in)    :: a(2)
+        logical,          intent(in)    :: option
+        character(len=*), intent(in)    :: proc
+        type(mlxc_array)  :: h(2)
+        type(mlxc_array)  :: res
+        type(mlxc_stream) :: s
+        integer(c_int)    :: ierr
+        call mlxf_require_device(proc)
+        h(1) = mlxf_handle(a(1), proc)
+        h(2) = mlxf_handle(a(2), proc)
+        res = mlxc_array_new()
+        s = cpu_stream(proc)
+        ierr = f(res, h(1), h(2), logical(option, c_bool), s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call adopt(r, res, proc)
+    end subroutine mlxf_cpu_compare_op
+
+    ! the two results of f(a), in MLX's order, on the CPU's default stream, for every int f(mlx_array* res_0,
+    ! mlx_array* res_1, const mlx_array a, const mlx_stream s)
+    module subroutine mlxf_cpu_pair_op( r, f, a, proc )
+        type(mlx_array),  intent(inout) :: r(2)
+        procedure(mlxc_pair_op)         :: f
+        type(mlx_array),  intent(in)    :: a
+        character(len=*), intent(in)    :: proc
+        type(mlxc_array)  :: ha
+        type(mlxc_array)  :: res(2)
+        type(mlxc_stream) :: s
+        integer(c_int)    :: ierr
+        call mlxf_require_device(proc)
+        ha = mlxf_handle(a, proc)
+        res(1) = mlxc_array_new()
+        res(2) = mlxc_array_new()
+        s = cpu_stream(proc)
+        ierr = f(res(1), res(2), ha, s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 )then
+            call mlxf_check(mlxc_array_free(res(1)), proc)
+            call mlxf_check(mlxc_array_free(res(2)), proc)
+        endif
+        call mlxf_check(ierr, proc)
+        call adopt(r(1), res(1), proc)
+        call adopt(r(2), res(2), proc)
+    end subroutine mlxf_cpu_pair_op
+
+    ! the two results of f(a, option), in MLX's order, on the CPU's default stream, for every int f(mlx_array* res_0,
+    ! mlx_array* res_1, const mlx_array a, const char* text, const mlx_stream s)
+    module subroutine mlxf_cpu_pair_text_op( r, f, a, option, proc )
+        type(mlx_array),  intent(inout) :: r(2)
+        procedure(mlxc_pair_text_op)    :: f
+        type(mlx_array),  intent(in)    :: a
+        character(len=*), intent(in)    :: option
+        character(len=*), intent(in)    :: proc
+        type(mlxc_array)  :: ha
+        type(mlxc_array)  :: res(2)
+        type(mlxc_stream) :: s
+        integer(c_int)    :: ierr
+        call mlxf_require_device(proc)
+        ha = mlxf_handle(a, proc)
+        res(1) = mlxc_array_new()
+        res(2) = mlxc_array_new()
+        s = cpu_stream(proc)
+        ierr = f(res(1), res(2), ha, trim(option)//c_null_char, s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 )then
+            call mlxf_check(mlxc_array_free(res(1)), proc)
+            call mlxf_check(mlxc_array_free(res(2)), proc)
+        endif
+        call mlxf_check(ierr, proc)
+        call adopt(r(1), res(1), proc)
+        call adopt(r(2), res(2), proc)
+    end subroutine mlxf_cpu_pair_text_op
+
+    ! r = f(a, option) on the CPU's default stream, for every int f(mlx_array* res, const mlx_array a,
+    ! const char* text, const mlx_stream s)
+    module subroutine mlxf_cpu_text_op( r, f, a, option, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_unary_text_op)   :: f
+        type(mlx_array),  intent(in)    :: a
+        character(len=*), intent(in)    :: option
+        character(len=*), intent(in)    :: proc
+        type(mlxc_array)  :: ha
+        type(mlxc_array)  :: res
+        type(mlxc_stream) :: s
+        integer(c_int)    :: ierr
+        call mlxf_require_device(proc)
+        ha = mlxf_handle(a, proc)
+        res = mlxc_array_new()
+        s = cpu_stream(proc)
+        ierr = f(res, ha, trim(option)//c_null_char, s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call adopt(r, res, proc)
+    end subroutine mlxf_cpu_text_op
+
+    ! the arrays of f(a), in MLX's order, on the CPU's default stream, for a function of mlxc_unstack_op's signature
+    ! that MLX implements on the CPU only
+    module subroutine mlxf_cpu_unstack_op( r, f, a, proc )
+        type(mlx_array),  allocatable, intent(out) :: r(:)
+        procedure(mlxc_unstack_op)                 :: f
+        type(mlx_array),  intent(in)               :: a
+        character(len=*), intent(in)               :: proc
+        type(mlxc_array)        :: ha
+        type(mlxc_vector_array) :: res
+        type(mlxc_stream)       :: s
+        integer(c_int)          :: ierr
+        integer                 :: status
+        call mlxf_require_device(proc)
+        ha = mlxf_handle(a, proc)
+        res = mlxc_vector_array_new()
+        s = cpu_stream(proc)
+        ierr = f(res, ha, s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_vector_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call mlxf_vector_import(r, res, status)
+        call mlxf_check(mlxc_vector_array_free(res), proc)
+        if( status /= 0 ) call mlxf_fail(proc, 'the results could not be adopted')
+    end subroutine mlxf_cpu_unstack_op
+
+    ! the arrays of f(a, option), in MLX's order, on the CPU's default stream, for every int f(mlx_vector_array* res,
+    ! const mlx_array a, bool flag, const mlx_stream s)
+    module subroutine mlxf_cpu_svd_op( r, f, a, option, proc )
+        type(mlx_array),  allocatable, intent(out) :: r(:)
+        procedure(mlxc_vector_flag_op)             :: f
+        type(mlx_array),  intent(in)               :: a
+        logical,          intent(in)               :: option
+        character(len=*), intent(in)               :: proc
+        type(mlxc_array)        :: ha
+        type(mlxc_vector_array) :: res
+        type(mlxc_stream)       :: s
+        integer(c_int)          :: ierr
+        integer                 :: status
+        call mlxf_require_device(proc)
+        ha = mlxf_handle(a, proc)
+        res = mlxc_vector_array_new()
+        s = cpu_stream(proc)
+        ierr = f(res, ha, logical(option, c_bool), s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_vector_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call mlxf_vector_import(r, res, status)
+        call mlxf_check(mlxc_vector_array_free(res), proc)
+        if( status /= 0 ) call mlxf_fail(proc, 'the results could not be adopted')
+    end subroutine mlxf_cpu_svd_op
+
+    ! the norm of order option%ord of a over the Fortran dimensions option%dims, each translated to its MLX axis in the
+    ! order given (of two, the first is the rows'), on the CPU's default stream when option%on_cpu, for every
+    ! int f(mlx_array* res, const mlx_array a, double ord, const int* axis, size_t axis_num, bool keepdims, const mlx_stream s)
+    module subroutine mlxf_norm_op( r, f, a, option, proc )
+        type(mlx_array),      intent(inout) :: r
+        procedure(mlxc_norm_op)             :: f
+        type(mlx_array),      intent(in)    :: a
+        type(mlxf_norm_spec), intent(in)    :: option
+        character(len=*),     intent(in)    :: proc
+        type(mlxc_array)            :: ha
+        type(mlxc_array)            :: res
+        type(mlxc_stream)           :: s
+        integer(c_int)              :: ierr
+        integer(c_int), allocatable :: axes(:)
+        call mlxf_require_device(proc)
+        ha = mlxf_handle(a, proc)
+        axes = mlxf_axes_of(a, option%dims, proc)
+        res = mlxc_array_new()
+        if( option%on_cpu )then
+            s = cpu_stream(proc)
+        else
+            s = mlxf_default_stream(proc)
+        endif
+        ierr = f(res, ha, option%ord, axes, int(size(axes), c_size_t), logical(option%keepdims, c_bool), s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call adopt(r, res, proc)
+    end subroutine mlxf_norm_op
+
+    ! the matrix norm named option%name of a over the Fortran dimensions option%dims, as mlxf_norm_op takes them, for
+    ! every int f(mlx_array* res, const mlx_array a, const char* ord, const int* axis, size_t axis_num, bool keepdims,
+    ! const mlx_stream s)
+    module subroutine mlxf_norm_text_op( r, f, a, option, proc )
+        type(mlx_array),      intent(inout) :: r
+        procedure(mlxc_norm_text_op)        :: f
+        type(mlx_array),      intent(in)    :: a
+        type(mlxf_norm_spec), intent(in)    :: option
+        character(len=*),     intent(in)    :: proc
+        type(mlxc_array)            :: ha
+        type(mlxc_array)            :: res
+        type(mlxc_stream)           :: s
+        integer(c_int)              :: ierr
+        integer(c_int), allocatable :: axes(:)
+        call mlxf_require_device(proc)
+        ha = mlxf_handle(a, proc)
+        axes = mlxf_axes_of(a, option%dims, proc)
+        res = mlxc_array_new()
+        if( option%on_cpu )then
+            s = cpu_stream(proc)
+        else
+            s = mlxf_default_stream(proc)
+        endif
+        ierr = f(res, ha, trim(option%name)//c_null_char, axes, int(size(axes), c_size_t), logical(option%keepdims, c_bool), s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call adopt(r, res, proc)
+    end subroutine mlxf_norm_text_op
+
+    ! r = f(a(1), a(2), option) for a function of mlxc_take_op's signature whose integer goes to MLX as given: an axis
+    ! already translated (a negative one counts from the last, so that it serves operands of different ranks) or a count
+    module subroutine mlxf_binary_axis_op( r, f, a, option, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_take_op)         :: f
+        type(mlx_array),  intent(in)    :: a(2)
+        integer,          intent(in)    :: option
+        character(len=*), intent(in)    :: proc
+        type(mlxc_array)  :: h(2)
+        type(mlxc_array)  :: res
+        type(mlxc_stream) :: s
+        integer(c_int)    :: ierr
+        call mlxf_require_device(proc)
+        h(1) = mlxf_handle(a(1), proc)
+        h(2) = mlxf_handle(a(2), proc)
+        res = mlxc_array_new()
+        s = mlxf_default_stream(proc)
+        ierr = f(res, h(1), h(2), int(option, c_int), s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call adopt(r, res, proc)
+    end subroutine mlxf_binary_axis_op
+
+    ! r = f(a, option), an absent option being MLX's default, for every int f(mlx_array* res, const mlx_array a,
+    ! mlx_optional_float scale, const mlx_stream s)
+    module subroutine mlxf_optional_float_op( r, f, a, proc, option )
+        type(mlx_array),  intent(inout)        :: r
+        procedure(mlxc_optional_float_op)      :: f
+        type(mlx_array),  intent(in)           :: a
+        character(len=*), intent(in)           :: proc
+        real(real32),     optional, intent(in) :: option
+        type(mlxc_array)          :: ha
+        type(mlxc_optional_float) :: scale
+        type(mlxc_array)          :: res
+        type(mlxc_stream)         :: s
+        integer(c_int)            :: ierr
+        call mlxf_require_device(proc)
+        ha = mlxf_handle(a, proc)
+        scale%value = 0
+        scale%has_value = present(option)
+        if( present(option) ) scale%value = real(option, c_float_kind)
+        res = mlxc_array_new()
+        s = mlxf_default_stream(proc)
+        ierr = f(res, ha, scale, s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call adopt(r, res, proc)
+    end subroutine mlxf_optional_float_op
+
+    ! r = option(1)*(a(2) times a(3)) + option(2)*a(1), a matrix product in MLX's view, for every int f(mlx_array* res,
+    ! const mlx_array c, const mlx_array a, const mlx_array b, float alpha, float beta, const mlx_stream s)
+    module subroutine mlxf_addmm_op( r, f, a, option, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_addmm_op)        :: f
+        type(mlx_array),  intent(in)    :: a(3)
+        real(real32),     intent(in)    :: option(2)
+        character(len=*), intent(in)    :: proc
+        type(mlxc_array)  :: h(3)
+        type(mlxc_array)  :: res
+        type(mlxc_stream) :: s
+        integer(c_int)    :: ierr
+        integer           :: i
+        call mlxf_require_device(proc)
+        do i = 1, 3
+            h(i) = mlxf_handle(a(i), proc)
+        end do
+        res = mlxc_array_new()
+        s = mlxf_default_stream(proc)
+        ierr = f(res, h(1), h(2), h(3), real(option(1), c_float_kind), real(option(2), c_float_kind), s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call adopt(r, res, proc)
+    end subroutine mlxf_addmm_op
+
+    ! r = f(option, a), the subscripts already in MLX's axis order, for every int f(mlx_array* res,
+    ! const char* subscripts, const mlx_vector_array operands, const mlx_stream s)
+    module subroutine mlxf_einsum_op( r, f, a, option, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_einsum_op)       :: f
+        type(mlx_array),  intent(in)    :: a(:)
+        character(len=*), intent(in)    :: option
+        character(len=*), intent(in)    :: proc
+        type(mlxc_vector_array) :: v
+        type(mlxc_array)        :: res
+        type(mlxc_stream)       :: s
+        integer(c_int)          :: ierr
+        call mlxf_require_device(proc)
+        if( size(a) == 0 ) call mlxf_fail(proc, 'empty list')
+        v = vector_of(a, proc)
+        res = mlxc_array_new()
+        s = mlxf_default_stream(proc)
+        ierr = f(res, trim(option)//c_null_char, v, s)
+        call mlxf_check(mlxc_vector_array_free(v), proc)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call adopt(r, res, proc)
+    end subroutine mlxf_einsum_op
+
+    ! r = f(a(1), a(2)) contracting the axes option(:, 1) of a(1) with the axes option(:, 2) of a(2), as MLX takes them,
+    ! for every int f(mlx_array* res, const mlx_array a, const mlx_array b, const int* axes_a, size_t axes_a_num,
+    ! const int* axes_b, size_t axes_b_num, const mlx_stream s)
+    module subroutine mlxf_tensordot_op( r, f, a, option, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_tensordot_op)    :: f
+        type(mlx_array),  intent(in)    :: a(2)
+        integer,          intent(in)    :: option(:,:)
+        character(len=*), intent(in)    :: proc
+        type(mlxc_array)            :: h(2)
+        type(mlxc_array)            :: res
+        type(mlxc_stream)           :: s
+        integer(c_int)              :: ierr
+        integer(c_int), allocatable :: axes(:,:)
+        integer(c_size_t)           :: n
+        call mlxf_require_device(proc)
+        if( size(option, 2) /= 2 ) call mlxf_fail(proc, 'two lists of axes are needed')
+        h(1) = mlxf_handle(a(1), proc)
+        h(2) = mlxf_handle(a(2), proc)
+        axes = int(option, c_int)
+        n = int(size(axes, 1), c_size_t)
+        res = mlxc_array_new()
+        s = mlxf_default_stream(proc)
+        ierr = f(res, h(1), h(2), axes(:, 1), n, axes(:, 2), n, s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call adopt(r, res, proc)
+    end subroutine mlxf_tensordot_op
+
+    ! the convolution of a(1) with the kernels a(2) over one spatial dimension, with the stride, padding, dilation and
+    ! groups of option, for every function of mlx_conv1d's signature
+    module subroutine mlxf_conv1d_op( r, f, a, option, proc )
+        type(mlx_array),     intent(inout) :: r
+        procedure(mlxc_conv1d_op)          :: f
+        type(mlx_array),     intent(in)    :: a(2)
+        type(mlx_conv_spec), intent(in)    :: option
+        character(len=*),    intent(in)    :: proc
+        type(mlxc_array)  :: h(2)
+        type(mlxc_array)  :: res
+        type(mlxc_stream) :: s
+        integer(c_int)    :: ierr
+        integer(c_int)    :: st(1), pd(1), dl(1)
+        call mlxf_require_device(proc)
+        call conv_operands(h, a, 1, option%groups, proc)
+        if( allocated(option%padding_hi) .or. allocated(option%input_dilation) .or. allocated(option%output_padding) .or. option%flip ) &
+            &call mlxf_fail(proc, 'padding_hi, input_dilation and flip belong to mlx_conv_general, output_padding to the transposed convolutions')
+        st = conv_list(option%stride, 1, 1, proc)
+        pd = conv_list(option%padding, 1, 0, proc)
+        dl = conv_list(option%dilation, 1, 1, proc)
+        res = mlxc_array_new()
+        s = mlxf_default_stream(proc)
+        ierr = f(res, h(1), h(2), st(1), pd(1), dl(1), int(option%groups, c_int), s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call adopt(r, res, proc)
+    end subroutine mlxf_conv1d_op
+
+    ! the convolution over two spatial dimensions: option's lists, given per Fortran dimension, reach MLX reversed, for
+    ! every function of mlx_conv2d's signature
+    module subroutine mlxf_conv2d_op( r, f, a, option, proc )
+        type(mlx_array),     intent(inout) :: r
+        procedure(mlxc_conv2d_op)          :: f
+        type(mlx_array),     intent(in)    :: a(2)
+        type(mlx_conv_spec), intent(in)    :: option
+        character(len=*),    intent(in)    :: proc
+        type(mlxc_array)  :: h(2)
+        type(mlxc_array)  :: res
+        type(mlxc_stream) :: s
+        integer(c_int)    :: ierr
+        integer(c_int)    :: st(2), pd(2), dl(2)
+        call mlxf_require_device(proc)
+        call conv_operands(h, a, 2, option%groups, proc)
+        if( allocated(option%padding_hi) .or. allocated(option%input_dilation) .or. allocated(option%output_padding) .or. option%flip ) &
+            &call mlxf_fail(proc, 'padding_hi, input_dilation and flip belong to mlx_conv_general, output_padding to the transposed convolutions')
+        st = conv_list(option%stride, 2, 1, proc)
+        pd = conv_list(option%padding, 2, 0, proc)
+        dl = conv_list(option%dilation, 2, 1, proc)
+        res = mlxc_array_new()
+        s = mlxf_default_stream(proc)
+        ierr = f(res, h(1), h(2), st(1), st(2), pd(1), pd(2), dl(1), dl(2), int(option%groups, c_int), s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call adopt(r, res, proc)
+    end subroutine mlxf_conv2d_op
+
+    ! the convolution over three spatial dimensions, option's lists reversed, for every function of mlx_conv3d's signature
+    module subroutine mlxf_conv3d_op( r, f, a, option, proc )
+        type(mlx_array),     intent(inout) :: r
+        procedure(mlxc_conv3d_op)          :: f
+        type(mlx_array),     intent(in)    :: a(2)
+        type(mlx_conv_spec), intent(in)    :: option
+        character(len=*),    intent(in)    :: proc
+        type(mlxc_array)  :: h(2)
+        type(mlxc_array)  :: res
+        type(mlxc_stream) :: s
+        integer(c_int)    :: ierr
+        integer(c_int)    :: st(3), pd(3), dl(3)
+        call mlxf_require_device(proc)
+        call conv_operands(h, a, 3, option%groups, proc)
+        if( allocated(option%padding_hi) .or. allocated(option%input_dilation) .or. allocated(option%output_padding) .or. option%flip ) &
+            &call mlxf_fail(proc, 'padding_hi, input_dilation and flip belong to mlx_conv_general, output_padding to the transposed convolutions')
+        st = conv_list(option%stride, 3, 1, proc)
+        pd = conv_list(option%padding, 3, 0, proc)
+        dl = conv_list(option%dilation, 3, 1, proc)
+        res = mlxc_array_new()
+        s = mlxf_default_stream(proc)
+        ierr = f(res, h(1), h(2), st(1), st(2), st(3), pd(1), pd(2), pd(3), dl(1), dl(2), dl(3), int(option%groups, c_int), s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call adopt(r, res, proc)
+    end subroutine mlxf_conv3d_op
+
+    ! the general convolution over one to three spatial dimensions: padding before and after (padding_hi, or the same),
+    ! the kernel's and the input's dilation, groups and a reversed kernel, option's lists reversed, for every function of
+    ! mlx_conv_general's signature
+    module subroutine mlxf_conv_general_op( r, f, a, option, proc )
+        type(mlx_array),     intent(inout) :: r
+        procedure(mlxc_conv_general_op)    :: f
+        type(mlx_array),     intent(in)    :: a(2)
+        type(mlx_conv_spec), intent(in)    :: option
+        character(len=*),    intent(in)    :: proc
+        type(mlxc_array)            :: h(2)
+        type(mlxc_array)            :: res
+        type(mlxc_stream)           :: s
+        integer(c_int)              :: ierr
+        integer(c_int), allocatable :: st(:), lo(:), hi(:), dl(:), il(:)
+        integer(c_size_t)           :: n
+        integer                     :: nsp
+        call mlxf_require_device(proc)
+        nsp = a(1)%ndim()-2
+        call conv_operands(h, a, nsp, option%groups, proc)
+        if( allocated(option%output_padding) ) call mlxf_fail(proc, 'output_padding belongs to the transposed convolutions')
+        st = conv_list(option%stride, nsp, 1, proc)
+        lo = conv_list(option%padding, nsp, 0, proc)
+        if( allocated(option%padding_hi) )then
+            hi = conv_list(option%padding_hi, nsp, 0, proc)
+        else
+            hi = lo
+        endif
+        dl = conv_list(option%dilation, nsp, 1, proc)
+        il = conv_list(option%input_dilation, nsp, 1, proc)
+        n = int(nsp, c_size_t)
+        res = mlxc_array_new()
+        s = mlxf_default_stream(proc)
+        ierr = f(res, h(1), h(2), st, n, lo, n, hi, n, dl, n, il, n, int(option%groups, c_int), logical(option%flip, c_bool), s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call adopt(r, res, proc)
+    end subroutine mlxf_conv_general_op
+
+    ! the transposed convolution over one spatial dimension, with the stride, padding, dilation, output padding and
+    ! groups of option, for every function of mlx_conv_transpose1d's signature
+    module subroutine mlxf_conv_transpose1d_op( r, f, a, option, proc )
+        type(mlx_array),     intent(inout)  :: r
+        procedure(mlxc_conv_transpose1d_op) :: f
+        type(mlx_array),     intent(in)     :: a(2)
+        type(mlx_conv_spec), intent(in)     :: option
+        character(len=*),    intent(in)     :: proc
+        type(mlxc_array)  :: h(2)
+        type(mlxc_array)  :: res
+        type(mlxc_stream) :: s
+        integer(c_int)    :: ierr
+        integer(c_int)    :: st(1), pd(1), dl(1), op(1)
+        call mlxf_require_device(proc)
+        call conv_operands(h, a, 1, option%groups, proc)
+        if( allocated(option%padding_hi) .or. allocated(option%input_dilation) .or. option%flip ) &
+            &call mlxf_fail(proc, 'padding_hi, input_dilation and flip belong to mlx_conv_general')
+        st = conv_list(option%stride, 1, 1, proc)
+        pd = conv_list(option%padding, 1, 0, proc)
+        dl = conv_list(option%dilation, 1, 1, proc)
+        op = conv_list(option%output_padding, 1, 0, proc)
+        res = mlxc_array_new()
+        s = mlxf_default_stream(proc)
+        ierr = f(res, h(1), h(2), st(1), pd(1), dl(1), op(1), int(option%groups, c_int), s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call adopt(r, res, proc)
+    end subroutine mlxf_conv_transpose1d_op
+
+    ! the transposed convolution over two spatial dimensions, option's lists reversed, for every function of
+    ! mlx_conv_transpose2d's signature
+    module subroutine mlxf_conv_transpose2d_op( r, f, a, option, proc )
+        type(mlx_array),     intent(inout)  :: r
+        procedure(mlxc_conv_transpose2d_op) :: f
+        type(mlx_array),     intent(in)     :: a(2)
+        type(mlx_conv_spec), intent(in)     :: option
+        character(len=*),    intent(in)     :: proc
+        type(mlxc_array)  :: h(2)
+        type(mlxc_array)  :: res
+        type(mlxc_stream) :: s
+        integer(c_int)    :: ierr
+        integer(c_int)    :: st(2), pd(2), dl(2), op(2)
+        call mlxf_require_device(proc)
+        call conv_operands(h, a, 2, option%groups, proc)
+        if( allocated(option%padding_hi) .or. allocated(option%input_dilation) .or. option%flip ) &
+            &call mlxf_fail(proc, 'padding_hi, input_dilation and flip belong to mlx_conv_general')
+        st = conv_list(option%stride, 2, 1, proc)
+        pd = conv_list(option%padding, 2, 0, proc)
+        dl = conv_list(option%dilation, 2, 1, proc)
+        op = conv_list(option%output_padding, 2, 0, proc)
+        res = mlxc_array_new()
+        s = mlxf_default_stream(proc)
+        ierr = f(res, h(1), h(2), st(1), st(2), pd(1), pd(2), dl(1), dl(2), op(1), op(2), int(option%groups, c_int), s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call adopt(r, res, proc)
+    end subroutine mlxf_conv_transpose2d_op
+
+    ! the transposed convolution over three spatial dimensions, option's lists reversed, for every function of
+    ! mlx_conv_transpose3d's signature
+    module subroutine mlxf_conv_transpose3d_op( r, f, a, option, proc )
+        type(mlx_array),     intent(inout)  :: r
+        procedure(mlxc_conv_transpose3d_op) :: f
+        type(mlx_array),     intent(in)     :: a(2)
+        type(mlx_conv_spec), intent(in)     :: option
+        character(len=*),    intent(in)     :: proc
+        type(mlxc_array)  :: h(2)
+        type(mlxc_array)  :: res
+        type(mlxc_stream) :: s
+        integer(c_int)    :: ierr
+        integer(c_int)    :: st(3), pd(3), dl(3), op(3)
+        call mlxf_require_device(proc)
+        call conv_operands(h, a, 3, option%groups, proc)
+        if( allocated(option%padding_hi) .or. allocated(option%input_dilation) .or. option%flip ) &
+            &call mlxf_fail(proc, 'padding_hi, input_dilation and flip belong to mlx_conv_general')
+        st = conv_list(option%stride, 3, 1, proc)
+        pd = conv_list(option%padding, 3, 0, proc)
+        dl = conv_list(option%dilation, 3, 1, proc)
+        op = conv_list(option%output_padding, 3, 0, proc)
+        res = mlxc_array_new()
+        s = mlxf_default_stream(proc)
+        ierr = f(res, h(1), h(2), st(1), st(2), st(3), pd(1), pd(2), pd(3), dl(1), dl(2), dl(3), op(1), op(2), op(3), int(option%groups, c_int), s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call adopt(r, res, proc)
+    end subroutine mlxf_conv_transpose3d_op
+
+    ! the handles of a convolution's input a(1) and kernels a(2), both of rank n + 2 for n spatial dimensions (1 to
+    ! 3); MLX divides by the groups unchecked, so they are checked here
+    subroutine conv_operands( h, a, n, groups, proc )
+        type(mlxc_array), intent(out) :: h(2)
+        type(mlx_array),  intent(in)  :: a(2)
+        integer,          intent(in)  :: n, groups
+        character(len=*), intent(in)  :: proc
+        h(1) = mlxf_handle(a(1), proc)
+        h(2) = mlxf_handle(a(2), proc)
+        if( groups < 1 ) call mlxf_fail(proc, 'groups must be at least 1')
+        if( n < 1 .or. n > 3 ) call mlxf_fail(proc, 'a convolution has one to three spatial dimensions: an input of rank 3 to 5')
+        if( a(1)%ndim() /= n+2 ) call mlxf_fail(proc, 'the input needs the rank (channels, the spatial dimensions, batch)')
+        if( a(2)%ndim() /= n+2 ) call mlxf_fail(proc, 'the kernels need the rank (input channels, the spatial dimensions, kernels)')
+    end subroutine conv_operands
+
+    ! one list of a convolution's options as MLX takes it: a value per spatial dimension, the Fortran order reversed;
+    ! an absent list is fill everywhere and a list of one value serves every dimension
+    function conv_list( list, n, fill, proc ) result(v)
+        integer, allocatable, intent(in) :: list(:)
+        integer,              intent(in) :: n, fill
+        character(len=*),     intent(in) :: proc
+        integer(c_int) :: v(n)
+        v = int(fill, c_int)
+        if( .not. allocated(list) ) return
+        if( size(list) == 1 )then
+            v = int(list(1), c_int)
+        else if( size(list) == n )then
+            v = int(list(n:1:-1), c_int)
+        else
+            call mlxf_fail(proc, 'a list of the convolution spec needs one value, or one per spatial dimension')
+        endif
+    end function conv_list
+
+    ! the default stream of the CPU, where MLX runs the factorisations whatever the default device; the caller frees
+    ! it with mlxc_stream_free
+    function cpu_stream( proc ) result(s)
+        character(len=*), intent(in) :: proc
+        type(mlxc_stream) :: s
+        type(mlxc_device) :: dev
+        dev = mlxc_device_new_type(MLXC_CPU, 0_c_int)
+        s = mlxc_stream_new()
+        call mlxf_check(mlxc_get_default_stream(s, dev), proc)
+        call mlxf_check(mlxc_device_free(dev), proc)
+    end function cpu_stream
+
     ! unary plus: a new node with a's values
     module function pos_array( a ) result(r)
         class(mlx_array), intent(in) :: a
@@ -1515,17 +2267,54 @@ contains
     end subroutine check_fft_norm
 
     ! stops unless dtype is a member of MLX_DTYPES: mlx-c converts it through a table it indexes unchecked
-    subroutine check_dtype( dtype, proc )
+    module subroutine mlxf_check_dtype( dtype, proc )
         integer,          intent(in) :: dtype
         character(len=*), intent(in) :: proc
         if( all(dtype /= [MLX_DTYPES%bool, MLX_DTYPES%int8, MLX_DTYPES%int16, MLX_DTYPES%int32, MLX_DTYPES%int64, &
             &MLX_DTYPES%uint8, MLX_DTYPES%uint16, MLX_DTYPES%uint32, MLX_DTYPES%uint64, MLX_DTYPES%float16, &
             &MLX_DTYPES%bfloat16, MLX_DTYPES%float32, MLX_DTYPES%float64, MLX_DTYPES%complex64]) ) &
             &call mlxf_fail(proc, 'the dtype must be a member of MLX_DTYPES')
-    end subroutine check_dtype
+    end subroutine mlxf_check_dtype
+
+    ! 1-based integer positions as MLX's: one subtracted in the graph, or the amounts less, broadcast along
+    ! dimension 1; a non-integer array stops. uint64 goes through int64 first, since MLX promotes uint64 with a
+    ! signed integer to a float
+    module subroutine mlxf_zero_based( r, indices, proc, less )
+        type(mlx_array),  intent(inout)        :: r
+        type(mlx_array),  intent(in)           :: indices
+        character(len=*), intent(in)           :: proc
+        integer,          optional, intent(in) :: less(:)
+        type(mlx_array) :: offset, signed
+        integer         :: dtype
+        dtype = indices%kind()
+        if( all(dtype /= [MLX_DTYPES%int8, MLX_DTYPES%int16, MLX_DTYPES%int32, MLX_DTYPES%int64, MLX_DTYPES%uint8, &
+            &MLX_DTYPES%uint16, MLX_DTYPES%uint32, MLX_DTYPES%uint64]) ) call mlxf_fail(proc, 'indices must be integers')
+        if( present(less) )then
+            offset = mlx_from(int(less, int32))
+        else
+            offset = mlx_from(1_int32)
+        endif
+        if( dtype == MLX_DTYPES%uint64 )then
+            call mlxf_int_op(signed, mlxc_astype, indices, MLX_DTYPES%int64, proc)
+            call mlxf_binary(r, mlxc_subtract, signed, offset, proc)
+        else
+            call mlxf_binary(r, mlxc_subtract, indices, offset, proc)
+        endif
+    end subroutine mlxf_zero_based
+
+    ! MLX's 0-based positions as Fortran's: int32, one added in the graph
+    module subroutine mlxf_one_based( r, idx, proc )
+        type(mlx_array),  intent(inout) :: r
+        type(mlx_array),  intent(in)    :: idx
+        character(len=*), intent(in)    :: proc
+        type(mlx_array) :: cast, one
+        call mlxf_int_op(cast, mlxc_astype, idx, MLX_DTYPES%int32, proc)
+        one = mlx_from(1_int32)
+        call mlxf_binary(r, mlxc_add, cast, one, proc)
+    end subroutine mlxf_one_based
 
     ! the MLX axes of the Fortran dimensions dims of a, each checked against its rank
-    function axes_of( a, dims, proc ) result(axes)
+    module function mlxf_axes_of( a, dims, proc ) result(axes)
         type(mlx_array),  intent(in) :: a
         integer,          intent(in) :: dims(:)
         character(len=*), intent(in) :: proc
@@ -1537,7 +2326,7 @@ contains
             if( dims(i) < 1 .or. dims(i) > nd ) call mlxf_fail(proc, 'dimension outside array rank')
             axes(i) = int(nd-dims(i), c_int)
         end do
-    end function axes_of
+    end function mlxf_axes_of
 
     ! MLX's start, stop and strides (the columns of b) of the section option of a: Fortran's inclusive 1-based
     ! bounds reversed, 0-based and stop excluded; with a negative stride the stop is upper - 2, moved below

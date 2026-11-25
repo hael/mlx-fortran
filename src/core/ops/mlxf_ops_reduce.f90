@@ -14,9 +14,9 @@ use mlxf_c_ops,  only: mlxc_add, mlxc_argmax, mlxc_argmax_axis, mlxc_argmin, mlx
                        mlxc_min_axis, mlxc_prod, mlxc_prod_axes, mlxc_prod_axis, mlxc_std, mlxc_std_axes, &
                        mlxc_std_axis, mlxc_sum, mlxc_sum_axes, mlxc_sum_axis, mlxc_var, mlxc_var_axes, mlxc_var_axis
 use mlxf_defs,   only: MLX_DTYPES, mlxf_reduce_spec, mlxf_scan_spec
-use mlxf_array,  only: mlx_from, mlxf_binary, mlxf_list_op, mlxf_reduce_all_op, mlxf_reduce_dims_op, mlxf_reduce_op, &
-                       mlxf_scan_all_op, mlxf_scan_op, mlxf_scan_plain_all_op, mlxf_scan_plain_op, mlxf_var_all_op, &
-                       mlxf_var_dims_op, mlxf_var_op
+use mlxf_array,  only: mlx_from, mlxf_binary, mlxf_one_based, mlxf_list_op, mlxf_reduce_all_op, mlxf_reduce_dims_op, &
+                       mlxf_reduce_op, mlxf_scan_all_op, mlxf_scan_op, mlxf_scan_plain_all_op, mlxf_scan_plain_op, &
+                       mlxf_var_all_op, mlxf_var_dims_op, mlxf_var_op
 use mlxf_device, only: mlxf_enter
 use mlxf_error,  only: mlxf_fail
 implicit none
@@ -452,17 +452,6 @@ contains
         call loc_whole(r, mlxc_argmin, a, 'minloc')
     end function minloc_all
 
-    ! MLX's 0-based positions as Fortran's: int32, one added
-    module subroutine index_result( r, idx, proc )
-        type(mlx_array),  intent(inout) :: r
-        type(mlx_array),  intent(in)    :: idx
-        character(len=*), intent(in)    :: proc
-        type(mlx_array) :: cast, one
-        cast = mlx_astype(idx, MLX_DTYPES%int32)
-        one = mlx_from(1_int32)
-        call mlxf_binary(r, mlxc_add, cast, one, proc)
-    end subroutine index_result
-
     ! the positions of the extremum f finds along option%dim; a zero-size a gives zeros of the reduced shape,
     ! as Fortran does, since MLX's argmin and argmax refuse a zero-size array
     subroutine loc_along( r, f, a, option, proc )
@@ -486,7 +475,7 @@ contains
             return
         endif
         call mlxf_reduce_op(idx, f, a, option, proc)
-        call index_result(r, idx, proc)
+        call mlxf_one_based(r, idx, proc)
     end subroutine loc_along
 
     ! the subscripts of the extremum f finds in the whole array: MLX's position in its row-major order is the

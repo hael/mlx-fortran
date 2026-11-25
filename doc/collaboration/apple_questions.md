@@ -202,6 +202,59 @@ layout does 2.9 million pairs per second on 24 cores; the target machine is an M
       `2*(extent-1)` for IRFFT, explicit `n` for an odd real output. Independent DFT tests assert those
       conventions on both devices. The original `-1` assumption was our wrapper error, not an MLX defect.
 
+## H. Custom Metal kernels and the gathered products through mlx-c
+
+21. **mlx-c's Metal kernel cannot choose the math mode.** Status: open; read 2026-11-24 in mlx-c 0.8.0 and
+    MLX 0.32.4, not measured.
+    - Ask: `mlx::core::fast::metal_kernel` takes `compile_options` (the math mode: safe, relaxed or fast), and
+      `mlx_fast_metal_kernel_new` passes seven arguments and leaves it at its default. Would you take a
+      setter on the kernel, or an eighth argument, so that a kernel written through C can opt into the
+      relaxed mode as a Python one can?
+    - Where: mlx-c `mlx/c/fast.cpp` (`mlx_fast_metal_kernel_new_`); MLX `mlx/fast.h` (`metal_kernel`),
+      `docs/src/dev/custom_metal_kernels.rst` ("Math Mode").
+    - Meanwhile: mlx-fortran's `mlx_metal_kernel` builds every kernel in the default safe mode; its spec has
+      no member for the mode.
+
+22. **`segmented_mm` does not check that the inner extents agree.** Status: open; read 2026-11-24 in MLX
+    0.32.4 and at head `5c8989446`, not run.
+    - Ask: `gather_mm` and `block_masked_mm` refuse operands whose inner extents differ ("Last dimension of
+      first input ... must match"); `segmented_mm` checks the two ranks, the segments' last extent and the
+      dtypes only, and hands `a` of (M, K) and `b` of (K', N) to the kernels. Is the check missing by
+      oversight? A segment's bounds are not checked against K either, which we take as intended.
+    - Where: MLX `mlx/ops.cpp` (`segmented_mm`), `mlx/backend/cpu/masked_mm.cpp` (`segmented_mm<T>`).
+    - Meanwhile: `mlx_segmented_mm` checks the ranks, the inner extents and the segments' first extent itself
+      and stops; the bounds stay unchecked, as every index of the library.
+
+## I. Convolutions and the Hadamard transform
+
+23. **A transposed convolution with a padding above `dilation*(k-1)` returns a shorter result.** Status: open;
+    measured 2026-11-25 on MLX 0.32.4, both devices.
+    - Ask: `conv_transpose1d` of `[1, 2, 3, 4]` with a kernel of one element `[1]`, stride 2 and padding 1
+      returns `[2, 0, 3]` (extent 3). The usual definition, `(W-1)*stride - 2*padding + dilation*(k-1) + 1 +
+      output_padding`, gives extent 5 and `[0, 2, 0, 3, 0]`: the full result `[1, 0, 2, 0, 3, 0, 4]` with one
+      element taken from each end. With a kernel of 3, stride 2 and padding 3 MLX returns one element where the
+      definition gives three. `conv_transpose_general` turns the padding into `padding_lo = dilation*(k-1) -
+      padding`, and a negative `padding_lo` makes `conv_general` slice the input before it is dilated, so each
+      unit of excess removes `stride` positions instead of one. Is a padding above `dilation*(k-1)` meant to
+      be refused, or to follow the definition?
+    - Where: MLX `mlx/ops.cpp` (`conv_transpose_general`, the negative-padding branch of `conv_general`).
+    - Meanwhile: the wrappers pass the options through, and the binding policy states the extent formula for
+      a padding up to `dilation*(k-1)` only. Our tests stay inside that bound.
+
+24. **float64 convolutions and the float64 Hadamard transform build a float64 graph and then do not evaluate
+    it as one.** Status: open; measured 2026-11-25 on MLX 0.32.4, CPU.
+    - Ask: on float64 operands `conv_general` returns a float64 array. With no dilation of the kernel or of
+      the input (and one group beyond one dimension) the CPU evaluates it through the GEMM path in float32
+      and casts the result; with a dilation, a flip or groups the slow path refuses it at the evaluation
+      ("[Convolution::eval] got unsupported data type."). `hadamard_transform` keeps a float64 dtype and its
+      evaluation fails too ("[hadamard] Unsupported type."). Could the operations either refuse float64 when
+      the graph is built, or say in their documentation that they are float32 (and float16) operations? A
+      float64 result computed in float32 is the case we would most like to see named.
+    - Where: MLX `mlx/backend/cpu/conv.cpp` (`explicit_gemm_conv_*`, `dispatch_slow_conv_type`),
+      `mlx/backend/cpu/hadamard.cpp`.
+    - Meanwhile: the binding policy lists both as float32 operations; our tests run them in float32 on both
+      devices.
+
 ## For information (not Apple's to fix)
 
 - gfortran mis-finalizes derived types in four patterns (allocatable components with defined assignment,

@@ -2,7 +2,9 @@
 ! Adapted from SIMPLE's simple_test_utils: same names and output, without SIMPLE's types.
 module mlxf_test_utils
 use, intrinsic :: iso_fortran_env, only: output_unit, int32, int64, real32, real64
-use mlxf, only: MLX_DEVICES, mlx_device_count
+use mlxf,           only: MLX_DEVICES, MLX_DTYPES, mlx_array, mlx_from, mlx_to, reshape, mlx_device_count, &
+                          mlx_default_device
+use mlxf_test_defs, only: elem_tolerance, ELEM_SEED_CALIBRATION, ELEM_SEEDS_JUDGED
 implicit none
 private
 
@@ -10,6 +12,7 @@ public :: assert_true, assert_false, assert_int, assert_real, assert_double, ass
 public :: begin_test_suite, end_test_suite, report_summary
 public :: tests_run, tests_failed
 public :: set_fixed_seed, bits_equal, test_devices, device_name
+public :: judge_error, find_tolerance, family_seeds, seeded_uniform, seeded_array, shaped_error
 
 integer, parameter :: MSGLEN = 512
 
@@ -30,6 +33,17 @@ end type test_failure
 interface bits_equal
     module procedure bits_equal_r32, bits_equal_r64, bits_equal_c32
 end interface bits_equal
+
+! a seeded operand of any rank up to five, float64 when wide and rounded to float32 otherwise
+interface seeded_array
+    module procedure seeded_array1, seeded_array2, seeded_array3, seeded_array4, seeded_array5
+end interface seeded_array
+
+! a result's largest error against a reference relative to max(1, bound); the reference's shape is the shape the
+! result must have, and a result of another shape or dtype gives huge
+interface shaped_error
+    module procedure shaped_error0, shaped_error1, shaped_error2, shaped_error3, shaped_error4, shaped_error5
+end interface shaped_error
 
 integer :: tests_run    = 0
 integer :: tests_failed = 0
@@ -94,6 +108,169 @@ contains
         name = 'cpu'
         if( dev == MLX_DEVICES%gpu ) name = 'gpu'
     end function device_name
+
+    ! one measured error against its frozen tolerance, printed in float32 epsilons for the calibration record
+    subroutine judge_error( err, tol, label, dtype, seed )
+        real(real64),     intent(in) :: err, tol
+        character(len=*), intent(in) :: label, dtype
+        integer,          intent(in) :: seed
+        character(len=160) :: line
+        write(line,'(A,I0,A,ES16.9,A,F8.3,A)') '    error '//trim(label)//' '//device_name(mlx_default_device())// &
+            &' '//dtype//' seed=', seed, ': ', err, ' (', err/real(epsilon(1._real32), real64), ' eps32)'
+        write(output_unit,'(A)') trim(line)
+        call record_assertion(err <= tol, trim(label)//' '//dtype//' within its frozen tolerance on the '// &
+            &device_name(mlx_default_device()))
+    end subroutine judge_error
+
+    ! the frozen tolerances of a function in a table (zero, failing every inexact check, when it has none)
+    function find_tolerance( table, name ) result(t)
+        type(elem_tolerance), intent(in) :: table(:)
+        character(len=*),     intent(in) :: name
+        type(elem_tolerance) :: t
+        integer              :: k
+        t = elem_tolerance(name, 0._real64, 0._real64)
+        do k = 1, size(table)
+            if( trim(table(k)%name) == trim(name) ) t = table(k)
+        end do
+    end function find_tolerance
+
+    ! the seeds a calibrated family runs: the calibration seed, then the judged ones
+    function family_seeds() result(seeds)
+        integer, allocatable :: seeds(:)
+        seeds = [ELEM_SEED_CALIBRATION, ELEM_SEEDS_JUDGED]
+    end function family_seeds
+
+    ! n values from a fixed seed, uniform in [-1, 1] and rounded once to float32, so that a float32 and a float64
+    ! operand hold the same numbers
+    function seeded_uniform( n, seed ) result(x)
+        integer, intent(in) :: n, seed
+        real(real64) :: x(n)
+        call set_fixed_seed(seed)
+        call random_number(x)
+        x = real(real(2*x-1, real32), real64)
+    end function seeded_uniform
+
+    ! the array of Fortran shape shp that holds x in array element order: float64 when wide, else rounded to float32
+    function flat_array( x, shp, wide ) result(a)
+        real(real64), intent(in) :: x(:)
+        integer,      intent(in) :: shp(:)
+        logical,      intent(in) :: wide
+        type(mlx_array) :: a, flat
+        if( wide )then
+            flat = mlx_from(x)
+        else
+            flat = mlx_from(real(x, real32))
+        endif
+        a = reshape(flat, shp)
+    end function flat_array
+
+    function seeded_array1( x, wide ) result(a)
+        real(real64), intent(in) :: x(:)
+        logical,      intent(in) :: wide
+        type(mlx_array) :: a
+        a = flat_array(reshape(x, [size(x)]), shape(x), wide)
+    end function seeded_array1
+
+    function seeded_array2( x, wide ) result(a)
+        real(real64), intent(in) :: x(:,:)
+        logical,      intent(in) :: wide
+        type(mlx_array) :: a
+        a = flat_array(reshape(x, [size(x)]), shape(x), wide)
+    end function seeded_array2
+
+    function seeded_array3( x, wide ) result(a)
+        real(real64), intent(in) :: x(:,:,:)
+        logical,      intent(in) :: wide
+        type(mlx_array) :: a
+        a = flat_array(reshape(x, [size(x)]), shape(x), wide)
+    end function seeded_array3
+
+    function seeded_array4( x, wide ) result(a)
+        real(real64), intent(in) :: x(:,:,:,:)
+        logical,      intent(in) :: wide
+        type(mlx_array) :: a
+        a = flat_array(reshape(x, [size(x)]), shape(x), wide)
+    end function seeded_array4
+
+    function seeded_array5( x, wide ) result(a)
+        real(real64), intent(in) :: x(:,:,:,:,:)
+        logical,      intent(in) :: wide
+        type(mlx_array) :: a
+        a = flat_array(reshape(x, [size(x)]), shape(x), wide)
+    end function seeded_array5
+
+    ! the largest error of a float32 or float64 result against ref, in array element order, relative to
+    ! max(1, bound); huge when r has another shape than want, another dtype or cannot be read
+    function flat_error( r, want, ref, bound ) result(err)
+        type(mlx_array), intent(in) :: r
+        integer,         intent(in) :: want(:)
+        real(real64),    intent(in) :: ref(:), bound(:)
+        real(real64)              :: err
+        real(real32), allocatable :: got32(:)
+        real(real64), allocatable :: got(:)
+        integer,      allocatable :: sh(:)
+        integer                   :: st
+        err = huge(1._real64)
+        sh = r%shape()
+        if( size(sh) /= size(want) ) return
+        if( any(sh /= want) ) return
+        allocate(got(size(ref)))
+        if( r%kind() == MLX_DTYPES%float64 )then
+            call mlx_to(got, r, status=st)
+        else if( r%kind() == MLX_DTYPES%float32 )then
+            allocate(got32(size(ref)))
+            call mlx_to(got32, r, status=st)
+            got = real(got32, real64)
+        else
+            return
+        endif
+        if( st /= 0 ) return
+        err = 0._real64
+        if( size(ref) > 0 ) err = maxval(abs(got-ref)/max(1._real64, bound))
+    end function flat_error
+
+    function shaped_error0( r, ref, bound ) result(err)
+        type(mlx_array), intent(in) :: r
+        real(real64),    intent(in) :: ref, bound
+        real(real64) :: err
+        integer      :: none(0)
+        err = flat_error(r, none, [ref], [bound])
+    end function shaped_error0
+
+    function shaped_error1( r, ref, bound ) result(err)
+        type(mlx_array), intent(in) :: r
+        real(real64),    intent(in) :: ref(:), bound(:)
+        real(real64) :: err
+        err = flat_error(r, shape(ref), reshape(ref, [size(ref)]), reshape(bound, [size(bound)]))
+    end function shaped_error1
+
+    function shaped_error2( r, ref, bound ) result(err)
+        type(mlx_array), intent(in) :: r
+        real(real64),    intent(in) :: ref(:,:), bound(:,:)
+        real(real64) :: err
+        err = flat_error(r, shape(ref), reshape(ref, [size(ref)]), reshape(bound, [size(bound)]))
+    end function shaped_error2
+
+    function shaped_error3( r, ref, bound ) result(err)
+        type(mlx_array), intent(in) :: r
+        real(real64),    intent(in) :: ref(:,:,:), bound(:,:,:)
+        real(real64) :: err
+        err = flat_error(r, shape(ref), reshape(ref, [size(ref)]), reshape(bound, [size(bound)]))
+    end function shaped_error3
+
+    function shaped_error4( r, ref, bound ) result(err)
+        type(mlx_array), intent(in) :: r
+        real(real64),    intent(in) :: ref(:,:,:,:), bound(:,:,:,:)
+        real(real64) :: err
+        err = flat_error(r, shape(ref), reshape(ref, [size(ref)]), reshape(bound, [size(bound)]))
+    end function shaped_error4
+
+    function shaped_error5( r, ref, bound ) result(err)
+        type(mlx_array), intent(in) :: r
+        real(real64),    intent(in) :: ref(:,:,:,:,:), bound(:,:,:,:,:)
+        real(real64) :: err
+        err = flat_error(r, shape(ref), reshape(ref, [size(ref)]), reshape(bound, [size(bound)]))
+    end function shaped_error5
 
     ! seeds the intrinsic generator with a fixed, reproducible state derived from base_seed
     subroutine set_fixed_seed( base_seed )

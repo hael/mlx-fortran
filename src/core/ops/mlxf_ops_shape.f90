@@ -15,11 +15,12 @@ use mlxf_c_ops,  only: mlxc_arange, mlxc_as_strided, mlxc_atleast_1d, mlxc_atlea
                        mlxc_triu, mlxc_unflatten, mlxc_unstack, mlxc_unstack_axis, mlxc_zeros
 use mlxf_defs,   only: MLX_DTYPES, mlxf_slice_spec, mlxf_range_spec, mlxf_pad_spec, mlxf_strided_spec, mlxf_count_spec, &
                        mlxf_reduce_spec
-use mlxf_array,  only: mlx_from, mlxf_binary, mlxf_concat_op, mlxf_count_op, mlxf_int2_op, mlxf_int3_op, mlxf_int_op, &
-                       mlxf_list_op, mlxf_pad_op, mlxf_pad_width_op, mlxf_range_op, mlxf_reduce_all_op, mlxf_roll_op, &
-                       mlxf_slice_op, mlxf_split_op, mlxf_split_sections_op, mlxf_strided_op, mlxf_take_op, &
-                       mlxf_trace_op, mlxf_unary, mlxf_unflatten_op, mlxf_unstack_dim_op, mlxf_unstack_op, &
-                       mlxf_vector2_op, mlxf_vector_list_op, mlxf_vector_op, mlxf_zeros_op
+use mlxf_array,  only: mlx_from, mlxf_binary, mlxf_zero_based, mlxf_concat_op, mlxf_count_op, mlxf_int2_op, &
+                       mlxf_int3_op, mlxf_int_op, mlxf_list_op, mlxf_pad_op, mlxf_pad_width_op, mlxf_range_op, &
+                       mlxf_reduce_all_op, mlxf_roll_op, mlxf_slice_op, mlxf_split_op, mlxf_split_sections_op, &
+                       mlxf_strided_op, mlxf_take_op, mlxf_trace_op, mlxf_unary, mlxf_unflatten_op, &
+                       mlxf_unstack_dim_op, mlxf_unstack_op, mlxf_vector2_op, mlxf_vector_list_op, mlxf_vector_op, &
+                       mlxf_zeros_op
 use mlxf_device, only: mlxf_enter
 use mlxf_error,  only: mlxf_fail
 implicit none
@@ -569,7 +570,7 @@ contains
         type(mlx_array) :: r
         type(mlx_array) :: shifted
         call mlxf_enter('mlx_take_along_dim')
-        call zero_based(shifted, indices, 'mlx_take_along_dim')
+        call mlxf_zero_based(shifted, indices, 'mlx_take_along_dim')
         call mlxf_take_op(r, mlxc_take_along_axis, [a, shifted], dim, 'mlx_take_along_dim')
     end function mlx_take_along_dim
 
@@ -582,7 +583,7 @@ contains
         type(mlx_array) :: r
         type(mlx_array) :: shifted
         call mlxf_enter('mlx_take')
-        call zero_based(shifted, indices, 'mlx_take')
+        call mlxf_zero_based(shifted, indices, 'mlx_take')
         if( present(dim) )then
             call mlxf_take_op(r, mlxc_take_axis, [a, shifted], dim, 'mlx_take')
         else

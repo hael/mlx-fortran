@@ -5,7 +5,7 @@
 submodule(mlxf_ops) mlxf_ops_sort
 use mlxf_c_ops,  only: mlxc_argpartition, mlxc_argpartition_axis, mlxc_argsort, mlxc_argsort_axis, mlxc_partition, &
                        mlxc_partition_axis, mlxc_sort, mlxc_sort_axis, mlxc_topk, mlxc_topk_axis
-use mlxf_array,  only: mlxf_int2_op, mlxf_int_op, mlxf_unary
+use mlxf_array,  only: mlxf_int2_op, mlxf_int_op, mlxf_unary, mlxf_one_based
 use mlxf_device, only: mlxf_enter
 use mlxf_error,  only: mlxf_fail
 implicit none
@@ -37,7 +37,7 @@ contains
         else
             call mlxf_unary(idx, mlxc_argsort, a, 'mlx_argsort')
         endif
-        call index_result(r, idx, 'mlx_argsort')
+        call mlxf_one_based(r, idx, 'mlx_argsort')
     end function mlx_argsort
 
     ! a rearrangement with the element of sorted position kth in place: no element before it is larger and
@@ -70,7 +70,7 @@ contains
         else
             call mlxf_int_op(idx, mlxc_argpartition, a, kth-1, 'mlx_argpartition')
         endif
-        call index_result(r, idx, 'mlx_argpartition')
+        call mlxf_one_based(r, idx, 'mlx_argpartition')
     end function mlx_argpartition
 
     ! the k largest elements, in no defined order

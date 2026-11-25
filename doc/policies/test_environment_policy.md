@@ -29,8 +29,13 @@ One test executable, `mlxf_test_exec`, built by every compile script unless it i
 `MLXF_CTEST_BUDGET` in `test/CMakeLists.txt` must equal the registered count or configuration fails; it
 changes only with an owner decision or a plan that names the new entry, recorded in `doc/history/`.
 
-The current process budget is **8**: areas `core`, `array`, `ops`, `linalg`, `fft`, `compile`, `kernels`, plus
-the `object_contracts` guard group (ten members, including invalid FFT normalizations). The compile suite also
+The current process budget is **9**: areas `core`, `array`, `ops`, `linalg`, `fft`, `compile`, `fast`,
+`kernels`, plus the `object_contracts` guard group (nineteen members, including invalid FFT normalizations, dtypes
+outside `MLX_DTYPES`, a Metal kernel spec without outputs, an empty kernel applied, segments of the wrong shape, a
+factorisation of a rank-1 array, an unknown triangle and a convolution spec with a list of the wrong length). The `fast` area (the parity
+plan's decision 21) runs custom Metal kernels on the GPU against exact Fortran references and checks their
+refusal on the CPU device; it provokes a Metal compilation failure on purpose, which is why it has a process of
+its own. The compile suite also
 checks empty local handles in a two-thread OpenMP region; no live MLX work is submitted there. The operation areas compare both devices with independent Fortran
 references; `array` also runs 10,000 evaluated iterations per new operation family and checks exact
 active memory, live handles and stale releases. The compile area checks byte identity for exactly

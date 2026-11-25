@@ -8,11 +8,11 @@ use mlxf_c_ops,  only: mlxc_gather, mlxc_gather_single, mlxc_masked_scatter, mlx
                        mlxc_scatter_max_single, mlxc_scatter_min, mlxc_scatter_min_single, mlxc_scatter_prod, &
                        mlxc_scatter_prod_single, mlxc_scatter_single, mlxc_searchsorted, mlxc_slice_dynamic, &
                        mlxc_slice_update, mlxc_slice_update_add, mlxc_slice_update_dynamic, mlxc_slice_update_max, &
-                       mlxc_slice_update_min, mlxc_slice_update_prod, mlxc_subtract, mlxc_unique
-use mlxf_defs,   only: MLX_DTYPES, mlxf_index_spec, mlxf_slice_spec
-use mlxf_array,  only: mlx_from, mlxf_binary, mlxf_gather_op, mlxf_gather_single_op, mlxf_put_op, mlxf_scatter_op, &
-                       mlxf_slice_dynamic_op, mlxf_slice_update_op, mlxf_ternary_op, mlxf_ternary_vector_op, &
-                       mlxf_text_op, mlxf_unique_op
+                       mlxc_slice_update_min, mlxc_slice_update_prod, mlxc_unique
+use mlxf_defs,   only: mlxf_index_spec, mlxf_slice_spec
+use mlxf_array,  only: mlxf_zero_based, mlxf_one_based, mlxf_gather_op, mlxf_gather_single_op, mlxf_put_op, &
+                       mlxf_scatter_op, mlxf_slice_dynamic_op, mlxf_slice_update_op, mlxf_ternary_op, &
+                       mlxf_ternary_vector_op, mlxf_text_op, mlxf_unique_op
 use mlxf_device, only: mlxf_enter
 use mlxf_error,  only: mlxf_fail
 implicit none
@@ -34,7 +34,7 @@ contains
         allocate(ops(size(indices)+1))
         ops(1) = a
         do i = 1, size(indices)
-            call zero_based(ops(i+1), indices(i), 'mlx_gather')
+            call mlxf_zero_based(ops(i+1), indices(i), 'mlx_gather')
         end do
         spec%axes = axes_of(a%ndim(), dims, 'mlx_gather')
         spec%sizes = slice_sizes(size(slice_sizes):1:-1)
@@ -49,7 +49,7 @@ contains
         type(mlx_array)       :: shifted
         type(mlxf_index_spec) :: spec
         call mlxf_enter('mlx_gather')
-        call zero_based(shifted, indices, 'mlx_gather')
+        call mlxf_zero_based(shifted, indices, 'mlx_gather')
         spec%axes = [axis_of(a%ndim(), dim, 'mlx_gather')]
         spec%sizes = slice_sizes(size(slice_sizes):1:-1)
         call mlxf_gather_single_op(r, mlxc_gather_single, [a, shifted], spec, 'mlx_gather')
@@ -180,7 +180,7 @@ contains
         else
             call mlxf_text_op(idx, mlxc_searchsorted, [sorted, values], 'left', 'mlx_searchsorted')
         endif
-        call index_result(r, idx, 'mlx_searchsorted')
+        call mlxf_one_based(r, idx, 'mlx_searchsorted')
     end function mlx_searchsorted
 
     ! the distinct values of a, ascending, in size slots (unused ones hold fill, the smallest value by default),
@@ -201,8 +201,8 @@ contains
         if( ubound(raw, 1) /= 4 ) call mlxf_fail('mlx_unique', 'four results expected')
         allocate(results(4))
         results(1) = raw(1)
-        call index_result(results(2), raw(2), 'mlx_unique')
-        call index_result(results(3), raw(3), 'mlx_unique')
+        call mlxf_one_based(results(2), raw(2), 'mlx_unique')
+        call mlxf_one_based(results(3), raw(3), 'mlx_unique')
         results(4) = raw(4)
     end subroutine mlx_unique
 
@@ -216,7 +216,7 @@ contains
         type(mlx_array)       :: shifted
         type(mlxf_index_spec) :: spec
         call mlxf_enter('mlx_slice')
-        call zero_based(shifted, start, 'mlx_slice')
+        call mlxf_zero_based(shifted, start, 'mlx_slice')
         spec%axes = axes_of(a%ndim(), dims, 'mlx_slice')
         spec%sizes = slice_sizes(size(slice_sizes):1:-1)
         call mlxf_slice_dynamic_op(r, mlxc_slice_dynamic, [a, shifted], spec, 'mlx_slice')
@@ -240,7 +240,7 @@ contains
         type(mlx_array) :: r
         type(mlx_array) :: shifted
         call mlxf_enter('mlx_slice_update')
-        call zero_based(shifted, start, 'mlx_slice_update')
+        call mlxf_zero_based(shifted, start, 'mlx_slice_update')
         call mlxf_ternary_vector_op(r, mlxc_slice_update_dynamic, [a, update, shifted], axes_of(a%ndim(), dims, 'mlx_slice_update'), 'mlx_slice_update')
     end function slice_update_dynamic
 
@@ -284,26 +284,6 @@ contains
         call mlxf_slice_update_op(r, mlxc_slice_update_prod, [a, update], section(lower, upper, stride), 'mlx_slice_update_prod')
     end function mlx_slice_update_prod
 
-    ! 1-based integer positions as MLX's: one subtracted in the graph; a non-integer array stops. uint64 goes
-    ! through int64 first, since MLX promotes uint64 with a signed integer to a float
-    module subroutine zero_based( r, indices, proc )
-        type(mlx_array),  intent(inout) :: r
-        type(mlx_array),  intent(in)    :: indices
-        character(len=*), intent(in)    :: proc
-        type(mlx_array) :: one, signed
-        integer         :: dtype
-        dtype = indices%kind()
-        if( all(dtype /= [MLX_DTYPES%int8, MLX_DTYPES%int16, MLX_DTYPES%int32, MLX_DTYPES%int64, MLX_DTYPES%uint8, &
-            &MLX_DTYPES%uint16, MLX_DTYPES%uint32, MLX_DTYPES%uint64]) ) call mlxf_fail(proc, 'indices must be integers')
-        one = mlx_from(1_int32)
-        if( dtype == MLX_DTYPES%uint64 )then
-            signed = mlx_astype(indices, MLX_DTYPES%int64)
-            call mlxf_binary(r, mlxc_subtract, signed, one, proc)
-        else
-            call mlxf_binary(r, mlxc_subtract, indices, one, proc)
-        endif
-    end subroutine zero_based
-
     ! a scatter of ops(2), the updates, into ops(1) at the 1-based index arrays ops(3:), one per dimension of dims
     subroutine scatter_many( r, f, ops, dims, proc )
         type(mlx_array),  intent(inout) :: r
@@ -318,7 +298,7 @@ contains
         shifted(1) = ops(1)
         shifted(2) = ops(2)
         do i = 3, size(ops)
-            call zero_based(shifted(i), ops(i), proc)
+            call mlxf_zero_based(shifted(i), ops(i), proc)
         end do
         call mlxf_scatter_op(r, f, shifted, axes_of(ops(1)%ndim(), dims, proc), proc)
     end subroutine scatter_many
@@ -331,7 +311,7 @@ contains
         integer,          intent(in)    :: dim
         character(len=*), intent(in)    :: proc
         type(mlx_array) :: shifted
-        call zero_based(shifted, ops(2), proc)
+        call mlxf_zero_based(shifted, ops(2), proc)
         call mlxf_put_op(r, f, [ops(1), shifted, ops(3)], axis_of(ops(1)%ndim(), dim, proc), proc)
     end subroutine scatter_single
 

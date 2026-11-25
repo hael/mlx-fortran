@@ -77,9 +77,12 @@ The full contract is [`doc/policies/binding_contract_policy.md`](doc/policies/bi
 | matrices | `mlx_diag`, `mlx_diagonal`, `mlx_trace`, `mlx_tril`, `mlx_triu` (diagonal k > 0 above the main diagonal of the Fortran matrix) |
 | reductions | `sum`, `product`, `maxval`, `minval`, `all`, `any`, `count`, `maxloc`, `minloc`, `mlx_mean`, `mlx_median`, `mlx_var`, `mlx_std`, `mlx_logsumexp` (one dimension, a list or all; `keepdims`), `mlx_softmax` (`maxloc` and `minloc`: one dimension, or the whole array's subscripts) |
 | scans and sorting | `mlx_cumsum`, `mlx_cumprod`, `mlx_cummax`, `mlx_cummin`, `mlx_logcumsumexp`, `mlx_diff`, `mlx_sort`, `mlx_argsort`, `mlx_partition`, `mlx_argpartition`, `mlx_topk` |
-| linear algebra | `matmul` (batched) |
-| Fourier transforms | `mlx_fft`, `mlx_ifft`, `mlx_rfft`, `mlx_irfft`, `mlx_fft2`, `mlx_ifft2`, `MLX_FFT_NORMS` |
+| products | `matmul` (batched), `mlx_addmm`, `mlx_gather_mm`, `mlx_block_masked_mm`, `mlx_segmented_mm` (products of chosen matrices, of masked blocks, of segments of the inner dimension), `mlx_inner`, `mlx_outer`, `mlx_kron`, `mlx_vecdot` (Fortran's `dot_product`, batched), `mlx_cross`, `mlx_tensordot`, `mlx_einsum` (subscripts in Fortran's dimension order), `mlx_hadamard_transform` |
+| linear algebra | `mlx_inv`, `mlx_pinv`, `mlx_tri_inv`, `mlx_det`, `mlx_slogdet`, `mlx_cholesky`, `mlx_cholesky_inv`, `mlx_qr`, `mlx_lu`, `mlx_lu_factor`, `mlx_svd`, `mlx_eigh`, `mlx_eigvalsh`, `mlx_eig`, `mlx_eigvals`, `mlx_solve`, `mlx_solve_triangular` (a matrix is dimensions 1 and 2; these run on the CPU whatever the default device), `norm2`, `mlx_norm`, `mlx_norm_matrix` |
+| convolutions | `mlx_conv1d`, `mlx_conv2d`, `mlx_conv3d`, `mlx_conv_general`, `mlx_conv_transpose1d`, `mlx_conv_transpose2d`, `mlx_conv_transpose3d` (input (C, W[, H[, D]], N); options in `mlx_conv_spec`, per spatial dimension, W first) |
+| Fourier transforms | `mlx_fft`, `mlx_ifft`, `mlx_rfft`, `mlx_irfft`, `mlx_fft2`, `mlx_ifft2`, `mlx_fftn`, `mlx_ifftn`, `mlx_rfft2`, `mlx_irfft2`, `mlx_rfftn`, `mlx_irfftn` (the half-size dimension is the first listed), `mlx_fftshift`, `mlx_ifftshift`, `mlx_fftfreq`, `mlx_rfftfreq`, `MLX_FFT_NORMS` |
 | compilation | `mlx_function` (from a Fortran callback), `mlx_compile` |
+| custom kernels | `mlx_metal_kernel` (a Metal kernel from source text, GPU only), `mlx_metal_kernel_spec` |
 | devices and memory | `mlx_device_count`, `mlx_default_device`, `mlx_set_default_device`, `mlx_device_info_*`, `mlx_active_memory`, `mlx_peak_memory`, `mlx_reset_peak_memory`, `mlx_cache_memory`, `mlx_clear_cache`, `mlx_set_memory_limit`, `mlx_set_cache_limit` |
 | runtime | `mlx_last_error`, `mlx_live_count`, `mlx_runtime_version`, `mlxf_version_string`, `mlxf_build_description`, `mlxf_runtime_description`, `MLX_DTYPES`, `MLX_DEVICES`, `MLXF_HARD_ERROR_STATUS` |
 
@@ -96,7 +99,7 @@ shared library, either `brew install mlx-c` (no Xcode needed) or the pinned sour
 ./compile_clean.sh                        # Release build, static and fast test gates, install into build/
 ./compile_debug.sh                        # the same in Debug
 ./recompile.sh                            # incremental
-build/bin/mlxf_test_exec test=unit_core   # one area: core, array, ops, linalg, fft, compile, kernels
+build/bin/mlxf_test_exec test=unit_core   # one area: core, array, ops, linalg, fft, compile, fast, kernels
 ```
 
 Both builds treat warnings as errors in CI (`-DMLXF_WERROR=ON`). Only `mlxf.mod` and the library are

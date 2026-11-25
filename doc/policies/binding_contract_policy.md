@@ -70,7 +70,7 @@ written, the skill `mlxf-modern-fortran`.
   index results to int32. `mlx_as_strided`'s `offset` is a count of elements skipped, not a position, and its
   strides are in elements per Fortran dimension. Slices are `mlx_slice(a, lower, upper[, stride])` with inclusive bounds from 1.
 - A user never writes a C-order shape or a 0-based axis. The one exception is the source of a custom Metal
-  kernel, which indexes MLX's row-major, 0-based layout.
+  kernel, which indexes MLX's row-major, 0-based layout (section 12 says how a Fortran array reads there).
 
 ## 3. Lifetime
 
@@ -228,7 +228,8 @@ written, the skill `mlxf-modern-fortran`.
 - **Checked procedures** take an optional `integer, intent(out) :: status` and leave the message in
   `mlx_last_error()`: `mlx_eval`, `mlx_async_eval`, `mlx_synchronize`, `mlx_to`, `mlx_to_alloc`, `mlx_view`,
   `mlx_alloc`, `mlx_set_default_device`, `mlx_set_memory_limit`, `mlx_device_info_size`,
-  `mlx_device_info_string`. Without `status` they stop. A failure the
+  `mlx_device_info_string`, and the `apply` of `mlx_function` and of `mlx_metal_kernel`. Without `status` they
+  stop. A failure the
   library finds itself is reported the same way (`mlxf_report`): `mlx_to_alloc` allocates its destination
   with `stat=`, and a destination that cannot be allocated returns a status, the message "the destination
   could not be allocated", and the allocatable unallocated.
@@ -251,6 +252,8 @@ written, the skill `mlxf-modern-fortran`.
   only that the backend was compiled in). The default device is MLX's (the GPU when present);
   `mlx_set_default_device(MLX_DEVICES%cpu)` or `(MLX_DEVICES%gpu)` changes it. Without a GPU a Metal build of MLX cannot allocate on
   either device: the first operation that would allocate stops saying so. Explicit streams are not offered.
+  One choice of stream is the library's own: the factorisations, inverses, determinants, eigenvalues and
+  solvers of section 10, which MLX implements on the CPU only, always run on the CPU's default stream.
 - **One submitting thread.** Graphs are built and evaluated from one thread. Every public procedure opens
   with the entry (`mlxf_enter`: the one-thread guard, then initialisation on the first call), before it looks
   at an operand, so the guard runs on every path: an empty list of arrays, `mlx_live_count` and
@@ -281,9 +284,8 @@ written, the skill `mlxf-modern-fortran`.
 
 ## 9. Coming with later phases (the contract they keep)
 
-- **Custom Metal kernels** (`mlx_metal_kernel`): configured through a spec type (name, input and output
-  names, source, header, grid, threadgroup, template arguments, output shapes in Fortran order), only for a
-  measured bottleneck that ordinary or compiled operations cannot handle.
+- **Custom Metal kernels** (`mlx_metal_kernel`) are delivered: section 12. They are configured through a spec
+  type and kept for a measured bottleneck that ordinary or compiled operations cannot handle.
 
 
 ## 10. Operations, matrices and Fourier transforms
@@ -433,6 +435,136 @@ written, the skill `mlxf-modern-fortran`.
   scalar bounds, defaults to unit step and float32, and excludes `stop`; negative steps are supported.
 - `matmul(a,b)` multiplies Fortran dimensions 1 and 2 and broadcasts dimensions 3 and above. Complex
   multiplication does not conjugate either operand; use `conjg` explicitly when needed.
+- **Products of chosen, masked and segmented matrices.** Three products of real matrices in the Fortran view,
+  with no transpose and no copy: the operands are exchanged, as for `matmul` (MLX's product of the transposes
+  is the transpose of the Fortran product), and the lists and masks are exchanged with them; the only added
+  node is the shift of a list or of the segments to MLX's 0-based values. With a list, a mask or segments,
+  complex and integer operands stop (without, the first two are `matmul`, which takes them).
+  - `mlx_gather_mm(a,b[,lhs_indices,rhs_indices,sorted_indices])`:
+    `r(:,:,i) = matmul(a(:,:,lhs_indices(i)), b(:,:,rhs_indices(i)))`. An index is the one-based number of a
+    matrix in array element order over dimensions 3 and up of its operand: matrix 4 of a (m, k, 3, 2) array is
+    `a(:,:,1,2)`. The two index arrays broadcast together with leading dimensions aligned, and their shape
+    follows dimensions 1 and 2 of the result. An absent list takes the operand's matrices in order, with the
+    shape of its batch dimensions; with neither list the result is `matmul`'s, bit for bit.
+    `sorted_indices=.true.` tells MLX that the one list given is ascending. Index arrays are of any integer
+    dtype, shifted in the graph and unchecked, as every index.
+  - `mlx_block_masked_mm(a,b[,block_size,mask_out,operand_masks])`: `matmul(a,b)`, batched, with blocks of
+    `block_size` rows and columns left out (32 or 64, MLX's two sizes; 64 by default). A mask has one element
+    per block, `ceiling(extent/block_size)` along each of its two matrix dimensions, then the batch
+    dimensions: `mask_out(i,j)` for block (i, j) of the result, `operand_masks(1)` for the blocks of `a` (rows
+    by inner dimension) and `operand_masks(2)` for those of `b` (inner dimension by columns), both applied
+    before the product and given together (an all-true mask leaves an operand whole). A boolean mask keeps a
+    block or zeroes it; a real mask multiplies it. A block a mask drops is exactly zero. Without masks the
+    result is `matmul`'s, bit for bit.
+  - `mlx_segmented_mm(a,b,segments)`: two matrices (rank 2) cut along the inner dimension.
+    `segments(1,i)` and `segments(2,i)` are the first and the last inner index of segment i, inclusive and
+    one-based, and `r(:,:,i) = matmul(a(:,s1:s2), b(s1:s2,:))`; a last index below the first gives zeros, as
+    an empty section does (measured on both devices for gaps up to 299). The segments' dimensions 2 and up
+    follow dimensions 1 and 2 of the result. The wrapper checks what MLX does not: the two ranks, equal
+    inner extents, and a first dimension of extent 2 for `segments` (the shift of the bounds would otherwise
+    broadcast a (1, n) array into pairs). The bounds themselves are values of the graph and are not checked
+    against the inner extent, as no index is.
+  - MLX v0.32.4 evaluates the gathered and the masked product in float32 only: built on float64 operands they
+    fail the evaluation on the CPU with a status ("Currently only supports float32"). The segmented product is
+    float64 on the CPU. The tests (`linalg_mm` of `unit_linalg`) judge an element by its error relative to
+    `max(1, (|a| |b|)(i,j))` against real64 `matmul` of the same sections, at 4 epsilons of the result kind.
+- **Other products.** The exchange of operands that serves `matmul` also puts the dimensions of an inner
+  product, an outer product and a contraction in Fortran's order, `a`'s before `b`'s; none adds a node.
+  - `mlx_addmm(c,a,b[,alpha,beta])`: `alpha*matmul(a,b) + beta*c` in one node, `c` broadcast, both factors
+    real32 and 1 by default; a rank-1 `a` is a row and a rank-1 `b` a column, as for Fortran's `matmul`.
+  - `mlx_inner(a,b)` sums over dimension 1 of both, without conjugation: `r(i...,j...)` is the sum over k of
+    `a(k,i...)*b(k,j...)`. `mlx_outer(a,b)` is `r(i,j) = a(i)*b(j)` over the elements of each in array element
+    order. `mlx_kron(a,b)` is the Kronecker product, `r((i-1)*p+k,(j-1)*q+l) = a(i,j)*b(k,l)` for a (p, q)
+    `b`; a lower rank counts with trailing extents of 1.
+  - `mlx_vecdot(a,b[,dim])` is the dot product along `dim` (1 by default) of two arrays of one rank, the first
+    conjugated: Fortran's `dot_product`, batched. `mlx_cross(a,b[,dim])` is the cross product of the vectors of
+    3 elements along `dim` (1 by default); vectors of 2 count with a third component of zero and give 3. The
+    other dimensions broadcast, also between different ranks (the dimension reaches MLX as its axis `-dim`).
+  - `mlx_tensordot(a,b[,n])` contracts the last `n` dimensions of `a` with the first `n` of `b` in order (2 by
+    default; 1 is `matmul` for matrices); `mlx_tensordot(a,b,dims_a,dims_b)` contracts `dims_a(i)` with
+    `dims_b(i)`. The result has the remaining dimensions of `a`, then those of `b`.
+  - `mlx_einsum(subscripts,operands)`: each operand has one letter per dimension **in Fortran's order**, a
+    repeated letter is summed over, and `...` stands for the dimensions not named, which broadcast aligned from
+    the first. After `->` come the result's letters; without it the result has the letters that occur once,
+    capitals first and each case in alphabetical order, then the ellipsis. So `'ij,jk->ik'` is `matmul`,
+    `'ij->ji'` the transpose and `'ij...,jk...'` the batched product with the batch last. The wrapper reverses
+    every term for MLX and always names the result (MLX's own default would read in reverse order).
+  - `mlx_hadamard_transform(a[,scale])` is the Walsh-Hadamard transform along dimension 1, whose extent n is a
+    power of two, times `scale` (real32; `1/sqrt(n)` by default, its own inverse).
+  - MLX v0.32.4 evaluates the Hadamard transform in float32 only: on a float64 array the graph builds and the
+    evaluation fails with a status ("[hadamard] Unsupported type"). The others are float64 on the CPU. The
+    tests (`linalg_products`) judge an element by its error relative to `max(1,` the same product of the
+    magnitudes`)` against real64 loops, at 4 epsilons of the result kind.
+- **Matrices: factorisations, inverses, determinants, eigenvalues and solvers.** A Fortran matrix is
+  dimensions 1 and 2, further dimensions a batch, and MLX sees its transpose. What that costs, per function:
+  - nothing: `mlx_inv(a)`, `mlx_pinv(a)` ((n, m) for an (m, n) matrix), `mlx_det(a)`,
+    `call mlx_slogdet(a,sign,logabsdet)`, and `call mlx_svd(a,u,s,vt)` or `call mlx_svd(a,s)` (`a = u diag(s)
+    vt` with `u` (m, m), `s` descending, `vt` (n, n): MLX's factors of the transpose are these, exchanged; a
+    complex `vt` is the conjugate transpose of v);
+  - the other triangle asked of MLX: `mlx_cholesky(a[,upper])` (the lower `l` with `a = l l^T`, or the upper
+    `u` with `a = u^T u`; the other triangle of the result is exactly zero), `mlx_cholesky_inv(factor[,upper])`
+    (the inverse of `a` from that factor), `mlx_tri_inv(a[,upper])` (the other triangle of `a` is not read),
+    `mlx_eigvalsh(a[,uplo])` (ascending; `'L'` by default);
+  - a transpose of the result, a view: `call mlx_eigh(a,w,v[,uplo])`, the eigenvectors as the columns of `v`
+    (conjugated as well for a Hermitian matrix);
+  - a transpose of the operand and of every matrix that comes back, all views:
+    `call mlx_qr(a,q,r)` (`q` (m, k), `r` (k, n), k the smaller extent), `call mlx_lu(a,p,l,u)` (row i of `a`
+    is row `p(i)` of `matmul(l,u)`; `l` unit lower, `u` upper), `call mlx_lu_factor(a,lu,pivots)` (LAPACK's
+    packed factors; row i was exchanged with row `pivots(i)`, for i = 1, 2, ... in turn),
+    `call mlx_eig(a,w,v)` and `mlx_eigvals(a)` (complex64 results, right eigenvectors as the columns of `v`,
+    the same order of eigenvalues in both), `mlx_solve(a,b)` and `mlx_solve_triangular(a,b[,upper])`
+    (`matmul(a,x) = b`; `b` is a vector, or right-hand sides as the columns of matrices, and `x` has its shape;
+    `mlx_solve` needs the same batch dimensions on `a` and `b`, `mlx_solve_triangular` broadcasts them).
+  - `p` and `pivots` are one-based int32 (binding rule for index results). Results that MLX returns as several
+    arrays are subroutine arguments.
+  - **Device.** MLX v0.32.4 implements all of these on the CPU only (the probe
+    `scripts/probes/mlx_behaviour_probe.c` lists each refusal of the GPU stream). The wrappers submit them to
+    the CPU's default stream whatever the default device; the transposes and the index shift stay on the
+    default device, and MLX evaluates a graph that crosses the two (unified memory, no copy). float64 remains a
+    CPU-device dtype: a float64 operand needs the CPU as the default device.
+  - **Dtypes.** Real float32 and float64; `mlx_svd`, `mlx_eigh`, `mlx_eigvalsh`, `mlx_eig` and `mlx_eigvals`
+    also take complex64. `mlx_eig` and `mlx_eigvals` return complex64 whatever the operand.
+  - The tests (`linalg_matrix`) compare no factor: a backward error (`|a - factors|_F/|a|_F`), a residual
+    (`|a x - 1|_F/(|a|_F |x|_F)`, `|a x - b|_F/(|a|_F |x|_F + |b|_F)`), the departure of a factor from
+    orthogonal and the error of eigenvalues and singular values against a constructed spectrum are held to
+    10 n epsilons of the result kind (n the larger extent); shapes, triangles, the permutation and the order
+    are exact; a determinant is judged against real64 Gaussian elimination at 4 epsilons.
+- **Norms.** `norm2(a[,dim][,keepdims])` and `norm2(a,dims[,keepdims])` are the Euclidean norm, as Fortran's
+  (of magnitudes for complex arrays): of every element without `dim`, over at most two listed dimensions (the
+  Frobenius norm of the matrices they span). `mlx_norm(a,ord[,dim][,keepdims])` and
+  `mlx_norm(a,ord,dims[,keepdims])` take a real64 order: over one dimension the vector norm (the sum of
+  `|a|**ord` to the power `1/ord`; the largest or smallest magnitude for plus or minus infinity; the count of
+  nonzeros for 0), over two the matrix norm of the matrices whose rows run along `dims(1)` and columns along
+  `dims(2)` (the largest column sum for 1, the smallest for -1, the row sums for plus and minus infinity, the
+  largest and smallest singular value for 2 and -2). Without `dim` a rank-1 array is a vector and a rank-2
+  array a matrix over dimensions (1, 2); a higher rank stops. `mlx_norm_matrix(a,ord[,dims][,keepdims])` takes
+  `'fro'` or `'nuc'` (the sum of the singular values) over `dims`, dimensions 1 and 2 by default. The norms of
+  singular values (2, -2, `'nuc'`) run on the CPU's default stream, the others on the default device.
+- **Convolutions.** MLX's channels-last layouts read in Fortran order: the input is (C, W[, H[, D]], N), the
+  kernels (C/groups, kW[, kH[, kD]], C_out), the result (C_out, W'[, H'[, D']], N).
+  `mlx_conv1d`, `mlx_conv2d`, `mlx_conv3d`, `mlx_conv_general`, `mlx_conv_transpose1d`, `mlx_conv_transpose2d`
+  and `mlx_conv_transpose3d` take `(input, weight[, spec])`, `spec` a `type(mlx_conv_spec)`: `stride`,
+  `padding`, `dilation`, `output_padding`, `padding_hi`, `input_dilation` (integer lists, one value per spatial
+  dimension **in Fortran's order, W first**; absent is the default, one value serves every dimension),
+  `groups` (1) and `flip` (false). The wrapper reverses the lists for MLX.
+  - A convolution is MLX's, a correlation: output element w' sums
+    `input(:, (w'-1)*stride - padding + (k-1)*dilation + 1, n) * weight(:, k, o)` over k and the channels of the
+    output channel's group, zeros outside the input. `mlx_conv_general` (one to three spatial dimensions, by
+    the input's rank) also pads the far end by `padding_hi`, spreads the input by `input_dilation` and reverses
+    the kernels with `flip` (a true convolution).
+  - A transposed convolution adds `input(:, w, n) * weight(:, k, o)` to output element
+    `(w-1)*stride - padding + (k-1)*dilation + 1`; the output's extent is
+    `(W-1)*stride - 2*padding + dilation*(kW-1) + 1 + output_padding`. This holds for a padding up to
+    `dilation*(kW-1)`: beyond it MLX v0.32.4 returns a shorter result (question 23 of
+    `doc/collaboration/apple_questions.md`).
+  - A field a function does not take stops (`padding_hi`, `input_dilation` and `flip` outside
+    `mlx_conv_general`, `output_padding` outside the transposed ones), as does a list of another length and
+    `groups` below 1. MLX takes groups in one and two spatial dimensions only.
+  - MLX v0.32.4 computes a convolution in float32. A float64 one is computed in float32 on the CPU when
+    neither the kernels nor the input are dilated (and, beyond one dimension, there is one group), and fails
+    the evaluation with a status otherwise ("[Convolution::eval] got unsupported data type"): convert to
+    float32. The tests (`conv`) judge float32 results against direct real64 sums, relative to `max(1,` the sum
+    of magnitudes`)`, at 4 float32 epsilons on both devices.
 - `mlx_fft`, `mlx_ifft`, `mlx_rfft`, `mlx_irfft` take `(a,dim[,n,norm])`; `mlx_fft2` and `mlx_ifft2`
   take `(a,dims[,n,norm])` with two dimensions and, when supplied, two lengths paired with those
   dimensions. Explicit lengths truncate or zero-pad; omitted lengths use the input extents except
@@ -443,6 +575,34 @@ written, the skill `mlxf-modern-fortran`.
   Every FFT wrapper rejects a `norm` outside these three `MLX_FFT_NORMS` values before calling mlx-c.
   `rfft` stores `floor(n/2)+1` complex values. MLX transforms use float32/complex64 even for CPU float64
   input, so the FFT tests use the documented float32 norm bound against independent double DFTs.
+- **Transforms over several dimensions.** `mlx_fftn(a[,dims,n,norm])` and `mlx_ifftn(a[,dims,n,norm])`
+  transform the listed dimensions, every dimension when `dims` is absent, and treat the others as batches.
+  `n` gives one length per transformed dimension, paired with `dims` in its order (with dimensions 1 to rank
+  when `dims` is absent); a length pads with zeros or truncates, as in one dimension. Over two dimensions
+  `mlx_fftn` gives `mlx_fft2`'s result bit for bit.
+- **Real transforms over several dimensions: the half-size dimension is the first listed.**
+  `mlx_rfftn(a[,dims,n,norm])` and `mlx_rfft2(a,dims[,n,norm])` keep the `n(1)/2+1` non-negative frequencies
+  along `dims(1)` (dimension 1 when `dims` is absent) and every frequency along the other transformed
+  dimensions: a real (n1, n2, n3) array has the complex (n1/2+1, n2, n3) spectrum, as a real-to-complex
+  transform has in Fortran (FFTW's Fortran interface halves the first dimension, C's and NumPy's the last
+  axis). Dimension 1 is MLX's last axis, so `mlx_rfftn(a)` is MLX's own default; for other choices the
+  wrapper passes `dims(1)` last, where MLX halves. `mlx_irfftn(a[,dims,n,norm])` and
+  `mlx_irfft2(a,dims[,n,norm])` are the inverses: `n` gives the real lengths, by default the extents and
+  `2*(extent-1)` along `dims(1)`, so an odd length there needs `n`, as for `mlx_irfft`. An inverse real
+  transform takes the half spectrum of a real array: the imaginary parts of the zero and the Nyquist
+  frequency along the half-size dimension do not enter, and a length that cuts or pads one of the *other*
+  dimensions makes an input that is no real array's spectrum (not tested, and not defined by MLX).
+- `mlx_fftshift(a[,dims])` moves the zero frequency to the centre of each listed dimension (every dimension
+  by default), element `extent/2 + 1`: Fortran's `cshift(a, -(extent/2), dim)`. `mlx_ifftshift(a[,dims])` is
+  `cshift(a, extent/2, dim)` and undoes it; the two differ along a dimension of odd extent.
+- `mlx_fftfreq(n[,d])` is the rank-1 float32 array of the n frequencies of a transform, in the transform's
+  order, (0, 1, ..., -2, -1)/(n d) with the negative frequencies last and `d` the sample spacing (real64,
+  1 by default); `mlx_rfftfreq(n[,d])` is the n/2+1 non-negative ones of a real transform.
+  `mlx_fftshift(mlx_fftfreq(n))` ascends, with zero at element n/2+1.
+- The tests of these transforms (`fft_nd` of `unit_fft`) judge a result by its largest error relative to
+  `max(1, the largest |reference| of the result)` against a direct real64 DFT: an element near a zero of a
+  spectrum carries the rounding of the whole transform. The frozen tolerances are 4 float32 epsilons, and
+  4.18 and 4.02 for `mlx_irfftn` and `mlx_irfft2`.
 
 
 ## 11. Fortran callbacks and graph compilation
@@ -491,3 +651,92 @@ end subroutine callback
   independently of MLX and includes the passing explicit-output control. The owner approved this callback
   interface on 2026-11-22.
   No `grad`, `vjp` or `vmap` is wrapped.
+
+## 12. Custom Metal kernels
+
+`k = mlx_metal_kernel(spec)` (or `call k%new(spec)`) builds a kernel from the record `mlx_metal_kernel_spec`,
+and `call k%apply(inputs, outputs[, status])` adds one application of it to the graph. A kernel is for a
+measured bottleneck that ordinary or compiled operations cannot handle. It runs on the GPU only, so the
+graph form of the same computation stays as the CPU path and as the reference.
+
+- **The spec** is a record of plain components, filled by assignment:
+
+  | component | meaning | default |
+  | --- | --- | --- |
+  | `name` | the kernel's name (MLX builds the Metal function's name from it) | required |
+  | `source` | the body of the Metal function; MLX writes its signature | required |
+  | `header` | declarations placed before the function (helper functions) | none |
+  | `input_names(:)`, `output_names(:)` | the names the buffers take in the source, in the order of `inputs` and `outputs` | no input; at least one output |
+  | `grid(3)`, `threadgroup(3)` | the threads launched and their grouping, as Metal's (x, y, z); they are not array shapes and are not reversed | `[1, 1, 1]` each |
+  | `output_shapes(:)` | the outputs' Fortran shapes, one after another | required |
+  | `output_ranks(:)` | how many extents of `output_shapes` each output takes (0 for a rank-0 output) | the outputs share the extents equally |
+  | `output_dtypes(:)` | one `MLX_DTYPES` member per output | float32 |
+  | `template_dtype_names(:)` with `template_dtypes(:)`, `template_int_names(:)` with `template_ints(:)`, `template_bool_names(:)` with `template_bools(:)` | template parameters of the Metal function: a type name, an `int` or a `bool` per name | none |
+  | `init_value` | when set, every output is filled with it before the kernel runs | not set: the outputs start undefined |
+  | `ensure_row_contiguous` | MLX copies a strided input (a transpose, a section) first, so the source sees the array's elements in array element order | `.true.` |
+  | `atomic_outputs` | the outputs are `atomic<T>` buffers, for threads that add to the same element | `.false.` |
+  | `verbose` | MLX prints the Metal source it generates at each application | `.false.` |
+
+  `new` validates the spec once and stops on an invalid one (no name, no source, no output, shapes that do
+  not match the outputs, a dtype outside `MLX_DTYPES`, a grid or threadgroup below 1, a template name without
+  its value). The launch configuration belongs to the kernel object: another grid or output shape is another
+  kernel, built from the edited spec. That is cheap, because MLX compiles a generated source once per process:
+  on the M5 Ultra the first evaluation of a new source took 60 ms, and building, applying and evaluating a
+  second kernel object with the same source and another grid took 0.2 ms.
+- **What MLX generates.** For an input named `a` the source gets `const device T* a` with T the input's dtype
+  (`float`, `int`, `complex64_t` with members `real` and `imag`, ...); also `a_shape`, `a_strides` and `a_ndim`
+  when the source names them. An input of fewer than 8 elements is passed in Metal's `constant` address space,
+  and a rank-0 input as a reference: `scale`, not `scale[0]`. An output named `out` is `device T* out`, or
+  `device atomic<T>* out` under `atomic_outputs`, rank 0 included (`out[0]`). The Metal attributes the source
+  names (`thread_position_in_grid`, `threads_per_grid`, `threads_per_simdgroup`, ...) become arguments, and
+  MLX's kernel utilities (`elem_to_loc`, ...) are in scope.
+- **The source sees MLX's layout: row-major, 0-based, the shape reversed.** A Fortran array `a(n1, n2)` is
+  MLX's `[n2, n1]`: in the source `a_shape[0]` is n2, `a_shape[1]` is n1, and element `a(i, j)` is
+  `a[(j-1)*n1 + (i-1)]`. In general element (i1, ..., ir) is at `(i1-1) + n1*((i2-1) + n2*(...))`, its
+  position in Fortran's array element order less one, and `a_shape[k]` is the extent of dimension r - k. One
+  thread per element, `elem = thread_position_in_grid.x` with `grid = [size, 1, 1]`, therefore visits the
+  array in array element order; the first subscript is `elem % a_shape[r-1] + 1`. With `grid = [n1, n2, 1]`,
+  `thread_position_in_grid.x` is i - 1 and `.y` is j - 1. Index values that a Fortran program passes in an
+  array are whatever it stored: the tests pass 1-based bins and the source subtracts 1. A worked example, the
+  kernel that adds to each element of a rank-2 array the number of its column:
+
+  ```fortran
+  spec%name = 'add_column'
+  spec%input_names = ['inp']
+  spec%output_names = ['out']
+  spec%source = 'uint elem = thread_position_in_grid.x;'//new_line('a')// &
+                'out[elem] = inp[elem] + float(elem / inp_shape[1] + 1);'
+  spec%grid = [size(x), 1, 1]
+  spec%threadgroup = [64, 1, 1]
+  spec%output_shapes = shape(x)
+  k = mlx_metal_kernel(spec)
+  call k%apply([a], outputs)          ! outputs(1) has x's shape and holds x(i, j) + j
+  ```
+
+  With `ensure_row_contiguous = .false.` a strided input reaches the source as its buffer, in storage order:
+  the source then goes through `elem_to_loc(elem, a_shape, a_strides, a_ndim)`.
+- **Errors.** `apply` is a checked procedure. It returns a status, with `outputs` unallocated and MLX usable,
+  when the default device is the CPU ("[metal_kernel] Only supports the GPU"), when the number of inputs is
+  not the number of input names, when an input is empty or stale ("mlx_metal_kernel apply: an input array is
+  empty or stale"), and when an output is float64. The source
+  is compiled at the first evaluation of a result, so a source that does not compile, and a threadgroup above
+  the device's limit (1,024 threads on the M5 Ultra, checked before the grid clips it), fail `mlx_eval`,
+  `mlx_to` or `mlx_view` with a status; `mlx_last_error()` then holds the Metal compiler's message with the
+  source line. An empty or stale kernel stops in `apply`, as an empty array stops an operation.
+- **Lifetime.** A kernel is a counted handle like `mlx_function`: assignment shares it, `kill` is idempotent,
+  finalization releases it, and it counts as one object in `mlx_live_count()`. A graph keeps what it needs of
+  an applied kernel, so the kernel object may be killed before its outputs are evaluated. Empty kernels may be
+  copied and killed anywhere; a live one only from the submitting thread. The unsupported forms of section 3
+  apply.
+- **In a compiled function.** A callback may build and apply a kernel and use the result in further
+  operations; `mlx_compile` then traces the kernel as one node. `apply` takes `status=`, which the callback
+  returns; building a kernel from an invalid spec stops, as an operator does on a program error, so a callback
+  builds only from a spec known to be valid. The grid and the output shapes are those of the trace: a
+  compiled function that holds a kernel is for the shapes it was traced with (a shapeless reuse at other
+  shapes is not tested).
+- The gates: `unit_fast` (exact results on the GPU for the layout, a two-dimensional grid, two inputs and two
+  outputs, templates and a header, a strided input with and without the copy, atomic int32 outputs with
+  colliding updates, complex64 and rank-0 inputs, a kernel without inputs, a kernel inside a compiled
+  function; the refusals above through `status`; the refusal on the CPU device), and two guards of
+  `object_contracts` (a spec without outputs, an empty kernel applied). Not tested: the other stops of `new`,
+  a stale kernel, an output above rank 2, a template dtype other than float32.

@@ -10,7 +10,8 @@ use, intrinsic :: iso_fortran_env, only: int8, int16, int32, int64, real32, real
 use mlxf_c_types, only: mlxc_array, mlxc_stream, mlxc_vector_array, mlxc_optional_dtype, mlxc_optional_float
 use mlxf_defs,    only: mlxf_slice_spec, mlxf_fft_spec, mlxf_range_spec, mlxf_close_spec, mlxf_nan_spec, &
                         mlxf_shape_spec, mlxf_reduce_spec, mlxf_scan_spec, mlxf_pad_spec, mlxf_strided_spec, &
-                        mlxf_count_spec, mlxf_linspace_spec, mlxf_index_spec
+                        mlxf_count_spec, mlxf_linspace_spec, mlxf_index_spec, mlxf_fftn_spec, mlx_conv_spec, &
+                        mlxf_norm_spec
 implicit none
 
 public :: mlx_array, mlx_from, mlx_to, mlx_to_alloc, mlx_item, mlx_view, mlx_alloc, mlx_eval, mlx_async_eval
@@ -25,7 +26,8 @@ public :: mlxf_int_op, mlxf_dtype_op, &
     &mlxf_zeros_op, &
     &mlxf_range_op, &
     &mlxf_fft_op, &
-    &mlxf_fft2_op, &
+    &mlxf_fftn_op, &
+    &mlxf_freq_op, &
     &mlxf_close_op, &
     &mlxf_compare_op, &
     &mlxf_nan_op, &
@@ -70,8 +72,33 @@ public :: mlxf_int_op, mlxf_dtype_op, &
     &mlxf_ternary_vector_op, &
     &mlxf_text_op, &
     &mlxf_slice_update_op, &
-    &mlxf_unique_op
-public :: mlxf_vector_import, mlxf_vector_export
+    &mlxf_unique_op, &
+    &mlxf_gather_mm_op, &
+    &mlxf_masked_mm_op, &
+    &mlxf_cpu_unary, &
+    &mlxf_cpu_binary, &
+    &mlxf_cpu_flag_op, &
+    &mlxf_cpu_compare_op, &
+    &mlxf_cpu_pair_op, &
+    &mlxf_cpu_pair_text_op, &
+    &mlxf_cpu_text_op, &
+    &mlxf_cpu_unstack_op, &
+    &mlxf_cpu_svd_op, &
+    &mlxf_norm_op, &
+    &mlxf_norm_text_op, &
+    &mlxf_binary_axis_op, &
+    &mlxf_optional_float_op, &
+    &mlxf_addmm_op, &
+    &mlxf_einsum_op, &
+    &mlxf_tensordot_op, &
+    &mlxf_conv1d_op, &
+    &mlxf_conv2d_op, &
+    &mlxf_conv3d_op, &
+    &mlxf_conv_general_op, &
+    &mlxf_conv_transpose1d_op, &
+    &mlxf_conv_transpose2d_op, &
+    &mlxf_conv_transpose3d_op
+public :: mlxf_vector_import, mlxf_vector_export, mlxf_check_dtype, mlxf_axes_of, mlxf_zero_based, mlxf_one_based
 public :: mlxf_weak_scalar
 public :: mlx_synchronize, mlx_is_live, exp, mlxf_handle, mlxf_unary, mlxf_binary, mlxc_unary_op, mlxc_binary_op
 private
@@ -314,7 +341,7 @@ abstract interface
     end function mlxc_fft_op
     ! int f(mlx_array* res, const mlx_array a, const int* n, size_t n_num, const int* axes,
     ! size_t axes_num, mlx_fft_norm norm, const mlx_stream s)
-    function mlxc_fft2_op( res, a, n, n_num, axes, axes_num, norm, s ) bind(c)
+    function mlxc_fftn_op( res, a, n, n_num, axes, axes_num, norm, s ) bind(c)
         import
         type(mlxc_array), intent(inout) :: res
         type(mlxc_array), value         :: a
@@ -324,8 +351,44 @@ abstract interface
         integer(c_size_t), value        :: axes_num
         integer(c_int), value           :: norm
         type(mlxc_stream), value        :: s
-        integer(c_int) :: mlxc_fft2_op
-    end function mlxc_fft2_op
+        integer(c_int) :: mlxc_fftn_op
+    end function mlxc_fftn_op
+    ! int f(mlx_array* res, const mlx_array a, const mlx_array b, const mlx_array lhs_indices,
+    ! const mlx_array rhs_indices, bool sorted_indices, const mlx_stream s)
+    function mlxc_gather_mm_op( res, a, b, lhs_indices, rhs_indices, sorted_indices, s ) bind(c)
+        import
+        type(mlxc_array),  intent(inout) :: res
+        type(mlxc_array),  value         :: a
+        type(mlxc_array),  value         :: b
+        type(mlxc_array),  value         :: lhs_indices
+        type(mlxc_array),  value         :: rhs_indices
+        logical(c_bool),   value         :: sorted_indices
+        type(mlxc_stream), value         :: s
+        integer(c_int) :: mlxc_gather_mm_op
+    end function mlxc_gather_mm_op
+    ! int f(mlx_array* res, const mlx_array a, const mlx_array b, int block_size, const mlx_array mask_out,
+    ! const mlx_array mask_lhs, const mlx_array mask_rhs, const mlx_stream s)
+    function mlxc_masked_mm_op( res, a, b, block_size, mask_out, mask_lhs, mask_rhs, s ) bind(c)
+        import
+        type(mlxc_array),  intent(inout) :: res
+        type(mlxc_array),  value         :: a
+        type(mlxc_array),  value         :: b
+        integer(c_int),    value         :: block_size
+        type(mlxc_array),  value         :: mask_out
+        type(mlxc_array),  value         :: mask_lhs
+        type(mlxc_array),  value         :: mask_rhs
+        type(mlxc_stream), value         :: s
+        integer(c_int) :: mlxc_masked_mm_op
+    end function mlxc_masked_mm_op
+    ! int f(mlx_array* res, int n, double d, const mlx_stream s)
+    function mlxc_freq_op( res, n, d, s ) bind(c)
+        import
+        type(mlxc_array),  intent(inout) :: res
+        integer(c_int),    value         :: n
+        real(c_double),    value         :: d
+        type(mlxc_stream), value         :: s
+        integer(c_int) :: mlxc_freq_op
+    end function mlxc_freq_op
     ! int f(mlx_array* res, const mlx_array a, const mlx_array b, double rtol, double atol, bool equal_nan,
     ! const mlx_stream s)
     function mlxc_close_op( res, a, b, rtol, atol, equal_nan, s ) bind(c)
@@ -843,6 +906,246 @@ abstract interface
         type(mlxc_stream),       value         :: s
         integer(c_int) :: mlxc_unique_op
     end function mlxc_unique_op
+    ! int f(mlx_array* res_0, mlx_array* res_1, const mlx_array a, const mlx_stream s)
+    function mlxc_pair_op( res_0, res_1, a, s ) bind(c)
+        import
+        type(mlxc_array),  intent(inout) :: res_0
+        type(mlxc_array),  intent(inout) :: res_1
+        type(mlxc_array),  value         :: a
+        type(mlxc_stream), value         :: s
+        integer(c_int) :: mlxc_pair_op
+    end function mlxc_pair_op
+    ! int f(mlx_array* res_0, mlx_array* res_1, const mlx_array a, const char* text, const mlx_stream s)
+    function mlxc_pair_text_op( res_0, res_1, a, text, s ) bind(c)
+        import
+        type(mlxc_array),       intent(inout) :: res_0
+        type(mlxc_array),       intent(inout) :: res_1
+        type(mlxc_array),       value         :: a
+        character(kind=c_char), intent(in)    :: text(*)
+        type(mlxc_stream),      value         :: s
+        integer(c_int) :: mlxc_pair_text_op
+    end function mlxc_pair_text_op
+    ! int f(mlx_array* res, const mlx_array a, const char* text, const mlx_stream s)
+    function mlxc_unary_text_op( res, a, text, s ) bind(c)
+        import
+        type(mlxc_array),       intent(inout) :: res
+        type(mlxc_array),       value         :: a
+        character(kind=c_char), intent(in)    :: text(*)
+        type(mlxc_stream),      value         :: s
+        integer(c_int) :: mlxc_unary_text_op
+    end function mlxc_unary_text_op
+    ! int f(mlx_vector_array* res, const mlx_array a, bool flag, const mlx_stream s)
+    function mlxc_vector_flag_op( res, a, flag, s ) bind(c)
+        import
+        type(mlxc_vector_array), intent(inout) :: res
+        type(mlxc_array),        value         :: a
+        logical(c_bool),         value         :: flag
+        type(mlxc_stream),       value         :: s
+        integer(c_int) :: mlxc_vector_flag_op
+    end function mlxc_vector_flag_op
+    ! int f(mlx_array* res, const mlx_array a, double ord, const int* axis, size_t axis_num, bool keepdims,
+    ! const mlx_stream s)
+    function mlxc_norm_op( res, a, ord, axis, axis_num, keepdims, s ) bind(c)
+        import
+        type(mlxc_array),  intent(inout) :: res
+        type(mlxc_array),  value         :: a
+        real(c_double),    value         :: ord
+        integer(c_int),    intent(in)    :: axis(*)
+        integer(c_size_t), value         :: axis_num
+        logical(c_bool),   value         :: keepdims
+        type(mlxc_stream), value         :: s
+        integer(c_int) :: mlxc_norm_op
+    end function mlxc_norm_op
+    ! int f(mlx_array* res, const mlx_array a, const char* ord, const int* axis, size_t axis_num, bool keepdims,
+    ! const mlx_stream s)
+    function mlxc_norm_text_op( res, a, ord, axis, axis_num, keepdims, s ) bind(c)
+        import
+        type(mlxc_array),       intent(inout) :: res
+        type(mlxc_array),       value         :: a
+        character(kind=c_char), intent(in)    :: ord(*)
+        integer(c_int),         intent(in)    :: axis(*)
+        integer(c_size_t),      value         :: axis_num
+        logical(c_bool),        value         :: keepdims
+        type(mlxc_stream),      value         :: s
+        integer(c_int) :: mlxc_norm_text_op
+    end function mlxc_norm_text_op
+    ! int f(mlx_array* res, const mlx_array a, mlx_optional_float scale, const mlx_stream s)
+    function mlxc_optional_float_op( res, a, scale, s ) bind(c)
+        import
+        type(mlxc_array),          intent(inout) :: res
+        type(mlxc_array),          value         :: a
+        type(mlxc_optional_float), value         :: scale
+        type(mlxc_stream),         value         :: s
+        integer(c_int) :: mlxc_optional_float_op
+    end function mlxc_optional_float_op
+    ! int f(mlx_array* res, const mlx_array c, const mlx_array a, const mlx_array b, float alpha, float beta,
+    ! const mlx_stream s)
+    function mlxc_addmm_op( res, c, a, b, alpha, beta, s ) bind(c)
+        import
+        type(mlxc_array),   intent(inout) :: res
+        type(mlxc_array),   value         :: c
+        type(mlxc_array),   value         :: a
+        type(mlxc_array),   value         :: b
+        real(c_float_kind), value         :: alpha
+        real(c_float_kind), value         :: beta
+        type(mlxc_stream),  value         :: s
+        integer(c_int) :: mlxc_addmm_op
+    end function mlxc_addmm_op
+    ! int f(mlx_array* res, const char* subscripts, const mlx_vector_array operands, const mlx_stream s)
+    function mlxc_einsum_op( res, subscripts, operands, s ) bind(c)
+        import
+        type(mlxc_array),        intent(inout) :: res
+        character(kind=c_char),  intent(in)    :: subscripts(*)
+        type(mlxc_vector_array), value         :: operands
+        type(mlxc_stream),       value         :: s
+        integer(c_int) :: mlxc_einsum_op
+    end function mlxc_einsum_op
+    ! int f(mlx_array* res, const mlx_array a, const mlx_array b, const int* axes_a, size_t axes_a_num,
+    ! const int* axes_b, size_t axes_b_num, const mlx_stream s)
+    function mlxc_tensordot_op( res, a, b, axes_a, axes_a_num, axes_b, axes_b_num, s ) bind(c)
+        import
+        type(mlxc_array),  intent(inout) :: res
+        type(mlxc_array),  value         :: a
+        type(mlxc_array),  value         :: b
+        integer(c_int),    intent(in)    :: axes_a(*)
+        integer(c_size_t), value         :: axes_a_num
+        integer(c_int),    intent(in)    :: axes_b(*)
+        integer(c_size_t), value         :: axes_b_num
+        type(mlxc_stream), value         :: s
+        integer(c_int) :: mlxc_tensordot_op
+    end function mlxc_tensordot_op
+    ! int f(mlx_array* res, const mlx_array input, const mlx_array weight, int stride, int padding, int dilation,
+    ! int groups, const mlx_stream s)
+    function mlxc_conv1d_op( res, input, weight, stride, padding, dilation, groups, s ) bind(c)
+        import
+        type(mlxc_array),  intent(inout) :: res
+        type(mlxc_array),  value         :: input
+        type(mlxc_array),  value         :: weight
+        integer(c_int),    value         :: stride
+        integer(c_int),    value         :: padding
+        integer(c_int),    value         :: dilation
+        integer(c_int),    value         :: groups
+        type(mlxc_stream), value         :: s
+        integer(c_int) :: mlxc_conv1d_op
+    end function mlxc_conv1d_op
+    ! int f(mlx_array* res, const mlx_array input, const mlx_array weight, int stride_0, int stride_1,
+    ! int padding_0, int padding_1, int dilation_0, int dilation_1, int groups, const mlx_stream s)
+    function mlxc_conv2d_op( res, input, weight, stride_0, stride_1, padding_0, padding_1, dilation_0, dilation_1, groups, s ) bind(c)
+        import
+        type(mlxc_array),  intent(inout) :: res
+        type(mlxc_array),  value         :: input
+        type(mlxc_array),  value         :: weight
+        integer(c_int),    value         :: stride_0
+        integer(c_int),    value         :: stride_1
+        integer(c_int),    value         :: padding_0
+        integer(c_int),    value         :: padding_1
+        integer(c_int),    value         :: dilation_0
+        integer(c_int),    value         :: dilation_1
+        integer(c_int),    value         :: groups
+        type(mlxc_stream), value         :: s
+        integer(c_int) :: mlxc_conv2d_op
+    end function mlxc_conv2d_op
+    ! int f(mlx_array* res, const mlx_array input, const mlx_array weight, three strides, three paddings, three
+    ! dilations, each an int, int groups, const mlx_stream s)
+    function mlxc_conv3d_op( res, input, weight, stride_0, stride_1, stride_2, padding_0, padding_1, padding_2, dilation_0, dilation_1, dilation_2, groups, s ) bind(c)
+        import
+        type(mlxc_array),  intent(inout) :: res
+        type(mlxc_array),  value         :: input
+        type(mlxc_array),  value         :: weight
+        integer(c_int),    value         :: stride_0
+        integer(c_int),    value         :: stride_1
+        integer(c_int),    value         :: stride_2
+        integer(c_int),    value         :: padding_0
+        integer(c_int),    value         :: padding_1
+        integer(c_int),    value         :: padding_2
+        integer(c_int),    value         :: dilation_0
+        integer(c_int),    value         :: dilation_1
+        integer(c_int),    value         :: dilation_2
+        integer(c_int),    value         :: groups
+        type(mlxc_stream), value         :: s
+        integer(c_int) :: mlxc_conv3d_op
+    end function mlxc_conv3d_op
+    ! int f(mlx_array* res, const mlx_array input, const mlx_array weight, const int* stride, size_t stride_num,
+    ! const int* padding_lo, size_t padding_lo_num, const int* padding_hi, size_t padding_hi_num,
+    ! const int* kernel_dilation, size_t kernel_dilation_num, const int* input_dilation, size_t input_dilation_num,
+    ! int groups, bool flip, const mlx_stream s)
+    function mlxc_conv_general_op( res, input, weight, stride, stride_num, padding_lo, padding_lo_num, padding_hi, padding_hi_num, kernel_dilation, kernel_dilation_num, input_dilation, input_dilation_num, groups, flip, s ) bind(c)
+        import
+        type(mlxc_array),  intent(inout) :: res
+        type(mlxc_array),  value         :: input
+        type(mlxc_array),  value         :: weight
+        integer(c_int),    intent(in)    :: stride(*)
+        integer(c_size_t), value         :: stride_num
+        integer(c_int),    intent(in)    :: padding_lo(*)
+        integer(c_size_t), value         :: padding_lo_num
+        integer(c_int),    intent(in)    :: padding_hi(*)
+        integer(c_size_t), value         :: padding_hi_num
+        integer(c_int),    intent(in)    :: kernel_dilation(*)
+        integer(c_size_t), value         :: kernel_dilation_num
+        integer(c_int),    intent(in)    :: input_dilation(*)
+        integer(c_size_t), value         :: input_dilation_num
+        integer(c_int),    value         :: groups
+        logical(c_bool),   value         :: flip
+        type(mlxc_stream), value         :: s
+        integer(c_int) :: mlxc_conv_general_op
+    end function mlxc_conv_general_op
+    ! int f(mlx_array* res, const mlx_array input, const mlx_array weight, int stride, int padding, int dilation,
+    ! int output_padding, int groups, const mlx_stream s)
+    function mlxc_conv_transpose1d_op( res, input, weight, stride, padding, dilation, output_padding, groups, s ) bind(c)
+        import
+        type(mlxc_array),  intent(inout) :: res
+        type(mlxc_array),  value         :: input
+        type(mlxc_array),  value         :: weight
+        integer(c_int),    value         :: stride
+        integer(c_int),    value         :: padding
+        integer(c_int),    value         :: dilation
+        integer(c_int),    value         :: output_padding
+        integer(c_int),    value         :: groups
+        type(mlxc_stream), value         :: s
+        integer(c_int) :: mlxc_conv_transpose1d_op
+    end function mlxc_conv_transpose1d_op
+    ! int f(mlx_array* res, const mlx_array input, const mlx_array weight, two strides, two paddings, two
+    ! dilations, two output paddings, each an int, int groups, const mlx_stream s)
+    function mlxc_conv_transpose2d_op( res, input, weight, stride_0, stride_1, padding_0, padding_1, dilation_0, dilation_1, output_padding_0, output_padding_1, groups, s ) bind(c)
+        import
+        type(mlxc_array),  intent(inout) :: res
+        type(mlxc_array),  value         :: input
+        type(mlxc_array),  value         :: weight
+        integer(c_int),    value         :: stride_0
+        integer(c_int),    value         :: stride_1
+        integer(c_int),    value         :: padding_0
+        integer(c_int),    value         :: padding_1
+        integer(c_int),    value         :: dilation_0
+        integer(c_int),    value         :: dilation_1
+        integer(c_int),    value         :: output_padding_0
+        integer(c_int),    value         :: output_padding_1
+        integer(c_int),    value         :: groups
+        type(mlxc_stream), value         :: s
+        integer(c_int) :: mlxc_conv_transpose2d_op
+    end function mlxc_conv_transpose2d_op
+    ! int f(mlx_array* res, const mlx_array input, const mlx_array weight, three strides, three paddings, three
+    ! dilations, three output paddings, each an int, int groups, const mlx_stream s)
+    function mlxc_conv_transpose3d_op( res, input, weight, stride_0, stride_1, stride_2, padding_0, padding_1, padding_2, dilation_0, dilation_1, dilation_2, output_padding_0, output_padding_1, output_padding_2, groups, s ) bind(c)
+        import
+        type(mlxc_array),  intent(inout) :: res
+        type(mlxc_array),  value         :: input
+        type(mlxc_array),  value         :: weight
+        integer(c_int),    value         :: stride_0
+        integer(c_int),    value         :: stride_1
+        integer(c_int),    value         :: stride_2
+        integer(c_int),    value         :: padding_0
+        integer(c_int),    value         :: padding_1
+        integer(c_int),    value         :: padding_2
+        integer(c_int),    value         :: dilation_0
+        integer(c_int),    value         :: dilation_1
+        integer(c_int),    value         :: dilation_2
+        integer(c_int),    value         :: output_padding_0
+        integer(c_int),    value         :: output_padding_1
+        integer(c_int),    value         :: output_padding_2
+        integer(c_int),    value         :: groups
+        type(mlxc_stream), value         :: s
+        integer(c_int) :: mlxc_conv_transpose3d_op
+    end function mlxc_conv_transpose3d_op
 end interface
 
 interface exp
@@ -1654,13 +1957,20 @@ interface
         type(mlxf_fft_spec), intent(in)    :: option
         character(len=*),    intent(in)    :: proc
     end subroutine mlxf_fft_op
-    module subroutine mlxf_fft2_op( r, f, a, option, proc )
-        type(mlx_array),     intent(inout) :: r
-        procedure(mlxc_fft2_op)            :: f
-        type(mlx_array),     intent(in)    :: a
-        type(mlxf_fft_spec), intent(in)    :: option
-        character(len=*),    intent(in)    :: proc
-    end subroutine mlxf_fft2_op
+    module subroutine mlxf_fftn_op( r, f, a, option, proc )
+        type(mlx_array),      intent(inout) :: r
+        procedure(mlxc_fftn_op)             :: f
+        type(mlx_array),      intent(in)    :: a
+        type(mlxf_fftn_spec), intent(in)    :: option
+        character(len=*),     intent(in)    :: proc
+    end subroutine mlxf_fftn_op
+    module subroutine mlxf_freq_op( r, f, n, d, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_freq_op)         :: f
+        integer,          intent(in)    :: n
+        real(c_double),   intent(in)    :: d
+        character(len=*), intent(in)    :: proc
+    end subroutine mlxf_freq_op
     module subroutine mlxf_close_op( r, f, a, option, proc )
         type(mlx_array),       intent(inout) :: r
         procedure(mlxc_close_op)             :: f
@@ -1972,6 +2282,198 @@ interface
         integer,          intent(in) :: dim
         character(len=*), intent(in) :: proc
     end subroutine check_dim
+    module subroutine mlxf_check_dtype( dtype, proc )
+        integer,          intent(in) :: dtype
+        character(len=*), intent(in) :: proc
+    end subroutine mlxf_check_dtype
+    module function mlxf_axes_of( a, dims, proc ) result(axes)
+        type(mlx_array),  intent(in) :: a
+        integer,          intent(in) :: dims(:)
+        character(len=*), intent(in) :: proc
+        integer(c_int), allocatable :: axes(:)
+    end function mlxf_axes_of
+    module subroutine mlxf_zero_based( r, indices, proc, less )
+        type(mlx_array),  intent(inout)        :: r
+        type(mlx_array),  intent(in)           :: indices
+        character(len=*), intent(in)           :: proc
+        integer,          optional, intent(in) :: less(:)
+    end subroutine mlxf_zero_based
+    module subroutine mlxf_gather_mm_op( r, f, a, option, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_gather_mm_op)    :: f
+        type(mlx_array),  intent(in)    :: a(4)
+        logical,          intent(in)    :: option
+        character(len=*), intent(in)    :: proc
+    end subroutine mlxf_gather_mm_op
+    module subroutine mlxf_masked_mm_op( r, f, a, option, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_masked_mm_op)    :: f
+        type(mlx_array),  intent(in)    :: a(5)
+        integer,          intent(in)    :: option
+        character(len=*), intent(in)    :: proc
+    end subroutine mlxf_masked_mm_op
+    module subroutine mlxf_one_based( r, idx, proc )
+        type(mlx_array),  intent(inout) :: r
+        type(mlx_array),  intent(in)    :: idx
+        character(len=*), intent(in)    :: proc
+    end subroutine mlxf_one_based
+    module subroutine mlxf_cpu_unary( r, f, a, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_unary_op)        :: f
+        type(mlx_array),  intent(in)    :: a
+        character(len=*), intent(in)    :: proc
+    end subroutine mlxf_cpu_unary
+    module subroutine mlxf_cpu_binary( r, f, a, b, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_binary_op)       :: f
+        type(mlx_array),  intent(in)    :: a, b
+        character(len=*), intent(in)    :: proc
+    end subroutine mlxf_cpu_binary
+    module subroutine mlxf_cpu_flag_op( r, f, a, option, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_flag_op)         :: f
+        type(mlx_array),  intent(in)    :: a
+        logical,          intent(in)    :: option
+        character(len=*), intent(in)    :: proc
+    end subroutine mlxf_cpu_flag_op
+    module subroutine mlxf_cpu_compare_op( r, f, a, option, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_compare_op)      :: f
+        type(mlx_array),  intent(in)    :: a(2)
+        logical,          intent(in)    :: option
+        character(len=*), intent(in)    :: proc
+    end subroutine mlxf_cpu_compare_op
+    module subroutine mlxf_cpu_pair_op( r, f, a, proc )
+        type(mlx_array),  intent(inout) :: r(2)
+        procedure(mlxc_pair_op)         :: f
+        type(mlx_array),  intent(in)    :: a
+        character(len=*), intent(in)    :: proc
+    end subroutine mlxf_cpu_pair_op
+    module subroutine mlxf_cpu_pair_text_op( r, f, a, option, proc )
+        type(mlx_array),  intent(inout) :: r(2)
+        procedure(mlxc_pair_text_op)    :: f
+        type(mlx_array),  intent(in)    :: a
+        character(len=*), intent(in)    :: option
+        character(len=*), intent(in)    :: proc
+    end subroutine mlxf_cpu_pair_text_op
+    module subroutine mlxf_cpu_text_op( r, f, a, option, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_unary_text_op)   :: f
+        type(mlx_array),  intent(in)    :: a
+        character(len=*), intent(in)    :: option
+        character(len=*), intent(in)    :: proc
+    end subroutine mlxf_cpu_text_op
+    module subroutine mlxf_cpu_unstack_op( r, f, a, proc )
+        type(mlx_array),  allocatable, intent(out) :: r(:)
+        procedure(mlxc_unstack_op)                 :: f
+        type(mlx_array),  intent(in)               :: a
+        character(len=*), intent(in)               :: proc
+    end subroutine mlxf_cpu_unstack_op
+    module subroutine mlxf_cpu_svd_op( r, f, a, option, proc )
+        type(mlx_array),  allocatable, intent(out) :: r(:)
+        procedure(mlxc_vector_flag_op)             :: f
+        type(mlx_array),  intent(in)               :: a
+        logical,          intent(in)               :: option
+        character(len=*), intent(in)               :: proc
+    end subroutine mlxf_cpu_svd_op
+    module subroutine mlxf_norm_op( r, f, a, option, proc )
+        type(mlx_array),      intent(inout) :: r
+        procedure(mlxc_norm_op)             :: f
+        type(mlx_array),      intent(in)    :: a
+        type(mlxf_norm_spec), intent(in)    :: option
+        character(len=*),     intent(in)    :: proc
+    end subroutine mlxf_norm_op
+    module subroutine mlxf_norm_text_op( r, f, a, option, proc )
+        type(mlx_array),      intent(inout) :: r
+        procedure(mlxc_norm_text_op)        :: f
+        type(mlx_array),      intent(in)    :: a
+        type(mlxf_norm_spec), intent(in)    :: option
+        character(len=*),     intent(in)    :: proc
+    end subroutine mlxf_norm_text_op
+    module subroutine mlxf_binary_axis_op( r, f, a, option, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_take_op)         :: f
+        type(mlx_array),  intent(in)    :: a(2)
+        integer,          intent(in)    :: option
+        character(len=*), intent(in)    :: proc
+    end subroutine mlxf_binary_axis_op
+    module subroutine mlxf_optional_float_op( r, f, a, proc, option )
+        type(mlx_array),  intent(inout)        :: r
+        procedure(mlxc_optional_float_op)      :: f
+        type(mlx_array),  intent(in)           :: a
+        character(len=*), intent(in)           :: proc
+        real(real32),     optional, intent(in) :: option
+    end subroutine mlxf_optional_float_op
+    module subroutine mlxf_addmm_op( r, f, a, option, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_addmm_op)        :: f
+        type(mlx_array),  intent(in)    :: a(3)
+        real(real32),     intent(in)    :: option(2)
+        character(len=*), intent(in)    :: proc
+    end subroutine mlxf_addmm_op
+    module subroutine mlxf_einsum_op( r, f, a, option, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_einsum_op)       :: f
+        type(mlx_array),  intent(in)    :: a(:)
+        character(len=*), intent(in)    :: option
+        character(len=*), intent(in)    :: proc
+    end subroutine mlxf_einsum_op
+    module subroutine mlxf_tensordot_op( r, f, a, option, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_tensordot_op)    :: f
+        type(mlx_array),  intent(in)    :: a(2)
+        integer,          intent(in)    :: option(:,:)
+        character(len=*), intent(in)    :: proc
+    end subroutine mlxf_tensordot_op
+    module subroutine mlxf_conv1d_op( r, f, a, option, proc )
+        type(mlx_array),     intent(inout) :: r
+        procedure(mlxc_conv1d_op)          :: f
+        type(mlx_array),     intent(in)    :: a(2)
+        type(mlx_conv_spec), intent(in)    :: option
+        character(len=*),    intent(in)    :: proc
+    end subroutine mlxf_conv1d_op
+    module subroutine mlxf_conv2d_op( r, f, a, option, proc )
+        type(mlx_array),     intent(inout) :: r
+        procedure(mlxc_conv2d_op)          :: f
+        type(mlx_array),     intent(in)    :: a(2)
+        type(mlx_conv_spec), intent(in)    :: option
+        character(len=*),    intent(in)    :: proc
+    end subroutine mlxf_conv2d_op
+    module subroutine mlxf_conv3d_op( r, f, a, option, proc )
+        type(mlx_array),     intent(inout) :: r
+        procedure(mlxc_conv3d_op)          :: f
+        type(mlx_array),     intent(in)    :: a(2)
+        type(mlx_conv_spec), intent(in)    :: option
+        character(len=*),    intent(in)    :: proc
+    end subroutine mlxf_conv3d_op
+    module subroutine mlxf_conv_general_op( r, f, a, option, proc )
+        type(mlx_array),     intent(inout) :: r
+        procedure(mlxc_conv_general_op)    :: f
+        type(mlx_array),     intent(in)    :: a(2)
+        type(mlx_conv_spec), intent(in)    :: option
+        character(len=*),    intent(in)    :: proc
+    end subroutine mlxf_conv_general_op
+    module subroutine mlxf_conv_transpose1d_op( r, f, a, option, proc )
+        type(mlx_array),     intent(inout)  :: r
+        procedure(mlxc_conv_transpose1d_op) :: f
+        type(mlx_array),     intent(in)     :: a(2)
+        type(mlx_conv_spec), intent(in)     :: option
+        character(len=*),    intent(in)     :: proc
+    end subroutine mlxf_conv_transpose1d_op
+    module subroutine mlxf_conv_transpose2d_op( r, f, a, option, proc )
+        type(mlx_array),     intent(inout)  :: r
+        procedure(mlxc_conv_transpose2d_op) :: f
+        type(mlx_array),     intent(in)     :: a(2)
+        type(mlx_conv_spec), intent(in)     :: option
+        character(len=*),    intent(in)     :: proc
+    end subroutine mlxf_conv_transpose2d_op
+    module subroutine mlxf_conv_transpose3d_op( r, f, a, option, proc )
+        type(mlx_array),     intent(inout)  :: r
+        procedure(mlxc_conv_transpose3d_op) :: f
+        type(mlx_array),     intent(in)     :: a(2)
+        type(mlx_conv_spec), intent(in)     :: option
+        character(len=*),    intent(in)     :: proc
+    end subroutine mlxf_conv_transpose3d_op
     module function vector_of( arrays, proc ) result(v)
         type(mlx_array),  intent(in) :: arrays(:)
         character(len=*), intent(in) :: proc

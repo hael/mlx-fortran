@@ -316,4 +316,72 @@ type(elem_tolerance), parameter :: REDUCE_TOLERANCES(16) = [&
     &elem_tolerance('mlx_hamming', ELEM_FLOOR32, ELEM_FLOOR64), &
     &elem_tolerance('mlx_hanning', ELEM_FLOOR32, ELEM_FLOOR64)]
 
+! the transform testers' fixtures per seed, along a fourth dimension: a seed's largest error is taken over about
+! a thousand transformed values
+integer, parameter :: FFT_NBATCH = 8
+! the transforms over several dimensions and the frequencies, over every form of the function: a transform's
+! largest error relative to max(1, the largest |reference| of its result), a frequency's relative to
+! max(1, |reference|). Calibrated on seed 1 on both devices and frozen as ELEM_TOLERANCES is, max(2 x the largest
+! error on either device, the float32 floor); MLX transforms in float32 whatever its input, so a float64 input
+! on the CPU is held to the float32 bound
+type(elem_tolerance), parameter :: FFT_TOLERANCES(8) = [&
+    &elem_tolerance('mlx_fftn', ELEM_FLOOR32, ELEM_FLOOR32), &
+    &elem_tolerance('mlx_ifftn', ELEM_FLOOR32, ELEM_FLOOR32), &
+    &elem_tolerance('mlx_rfftn', ELEM_FLOOR32, ELEM_FLOOR32), &
+    &elem_tolerance('mlx_irfftn', 4.979893410e-07_real64, 4.979893410e-07_real64), &
+    &elem_tolerance('mlx_rfft2', ELEM_FLOOR32, ELEM_FLOOR32), &
+    &elem_tolerance('mlx_irfft2', 4.796738626e-07_real64, 4.796738626e-07_real64), &
+    &elem_tolerance('mlx_fftfreq', ELEM_FLOOR32, ELEM_FLOOR32), &
+    &elem_tolerance('mlx_rfftfreq', ELEM_FLOOR32, ELEM_FLOOR32)]
+
+! the gathered, block-masked and segmented matrix products: an element's error relative to
+! max(1, (|a| |b|)(i, j)), the scale of a dot product's rounding, over every form of the function. Calibrated on
+! seed 1 on both devices and frozen as ELEM_TOLERANCES is. MLX evaluates the first two in float32 only; the
+! segmented product's float64 column is its float64 result on the CPU
+type(elem_tolerance), parameter :: MM_TOLERANCES(3) = [&
+    &elem_tolerance('mlx_gather_mm', ELEM_FLOOR32, ELEM_FLOOR64), &
+    &elem_tolerance('mlx_block_masked_mm', ELEM_FLOOR32, ELEM_FLOOR64), &
+    &elem_tolerance('mlx_segmented_mm', ELEM_FLOOR32, ELEM_FLOOR64)]
+
+! the products of linear algebra: an element's error relative to max(1, the same product of the magnitudes), over
+! every form of the function. Calibrated on seed 1 on both devices and frozen as ELEM_TOLERANCES is: no function
+! reached a float32 epsilon, so each holds the floor of its kind. MLX evaluates the Hadamard transform in float32
+! only; its float64 column judges nothing
+type(elem_tolerance), parameter :: PRODUCT_TOLERANCES(9) = [&
+    &elem_tolerance('mlx_inner', ELEM_FLOOR32, ELEM_FLOOR64), &
+    &elem_tolerance('mlx_outer', ELEM_FLOOR32, ELEM_FLOOR64), &
+    &elem_tolerance('mlx_kron', ELEM_FLOOR32, ELEM_FLOOR64), &
+    &elem_tolerance('mlx_vecdot', ELEM_FLOOR32, ELEM_FLOOR64), &
+    &elem_tolerance('mlx_cross', ELEM_FLOOR32, ELEM_FLOOR64), &
+    &elem_tolerance('mlx_tensordot', ELEM_FLOOR32, ELEM_FLOOR64), &
+    &elem_tolerance('mlx_einsum', ELEM_FLOOR32, ELEM_FLOOR64), &
+    &elem_tolerance('mlx_addmm', ELEM_FLOOR32, ELEM_FLOOR64), &
+    &elem_tolerance('mlx_hadamard_transform', ELEM_FLOOR32, ELEM_FLOOR64)]
+
+! the bound of a backward-stable factorisation or solve: this many times the matrix order times the epsilon of the
+! result's kind, for a backward error, a residual and the departure of a factor from orthogonal
+real(real64), parameter :: LINALG_RESIDUAL_FACTOR = 10._real64
+! determinants and norms: a value's error relative to max(1, |reference|), over every form of the function.
+! Calibrated on seed 1 on both devices and frozen as ELEM_TOLERANCES is: none reached a float32 epsilon (or two
+! float64 epsilons), so each holds the floor of its kind
+type(elem_tolerance), parameter :: MATRIX_TOLERANCES(5) = [&
+    &elem_tolerance('mlx_det', ELEM_FLOOR32, ELEM_FLOOR64), &
+    &elem_tolerance('mlx_slogdet', ELEM_FLOOR32, ELEM_FLOOR64), &
+    &elem_tolerance('norm2', ELEM_FLOOR32, ELEM_FLOOR64), &
+    &elem_tolerance('mlx_norm', ELEM_FLOOR32, ELEM_FLOOR64), &
+    &elem_tolerance('mlx_norm_matrix', ELEM_FLOOR32, ELEM_FLOOR64)]
+
+! the convolutions: an output element's error relative to max(1, the same sum of magnitudes), over every form of
+! the function. Calibrated on seed 1 on both devices and frozen as ELEM_TOLERANCES is: none passed 1.1 float32
+! epsilons, so each holds the float32 floor. MLX computes a convolution in float32 whatever its operands (and
+! refuses most float64 ones), so the float64 column holds the float32 bound and judges nothing
+type(elem_tolerance), parameter :: CONV_TOLERANCES(7) = [&
+    &elem_tolerance('mlx_conv1d', ELEM_FLOOR32, ELEM_FLOOR32), &
+    &elem_tolerance('mlx_conv2d', ELEM_FLOOR32, ELEM_FLOOR32), &
+    &elem_tolerance('mlx_conv3d', ELEM_FLOOR32, ELEM_FLOOR32), &
+    &elem_tolerance('mlx_conv_general', ELEM_FLOOR32, ELEM_FLOOR32), &
+    &elem_tolerance('mlx_conv_transpose1d', ELEM_FLOOR32, ELEM_FLOOR32), &
+    &elem_tolerance('mlx_conv_transpose2d', ELEM_FLOOR32, ELEM_FLOOR32), &
+    &elem_tolerance('mlx_conv_transpose3d', ELEM_FLOOR32, ELEM_FLOOR32)]
+
 end module mlxf_test_defs

@@ -60,6 +60,13 @@ type :: mlxf_fft_spec
     integer :: norm = 0
 end type mlxf_fft_spec
 
+! a transform over several dimensions: the Fortran dimensions in the order MLX takes their axes (it halves a
+! real transform along the last), the length along each, and the norm
+type :: mlxf_fftn_spec
+    integer, allocatable :: dims(:), n(:)
+    integer              :: norm = 0
+end type mlxf_fftn_spec
+
 type :: mlxf_range_spec
     real(c_double) :: start = 0, stop = 0, step = 1
     integer        :: dtype = int(MLXC_FLOAT32)
@@ -132,5 +139,48 @@ end type mlxf_linspace_spec
 type :: mlxf_index_spec
     integer, allocatable :: axes(:), sizes(:)
 end type mlxf_index_spec
+
+! the options of a convolution (mlx_conv1d to mlx_conv3d, mlx_conv_general, mlx_conv_transpose1d to 3d), one
+! value per spatial dimension in Fortran order (dimension 2 of the input first). An absent list is the default
+! (stride 1, padding 0, dilation 1, input dilation 1, output padding 0) and a list of one value serves every
+! spatial dimension. padding pads both ends of the input of a convolution with zeros and takes as much from both
+! ends of the result of a transposed one; mlx_conv_general alone pads the far end by padding_hi instead when it
+! is present, spreads the input by input_dilation and reverses the kernel with flip. output_padding belongs to
+! the transposed convolutions; groups is at least 1
+type :: mlx_conv_spec
+    integer, allocatable :: stride(:), padding(:), dilation(:)
+    integer, allocatable :: output_padding(:), padding_hi(:), input_dilation(:)
+    integer              :: groups = 1
+    logical              :: flip = .false.
+end type mlx_conv_spec
+
+! what a norm takes besides its array: the order as a number or as the name of a matrix norm, the Fortran
+! dimensions in the order MLX takes their axes, whether they stay with extent 1, and whether the norm is one
+! MLX computes on the CPU only (those of the singular values)
+type :: mlxf_norm_spec
+    real(c_double)       :: ord = 2
+    character(len=8)     :: name = ''
+    integer, allocatable :: dims(:)
+    logical              :: keepdims = .false.
+    logical              :: on_cpu = .false.
+end type mlxf_norm_spec
+
+! a custom Metal kernel and its launch (mlx_metal_kernel): the body of the Metal function (source), declarations
+! put before it (header), the names its buffers take in the source, the thread grid and the threadgroup as
+! Metal's (x, y, z), and the outputs. output_shapes holds the outputs' Fortran shapes one after another and
+! output_ranks how many extents each takes (absent: the outputs share them equally); absent output_dtypes are
+! float32. A template parameter is a name with a dtype, an integer or a logical. With init_value every output
+! is filled with it before the kernel runs. The source indexes MLX's buffers, row-major and 0-based
+type :: mlx_metal_kernel_spec
+    character(len=:), allocatable :: name, source, header
+    character(len=:), allocatable :: input_names(:), output_names(:)
+    integer                       :: grid(3) = [1, 1, 1], threadgroup(3) = [1, 1, 1]
+    integer,          allocatable :: output_shapes(:), output_ranks(:), output_dtypes(:)
+    character(len=:), allocatable :: template_dtype_names(:), template_int_names(:), template_bool_names(:)
+    integer,          allocatable :: template_dtypes(:), template_ints(:)
+    logical,          allocatable :: template_bools(:)
+    real(c_float),    allocatable :: init_value
+    logical                       :: ensure_row_contiguous = .true., atomic_outputs = .false., verbose = .false.
+end type mlx_metal_kernel_spec
 
 end module mlxf_defs

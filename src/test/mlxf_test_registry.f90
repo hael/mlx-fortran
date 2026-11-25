@@ -7,7 +7,8 @@ module mlxf_test_registry
 use, intrinsic :: iso_fortran_env,    only: real32, real64
 use mlxf,                             only: mlx_array, mlx_from, mlx_eval, mlx_live_count, mlx_last_error, &
                                             mlx_set_default_device, MLX_DEVICES, exp, mlx_fft, mlx_fft2, mlx_astype, &
-                                            mlx_zeros, mlx_arange
+                                            mlx_zeros, mlx_arange, mlx_metal_kernel, mlx_metal_kernel_spec, &
+                                            mlx_segmented_mm, mlx_qr, mlx_eigvalsh, mlx_conv2d, mlx_conv_spec
 use mlxf_array_tester,                only: run_all_array_tests
 use mlxf_device_tester,               only: run_all_device_tests
 use mlxf_error_tester,                only: run_all_error_tests, run_all_recovery_half_tests
@@ -23,7 +24,13 @@ use mlxf_ops_sort_tester,             only: run_all_ops_sort_tests
 use mlxf_ops_shape_tester,            only: run_all_ops_shape_tests
 use mlxf_ops_index_tester,            only: run_all_ops_index_tests
 use mlxf_linalg_tester,               only: run_all_linalg_tests
+use mlxf_linalg_mm_tester,            only: run_all_linalg_mm_tests
+use mlxf_linalg_products_tester,      only: run_all_linalg_products_tests
+use mlxf_linalg_matrix_tester,        only: run_all_linalg_matrix_tests
+use mlxf_conv_tester,                 only: run_all_conv_tests
 use mlxf_fft_tester,                  only: run_all_fft_tests
+use mlxf_fft_nd_tester,               only: run_all_fft_nd_tests
+use mlxf_fast_tester,                 only: run_all_fast_tests
 use mlxf_compile_tester,              only: run_all_compile_tests
 use mlxf_toy_polarft_calc_tester,     only: run_all_polarft_calc_tests
 use mlxf_toy_polarft_shiftmap_tester, only: run_all_polar_shiftmap_tests, run_all_polar_shiftmap_accuracy_tests
@@ -40,8 +47,8 @@ abstract interface
     end subroutine tester_entry
 end interface
 
-character(len=*), parameter :: AREAS(7) = [character(len=16) :: 'core', 'array', 'ops', 'linalg', 'fft', 'compile', &
-    &'kernels']
+character(len=*), parameter :: AREAS(8) = [character(len=16) :: 'core', 'array', 'ops', 'linalg', 'fft', 'compile', &
+    &'fast', 'kernels']
 ! the measure-only benchmarks, run by hand (never by CTest): mlxf_test_exec test=bench_<x> suite=<mode>
 character(len=*), parameter :: BENCHES(1) = [character(len=32) :: 'polar_table']
 ! sub-suites an area runs only when suite= names them (too costly for the fast gate)
@@ -52,7 +59,7 @@ type :: guard_member
     character(len=32) :: group = ''
 end type guard_member
 
-type(guard_member), parameter :: GUARDS(13) = [&
+type(guard_member), parameter :: GUARDS(19) = [&
     &guard_member('guard_empty_operation',   'object_contracts'), &
     &guard_member('guard_stale_handle',      'object_contracts'), &
     &guard_member('guard_openmp_region',     'object_contracts'), &
@@ -65,7 +72,13 @@ type(guard_member), parameter :: GUARDS(13) = [&
     &guard_member('guard_fft2_norm',         'object_contracts'), &
     &guard_member('guard_dtype_astype',      'object_contracts'), &
     &guard_member('guard_dtype_zeros',       'object_contracts'), &
-    &guard_member('guard_dtype_arange',      'object_contracts')]
+    &guard_member('guard_dtype_arange',      'object_contracts'), &
+    &guard_member('guard_kernel_spec',       'object_contracts'), &
+    &guard_member('guard_kernel_empty',      'object_contracts'), &
+    &guard_member('guard_segments_shape',    'object_contracts'), &
+    &guard_member('guard_matrix_rank',       'object_contracts'), &
+    &guard_member('guard_eigh_uplo',         'object_contracts'), &
+    &guard_member('guard_conv_spec',         'object_contracts')]
 
 contains
 
@@ -97,10 +110,17 @@ contains
                 call run_suite('ops_index',  run_all_ops_index_tests,  suite, ran)
             case('linalg')
                 call run_suite('linalg', run_all_linalg_tests, suite, ran)
+                call run_suite('linalg_mm', run_all_linalg_mm_tests, suite, ran)
+                call run_suite('linalg_products', run_all_linalg_products_tests, suite, ran)
+                call run_suite('linalg_matrix', run_all_linalg_matrix_tests, suite, ran)
+                call run_suite('conv', run_all_conv_tests, suite, ran)
             case('fft')
                 call run_suite('fft', run_all_fft_tests, suite, ran)
+                call run_suite('fft_nd', run_all_fft_nd_tests, suite, ran)
             case('compile')
                 call run_suite('compile', run_all_compile_tests, suite, ran)
+            case('fast')
+                call run_suite('fast', run_all_fast_tests, suite, ran)
             case('kernels')
                 call run_suite('polarft_calc', run_all_polarft_calc_tests, suite, ran)
                 call run_suite('polar_shiftmap', run_all_polar_shiftmap_tests, suite, ran)
@@ -186,6 +206,18 @@ contains
                 call guard_dtype_zeros
             case('guard_dtype_arange')
                 call guard_dtype_arange
+            case('guard_kernel_spec')
+                call guard_kernel_spec
+            case('guard_kernel_empty')
+                call guard_kernel_empty
+            case('guard_segments_shape')
+                call guard_segments_shape
+            case('guard_matrix_rank')
+                call guard_matrix_rank
+            case('guard_eigh_uplo')
+                call guard_eigh_uplo
+            case('guard_conv_spec')
+                call guard_conv_spec
             case('guard_empty_operation')
                 call guard_empty_operation
             case('guard_stale_handle')
@@ -245,6 +277,64 @@ contains
         write(*,'(a)') 'guard_dtype_arange: mlx_arange of a dtype outside MLX_DTYPES'
         r = mlx_arange(0.d0, 4.d0, dtype=99)
     end subroutine guard_dtype_arange
+
+    ! a Metal kernel spec that names no output stops when the kernel is built
+    subroutine guard_kernel_spec
+        type(mlx_metal_kernel_spec) :: spec
+        type(mlx_metal_kernel)      :: k
+        write(*,'(a)') 'guard_kernel_spec: a Metal kernel built from a spec without outputs'
+        spec%name = 'mlxf_guard_no_output'
+        spec%source = 'uint elem = thread_position_in_grid.x;'
+        k = mlx_metal_kernel(spec)
+    end subroutine guard_kernel_spec
+
+    ! applying a declared, never-built Metal kernel stops, with or without a status
+    subroutine guard_kernel_empty
+        type(mlx_metal_kernel)       :: k
+        type(mlx_array)              :: none(0)
+        type(mlx_array), allocatable :: outputs(:)
+        integer                      :: st
+        write(*,'(a)') 'guard_kernel_empty: applying an empty Metal kernel'
+        call k%apply(none, outputs, status=st)
+    end subroutine guard_kernel_empty
+
+    ! segments whose first dimension is not of extent 2 stop: the shift of their bounds would broadcast a (1, n)
+    ! array into pairs before MLX saw it
+    subroutine guard_segments_shape
+        type(mlx_array) :: a, b, r
+        write(*,'(a)') 'guard_segments_shape: mlx_segmented_mm with a (1, 3) array of segments'
+        a = mlx_from(reshape([1._real32, 2._real32, 3._real32, 4._real32], [2, 2]))
+        b = mlx_from(reshape([1._real32, 2._real32, 3._real32, 4._real32], [2, 2]))
+        r = mlx_segmented_mm(a, b, mlx_from(reshape([1, 2, 1], [1, 3])))
+    end subroutine guard_segments_shape
+
+    ! a factorisation of an array without a second dimension stops
+    subroutine guard_matrix_rank
+        type(mlx_array) :: a, q, r
+        write(*,'(a)') 'guard_matrix_rank: mlx_qr of a rank-1 array'
+        a = mlx_from([1._real32, 2._real32, 3._real32])
+        call mlx_qr(a, q, r)
+    end subroutine guard_matrix_rank
+
+    ! a triangle that is neither 'L' nor 'U' stops
+    subroutine guard_eigh_uplo
+        type(mlx_array) :: a, r
+        write(*,'(a)') 'guard_eigh_uplo: mlx_eigvalsh with the triangle X'
+        a = mlx_from(reshape([2._real32, 1._real32, 1._real32, 3._real32], [2, 2]))
+        r = mlx_eigvalsh(a, uplo='X')
+    end subroutine guard_eigh_uplo
+
+    ! a list of the convolution spec with neither one value nor one per spatial dimension stops
+    subroutine guard_conv_spec
+        type(mlx_array) :: a, w, r
+        real(real32)    :: x(1, 4, 4, 1), k(1, 2, 2, 1)
+        write(*,'(a)') 'guard_conv_spec: mlx_conv2d with three strides'
+        x = 1._real32
+        k = 1._real32
+        a = mlx_from(x)
+        w = mlx_from(k)
+        r = mlx_conv2d(a, w, mlx_conv_spec(stride=[1, 1, 1]))
+    end subroutine guard_conv_spec
 
     subroutine guard_empty_operation
         type(mlx_array) :: a, b

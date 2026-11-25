@@ -46,8 +46,9 @@ Rules:
              declares type(mlx_array) or class(mlx_array), anywhere in it; the getters a%shape(), %ndim(),
              %size(), %kind(), a keyword name and the argument of an inquiry intrinsic (size, lbound, ubound,
              shape, rank, allocated, present, storage_size, ...) are not references; an implied-do is checked
-             through its items; a call of a function the file defines or declares with a handle result counts
-             as a reference (it is never bare)
+             through its items; a call of a function the file defines or declares with a handle result, or
+             imports by name from a file of the tree that defines it (a generic that holds one included; the
+             user API's names are ctorcall's), counts as a reference (it is never bare)
   entry      every procedure that implements a name of the user API (the public block of src/core/mlxf.f90:
              its procedures, the specifics of its generics, the bindings of its types except final) opens with
              an entry call (mlxf_enter, mlxf_guard_thread, mlxf_require_device) or a call to a guarded helper
@@ -113,16 +114,17 @@ MAX_DUMMIES = 5
 DEFS_EXCEPTIONS = {}
 ENTRY_CALLS = ('mlxf_enter', 'mlxf_guard_thread', 'mlxf_require_device')
 # helpers an entry may call first instead: each must itself open with an entry call
-ENTRY_HELPERS = ('mlxf_unary', 'mlxf_binary', 'mlxf_weak_scalar', 'mlxf_int_op', 'mlxf_dtype_op', 'mlxf_vector_op', 'mlxf_reduce_op', 'mlxf_ternary_op', 'mlxf_take_op', 'mlxf_scan_op', 'mlxf_slice_op', 'mlxf_concat_op', 'mlxf_zeros_op', 'mlxf_range_op', 'mlxf_fft_op', 'mlxf_fft2_op', 'mlxf_close_op', 'mlxf_compare_op', 'mlxf_nan_op', 'mlxf_binary_vector_op', 'mlxf_full_op', 'mlxf_binary_int_op', 'mlxf_reduce_all_op', 'mlxf_reduce_dims_op', 'mlxf_var_all_op', 'mlxf_var_op', 'mlxf_var_dims_op', 'mlxf_int2_op', 'mlxf_int3_op', 'mlxf_trace_op', 'mlxf_scan_all_op', 'mlxf_scan_plain_op', 'mlxf_scan_plain_all_op', 'mlxf_roll_op', 'mlxf_unflatten_op', 'mlxf_vector2_op', 'mlxf_strided_op', 'mlxf_count_op', 'mlxf_window_op', 'mlxf_identity_op', 'mlxf_eye_op', 'mlxf_linspace_op', 'mlxf_linspace_endpoint_op', 'mlxf_list_op', 'mlxf_vector_list_op', 'mlxf_meshgrid_op', 'mlxf_split_op', 'mlxf_split_sections_op', 'mlxf_unstack_op', 'mlxf_unstack_dim_op', 'mlxf_pad_op', 'mlxf_pad_width_op', 'mlxf_gather_op', 'mlxf_gather_single_op', 'mlxf_slice_dynamic_op', 'mlxf_scatter_op', 'mlxf_put_op', 'mlxf_ternary_vector_op', 'mlxf_text_op', 'mlxf_slice_update_op', 'mlxf_unique_op')
+ENTRY_HELPERS = ('mlxf_unary', 'mlxf_binary', 'mlxf_weak_scalar', 'mlxf_int_op', 'mlxf_dtype_op', 'mlxf_vector_op', 'mlxf_reduce_op', 'mlxf_ternary_op', 'mlxf_take_op', 'mlxf_scan_op', 'mlxf_slice_op', 'mlxf_concat_op', 'mlxf_zeros_op', 'mlxf_range_op', 'mlxf_fft_op', 'mlxf_fftn_op', 'mlxf_freq_op', 'mlxf_close_op', 'mlxf_compare_op', 'mlxf_nan_op', 'mlxf_binary_vector_op', 'mlxf_full_op', 'mlxf_binary_int_op', 'mlxf_reduce_all_op', 'mlxf_reduce_dims_op', 'mlxf_var_all_op', 'mlxf_var_op', 'mlxf_var_dims_op', 'mlxf_int2_op', 'mlxf_int3_op', 'mlxf_trace_op', 'mlxf_scan_all_op', 'mlxf_scan_plain_op', 'mlxf_scan_plain_all_op', 'mlxf_roll_op', 'mlxf_unflatten_op', 'mlxf_vector2_op', 'mlxf_strided_op', 'mlxf_count_op', 'mlxf_window_op', 'mlxf_identity_op', 'mlxf_eye_op', 'mlxf_linspace_op', 'mlxf_linspace_endpoint_op', 'mlxf_list_op', 'mlxf_vector_list_op', 'mlxf_meshgrid_op', 'mlxf_split_op', 'mlxf_split_sections_op', 'mlxf_unstack_op', 'mlxf_unstack_dim_op', 'mlxf_pad_op', 'mlxf_pad_width_op', 'mlxf_gather_op', 'mlxf_gather_single_op', 'mlxf_slice_dynamic_op', 'mlxf_scatter_op', 'mlxf_put_op', 'mlxf_ternary_vector_op', 'mlxf_text_op', 'mlxf_slice_update_op', 'mlxf_unique_op', 'mlxf_gather_mm_op', 'mlxf_masked_mm_op', 'mlxf_cpu_unary', 'mlxf_cpu_binary', 'mlxf_cpu_flag_op', 'mlxf_cpu_compare_op', 'mlxf_cpu_pair_op', 'mlxf_cpu_pair_text_op', 'mlxf_cpu_text_op', 'mlxf_cpu_unstack_op', 'mlxf_cpu_svd_op', 'mlxf_norm_op', 'mlxf_norm_text_op', 'mlxf_binary_axis_op', 'mlxf_optional_float_op', 'mlxf_addmm_op', 'mlxf_einsum_op', 'mlxf_tensordot_op', 'mlxf_conv1d_op', 'mlxf_conv2d_op', 'mlxf_conv3d_op', 'mlxf_conv_general_op', 'mlxf_conv_transpose1d_op', 'mlxf_conv_transpose2d_op', 'mlxf_conv_transpose3d_op')
 # the lifetime bindings touch shared state only through a live handle: they may open with the one-thread guard
 # conditional on one (between empty handles they run anywhere; nothing they do needs initialisation)
-ENTRY_IF_LIVE = ('assign_array', 'kill_array', 'function_assign', 'function_kill')
+ENTRY_IF_LIVE = ('assign_array', 'kill_array', 'function_assign', 'function_kill', 'metal_kernel_assign',
+                 'metal_kernel_kill')
 ENTRY_EXEMPT = {
     'mlxf_version_string': 'pure: returns a build constant, touches no state and calls no MLX function',
     'mlxf_build_description': 'pure: returns build constants, touches no state and calls no MLX function',
 }
 USER_MODULE = CORE + 'mlxf.f90'
-HANDLE_TYPES = ('mlx_array', 'mlx_function')
+HANDLE_TYPES = ('mlx_array', 'mlx_function', 'mlx_metal_kernel')
 HANDLE_DECL = re.compile(r'^(type|class)\s*\(\s*(' + '|'.join(HANDLE_TYPES) + r')\s*\)(.*)$', re.I)
 HANDLE_PREFIX = re.compile(r'\b(type|class)\s*\(\s*(' + '|'.join(HANDLE_TYPES) + r')\s*\)', re.I)
 HANDLE_GETTERS = ('shape', 'ndim', 'size', 'kind')
@@ -136,7 +138,7 @@ PARITY_PHASES = range(1, 9)
 # the mlx-c release the ledger lists: the minimum; a newer one's differences are warnings, an older one fails
 PARITY_MLXC_VERSION = '0.8.0'
 # the pending lines of the ledger; may only shrink
-PARITY_PENDING = 128
+PARITY_PENDING = 76
 MIRROR_LEDGER = 'scripts/toy_mirror.txt'
 TOY_DIR = 'src/test/'
 TOY_PREFIX = 'mlxf_toy_'
@@ -651,11 +653,38 @@ def ctor_violations(body, handles, functions=()):
     return bad
 
 
-def check_ctorexpr(rel, lines, out):
+def exported_handle_functions(lines):
+    """the functions with a handle result that a file defines, and the generics that hold one of them"""
+    names = handle_functions(lines, handle_names(lines))
+    generic = None
+    for s in statements(lines):
+        m = re.match(r'^interface\s+([a-z_]\w*)\s*$', s, re.I)
+        if m:
+            generic = m.group(1).lower()
+        elif re.match(r'^end\s*interface\b', s, re.I):
+            generic = None
+        elif generic:
+            m = re.match(r'^(?:module\s+)?procedure\b\s*(?:::)?(.*)$', s, re.I)
+            if m and any(n.strip().lower() in names for n in m.group(1).split(',')):
+                names.add(generic)
+    return names
+
+
+def imported_names(lines):
+    """the lower-case names a file imports through `use ..., only:` lists (a renamed one under its local name)"""
+    names = set()
+    for s in statements(lines):
+        m = re.match(r'^use\b.*\bonly\s*:(.*)$', s, re.I)
+        if m:
+            names |= set(n.split('=>')[0].strip().lower() for n in m.group(1).split(',') if n.strip())
+    return names
+
+
+def check_ctorexpr(rel, lines, out, tree_functions=()):
     handles = handle_names(lines)
     if not handles:
         return
-    functions = handle_functions(lines, handles)
+    functions = handle_functions(lines, handles) | (set(tree_functions) & imported_names(lines))
     for start, stmt in logical_lines([code_of(l) for l in lines]):
         for body in constructors(stmt):
             for e in ctor_violations(body, handles, functions):
@@ -1247,6 +1276,11 @@ def main():
     out = []
     cbind, libc, prints, state = {}, {}, {}, {}
     api = public_names(root)
+    tree_functions = set()
+    for rel in files:
+        tree_functions |= exported_handle_functions(read(root, rel).split('\n'))
+    # the user API is ctorcall's (and its generics named after intrinsics also take plain Fortran arguments)
+    tree_functions -= api
     check_reexport_mlxc(root, out)
     mirrored = check_mirror(root, files, out)
     for rel in files:
@@ -1258,7 +1292,7 @@ def main():
         check_cbstop(rel, lines, out)
         check_arity(rel, lines, out, mirrored.get(toy_module(lines)[0], ()) if rel.startswith(TOY_DIR) else ())
         check_ctorcall(rel, lines, api, out)
-        check_ctorexpr(rel, lines, out)
+        check_ctorexpr(rel, lines, out, tree_functions)
         n = sum(1 for r in raws if BIND_MLX.search(r))
         if n:
             cbind[rel] = n

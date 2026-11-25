@@ -1,11 +1,15 @@
 /* mlx_behaviour_probe.c -- MLX behaviour the Fortran wrappers of the parity plan depend on, on the CPU and the
    GPU stream: remainder's sign, round at .5, whether vecdot and inner conjugate, argsort stability,
-   searchsorted's sides, which linalg functions refuse the GPU, and the distributed group without a backend.
+   searchsorted's sides, which linalg functions refuse the GPU (the norms order by order), a graph that runs an
+   inverse on the CPU stream between two GPU operations, and the distributed group without a backend.
    Re-run it on a new MLX release or a new Mac and compare with the parity plan's Phase 0 Progress entry.
 
        P=$(brew --prefix)      (or the mlx-c prefix: MLXC_ROOT, .deps/install)
        clang -std=c11 -Wall scripts/probes/mlx_behaviour_probe.c -I$P/include -L$P/lib -lmlxc \
-             -Wl,-rpath,$P/lib -o /tmp/mlx_behaviour_probe && /tmp/mlx_behaviour_probe
+             -Wl,-rpath,$P/lib -o /tmp/mlx_behaviour_probe && MLX_ENABLE_TF32=0 /tmp/mlx_behaviour_probe
+
+   MLX_ENABLE_TF32=0 gives full float32 matrix products on the GPU: without it the last product of the
+   mixed-stream graph is off by 1e-3.
 
    It needs a session that sees the GPU (a Terminal, not a headless sandbox). Not part of the build. */
 #include <stdio.h>
@@ -120,7 +124,30 @@ int main(void) {
         { last[0] = 0; int st = mlx_linalg_lu(&va, A, s);
           if (!st) { st = mlx_vector_array_get(&r0, va, 0); if (!st) st = mlx_array_eval(r0); }
           printf("linalg %-18s %s: %s %s\n", "lu", dn, st ? "REFUSED" : "ok", st ? last : ""); }
+        /* the norms by order and the cross product: which orders need the CPU (the singular values)? */
+        int ax2[2] = {0, 1}, ax1[1] = {1};
+        TRY("norm ord=1 vector", mlx_linalg_norm(&r0, A, 1.0, ax1, 1, false, s), r0);
+        TRY("norm ord=3 vector", mlx_linalg_norm(&r0, A, 3.0, ax1, 1, false, s), r0);
+        TRY("norm ord=1 matrix", mlx_linalg_norm(&r0, A, 1.0, ax2, 2, false, s), r0);
+        TRY("norm ord=inf matrix", mlx_linalg_norm(&r0, A, 1.0 / 0.0, ax2, 2, false, s), r0);
+        TRY("norm ord=2 matrix", mlx_linalg_norm(&r0, A, 2.0, ax2, 2, false, s), r0);
+        TRY("norm ord=-2 matrix", mlx_linalg_norm(&r0, A, -2.0, ax2, 2, false, s), r0);
+        TRY("norm_matrix fro", mlx_linalg_norm_matrix(&r0, A, "fro", ax2, 2, false, s), r0);
+        TRY("norm_matrix nuc", mlx_linalg_norm_matrix(&r0, A, "nuc", ax2, 2, false, s), r0);
+        TRY("norm_l2 axes", mlx_linalg_norm_l2(&r0, A, ax2, 2, false, s), r0);
+        TRY("cross", mlx_linalg_cross(&r0, A, A, -1, s), r0);
     }
+
+    /* a graph over both streams, as the wrappers of the CPU-only functions build it under a GPU default: the
+       operand made by a GPU operation, the factorisation on the CPU stream, its result used on the GPU */
+    { mlx_array t0 = mlx_array_new(), t1 = mlx_array_new(), t2 = mlx_array_new();
+      last[0] = 0;
+      int st = mlx_add(&t0, A, A, gpu);
+      if (!st) st = mlx_linalg_inv(&t1, t0, cpu);
+      if (!st) st = mlx_matmul(&t2, t1, t0, gpu);
+      if (!st) st = mlx_array_eval(t2);
+      if (st) printf("gpu -> cpu inv -> gpu matmul: ERROR %s\n", last); else show("gpu -> cpu inv -> gpu matmul", t2);
+      mlx_array_free(t0); mlx_array_free(t1); mlx_array_free(t2); }
 
     /* distributed: no backend */
     mlx_distributed_group g = mlx_distributed_group_new();

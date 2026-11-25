@@ -1,5 +1,14 @@
 # mlx-fortran: parity with mlx-c
 
+Status, 2026-11-25: Phase 4 complete in a scratch copy of the working tree (linear algebra, products and
+convolutions: 37 lines public); 76 lines pending for Phases 5 to 8. One gate waits for a ruling: the Release
+build-time bound of R3, which the base itself exceeds (15.0 s against 14.08 s; the phase adds 0.5 s). Report:
+[`mlxf_mlxc_parity_report.md`](../completed/mlxf_mlxc_parity_report.md), section 9.
+
+Status, 2026-11-24 (night): Phase 10 complete in a scratch copy of the working tree (decisions 27 and 28: the
+custom Metal kernel, the FFT lines of Phase 5, three matrix products of Phase 4); 113 lines pending for Phases
+4 to 8. Report: [`mlxf_mlxc_parity_report.md`](../completed/mlxf_mlxc_parity_report.md), section 8.
+
 Status, 2026-11-24 (later): Phases 0 to 3 complete; the run `mlxf_parity` stands at the hold after Phase 3
 (decision 4): the maintainer reads the API in the Phase 3 Progress entry. Report:
 [`mlxf_mlxc_parity_report.md`](../completed/mlxf_mlxc_parity_report.md). After the hold, the wrappers that
@@ -440,6 +449,7 @@ times against Phase 0. Exit: the report exists; `check_tree.sh` passes.
 | `src/core/array/mlxf_array_tester.f90` | the use-block form the static gate checks (one line of the launch edit) | 1 |
 | `src/core/array/mlxf_array_borrow.f90` | decision 13's `mlx_view` and `mlx_alloc` of int8 and int16, which live in the borrowing submodule and not in `mlxf_array_transfer` (row added by the run in Phase 3, before the edit) | 3 |
 | `src/core/ops/*` (existing and new submodules `mlxf_ops_math`, `mlxf_ops_index`, `mlxf_ops_sort`) | operations | 1, 2, 3, 4 |
+| `src/core/ops/mlxf_ops.f90`, `mlxf_ops_index.f90`, `mlxf_ops_shape.f90` | the shift of 1-based index arrays, `zero_based`, moves to the array module as `mlxf_zero_based`, where the gathered and segmented products of `src/core/linalg` share it; the index wrappers and the two takes call it there (row added by the run in Phase 10, before the edit; `mlxf_ops_shape.f90` joined it when the build named its two calls) | 10 |
 | `src/core/linalg/*` | linear algebra, products, convolutions | 4, 10 |
 | `src/core/fft/*` | FFTs | 5, 10 |
 | `src/core/random/*` (new) | random | 5 |
@@ -819,3 +829,829 @@ later execution records below; do not duplicate the archived Phase 0/1 evidence.
   product, a convolution or a random draw) is reachable from Fortran in Fortran's conventions on both devices,
   with every transferable kind. 128 ledger lines remain for Phases 4 to 8; decision 27 orders the first of
   them. The maintainer reads the API above before those start.
+
+### Phase 10, part 1, the custom Metal kernel: 2026-11-24 22:56 EST (a scratch copy on the M5 Ultra, Claude)
+
+- *Machine and base.* HanssMacStudio, the M5 Ultra (macOS 27.2, GFortran 16.2.0, CMake 4.5.1, Homebrew MLX 0.32.4
+  and mlx-c 0.8.0). Base: `d0b1091` plus the maintainer's uncommitted toy refactoring and document edits (the
+  working tree of 2026-11-24, evening; a snapshot of it is the reference of every count below). Ruling of
+  `spec/rulings.md`: the hold after Phase 3 is released, the API as delivered. R1, R3 and R4 apply. Paths
+  below are under the run's root, `.../scratchpad/wrappers_work`.
+- *The base's counts (measured, `scratch/keep/base/`, Debug and Release alike, both devices / CPU / GPU):* core
+  80 to 82 / 55 or 56 / 55 or 56 (the address-reuse checks), array 179 / 96 / 94, ops 2,402 / 1,439 / 965,
+  linalg 32 / 17 / 15, fft 57 / 29 / 28, compile 63 / 32 / 32, kernels 1,063 / 539 / 531 (993 before the toy
+  refactoring). `GPU devices: 1`. Zero warnings; `scripts/check_tree.sh` passes.
+- *Read before the spec was fixed:* mlx-c's `fast.h` and `fast.cpp`; MLX's `docs/src/dev/custom_metal_kernels.rst`,
+  `mlx/backend/common/metal_kernel.cpp`, `mlx/backend/metal/custom_kernel.cpp` and the kernel tests of
+  `python/tests/test_fast.py`, all at `v0.32.4`.
+- *Files.* New: `src/core/fast/mlxf_fast.f90` (module `mlxf_fast`: `type(mlx_metal_kernel)`),
+  `mlxf_fast_tester.f90`, `fast.inf`. Changed: `src/defs/mlxf_defs.f90` (`mlx_metal_kernel_spec`);
+  `src/core/array/mlxf_array.f90` and `mlxf_array_operations.f90` (the dtype check becomes the shared helper
+  `mlxf_check_dtype`); `src/core/mlxf.f90`; `src/test/mlxf_test_registry.f90` (area `fast`, two guards);
+  `test/CMakeLists.txt` (`unit_fast`, budget 9); `scripts/mlxc_parity.txt`; `scripts/check_rules.py`
+  (`PARITY_PENDING` 126, `mlx_metal_kernel` among the handle types of rules `ctorcall` and `ctorexpr`, its
+  assignment and `kill` among the lifetime bindings of rule `entry`); the binding policy (section 12 new;
+  sections 2, 6, 9), the test policy (budget 9), `README.md`.
+- *Exit items of the part.*
+  - The two lines are `public`: `mlx_fast_metal_kernel_new` as `mlx_metal_kernel`, `mlx_fast_metal_kernel_apply`
+    as `mlx_metal_kernel%apply`. Ledger: 128 to 126 pending (7: 9 to 7); 14 lines go from `internal` to
+    `plumbing` (the kernel's `free`, the ten `config` functions, `mlx_vector_string_new`, `_append_value`,
+    `_free`) *(exact)*. Rule `parity` passes.
+  - `unit_fast` passes in both builds: 93 checks with both devices, 13 with `device=cpu`, 81 with `device=gpu`
+    (`scratch/keep/part1/area_part1_{Debug,Release}_fast_*.log`). On the GPU every result is exact
+    (`bits_equal`, or integer equality); on the CPU device the refusal is tested: a status, the message
+    "[metal_kernel] Only supports the GPU", no output, and the CPU device usable afterwards.
+  - Phase 7's test: `test_column_index`, x(i, j) + j on a (5, 3) float32 array, exact, with the row number as
+    the negative control.
+  - Decision 28's tests. Every member of `mlx_metal_kernel_spec` is exercised: `name`, `source`, `input_names`,
+    `output_names`, `grid`, `threadgroup`, `output_shapes` in all; `header`, the six `template_*` members and the
+    equal sharing of `output_shapes` in `test_template_and_header` (a dtype, an integer and a logical
+    parameter; a second kernel with -2 and false gives the other results); `output_ranks` and `output_dtypes` in
+    `test_two_inputs_two_outputs` (**two inputs and two outputs**: a (4, 3) float32 matrix and 3 weights, a
+    (4, 3) float32 and a (12) int32 output); `ensure_row_contiguous` both ways in `test_strided_input` (the
+    copy, the storage order without it, `elem_to_loc` without it); `atomic_outputs` and `init_value` in
+    `test_atomic_outputs` (**4,096 weighted int32 updates colliding in 13 bins and in a rank-0 total, exact**,
+    from 0 and from 5); `verbose` in `test_grid_2d`. **A result used inside a compiled function:**
+    `test_compiled_function` (a callback builds and applies the kernel and doubles its result; `mlx_compile`
+    traces it once for two arrays; compiled and uncompiled results are byte-identical and exact).
+  - Beyond the plan's list: a two-dimensional grid; complex64 and rank-0 inputs; a kernel without inputs; the
+    lifecycle (one live object per kernel, copies, idempotent `kill`, empty kernels in an OpenMP region); the
+    refusals through `status` (a wrong number of inputs, an empty input, a float64 output; at the evaluation
+    a source that does not compile and a threadgroup above the device's limit), with MLX usable after each.
+    Two guards joined `object_contracts` (15 members): a spec without outputs, an empty kernel applied.
+  - Debug and Release from scratch with `-DMLXF_WERROR=ON`, zero warnings; fast gate 9 of 9 in both with
+    `scripts/check_tree.sh` first (`scratch/keep/part1/{build,gate}_part1_{Debug,Release}.log`). The existing
+    areas keep the base's counts in both builds (`scratch/keep/part1/areas_part1_*.txt`). A first Release
+    build failed on `-Wfunction-elimination` in the new tester (an impure call after `.and.`, the trap the
+    earlier phases met), fixed with two assertions.
+  - Six planted violations fail and the restored copy passes (`scratch/keep/part1_plants.txt`): the ratchet
+    left at 128, a config setter the library calls classed `internal`, `mlx_metal_kernel` missing from
+    `mlxf.f90`'s public block, `apply` looking at its kernel before the entry, a parenthesized kernel handle
+    in an array constructor, the area missing from CTest.
+  - `unit_fast` in the Release gate: 0.19 to 0.59 s beside the other entries, 0.08 s alone *(measured)*,
+    against the 3 s bound of a new area.
+- *The new public names.*
+  - `type(mlx_metal_kernel_spec)`, a record: `name`, `source`, `header` (deferred-length characters);
+    `input_names(:)`, `output_names(:)` (character arrays); `grid(3)`, `threadgroup(3)` (default `[1, 1, 1]`);
+    `output_shapes(:)`, `output_ranks(:)`, `output_dtypes(:)`; `template_dtype_names(:)` with
+    `template_dtypes(:)`, `template_int_names(:)` with `template_ints(:)`, `template_bool_names(:)` with
+    `template_bools(:)`; `init_value` (an allocatable real32: unset means none);
+    `ensure_row_contiguous = .true.`, `atomic_outputs = .false.`, `verbose = .false.`.
+  - `type(mlx_metal_kernel)`: `k = mlx_metal_kernel(spec)`, `call k%new(spec)`,
+    `call k%apply(inputs, outputs[, status])` (`inputs(:)` an array of handles, `outputs(:)` allocatable,
+    `intent(out)`), `call k%kill()`, defined assignment, finalization.
+- *What a Fortran user must know about the buffers in a kernel's source.* The source is the one place where
+  MLX's layout shows: row-major, 0-based, the shape reversed. A Fortran array `a(n1, n2)` is MLX's `[n2, n1]`,
+  so in the source `a_shape[0]` is n2 and `a_shape[1]` is n1, and element `a(i, j)` is
+  `a[(j-1)*n1 + (i-1)]`: the buffer is the array in Fortran's array element order, and what changes is only
+  how MLX's shape names the extents. Worked example, the test's kernel: for `x(5, 3)` with
+  `grid = [15, 1, 1]` the thread `elem = thread_position_in_grid.x` handles element `elem + 1` of the array
+  in array element order; its column is `elem / inp_shape[1] + 1` (`inp_shape[1]` is 5, the first extent) and
+  its row `elem % inp_shape[1] + 1`; `out[elem] = inp[elem] + float(elem / inp_shape[1] + 1)` gives
+  x(i, j) + j. With `grid = [5, 3, 1]`, `thread_position_in_grid.x` is i - 1 and `.y` is j - 1, at position
+  `y*5 + x`. Three more facts: a strided input (a transpose, a section) is copied first unless
+  `ensure_row_contiguous` is false, and then the source must use the strides; an input of fewer than 8
+  elements arrives in Metal's `constant` address space and a rank-0 input as a reference (`scale`, not
+  `scale[0]`); index values are what the program stored, so 1-based Fortran indices need `- 1` in the source.
+- *Decisions under delegation.*
+  - **The launch configuration belongs to the kernel object.** `new` reads the whole spec (mlx-c's kernel and
+    its `config` are made once and freed together); `apply` takes only the arrays, as `mlx_function`'s does.
+    Another grid or output shape is another kernel from the edited spec. That costs nothing that matters: MLX
+    compiles a generated source once per process; the first evaluation of a new source took 60 ms and a second
+    kernel object with the same source and another grid 0.2 ms for building, applying and evaluating
+    *(measured, `scratch/keep/part1_kernel_cache_probe.txt`)*.
+  - **`apply` is a checked procedure**, `(inputs, outputs[, status])`, though it builds a graph node: the
+    refusal on the CPU must be testable in-process, and a callback of a compiled function must be able to
+    return a kernel's failure instead of stopping inside C++ frames. `new` stops on an invalid spec, as
+    `mlx_function`'s does. An empty or stale kernel stops in `apply` with or without `status`.
+  - **The spec gained `init_value` and `verbose`**, which decision 17's list does not name and mlx-c's config
+    has: decision 28's atomic test cannot be written without an initial value (the outputs start undefined),
+    and the generated source that `verbose` prints is what one reads when a kernel does not compile.
+  - **The spec is a record of plain components** in `mlxf_defs`, with no second public type: the outputs'
+    shapes are one list with `output_ranks` (absent: shared equally), and the template parameters three pairs
+    of lists by kind. MLX orders template parameters; the three kinds are passed dtypes first, then integers,
+    then logicals, which changes nothing a source can see.
+  - **Defaults:** float32 outputs, `[1, 1, 1]` for the grid and the threadgroup (both are checked to be
+    positive), no header, no input.
+  - **The stream is the default device's**, as for every operation; MLX refuses a CPU stream. The wrapper does
+    not move a kernel to the GPU behind a CPU default.
+  - **The module is `mlxf_fast`** in `src/core/fast/`, named as the mlx-c header, as `mlxf_fft` and
+    `mlxf_compile` are; `mlx_layer_norm` and the others of decision 17 join it in Phase 7.
+  - **`mlxf_check_dtype`** replaces the operations submodule's private `check_dtype`, so that the kernel's
+    dtypes are checked by the one routine (mlx-c indexes a table with a dtype unchecked).
+- *Surprises about MLX and mlx-c (the first three measured, `scratch/keep/part1_kernel_failures_probe.txt`; the
+  fourth read in the sources).*
+  - A source that does not compile is not an abort: `mlx_eval` returns a status, `mlx_last_error()` holds
+    "[metal::Device] Unable to build metal library from source" with the Metal compiler's line and caret, and
+    MLX evaluates other kernels afterwards.
+  - The threadgroup is checked at the evaluation against the device's limit, 1,024 threads on the M5 Ultra,
+    before the grid clips it: `threadgroup = [4096, 1, 1]` fails even with a grid of 16.
+  - A float64 output is refused when the kernel is applied ("float64 is not supported on the GPU").
+  - mlx-c's `mlx_fast_metal_kernel_new` passes no compile options, so a kernel is always built in MLX's
+    default "safe" math mode; MLX's `compile_options` (0.32.4) is not reachable from C (question 21 of
+    `doc/collaboration/apple_questions.md`).
+- *What it means, in short:* a Fortran program can write a Metal kernel as text, launch it on arrays and use
+  the result in a graph or a compiled function, with errors as statuses; K1, K2, K5 and K6 have their base.
+
+### Phase 10a, the calibration of the transforms over several dimensions: 2026-11-24 23:06 EST (Claude)
+
+- *How.* The new tester `mlxf_fft_nd_tester` (sub-suite `fft_nd` of `unit_fft`) built in Debug with its seed
+  list held to the calibration seed alone and its tolerances at the ceiling, run as
+  `mlxf_test_exec test=unit_fft suite=fft_nd device=cpu|gpu` (logs
+  `scratch/keep/phase10a_fft_nd_{cpu,gpu}_seed1.log`, table `scratch/keep/phase10a_frozen.txt`). Both devices on
+  seed 1, as R4 rules; no seed 2 or 3 ran before this entry. Each transform runs on 8 seeded (6, 5, 4) fixtures
+  (`FFT_NBATCH`), uniform in [-1, 1] and rounded once to float32, in 5 to 7 forms: dimensions given or not, in
+  and out of order, lengths that pad and truncate, the three norms; the form without dimensions on each fixture
+  as a rank-3 array, the others on the batch along a fourth dimension. The reference is a direct DFT in real64,
+  one dimension after another; an inverse real transform takes the half spectrum of a real fixture, rounded to
+  complex64, and its reference is computed from the rounded spectrum (the other dimensions first, then the real
+  lines along the half-size dimension).
+- *The error (decision under delegation).* A transform's error is its largest element error relative to
+  `max(1, the largest |reference| of the result)`, not to each element's own magnitude: an element near a zero
+  of a spectrum carries the rounding of the whole transform, so an element-wise relative error would measure
+  cancellation, not the function. The frequencies use the element-wise error of section 6.
+- *Observed on seed 1, CPU / GPU, in float32 epsilons (measured):* `mlx_fftn` 1.068 / 1.086, `mlx_ifftn`
+  1.482 / 1.547, `mlx_rfftn` 0.920 / 1.192, `mlx_irfftn` 1.830 / 2.089, `mlx_rfft2` 0.807 / 0.886, `mlx_irfft2`
+  2.012 / 1.859, `mlx_fftfreq` 0.533 / 0.533, `mlx_rfftfreq` 0.533 / 0.533. A float64 input on the CPU gives the
+  float32 error exactly (`mlx_rfftn` 0.920, `mlx_rfft2` 0.807): MLX transforms in float32. None is near the
+  64 eps ceiling: no finding. The shifts are exact and need no calibration.
+- *Frozen* in `src/test/mlxf_test_defs.f90` (`FFT_TOLERANCES`), `max(2 x the larger of the CPU and GPU seed-1
+  errors, 4 eps32)` *(derived)*: `mlx_irfftn` **4.979893410e-07** (4.177 eps32), `mlx_irfft2`
+  **4.796738626e-07** (4.024 eps32), the six others the floor 4 eps32 = 4.768371582e-07. The float64 column
+  holds the same values (the float32 bound).
+
+### Phase 10, part 2, the FFT lines of Phase 5: 2026-11-24 23:11 EST (a scratch copy on the M5 Ultra, Claude)
+
+- *Machine, base and rulings:* as part 1's entry; the tree is the base plus part 1.
+- *Files.* `src/core/fft/mlxf_fft.f90` (ten wrappers; `mlx_fft2` and `mlx_ifft2` now build an
+  `mlxf_fftn_spec`), the new `mlxf_fft_nd_tester.f90`; `src/defs/mlxf_defs.f90` (`mlxf_fftn_spec`);
+  `src/core/array/mlxf_array.f90` and `mlxf_array_operations.f90` (`mlxf_fftn_op` replaces `mlxf_fft2_op` for the
+  same C signature and takes any number of dimensions; `mlxf_freq_op`; the translation of dimensions to axes
+  becomes the shared `mlxf_axes_of`); `src/core/mlxf.f90`; `src/test/mlxf_test_defs.f90` (`FFT_TOLERANCES`,
+  `FFT_NBATCH`), `src/test/mlxf_test_registry.f90` (row `fft_nd` of area `fft`); `scripts/mlxc_parity.txt`,
+  `scripts/check_rules.py` (`PARITY_PENDING` 116, `ENTRY_HELPERS`); the binding policy (section 10),
+  `README.md`.
+- *Exit items of the part.*
+  - The ten lines are `public`: `mlx_fft_fftn`, `_ifftn`, `_rfft2`, `_irfft2`, `_rfftn`, `_irfftn`, `_fftshift`,
+    `_ifftshift`, `_fftfreq`, `_rfftfreq`. Ledger: 126 to 116 pending (5: 29 to 19) *(exact)*.
+  - `unit_fft` passes on both devices in both builds: 192 checks, 100 with `device=cpu`, 93 with `device=gpu`
+    (`scratch/keep/part2/area_part2_{Debug,Release}_fft_*.log`): the existing sub-suite `fft` unchanged at 57
+    (29 / 28) and the new `fft_nd` 135 (71 / 65).
+  - Sub-phase 10b, seeds 2 and 3 after the freeze of entry "Phase 10a": first run 23:06 EST
+    (`scratch/keep/phase10b_unit_fft_debug.log`, 188 of 188, before four exact shift checks were added). No
+    judged check has failed in any run. Largest judged errors on seeds 2 and 3, in float32 epsilons
+    *(measured)*: `mlx_irfftn` 2.418 (CPU, tolerance 4.177), `mlx_irfft2` 1.956 (4.024), `mlx_ifftn` 1.684,
+    `mlx_fftn` 1.568 (GPU), `mlx_rfftn` 1.269 (GPU), `mlx_rfft2` 0.966, the frequencies 0.461, against the
+    floor 4.
+  - Exact checks: the shifts against Fortran's `cshift` (every dimension, one, two, an odd extent of a rank-2
+    array; `mlx_ifftshift` undoes `mlx_fftshift` and two forward shifts along an odd extent do not);
+    `mlx_fftshift(mlx_fftfreq(n))` ascends with zero at element n/2+1; `mlx_fftn` over two dimensions is
+    `mlx_fft2` bit for bit; the shapes that state the half-size dimension and the inverse's default length.
+  - Seven mutations of the wrappers on a scratch copy each fail the sub-suite, and the restored copy passes
+    (`scratch/keep/part2_mutations.txt`): the last listed dimension halved (30 of 131 checks fail), the
+    inverse's default length the extent (16), lengths not reversed with the dimensions (46), the two shifts
+    exchanged (12), a shift's dimensions passed 0-based (2, then 6 of 135 after two checks were added: a shift
+    along the middle dimension of a rank-3 array could not tell a translated axis from a 0-based one),
+    `mlx_fftfreq` given 1/d (6).
+  - Debug and Release from scratch with `-DMLXF_WERROR=ON`, zero warnings; fast gate 9 of 9 in both
+    (`scratch/keep/part2/{build,gate}_part2_{Debug,Release}.log`); the other areas keep the base's counts and
+    `unit_fast` its 93 (`scratch/keep/part2/areas_part2_*.txt`). A first Debug build failed on
+    `-Winteger-division` (5/2 written with named constants in the tester), fixed with the half extents as
+    constants; rule `arity` then refused two test procedures of six arguments, which now take a record.
+- *Frozen tolerances:* entry "Phase 10a", unchanged since. Upstream-defect lines: 0.
+- *The new public names.* `dims` and `n` are integer arrays, `[x]` optional and passed by keyword.
+  - `mlx_fftn(a[, dims][, n][, norm])`, `mlx_ifftn(a[, dims][, n][, norm])`;
+  - `mlx_rfftn(a[, dims][, n][, norm])`, `mlx_irfftn(a[, dims][, n][, norm])`;
+  - `mlx_rfft2(a, dims[, n][, norm])`, `mlx_irfft2(a, dims[, n][, norm])`, `dims(2)` and `n(2)`;
+  - `mlx_fftshift(a[, dims])`, `mlx_ifftshift(a[, dims])`;
+  - `mlx_fftfreq(n[, d])`, `mlx_rfftfreq(n[, d])`, `d` real64.
+- *Decisions under delegation.*
+  - **The half-size dimension of a real transform is the first listed, `dims(1)`**, and dimension 1 when
+    `dims` is absent: a real (n1, n2, n3) array has the (n1/2+1, n2, n3) spectrum, as FFTW's Fortran interface
+    and SIMPLE's images have it. This is what the plan's "Fortran's array element order for the half-size
+    dimension" is read to mean. MLX halves the last axis it is given, so the wrapper lists `dims(1)` last; for
+    the default it is MLX's own default, since dimension 1 is MLX's last axis. No extra node.
+  - **`n` is paired with `dims` in the caller's order**, as `mlx_fft2`'s is; with `dims` absent, with
+    dimensions 1 to rank. A complex transform passes the dimensions to MLX in the caller's order (so two
+    dimensions are `mlx_fft2` bit for bit) and, without `dims`, in MLX's own default order.
+  - **`dims` is optional for the `n`-dimensional transforms and required for `mlx_rfft2` and `mlx_irfft2`**,
+    as it is for `mlx_fft2`.
+  - **One helper for the C signature of `fft2`, `fftn`, `rfft2`, `rfftn` and their inverses:** `mlxf_fft2_op`
+    became `mlxf_fftn_op`, with a record of allocatable lists; `mlx_fft2` and `mlx_ifft2` pass it the same
+    axes and lengths as before (their 57 checks are unchanged). `mlxf_fft_spec` keeps its two-element lists,
+    of which the one-dimensional helper reads the first.
+  - **`mlxf_axes_of` is the array module's translation of dimensions to axes, now shared** (the shifts need
+    it). `mlxf_ops` keeps its own `axes_of`, which is outside this phase's file table: one of the two can go.
+  - **The frequencies take `d` as real64** (C's `double`), as `mlx_linspace` takes its bounds.
+  - **The error of a transform** is relative to the largest |reference| of its result (entry "Phase 10a").
+  - **An inverse real transform is tested on lengths that change the half-size dimension only** (odd, padded,
+    truncated). A length that cuts or pads another dimension makes an input that is not the half spectrum of a
+    real array, where MLX defines no result; the policy says so.
+- *Surprises about MLX and mlx-c:* none in the transforms; both devices agree with the direct DFT to 2.5
+  float32 epsilons of the largest element. A float64 input gives the float32 result bit for bit (the same
+  error to ten digits), as the policy already says of every FFT.
+- *What it means, in short:* volumes and images transform in Fortran's layout, real ones with the half
+  dimension first, on both devices; K2's bench and K8's PCG solve have their transforms.
+
+### Phase 10c, the calibration of the gathered, masked and segmented products: 2026-11-24 23:21 EST (Claude)
+
+- *How.* The new tester `mlxf_linalg_mm_tester` (sub-suite `linalg_mm` of `unit_linalg`) built in Debug with its
+  seed list held to the calibration seed alone and its tolerances at the ceiling, run as
+  `mlxf_test_exec test=unit_linalg suite=linalg_mm device=cpu|gpu` (logs
+  `scratch/keep/phase10c_linalg_mm_{cpu,gpu}_seed1.log`, table `scratch/keep/phase10c_frozen.txt`). Both devices
+  on seed 1 (R4); no seed 2 or 3 ran before this entry. Operands uniform in [-1, 1], rounded once to float32;
+  the reference is real64 `matmul` of the sections a form selects. `mlx_gather_mm`: (5, 4) by (4, 6) matrices,
+  6 of them in a (3, 2) batch against 5, in four forms (two rank-1 lists of 7, int32 and int64; lists that
+  broadcast to (3, 4); one sorted list with the other operand in order; the other list alone).
+  `mlx_block_masked_mm`: (70, 40) by (40, 50), blocks of 32 (three, two and two) in six forms (the result's
+  mask, the operands', the three, the default block of 64, a real mask, a batch of two).
+  `mlx_segmented_mm`: (5, 12) by (12, 6) with four segments, one empty, and a (2, 2, 3) array of segments.
+- *The error (decision under delegation).* An element's error relative to `max(1, (|a| |b|)(i, j))`: the
+  product of the absolute values is the scale of a dot product's rounding, as in the existing `matmul` test.
+- *Observed on seed 1, CPU / GPU, in float32 epsilons (measured):* `mlx_gather_mm` 0.702 / 0.702,
+  `mlx_block_masked_mm` 1.508 / 1.497, `mlx_segmented_mm` 0.723 / 0.723; float64 on the CPU, `mlx_segmented_mm`
+  0.98 eps64. No finding.
+- *Frozen* in `src/test/mlxf_test_defs.f90` (`MM_TOLERANCES`), `max(2 x the larger of the CPU and GPU seed-1
+  errors, 4 eps)` of the result kind *(derived)*: the float32 floor 4.768371582e-07 for the three, and the
+  float64 floor 8.881784197e-16 for `mlx_segmented_mm` on the CPU. The first two have no float64 result to
+  judge (MLX 0.32.4 evaluates them in float32 only).
+
+### Phase 10, part 3, the matrix products of Phase 4: 2026-11-24 23:25 EST (a scratch copy on the M5 Ultra, Claude)
+
+- *Machine, base and rulings:* as part 1's entry; the tree is the base plus parts 1 and 2.
+- *Files.* `src/core/linalg/mlxf_linalg.f90` (three wrappers), the new `mlxf_linalg_mm_tester.f90`;
+  `src/core/array/mlxf_array.f90` and `mlxf_array_operations.f90` (`mlxf_gather_mm_op`, `mlxf_masked_mm_op`,
+  `mlxf_zero_based`); `src/core/ops/mlxf_ops.f90`, `mlxf_ops_index.f90`, `mlxf_ops_shape.f90` (their
+  `zero_based` is now the array module's; the file-table row was added before the edit);
+  `src/core/mlxf.f90`; `src/test/mlxf_test_defs.f90` (`MM_TOLERANCES`), `src/test/mlxf_test_utils.f90`
+  (`judge_error`, `find_tolerance`, used by the two new testers of parts 2 and 3),
+  `src/test/mlxf_test_registry.f90` (row `linalg_mm` of area `linalg`); `scripts/mlxc_parity.txt`,
+  `scripts/check_rules.py` (`PARITY_PENDING` 113, `ENTRY_HELPERS`); the binding policy (section 10),
+  `README.md`.
+- *Exit items of the part.*
+  - The three lines are `public`: `mlx_gather_mm`, `mlx_block_masked_mm`, `mlx_segmented_mm`. Ledger: 116 to
+    113 pending (4: 40 to 37) *(exact)*.
+  - `unit_linalg` passes on both devices in both builds: 94 checks, 50 with `device=cpu`, 45 with
+    `device=gpu` (`scratch/keep/part3/area_part3_{Debug,Release}_linalg_*.log`): the existing sub-suite
+    `linalg` unchanged at 32 (17 / 15) and the new `linalg_mm` 62 (33 / 30).
+  - Sub-phase 10d, seeds 2 and 3 after the freeze of entry "Phase 10c": first run 23:21 EST
+    (`scratch/keep/phase10d_unit_linalg_debug.log`, 94 of 94). No judged check has failed in any run. Largest
+    judged errors on seeds 2 and 3, in float32 epsilons *(measured)*: `mlx_block_masked_mm` 1.534 (GPU; 2.096
+    on the CPU after the review enlarged the fixture, below), `mlx_segmented_mm` 1.096, `mlx_gather_mm` 0.797,
+    against the floor 4; `mlx_segmented_mm` in float64 on the CPU is exact on seeds 2 and 3.
+  - Exact checks: a block a mask drops and a reversed segment are exactly zero; without lists and without
+    masks the two products are `matmul` bit for bit; matrix 4 of a (5, 4, 3, 2) array is `a(:,:,1,2)`, and
+    the row-major reading `a(:,:,2,2)` fails the same bound.
+  - Six mutations of the wrappers on a scratch copy each fail the sub-suite, three through MLX's own shape
+    errors and three through assertions, and the restored copy passes (`scratch/keep/part3_mutations.txt`):
+    the lists not exchanged with the operands, b's list passed 1-based, the operand masks not exchanged, a
+    segment's last index excluded, the operands of the segmented and of the masked product not exchanged.
+  - `unit_ops` keeps 2,402 / 1,439 / 965 after the move of `zero_based`. Debug and Release from scratch with
+    `-DMLXF_WERROR=ON`, zero warnings; fast gate 9 of 9 in both
+    (`scratch/keep/part3/{build,gate}_part3_{Debug,Release}.log`, `areas_part3_*.txt`).
+- *Frozen tolerances:* entry "Phase 10c", unchanged since. Upstream-defect lines: 0.
+- *The new public names.*
+  - `mlx_gather_mm(a, b[, lhs_indices][, rhs_indices][, sorted_indices])`: the two lists are arrays of the
+    graph, of any integer dtype;
+  - `mlx_block_masked_mm(a, b[, block_size][, mask_out][, operand_masks])`: `operand_masks(2)` an array of
+    two handles, a's mask then b's;
+  - `mlx_segmented_mm(a, b, segments)`: `segments` an integer array of the graph, (2, ...).
+- *Decisions under delegation.*
+  - **The Fortran view costs no transpose and no copy:** the operands are exchanged as for `matmul`, and the
+    lists and operand masks with them; a mask and a list of segments in Fortran order are MLX's. The one
+    added node is the shift of 1-based values (decision 8).
+  - **A matrix is numbered from 1 in array element order over dimensions 3 and up**, which is MLX's flat
+    index over its batch axes (the flatten rule of the policy).
+  - **Segments are inclusive 1-based bounds**, `segments(1, i):segments(2, i)`, as `mlx_slice`'s: MLX's
+    [start, end) is obtained by subtracting [1, 0], one node. A last index below the first is an empty
+    section and gives zeros (measured on both devices for gaps up to 299,
+    `scratch/keep/part3_reversed_segments_probe.txt`).
+  - **`mlx_block_masked_mm` takes the two operand masks as one array of two handles**, both live: with
+    `block_size`, `mask_out`, and the two operands that keeps five dummies (rule `arity`), and MLX itself
+    treats the two as one group. An all-true mask leaves an operand whole. For the maintainer: three keyword
+    masks with the block size inferred from their extents would read better at the call and hide a choice;
+    it was not taken.
+  - **`block_size` defaults to 64**, MLX's default; MLX accepts 32 and 64 and says so when another is given
+    with a mask.
+  - **The wrapper checks `mlx_segmented_mm`'s shapes** (two matrices, equal inner extents, a first extent of 2
+    for `segments`): MLX checks no inner extent (question 22 for Apple), and the shift of the bounds would
+    broadcast a (1, n) array into pairs before MLX's own shape check saw it. Found by the review.
+  - **`zero_based` moved to the array module as `mlxf_zero_based`** (with the amounts to subtract as an
+    option, for the segments), so that one routine shifts every index array; three files of `src/core/ops`
+    joined the file table for it.
+  - **The error of a product** is relative to `max(1, (|a| |b|)(i, j))` (entry "Phase 10c").
+  - **`judge_error` and `find_tolerance` went to `mlxf_test_utils`** for the two new testers; the three older
+    table-driven testers of `src/core/ops` keep their private copies (outside this phase's table).
+- *Surprises about MLX and mlx-c.* MLX 0.32.4 evaluates the gathered and the masked product in float32 only:
+  on float64 operands the graph builds and the evaluation fails on the CPU with a status, "[GatherMM::eval]
+  Currently only supports float32" *(measured, `scratch/keep/part3_products_probe.txt`)*; the segmented
+  product is float64 there. All three refuse complex operands when a list, a mask or segments are given
+  *(read in `mlx/ops.cpp`)*: K3's complex products need the real formulation.
+- *What it means, in short:* products over arbitrary pairs of matrices, over masked tiles and over segments of
+  the inner dimension are one call each in Fortran's layout; K3 has its two candidates.
+
+### Phase 10, the kernels' wrappers ahead of their turn: 2026-11-24 23:42 EST (a scratch copy on the M5 Ultra, Claude) - complete
+
+The three parts are done; their entries above ("part 1", "10a", "part 2", "10c", "part 3") hold the detail.
+This entry closes the phase and states the final numbers, which supersede the parts' where the review
+changed a count.
+
+- *Machine and base.* HanssMacStudio, the M5 Ultra (macOS 27.2, GFortran 16.2.0, CMake 4.5.1, Homebrew MLX
+  0.32.4 and mlx-c 0.8.0). Base: `d0b1091` plus the maintainer's uncommitted toy refactoring and document
+  edits (decision 28 names that refactoring's commit as the base; it was not yet committed). Rulings: the hold
+  is released with no change to the API of Phases 2 and 3 (`spec/rulings.md`); R1, R3 and R4. The work was
+  done in a copy of the working tree, never in the maintainer's checkout; nothing is committed. Paths below
+  are under the run's root, `.../scratchpad/wrappers_work`.
+- *Files changed* (from `diff -rq` against the base snapshot). New: `src/core/fast/` (`mlxf_fast.f90`,
+  `mlxf_fast_tester.f90`, `fast.inf`), `src/core/fft/mlxf_fft_nd_tester.f90`,
+  `src/core/linalg/mlxf_linalg_mm_tester.f90`. Changed: `src/defs/mlxf_defs.f90`,
+  `src/core/array/mlxf_array.f90`, `mlxf_array_operations.f90`, `src/core/fft/mlxf_fft.f90`,
+  `src/core/linalg/mlxf_linalg.f90`, `src/core/ops/mlxf_ops.f90`, `mlxf_ops_index.f90`, `mlxf_ops_shape.f90`
+  (the row added in part 3), `src/core/mlxf.f90`, `src/test/mlxf_test_defs.f90`, `mlxf_test_registry.f90`,
+  `mlxf_test_utils.f90`, `test/CMakeLists.txt`, `scripts/mlxc_parity.txt`, `scripts/check_rules.py`,
+  `doc/policies/binding_contract_policy.md`, `doc/policies/test_environment_policy.md`, `README.md`,
+  `doc/collaboration/apple_questions.md`, `doc/history/2026-11.md`, this plan, the report. No file outside the
+  table as it now stands; the toy modules, the oracles and the benchmark are untouched.
+- *Exit items.*
+  - **The 15 lines are public and 113 are pending.** Ledger before: 271 public, 46 plumbing, 146 internal, 89
+    excluded, 128 pending (4: 40, 5: 29, 6: 16, 7: 9, 8: 34). After: 286 public, 60 plumbing, 132 internal, 89
+    excluded, 113 pending (4: 37, 5: 19, 6: 16, 7: 7, 8: 34) *(exact)*. `PARITY_PENDING = 113`; rule `parity`
+    passes. The lines keep their phases; this heading closes none of Phases 4, 5 and 7.
+  - **`unit_fast`, `unit_fft` and `unit_linalg` pass on both devices** in both builds
+    (`scratch/keep/final/area_final_{Debug,Release}_*.log`, both devices / CPU / GPU): `unit_fast` 94 / 13 /
+    82 (the Metal kernel exact on the GPU, its refusal tested on the CPU device); `unit_fft` 194 / 101 / 94
+    (`fft` 57 unchanged, `fft_nd` 137); `unit_linalg` 94 / 50 / 45 (`linalg` 32 unchanged, `linalg_mm` 62).
+  - **Decision 28's tests of the Metal kernel are present** (part 1's entry lists them by member).
+  - **The existing suites keep their assertions** (`scratch/keep/final/areas_final_*.txt`, Debug and Release
+    alike): core 82 / 56 / 56, array 179 / 96 / 94, ops 2,402 / 1,439 / 965, compile 63 / 32 / 32, kernels
+    1,063 / 539 / 531, and the 57 and 32 above; `object_contracts` passes with 16 members (13 at the base).
+  - **Debug and Release from scratch with `-DMLXF_WERROR=ON`, zero warnings**
+    (`scratch/keep/final/build_final_{Debug,Release}.log`), installed, **fast gate 9 of 9 in both** with
+    `scripts/check_tree.sh` first (`gate_final_*.log`).
+  - **The section 6 bounds, judged (R3) against the entry "Phase 2, the base measurements on the M5 Ultra":**
+    Release clean build, configure plus build from scratch at `-j 12`: 8.604 s (1.522 + 7.082; load 1.92
+    before the script, 2.30 after) and 8.721 s (1.550 + 7.171; load 2.28 before, 2.89 after;
+    `scratch/keep/final/second_release_timing.log`) against the bound **14.08 s**: met, 1.23 times the base's
+    mean 7.038 s. Fast gate total real time in Release: 10.66 s and 10.77 s against **38.74 s**: met, 2.0 s
+    above the base's 8.735 s (`unit_array` alone is the total). The new area `unit_fast`: 0.24 s in the
+    Release gate (0.19 to 0.59 s over the phase's gates, 0.08 s alone) against **3 s**: met. The budget is 9
+    of at most 13 (decision 21). All *measured*; the bounds *derived* in Phase 2.
+  - **`scripts/check_tree.sh` passes;** `restyle_fortran.py` and `format_use_blocks.py` were run on the 16
+    Fortran files touched, by name, after the last edit, and rewrote none.
+- *Frozen tolerances* (`src/test/mlxf_test_defs.f90`, entries "Phase 10a" and "Phase 10c"): `FFT_TOLERANCES`:
+  `mlx_irfftn` 4.979893410e-07, `mlx_irfft2` 4.796738626e-07, the six others 4 eps32 = 4.768371582e-07;
+  `MM_TOLERANCES`: 4 eps32 for the three, 4 eps64 = 8.881784197e-16 for `mlx_segmented_mm` in float64. No
+  tolerance moved after its freeze. Upstream-defect lines: 0.
+- *The independent review* (a read-only subagent, against MLX's source; its one slip: it wrote and deleted a
+  scratch copy of `ops.cpp` outside both trees). No translation error and no lifetime defect found. Fixed
+  from it:
+  - `mlx_segmented_mm` now checks the ranks, the inner extents and the segments' first extent (above), with a
+    guard, `guard_segments_shape`;
+  - a refused kernel input now says "mlx_metal_kernel apply: an input array is empty or stale" where it
+    borrowed the closure's message;
+  - blind tests made discriminating: the lengths without `dims` were a palindrome ([4, 8, 4], now [4, 8, 3])
+    and absent from the real transforms (a form added to each); b's block mask was square ((2, 2), now
+    (2, 4), the fixture (70, 40) by (40, 100)); two outputs sharing extents had equal extents ([9, 9], now
+    [9, 3]); the sorted route of `mlx_gather_mm` was not reached (a form with matrices of one column added);
+    a reversed segment only one apart (now 9 to 2); uint64 lists and segments added; `mlx_rfftfreq` without
+    `d` added. Every judged error stays within its frozen tolerance; `mlx_block_masked_mm`'s largest went
+    from 1.534 to 2.096 eps32 with the larger fixture *(measured)*.
+  - the policy's wording on extra nodes, on complex operands without a list, on kernels built in callbacks
+    and on shapeless compilation.
+  Left as they are, for the maintainer: one of about 14 stops of a kernel's `new` has a guard; `apply` without
+  `status`, a stale kernel, an output above rank 2 and a template dtype other than float32 have no test; real
+  or batched operand masks, vector operands of the three products and a `block_size` MLX refuses have none;
+  the FFT stops (a dimension outside the rank, a wrong number of lengths, a repeated dimension) have no
+  guard; the float64 refusal of the two float32-only products is measured in a probe and not pinned by a test
+  (a later MLX may lift it); a shapeless compiled function holding a kernel is not tested.
+- *Decisions under delegation:* in the parts' entries. Those that shape the API: the kernel object owns its
+  launch configuration and `apply` is checked; the spec gained `init_value` and `verbose`; the half-size
+  dimension of a real transform is the first listed; `n` pairs with `dims` in the caller's order; lists number
+  matrices from 1 in array element order; segments are inclusive; the operand masks are one array of two.
+  Decisions about the run itself: the base is the uncommitted working tree; parts were gated one by one with
+  both builds from scratch; mutations were run on scratch copies with the archive deleted before each build.
+- *Proposed, not applied* (skill edits need approval): `.github/skills/mlxf-binding/SKILL.md`, section 3, names
+  `mlxf_fft2_op`, which is now `mlxf_fftn_op`, and should list `mlxf_freq_op`, `mlxf_gather_mm_op`,
+  `mlxf_masked_mm_op` and the shared `mlxf_axes_of`, `mlxf_zero_based`, `mlxf_check_dtype`; section 4 could
+  say "a real transform's half-size dimension is passed last" and "operands, lists and masks of a product are
+  exchanged"; `references/testing.md` could warn that Apple's make compares whole seconds.
+- *The new public names of the phase, for the maintainer's read.* Arrays are `type(mlx_array)`; `[x]` is
+  optional and passed by keyword; `dims` and `n` are integer arrays.
+  - **Custom kernels:** `type(mlx_metal_kernel_spec)` (members in part 1's entry);
+    `k = mlx_metal_kernel(spec)`, `call k%new(spec)`, `call k%apply(inputs, outputs[, status])`,
+    `call k%kill()`.
+  - **Transforms:** `mlx_fftn(a[, dims][, n][, norm])`, `mlx_ifftn(a[, dims][, n][, norm])`,
+    `mlx_rfftn(a[, dims][, n][, norm])`, `mlx_irfftn(a[, dims][, n][, norm])`,
+    `mlx_rfft2(a, dims[, n][, norm])`, `mlx_irfft2(a, dims[, n][, norm])`, `mlx_fftshift(a[, dims])`,
+    `mlx_ifftshift(a[, dims])`, `mlx_fftfreq(n[, d])`, `mlx_rfftfreq(n[, d])`.
+  - **Products:** `mlx_gather_mm(a, b[, lhs_indices][, rhs_indices][, sorted_indices])`,
+    `mlx_block_masked_mm(a, b[, block_size][, mask_out][, operand_masks])`,
+    `mlx_segmented_mm(a, b, segments)`.
+- *Where a Fortran user would expect something else* (each stated in the binding policy, sections 10 and 12):
+  - a kernel's source is MLX's layout: 0-based, row-major, the shape reversed (the worked example of part 1);
+  - a kernel object is for one grid and one set of output shapes; another shape is another object;
+  - `mlx_rfftn` halves the first listed dimension, where NumPy and MLX halve the last axis; an odd real length
+    of an inverse needs `n`;
+  - `mlx_fftshift` is `cshift` by minus extent/2, `mlx_ifftshift` by plus extent/2;
+  - `mlx_block_masked_mm` takes its operand masks as one array of two, and blocks are of 32 or 64 only;
+  - the gathered and the masked product are float32 only in MLX 0.32.4, and none of the three takes complex
+    operands;
+  - nothing checks a list's values or a segment's bounds against the extents.
+- *What it means, in short:* the wrappers that K1 to K8 wait for exist, in Fortran's conventions, tested on
+  both devices: a Metal kernel from source text, the n-dimensional and real transforms, and the gathered,
+  masked and segmented products. 113 ledger lines remain for Phases 4 to 8.
+
+### Phase 4a, the calibration of the products: 2026-11-25 00:09 EST (a scratch copy on the M5 Ultra, Claude)
+
+- *How.* The new tester `mlxf_linalg_products_tester` (sub-suite `linalg_products` of `unit_linalg`) built in
+  Debug with the seed list held to the calibration seed alone and its tolerances at the ceiling, run as
+  `mlxf_test_exec test=unit_linalg suite=linalg_products device=cpu|gpu` (logs
+  `scratch/keep/phase4a_products_{cpu,gpu}_seed1.log`). Both devices on seed 1 (R4); no seed 2 or 3 ran
+  before this entry. Operands uniform in [-1, 1], rounded once to float32; the reference is the product
+  written out in real64 loops over Fortran subscripts; an element's error is relative to `max(1,` the same
+  product of the magnitudes`)`, as for the matrix products of entry "Phase 10c".
+- *Observed on seed 1, CPU / GPU, in float32 epsilons (measured):* `mlx_inner` 0.643 / 0.562, `mlx_outer`
+  0.111 / 0.111, `mlx_kron` 0.240 / 0.240, `mlx_vecdot` 0.479 / 0.479, `mlx_cross` 0.380 / 0.380,
+  `mlx_tensordot` 0.698 / 0.698, `mlx_einsum` 0.648 / 0.648, `mlx_addmm` 0.570 / 0.570,
+  `mlx_hadamard_transform` 0.436 / 0.436. float64 on the CPU: at most 0.25 eps64 (`mlx_tensordot`,
+  `mlx_einsum`), the rest exact. No finding.
+- *The Hadamard transform is float32 only.* The draft ran it in float64 on the CPU: the graph builds with a
+  float64 dtype and the evaluation fails with a status, "[hadamard] Unsupported type."
+  (`scratch/keep/phase4_hadamard_float64_probe.txt`). It is tested in float32 on both devices.
+- *Frozen* in `src/test/mlxf_test_defs.f90` (`PRODUCT_TOLERANCES`), `max(2 x the larger of the CPU and GPU
+  seed-1 errors, 4 eps)` of the result kind *(derived)*: the floors, 4.768371582e-07 and 8.881784197e-16, for
+  the nine.
+
+### Phase 4, family 1, the products and Einstein sums: 2026-11-25 00:14 EST (a scratch copy on the M5 Ultra, Claude)
+
+- *Lines made public (10):* `mlx_addmm`, `mlx_inner`, `mlx_outer`, `mlx_kron`, `mlx_vecdot`, `mlx_tensordot`
+  and `mlx_tensordot_axis` (one generic), `mlx_einsum`, `mlx_hadamard_transform`; and `mlx_linalg_cross`,
+  which is a product and lives with them in `mlxf_linalg`.
+- *Sub-phase 4b, seeds 2 and 3 after the freeze:* `scratch/keep/phase4b_products_unit_linalg_debug.log`,
+  `unit_linalg` 189 of 189 (the 94 of Phase 10 and 95 new). No judged check has failed in any run. Largest
+  judged errors on seeds 2 and 3, float32 epsilons *(measured, the final Release run)*: `mlx_inner` 0.923,
+  `mlx_hadamard_transform` 0.762, `mlx_tensordot` 0.701, `mlx_addmm` 0.665, `mlx_einsum` 0.638, the rest below
+  0.54, against the floor 4.
+- *Exact checks:* `'ij->ji'` is the transpose and `'ii->i'` the diagonal, bit for bit; `mlx_vecdot` of complex
+  vectors is Fortran's `dot_product` bit for bit and `mlx_inner` the unconjugated sum; every result's shape is
+  the reference's.
+- *Gates of the family:* Debug and Release with `-DMLXF_WERROR=ON`, no warning, fast gate 9 of 9 in both
+  (`scratch/keep/f1/gate_{base_debug,f1_release}.log`); the other areas at the base's counts
+  (`scratch/keep/f1/areas_f1_Release.txt`). A first Release build failed on `-Wfunction-elimination` (two
+  impure calls inside `min` after `.or.`), fixed with a local; a first static gate failed on rule `ctorexpr`,
+  which took the real dummies `a`, `b` of a test function for handles (renamed).
+- *Decisions under delegation.*
+  - **Operands exchanged, as for `matmul`,** in `mlx_addmm`, `mlx_inner`, `mlx_outer` and `mlx_tensordot`:
+    the result then has `a`'s remaining dimensions before `b`'s, and no node is added. `mlx_kron` needs no
+    exchange (the Kronecker product of the transposes is the transpose of the product).
+  - **`mlx_vecdot` keeps its name.** Phase 0 found that it conjugates as `dot_product` does and left the name
+    to this phase; decision 6's table fixes `mlx_vecdot` and section 7 forbids a public name outside the
+    ledger, so `dot_product` was not added. The default dimension is 1 (MLX's last axis).
+  - **A dimension shared by two operands reaches MLX as the axis `-dim`,** which is the same Fortran
+    dimension for any rank (`mlx_cross` broadcasts a batch against one vector). A new helper,
+    `mlxf_binary_axis_op`, passes the integer as given; `mlxf_take_op` translates with the first operand's
+    rank.
+  - **`mlx_tensordot(a, b[, n])`** contracts the last n dimensions of `a` with the first n of `b`, n = 2 by
+    default (MLX's Python default; mlx-c has none); `mlx_tensordot(a, b, dims_a, dims_b)` pairs listed
+    dimensions.
+  - **`mlx_einsum` reverses every term and always names the result.** Letters are Fortran dimensions; without
+    `->` the result is the letters that occur once in ASCII order (capitals first), then the ellipsis, which
+    is NumPy's rule read in Fortran order with the batch last. MLX's own default would be read reversed.
+  - **`mlx_addmm` takes `alpha` and `beta` as real32** (C's `float`), `mlx_hadamard_transform` its `scale`
+    likewise; an absent `scale` is MLX's `1/sqrt(n)` (the C optional is passed empty).
+  - **`mlx_cross` of two 2-vectors gives 3-vectors** `(0, 0, z)`: MLX's behaviour, where NumPy gives z.
+  - **`index_result` moved to the array module as `mlxf_one_based`** (the LU permutation and pivots of family
+    2 need it; `mlxf_ops.f90`, `mlxf_ops_reduce.f90`, `mlxf_ops_index.f90` and `mlxf_ops_sort.f90` call it
+    there). `unit_ops` keeps 2,402 / 1,439 / 965.
+  - **Shared test helpers** in `mlxf_test_utils`: `family_seeds`, `seeded_uniform`, `seeded_array` (ranks 1
+    to 5, float32 or float64) and `shaped_error` (the reference's shape is the shape the result must have).
+
+### Phase 4a, the calibration of the matrix functions: 2026-11-25 00:20 EST (a scratch copy on the M5 Ultra, Claude)
+
+- *How.* The new tester `mlxf_linalg_matrix_tester` (sub-suite `linalg_matrix`) built in Debug with the seed
+  list held to the calibration seed alone and its value tolerances at the ceiling, run on each device (logs
+  `scratch/keep/phase4a_matrix_{cpu,gpu}_seed1.log`: 93 and 50 checks, all passing at the first run, with no
+  change to a wrapper or a fixture afterwards). No seed 2 or 3 ran before this entry.
+- *Fixtures.* Matrices are built in real64 from seeded orthogonal factors (columns orthonormalised twice by
+  modified Gram-Schmidt) and a chosen spectrum: singular values or eigenvalues evenly spaced in [0.5, 3]
+  (condition number 6, within section 6's 1e3), eigenvalues in [-2, 3] for the symmetric eigenproblem, and a
+  normal non-symmetric matrix with the eigenvalues 0.5 +- 2i, -1 +- 0.75i and 1.5 for `mlx_eig`. Orders 5,
+  (6, 4) and (4, 6), batches of two. Triangular operands carry values in their other triangle that would
+  spoil the result if it were read.
+- *What section 6 fixes is not calibrated:* backward errors, residuals and the departure from orthogonal are
+  held to `10 n eps` of the result kind (n the larger extent; `LINALG_RESIDUAL_FACTOR` in `mlxf_test_defs`).
+  Observed on seed 1 in units of `n eps`, the larger of CPU and GPU float32, then CPU float64 *(measured)*:
+  `mlx_inv` 0.050 / 0.054, `mlx_tri_inv` 0.011 / 0.011, `mlx_pinv` 0.129 / 0.103, `mlx_cholesky` 0.109 / 0.117,
+  `mlx_cholesky_inv` 0.033 / 0.063, `mlx_qr` backward 0.148 / 0.284 and orthonormality 0.508 / 0.616, `mlx_lu`
+  0.078 / 0.067, `mlx_lu_factor` 0.059 / 0.095, `mlx_svd` backward 0.469 / 1.885, orthogonality 1.071 / 0.960,
+  values 0.252 / 0.168, `mlx_eigh` residual 0.689 / 0.561, orthonormality 1.165 / 1.736, values 0.389 / 0.292,
+  `mlx_eig` residual 0.370, values 0.327 (complex64 results: float32 bound, float64 operands included),
+  `mlx_solve` 0.058 / 0.053, `mlx_solve_triangular` 0.033 / 0.034, the norms of singular values 0.285 / 0.285;
+  complex `mlx_svd` 0.513 and 1.083, complex `mlx_eigh` 0.485 and 1.034. Everything is below a fifth of the
+  bound: no finding.
+- *Values, calibrated.* Observed on seed 1, CPU / GPU, float32 epsilons: `mlx_det` 0.528 / 0.528, `mlx_slogdet`
+  0.098 / 0.098, `norm2` 0.476 / 0.535, `mlx_norm` 0.395 / 0.607, `mlx_norm_matrix` 0.301 / 0.293; float64 on
+  the CPU at most 1.14 eps64 (`mlx_det`). *Frozen* (`MATRIX_TOLERANCES`), `max(2 x observed, 4 eps)`: the
+  floors of both kinds for the five.
+
+### Phase 4, family 2, the decompositions, solvers and norms of `linalg`: 2026-11-25 00:22 EST (a scratch copy on the M5 Ultra, Claude)
+
+- *Lines made public (20):* `mlx_linalg_inv`, `_pinv`, `_tri_inv`, `_det`, `_slogdet`, `_cholesky`,
+  `_cholesky_inv`, `_qr`, `_lu`, `_lu_factor`, `_svd`, `_eigh`, `_eigvalsh`, `_eig`, `_eigvals`, `_solve`,
+  `_solve_triangular`, `_norm` (`mlx_norm`), `_norm_matrix` (`mlx_norm_matrix`), `_norm_l2` (`norm2`).
+- *The probe (decision 9, "never from belief"), re-run on this machine with the functions Phase 0 left out*
+  (`scripts/probes/mlx_behaviour_probe.c`, output `scratch/keep/phase4_behaviour_probe_tf32_0.txt`): every
+  factorisation, inverse, determinant, eigensolver and solver refuses the GPU stream; `norm_l2`, `cross`, the
+  vector norms, the matrix norms of orders 1 and infinity and `'fro'` run on it; the matrix norms of orders 2
+  and -2 and `'nuc'` refuse it (they call `svd`). A graph with a GPU operation before and after an inverse on
+  the CPU stream evaluates and is right to 1e-8.
+- *Sub-phase 4b, seeds 2 and 3:* `scratch/keep/phase4b_matrix_unit_linalg_debug.log`, `unit_linalg` 589 of 589.
+  No judged check has failed in any run. Largest on seeds 2 and 3 *(measured)*: residuals 1.600 n eps (`mlx_eigh`
+  orthonormality, float32, both devices) and 1.397 n eps64, against 10; values 0.826 eps32 (`mlx_det`), 0.677
+  (`mlx_slogdet`), 0.639 (`mlx_norm`), against 4.
+- *Exact checks:* the shapes of every factor (reduced `q` and `r`, full `u` and `vt`, batches along dimension
+  3); a Cholesky factor's other triangle, `r`'s lower triangle, `l`'s unit diagonal and upper triangle, `u`'s
+  lower triangle exactly zero; `p` a permutation of 1 to m and `pivots(i)` in i to m, int32; singular values
+  descending, eigenvalues ascending; the sign of a determinant exactly 1 or -1, opposite after two rows are
+  exchanged.
+- *The translation table of decision 9, as found.* Right as written: the free functions (`inv`, `pinv`, `det`,
+  `slogdet`, `svd` with U and Vt exchanged, also for complex operands) and the flipped flags (`tri_inv`,
+  `cholesky`, `cholesky_inv`, `eigvalsh`; `eigh` with a transpose of the eigenvectors). **Wrong in the count
+  of nodes for six functions, which the plan asked the run to report:**
+  - `qr`, `lu`, `lu_factor`, `eig`, `solve` and `solve_triangular` need the operand transposed **and** every
+    matrix that comes back (the table lists one node). One transpose of `a` alone gives MLX the Fortran
+    matrix, but MLX's factors are then read transposed by Fortran: `q` and `r` would come back as `q^T` and
+    `r^T`. So `mlx_qr` adds three transposes, `mlx_lu` three and an index shift, `mlx_lu_factor` two and a
+    shift, `mlx_eig` two, `mlx_solve` and `mlx_solve_triangular` one for a vector `b` and three for a matrix
+    of right-hand sides. All are views (`swapaxes`), none a copy, so this is not the stop of section 7.
+  - `solve_triangular` keeps its `upper` flag, since MLX is given the Fortran matrix itself.
+  - `eigvals` could be free (a matrix and its transpose have the same eigenvalues); it transposes its operand
+    as the table says, so that its values come in `mlx_eig`'s order (measured equal on every seed).
+  - `eigh` of a complex Hermitian matrix needs the conjugate as well as the transpose of the eigenvectors
+    (MLX sees the conjugate matrix); the table speaks of real matrices.
+- *Decisions under delegation.*
+  - **A second module, `mlxf_linalg_matrix`,** holds the 20 wrappers (the products stay in `mlxf_linalg`).
+  - **Several results are subroutine arguments:** `call mlx_qr(a, q, r)`, `call mlx_lu(a, p, l, u)`,
+    `call mlx_lu_factor(a, lu, pivots)`, `call mlx_svd(a, u, s, vt)` and `call mlx_svd(a, s)` (the values
+    alone: MLX's `compute_uv = false`), `call mlx_eigh(a, w, v[, uplo])`, `call mlx_eig(a, w, v)`,
+    `call mlx_slogdet(a, sign, logabsdet)`.
+  - **`mlx_lu` returns the permutation as MLX defines it,** row i of `a` is row `p(i)` of `l u`, 1-based
+    int32; `mlx_lu_factor` returns LAPACK's interchange sequence, 1-based.
+  - **The CPU stream is chosen per function, in nine helpers named `mlxf_cpu_*`,** from the probe's list; a
+    private `cpu_stream` in `mlxf_array_operations` builds it from calls the ledger already classes as
+    plumbing (`mlx_default_cpu_stream_new` is a Phase 8 line and was left alone). The transposes and index
+    shifts stay on the default device.
+  - **The norms choose their stream by order:** the CPU's for the orders 2 and -2 of a matrix and for
+    `'nuc'`, the default device's otherwise (`mlxf_norm_spec%on_cpu`).
+  - **Three names for the norms, as the ledger has them:** `norm2(a[, dim][, keepdims])` and
+    `norm2(a, dims[, keepdims])`; `mlx_norm(a, ord[, dim][, keepdims])` and `mlx_norm(a, ord, dims[,
+    keepdims])` with a real64 `ord` (C's `double`; an infinite one through `ieee_value`);
+    `mlx_norm_matrix(a, ord[, dims][, keepdims])` with `'fro'` or `'nuc'`. Of two dimensions the first is the
+    rows'. Without dimensions `mlx_norm` takes a vector or a matrix (dimensions 1, 2) and stops on a higher
+    rank, as MLX does; `mlx_norm_matrix` defaults to dimensions 1 and 2 of any rank, the matrix dimensions of
+    every other function here, where MLX takes all axes of a rank-2 array only.
+  - **`norm2(a)` of a whole array flattens first** (one view): mlx-c's null axis list cannot be passed through
+    the generated interface, and MLX refuses more than two axes.
+  - **`uplo` is a character, `'L'` by default,** and names the triangle of the Fortran matrix; another letter
+    stops.
+  - **The residual of an inverse is `|a x - 1|_F / (|a|_F |x|_F)`** and of a solution the backward error
+    `|a x - b|_F / (|a|_F |x|_F + |b|_F)`; eigenvalues and singular values are judged against the constructed
+    spectrum relative to `|a|_F`; all under section 6's `10 n eps`. The norms of singular values are judged
+    the same way and not by a calibrated tolerance.
+
+### Phase 4a, the calibration of the convolutions: 2026-11-25 00:24 EST (a scratch copy on the M5 Ultra, Claude)
+
+- *How.* The new tester `mlxf_conv_tester` (sub-suite `conv`) built in Debug with the seed list held to the
+  calibration seed alone and its tolerances at the ceiling, run on each device (logs
+  `scratch/keep/phase4a_conv_{cpu,gpu}_seed1.log`). No seed 2 or 3 ran before this entry. Inputs and kernels
+  uniform in [-1, 1], rounded once to float32. The references are direct real64 sums over Fortran subscripts
+  (channels, W, H, D, batch): a correlation summed over the kernel at each output position, a transposed
+  convolution as every input element spread over the output, so that neither repeats MLX's method (MLX
+  computes a transposed convolution as a convolution of the dilated, padded input with the reversed kernel).
+  An output element's error is relative to `max(1,` the same sum of magnitudes`)`.
+- *The fixture, changed once before the freeze.* The draft also ran float64 on the CPU
+  (`scratch/logs/phase4a_conv_cpu_seed1_draft1.log`): every function failed there, because MLX 0.32.4 computes
+  a float64 convolution in float32 when neither the kernels nor the input are dilated (and, beyond one
+  dimension, the groups are one) and refuses it at the evaluation otherwise, "[Convolution::eval] got
+  unsupported data type." (`scratch/keep/phase4_conv_float64_probe.txt`; MLX `backend/cpu/conv.cpp`). The
+  tester was restricted to float32 on both devices; the float32 numbers of the draft and of the kept run are
+  the same.
+- *Observed on seed 1, CPU / GPU, float32 epsilons (measured):* `mlx_conv1d` 0.769 / 1.001, `mlx_conv2d`
+  0.963 / 0.963, `mlx_conv3d` 0.903 / 0.903, `mlx_conv_general` 0.839 / 0.839, `mlx_conv_transpose1d`
+  0.761 / 0.761, `mlx_conv_transpose2d` 1.092 / 1.092, `mlx_conv_transpose3d` 0.631 / 0.978. No finding.
+- *Frozen* (`CONV_TOLERANCES`), `max(2 x the larger, 4 eps32)`: the float32 floor 4.768371582e-07 for the
+  seven. The float64 column holds the same bound and judges nothing.
+
+### Phase 4, family 3, the convolutions: 2026-11-25 00:26 EST (a scratch copy on the M5 Ultra, Claude)
+
+- *Lines made public (7):* `mlx_conv1d`, `mlx_conv2d`, `mlx_conv3d`, `mlx_conv_general`,
+  `mlx_conv_transpose1d`, `mlx_conv_transpose2d`, `mlx_conv_transpose3d`, in the new module `mlxf_conv` of
+  `src/core/linalg/` (the file table puts the convolutions there), with the record `mlxf_conv_spec`.
+- *Sub-phase 4b, seeds 2 and 3:* `scratch/keep/phase4b_conv_unit_linalg_debug.log`, `unit_linalg` 632 of 632. No
+  judged check has failed in any run. Largest on seeds 2 and 3 *(measured)*: `mlx_conv2d` 1.353 eps32,
+  `mlx_conv_general` 0.992, `mlx_conv_transpose2d` 0.977, against the floor 4.
+- *What the forms cover:* one, two and three spatial dimensions; stride, padding, dilation and output padding
+  that differ between the dimensions; a list of one value; an absent list and an absent spec; groups in one
+  and two dimensions, also in a transposed convolution; for `mlx_conv_general` a padding after that differs
+  from the padding before, a dilated input and reversed kernels.
+- *Decisions under delegation.*
+  - **`type(mlxf_conv_spec)` is the public record, under the plan's name** (decision 10), and
+    `mlx_conv*(input, weight[, spec])` the signature. `CLAUDE.md` names user-facing types `mlx_<x>` and the
+    kernel's record is `mlx_metal_kernel_spec`; decision 10 fixes this name, so it was kept, and the rename
+    to `mlx_conv_spec` is the maintainer's to rule (one line of `mlxf_defs`, the import and the public line
+    of `mlxf.f90`, the tester and the policy).
+    *Taken at the review of the phase, before the name was ever committed:* the record is
+    **`type(mlx_conv_spec)`**. `CLAUDE.md`'s rule for public names stands above a plan's wording, the kernel's
+    record already follows it, and a rename after a release would break users. The source, the README and
+    the policy carry the new name; this record keeps the old one where it tells what the run did.
+  - **The lists are allocatable:** absent is the default, one value serves every spatial dimension, otherwise
+    one value per dimension in Fortran's order (W first), reversed inside the helper. A list of another length
+    stops; so do a field the function does not take and `groups` below 1 (MLX divides by it unchecked).
+  - **`padding` is the padding before and after;** `mlx_conv_general` takes `padding_hi` for the far end when
+    it is given. `dilation` is the kernel's, `input_dilation` the input's.
+  - **One helper per C signature,** seven of them, each translating the record itself, as the reduction
+    helpers translate dimensions.
+  - **The wrappers are correlations,** as MLX's convolutions are; `flip` of `mlx_conv_general` reverses the
+    kernels.
+  - **A transposed convolution whose padding exceeds `dilation*(k-1)` is passed through,** not refused: MLX
+    returns a shorter result there than the usual definition (measured on both devices,
+    `scratch/keep/phase4_conv_transpose_padding_probe.txt`; question 23 for Apple). The policy states the
+    extent formula up to that padding. It is a corner of three functions that are right elsewhere, so no
+    ledger line was excluded (decision 22 speaks of a function that disagrees with its documentation; MLX's
+    states no formula).
+
+### Phase 4, linear algebra, products and convolutions: 2026-11-25 00:50 EST (a scratch copy on the M5 Ultra, Claude) - complete
+
+The three families are done; their entries above ("4a" three times, "family 1", "family 2", "family 3") hold
+the detail. This entry closes the phase and states the final numbers. **One gate of the phase is not met and
+waits for a ruling: the Release build-time bound of ruling R3, which the base itself exceeds** (below).
+
+- *Machine and base.* HanssMacStudio, the M5 Ultra (macOS 27.2.1, GFortran 16.2.0, CMake 4.5.1, Homebrew MLX
+  0.32.4 and mlx-c 0.8.0). Base: the maintainer's checkout as it stood on 2026-11-24 at 23:45 EST, commit
+  `1e0ae97` plus uncommitted, verified work (Phase 10's wrappers and three test-only oracle modules); a
+  snapshot of it without `.git` is the reference of every count and of the diff. Ruling of `spec/rulings.md`:
+  the hold after Phase 3 is released, the API as delivered. R1, R3 and R4 applied. The work was done in a copy
+  of the working tree, never in the maintainer's checkout; nothing is committed. Paths below are under the
+  run's root, `.../scratchpad/parity4_work`.
+- *Files changed* (from `diff -rq` against the base snapshot). New: `src/core/linalg/mlxf_linalg_matrix.f90`,
+  `mlxf_conv.f90`, `mlxf_linalg_products_tester.f90`, `mlxf_linalg_matrix_tester.f90`, `mlxf_conv_tester.f90`.
+  Changed: `src/core/linalg/mlxf_linalg.f90`, `linalg.inf`; `src/core/array/mlxf_array.f90`,
+  `mlxf_array_operations.f90` (23 helpers, `mlxf_one_based`); `src/core/ops/mlxf_ops.f90`,
+  `mlxf_ops_reduce.f90`, `mlxf_ops_index.f90`, `mlxf_ops_sort.f90` (`index_result` is now the array module's);
+  `src/defs/mlxf_defs.f90` (`mlxf_conv_spec`, `mlxf_norm_spec`); `src/core/mlxf.f90`;
+  `src/test/mlxf_test_utils.f90`, `mlxf_test_defs.f90`, `mlxf_test_registry.f90`; `test/CMakeLists.txt` (the
+  comment on the guard group); `scripts/mlxc_parity.txt`, `scripts/check_rules.py` (`PARITY_PENDING` 76,
+  `ENTRY_HELPERS`, rule `ctorexpr` extended), `scripts/probes/mlx_behaviour_probe.c`;
+  `doc/policies/binding_contract_policy.md` (sections 7 and 10), `doc/policies/test_environment_policy.md`
+  (the guard members), `README.md`, `doc/collaboration/apple_questions.md` (questions 23 and 24),
+  `doc/history/2026-11.md`, this plan, the report. No file outside the table; the toy modules, the oracles,
+  the benchmark and the existing testers are untouched.
+- *Exit items.*
+  - **No `pending 4` line.** Ledger before: 286 public, 60 plumbing, 132 internal, 89 excluded, 113 pending
+    (4: 37, 5: 19, 6: 16, 7: 7, 8: 34). After: 323 public, 76 pending (5: 19, 6: 16, 7: 7, 8: 34); plumbing,
+    internal and excluded unchanged *(exact)*. `PARITY_PENDING = 76`; rule `parity` passes.
+  - **`unit_linalg` passes on both devices in both builds** (`scratch/keep/final/area_{Debug,Release}_linalg_*.log`,
+    `unit_linalg_by_suite.txt`; both devices / CPU / GPU): 632 / 397 / 239, that is `linalg` 32 / 17 / 15 and
+    `linalg_mm` 62 / 33 / 30 unchanged, `linalg_products` 95 / 60 / 36, `linalg_matrix` 400 / 265 / 136 (197
+    residuals judged), `conv` 43 / 22 / 22. The residual bounds of section 6 hold with a margin of
+    five: the largest residual of any run is 1.96 n eps64 (`mlx_svd`'s backward error, float64, Release).
+  - **The existing suites keep their assertions** (`scratch/keep/final/areas_{Debug,Release}.txt` against
+    `scratch/keep/base/areas_base_Debug.txt`): core 80 to 82 / 55 or 56 / 55 or 56 (the address-reuse checks),
+    array 179 / 96 / 94, ops 2,402 / 1,439 / 965, fft 194 / 101 / 94, compile 63 / 32 / 32, kernels 1,063 /
+    539 / 531, fast 94 / 13 / 82; `object_contracts` passes with 19 members (16 at the base).
+  - **Debug and Release from scratch with `-DMLXF_WERROR=ON`, zero warnings**
+    (`scratch/keep/final/build_{Debug,Release}.log`), **fast gate 9 of 9 in both** with `scripts/check_tree.sh`
+    first (`gate_{Debug,Release}.log`), installed (`install_*.log`).
+  - **Ruling R3, judged against the entry "Phase 2, the base measurements on the M5 Ultra".**
+    - *Fast gate total real time in Release:* 10.85 s and 10.77 s (`gate_Release.log`,
+      `second_release_gate.log`; load 2.07 and 2.47 before) against **38.74 s**: met. `unit_linalg` takes 0.39 s
+      in the gate. No new area, so the 3 s bound has no subject; the budget stays 9.
+    - *Release clean build, configure plus build from scratch at `-j 12`:* 15.507 s (1.521 + 13.986; load 1.36
+      before, 2.07 after) and 15.510 s (1.523 + 13.987; load 1.67 before, 2.47 after;
+      `second_release_timing.log`) against **14.08 s**: **not met.** The base snapshot alone takes 15.049,
+      15.011 and 15.041 s (`scratch/keep/base/build_basesnap_Release_{1,2,3}.log`, loads 2.6, 3.4 and 2.2
+      after): the bound was exceeded before this phase's first edit, by the test-only oracle modules that
+      entered after Phase 10's base (`mlxf_oracle_gridding`, `_recon_pcg`, `_projection`, `_pcg`, `_pose`
+      take 2.2 to 3.5 s each to compile at `-O3`; `scratch/keep/final/release_compile_profile.txt`). **This
+      phase adds 0.47 s of wall time, 3.1 % of the base** (15.509 against the base's mean 15.034). Compiled
+      one file at a time the tree takes 57.2 s, about 6.6 s of it this phase's: the three new testers
+      (`mlxf_linalg_matrix_tester` 4.0 s, the slowest file of the tree, `mlxf_linalg_products_tester` 1.4 s,
+      `mlxf_conv_tester` 1.0 s) and 0.3 s for the three library modules. All *measured*.
+    - *The stop of section 7 and what was done.* "The build-time bound exceeded" is a stop. R3 places the
+      judgment at the end of the phase, and the excess is the base's, in files this phase may not edit; the
+      families were therefore finished, and the stop is recorded here, at the judgment. **Ruling needed:**
+      either re-freeze the build bound on the present base (twice its mean would be 30.07 s), or bring the
+      oracles' compile time down (they are outside every phase's file table of this plan).
+    - *Ruled* (2026-11-25, Hans: "Go", on the recommendation): **the Release clean-build bound is re-frozen at
+      22.07 s** (*derived*: the present base's mean 15.03 s, *measured*, plus the 7.04 s of room Phase 2 gave
+      above its own base). Phase 4 meets it at 15.51 s. Phase 5 and later are judged against 22.07 s; they
+      start after the kernel runs K1, K8 and K2, which hold the M5.
+  - **`scripts/check_tree.sh` passes;** `restyle_fortran.py` and `format_use_blocks.py` were run on the 17
+    Fortran files touched, by name, after the last edit, and rewrote none.
+- *Frozen tolerances* (`src/test/mlxf_test_defs.f90`; entries "Phase 4a" above): `PRODUCT_TOLERANCES`,
+  `MATRIX_TOLERANCES` and `CONV_TOLERANCES` hold the floors, 4 eps32 = 4.768371582e-07 and 4 eps64 =
+  8.881784197e-16 (the convolutions 4 eps32 in both columns); `LINALG_RESIDUAL_FACTOR = 10` is section 6's.
+  No tolerance moved after its freeze. Upstream-defect lines: 0.
+- *Mutations and plants.*
+  - 41 mutations of the wrappers and helpers on a scratch copy, the archive, the executable and the object
+    deleted before each build (`scratch/keep/phase4_mutations_final.txt`): every one fails `unit_linalg`, 33
+    through assertions (2 to 33 failing checks) and 8 through MLX's own shape, axis or stream errors; the
+    restored copy passes. They cover each exchange of operands, each flipped flag, each transpose, the two index
+    shifts, the reversal of the convolution lists and the order of their options, and the choice of the CPU
+    stream for the norms of singular values.
+  - Seven planted violations fail the static gate and the restored copy passes
+    (`scratch/keep/phase4_plants.txt`): the ratchet left at 113, a public name missing from `mlxf.f90`, a
+    called function left pending, a wrapper that touches its operand before the entry, a helper missing from
+    `ENTRY_HELPERS`, a function result of an imported test helper inside a constructor of handles, a guard
+    member without its case.
+- *The independent review* (a read-only subagent, against MLX's and mlx-c's source; it wrote nothing). No
+  wrapper found that returns a wrong result for an input its comment declares legal. Acted on:
+  - a leak in the new products tester, two function results of `seeded_array` inside a constructor of
+    handles, which neither `ctorcall` nor `ctorexpr` saw. Fixed, and **rule `ctorexpr` now also counts a
+    function with a handle result that a file imports by name from a file of the tree** (generics included;
+    the user API stays `ctorcall`'s). The planted line fails; the tree had no other case.
+  - four blind tests made discriminating (the convolution fixtures: a stride equal to the dilation, a
+    palindromic stride list, a dilation equal to the output padding, a transposed convolution without a
+    dilation), and forms added (`mlx_addmm` with a vector on either side, a capital letter in an unnamed
+    `mlx_einsum` result, `mlx_conv2d` without a spec, a norm of singular values with the dimensions listed
+    the other way). Every judged error stays within its frozen tolerance.
+  - refusals added: a list of no dimensions for `norm2` and `mlx_norm` (it would reach MLX as "no reduction"),
+    `groups` below 1.
+  - comments and the policy corrected: `mlx_solve` needs the same batch dimensions on `a` and `b` (MLX's
+    `take_along_axis`), where `mlx_solve_triangular` broadcasts; the transposed convolution's formula holds
+    up to a padding of `dilation*(k-1)` (then measured, question 23); a negative padding crops; the
+    transposed 3D convolution takes one group; `padding` of the record means two things.
+  - Left as they are, for the maintainer: no test of batches of `mlx_lu`, `mlx_lu_factor`, `mlx_svd`,
+    `mlx_eigh`, `mlx_eig`, `mlx_cholesky` and `mlx_solve_triangular` (`mlx_inv`, `mlx_qr`, `mlx_det`,
+    `mlx_solve` and the norms have one), of `mlx_lu_factor` on a rectangular matrix, of a complex `uplo='U'`,
+    of `norm2` on a rank-0 array, of `mlx_inner` with a scalar, of `mlx_vecdot` broadcasting, of an ellipsis
+    that leads or sits in the middle or spans different ranks, of groups in `mlx_conv_transpose2d`, of
+    one-value lists other than stride and padding; three of the stops have a guard (`guard_matrix_rank`,
+    `guard_eigh_uplo`, `guard_conv_spec`), the others none; the float64 refusals of the Hadamard transform
+    and of the convolutions are measured in probes and not pinned by a test (a later MLX may lift them).
+- *Surprises about MLX and mlx-c (measured unless said).*
+  - Six functions of decision 9's table need more transposes than it lists (family 2's entry).
+  - The Hadamard transform and the convolutions are float32 operations that accept a float64 graph: the first
+    fails its evaluation, the second computes in float32 or fails, by its options (question 24).
+  - A transposed convolution with a padding above `dilation*(k-1)` returns less than the definition
+    (question 23).
+  - With MLX's default `MLX_ENABLE_TF32`, a 3 by 3 float32 product on the GPU is off by 7e-4 (the probe's
+    mixed-stream graph, `scratch/keep/phase4_behaviour_probe.txt`); with `MLX_ENABLE_TF32=0`, 1e-8. The policy
+    already says so of the precision; the probe's header now says to run it with the variable at 0.
+  - `mlx_solve` refuses a batch of `a` against a single `b` (read in `mlx/linalg.cpp`, not run).
+  - `mlx_eig` and `mlx_eigvals` of a float64 matrix return complex64 that is more accurate than the float32
+    route (residual 0.035 n eps32): MLX computes in double and rounds the result.
+- *Decisions about the run itself.* The wrappers of the three families and the ledger were written in one go
+  (rule `parity` needs a called function public), then each family was calibrated, frozen, judged and gated
+  in turn; had the run stopped between families, the untested family's wrappers and lines would have come
+  out. Mutations and plants ran on scratch copies. The base snapshot was built (never written to) to measure
+  the base's own build and gate times.
+- *Proposed, not applied* (skill edits need approval): `.github/skills/mlxf-binding/SKILL.md`, section 3,
+  should list the helpers of this phase (`mlxf_cpu_*`, `mlxf_norm_op`, `mlxf_norm_text_op`,
+  `mlxf_binary_axis_op`, `mlxf_optional_float_op`, `mlxf_addmm_op`, `mlxf_einsum_op`, `mlxf_tensordot_op`, the
+  seven `mlxf_conv*_op`) and the shared `mlxf_one_based`; section 4 could add "a matrix function transposes
+  what MLX's transposed view does not give for free: say which, and never copy", "a dimension shared by two
+  operands is passed as the axis `-dim`" and "a CPU-only function goes through an `mlxf_cpu_*` helper";
+  `references/testing.md` could say that a name shared by a real dummy and a handle trips `ctorexpr`, and that
+  a constant and a variable that differ only in case (`TALL`, `tall`) do not compile.
+- *The new public names of the phase, for the maintainer's read.* Arrays are `type(mlx_array)`; `[x]` is
+  optional and passed by keyword; `dim` is a Fortran dimension, `dims` an integer array of them; results are
+  functions unless written `call`.
+  - **Products:** `mlx_addmm(c, a, b[, alpha][, beta])` (real32 factors), `mlx_inner(a, b)`, `mlx_outer(a, b)`,
+    `mlx_kron(a, b)`, `mlx_vecdot(a, b[, dim])`, `mlx_cross(a, b[, dim])`, `mlx_tensordot(a, b[, n])`,
+    `mlx_tensordot(a, b, dims_a, dims_b)`, `mlx_einsum(subscripts, operands)` (`operands(:)` an array of
+    handles), `mlx_hadamard_transform(a[, scale])` (real32).
+  - **Matrices:** `mlx_inv(a)`, `mlx_pinv(a)`, `mlx_tri_inv(a[, upper])`, `mlx_det(a)`,
+    `call mlx_slogdet(a, sign, logabsdet)`, `mlx_cholesky(a[, upper])`, `mlx_cholesky_inv(factor[, upper])`,
+    `call mlx_qr(a, q, r)`, `call mlx_lu(a, p, l, u)`, `call mlx_lu_factor(a, lu, pivots)`,
+    `call mlx_svd(a, u, s, vt)`, `call mlx_svd(a, s)`, `call mlx_eigh(a, w, v[, uplo])`,
+    `mlx_eigvalsh(a[, uplo])`, `call mlx_eig(a, w, v)`, `mlx_eigvals(a)`, `mlx_solve(a, b)`,
+    `mlx_solve_triangular(a, b[, upper])`.
+  - **Norms:** `norm2(a[, dim][, keepdims])`, `norm2(a, dims[, keepdims])`, `mlx_norm(a, ord[, dim][, keepdims])`,
+    `mlx_norm(a, ord, dims[, keepdims])` (`ord` real64), `mlx_norm_matrix(a, ord[, dims][, keepdims])` (`ord`
+    `'fro'` or `'nuc'`, `dims(2)`).
+  - **Convolutions:** `mlx_conv1d`, `mlx_conv2d`, `mlx_conv3d`, `mlx_conv_general`, `mlx_conv_transpose1d`,
+    `mlx_conv_transpose2d`, `mlx_conv_transpose3d`: `f(input, weight[, spec])`; `type(mlxf_conv_spec)`:
+    `stride(:)`, `padding(:)`, `dilation(:)`, `output_padding(:)`, `padding_hi(:)`, `input_dilation(:)`
+    (allocatable integer lists), `groups = 1`, `flip = .false.`.
+- *Where a Fortran user would expect something else* (each stated in the binding policy, sections 7 and 10):
+  - the factorisations run on the CPU whatever the default device, and nothing says so at the call;
+  - `mlx_lu`'s `p` is a permutation (`a(i, :) = (l u)(p(i), :)`), `mlx_lu_factor`'s `pivots` LAPACK's
+    interchanges; `mlx_svd` returns full `u` and `vt` and the transposed `vt`, not `v`;
+  - `mlx_eig` returns complex64 for a real matrix; `mlx_eigh`'s `uplo` is a letter, the other triangle flags
+    are logicals named `upper`, as in MLX;
+  - `mlx_vecdot` is `dot_product` (it conjugates), `mlx_inner` is not; `mlx_cross` of 2-vectors gives
+    3-vectors; `mlx_tensordot(a, b)` contracts two dimensions by default;
+  - an `mlx_einsum` letter is a Fortran dimension, an unnamed result puts capitals first, and the ellipsis is
+    the trailing (batch) dimensions;
+  - `mlx_norm(a, ord)` without dimensions stops above rank 2; `norm2(a, dims)` takes at most two dimensions;
+    an infinite order needs `ieee_value`;
+  - a convolution's layout is (C, W, H, D, N) with the kernels' output channels last, the options are a
+    record whose lists are per spatial dimension with W first, and the convolutions are correlations in
+    float32;
+  - `mlxf_conv_spec` was the one public type whose name started with `mlxf_`; it is `mlx_conv_spec` since
+    the review of the phase.
+- *What it means, in short:* linear algebra, the tensor products and the convolutions of MLX are reachable
+  from Fortran with matrices, dimensions and layouts as Fortran reads them, tested on both devices, with no
+  accuracy finding and two reports for Apple. 76 ledger lines remain, for Phases 5 to 8. The build-time bound
+  has to be ruled on before the next phase is judged against it.

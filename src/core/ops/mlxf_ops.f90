@@ -1181,11 +1181,6 @@ interface
         type(mlx_array), intent(in) :: a
         type(mlx_array) :: r
     end function minloc_all
-    module subroutine index_result( r, idx, proc )
-        type(mlx_array),  intent(inout) :: r
-        type(mlx_array),  intent(in)    :: idx
-        character(len=*), intent(in)    :: proc
-    end subroutine index_result
     module function mlx_sort( a, dim ) result(r)
         type(mlx_array), intent(in)           :: a
         integer,         optional, intent(in) :: dim
@@ -1562,11 +1557,6 @@ interface
         integer,         optional, intent(in) :: stride(:)
         type(mlx_array) :: r
     end function mlx_slice_update_prod
-    module subroutine zero_based( r, indices, proc )
-        type(mlx_array),  intent(inout) :: r
-        type(mlx_array),  intent(in)    :: indices
-        character(len=*), intent(in)    :: proc
-    end subroutine zero_based
     module function slice_static( a, lower, upper, stride ) result(r)
         type(mlx_array), intent(in)           :: a
         integer,         intent(in)           :: lower(:), upper(:)

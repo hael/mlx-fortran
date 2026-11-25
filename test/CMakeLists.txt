@@ -55,12 +55,16 @@ endfunction()
 #   the GPU's small evaluations and the first compilation of each of its kernels.
 # compile isolates callback tracing, checked callback failures and shapeless reuse on both devices.
 # Cold CPU/GPU JIT compilation can put it above 0.5 s; cached invocations are much shorter.
+# fast (a new area the parity plan names): custom Metal kernels, which MLX compiles from source text at their
+#   first evaluation; on the GPU they are checked exactly, on the CPU device their refusal is. A process of its
+#   own keeps a kernel that fails to compile, which the suite provokes on purpose, apart from the other areas.
+#   Alone it takes 0.1 s in Release; beside the gate's other entries, which share the GPU, 0.6 s.
 # kernels: test-only models of SIMPLE's pipelines (the polar table's scoring
 #   workspace and its shift maps) on seeded or analytic fixtures against double-precision oracles, on both
 #   devices; its own process keeps the workspace's lifecycle checks (live count and active memory back to warm
 #   values) apart from other areas. Above 0.5 s in Release: the oracles' direct sums over every rotation and
 #   cell, and the GPU's first compilation of its kernels.
-set(MLXF_TEST_AREAS core array ops linalg fft compile kernels)
+set(MLXF_TEST_AREAS core array ops linalg fft compile fast kernels)
 foreach(_area IN LISTS MLXF_TEST_AREAS)
     mlxf_add_test(unit_${_area} fast 600 COMMAND $<TARGET_FILE:mlxf_test_exec> test=unit_${_area})
 endforeach()
@@ -69,11 +73,14 @@ endforeach()
 # object_contracts: an operation on an empty array, a stale handle used, a call inside an OpenMP region, a
 #   float64 operation built on the GPU, and the one-thread guard on the paths that touch no operand (an empty
 #   evaluation list, mlx_live_count, mlx_last_error) and on a live private copy released in a region; a
-#   invalid 1D/2D FFT normalizations; a separate entry because every member ends its process.
+#   invalid 1D/2D FFT normalizations; a Metal kernel built from a spec without outputs and an empty kernel
+#   applied; segments of the wrong shape; a factorisation of a rank-1 array, a triangle that is neither 'L' nor
+#   'U' and a convolution spec with a list of the wrong length; a separate entry because every member ends its
+#   process.
 mlxf_add_test(object_contracts fast 600 COMMAND $<TARGET_FILE:mlxf_test_exec> expect_aborts object_contracts)
 
 # ---- the budget ----------------------------------------------------------------------------------
-set(MLXF_CTEST_BUDGET 8)
+set(MLXF_CTEST_BUDGET 9)
 get_property(_mlxf_tests DIRECTORY PROPERTY TESTS)
 list(LENGTH _mlxf_tests _mlxf_ntests)
 if(NOT _mlxf_ntests EQUAL MLXF_CTEST_BUDGET)
