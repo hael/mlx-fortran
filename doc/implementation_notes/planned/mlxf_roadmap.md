@@ -70,7 +70,7 @@ plan, written to `doc/how2s/how2write_agent_plans.md`.
 | 1a | **Parity Phases 2 and 3**, then the API hold (delivered 2026-11-24 by run `mlxf_parity`; the hold released by Hans the same day) | [`mlxf_mlxc_parity.md`](mlxf_mlxc_parity.md) | rank 0 (its base), decision 4 | no `pending 2` or `pending 3` line; the maintainer has read the API |
 | 1b | **The wrappers the kernels need, ahead of their turn** (see below) | the parity plan, its decisions 27 and 28 (Phase 10; run `mlxf_parity_wrappers`; the hold is released, so it starts when rank 0b's result lands) | rank 1a, decision 5 | the named ledger lines are public and their area tests pass on both devices |
 | 1c | **Housekeeping** (see below) | this note, then the notes it names | rank 0 | each sub-item closed or handed to a plan |
-| 2 | **The toy kernels**, deliverables K1 to K8 | [`mlxf_kernel_families.md`](mlxf_kernel_families.md), then one plan per deliverable or family | each deliverable's own wrappers (design note, section 8), not the whole of rank 1b; decisions 6 to 9 | each deliverable's exit in the design note |
+| 2 | **The toy kernels**, deliverables K1 to K8 | [`mlxf_kernel_families.md`](mlxf_kernel_families.md), then one plan per deliverable or family: [K1](mlxf_kernel_k1.md), [K2](mlxf_kernel_k2.md) and [K8](mlxf_kernel_k8.md) are planned (2026-11-25) and await their rulings | each deliverable's own wrappers (design note, section 8), not the whole of rank 1b; decisions 6 to 9 | each deliverable's exit in the design note |
 | 3 | **The rest of parity** (the rest of Phase 4, the random half of Phase 5, Phase 6, the other `fast` functions, Phases 8 and 9) | the parity plan | rank 1b; runs beside rank 2 on a disjoint file table | no `pending` line; the parity report |
 | 4 | **SIMPLE's integration** | a SIMPLE plan, written by SIMPLE's rules | rank 2 for the family concerned | not started here |
 
@@ -174,6 +174,10 @@ without a dimension, `mlx_gather` and the `mlx_scatter` family.
 7. (2026-11-24, Hans: accept) **The order of the toy deliverables** K1 to K7 (design note, section 8). K8,
    the PCG solve, entered with decision 6's amendment; its slot is the design note's proposal and is open
    to a veto.
+   - (2026-11-25, Hans: "Go", on the recommendation) **The first three run K1, K8, K2**, one at a time on the
+     M5 Ultra: K8 is independent of the polar toy's files, and K2 shares nine files with K1. The plans are
+     [`mlxf_kernel_k1.md`](mlxf_kernel_k1.md), [`mlxf_kernel_k8.md`](mlxf_kernel_k8.md) and
+     [`mlxf_kernel_k2.md`](mlxf_kernel_k2.md).
 8. (2026-11-24, Hans: yes) **What a toy must agree with:**
    - an independent host oracle in double precision, within tolerances frozen before the judged run;
    - repeatability on one GPU configuration, as a separate gate;
@@ -227,8 +231,10 @@ without a dimension, `mlx_gather` and the `mlx_scatter` family.
       shared-voxel updates are unprotected, so it does not show the speed of a correct scatter. The probe
       tests the premise of an easy win without moving K6 forward.
     - Recommended: yes.
-15. (2026-11-24, proposed from the review; stands as recommended since the maintainer's go of that day, open to
-    the review) **The 30 % rule's denominator.** A second code path
+15. (2026-11-24, proposed from the review; ruled 2026-11-25 with the K1 plan, Hans: "Go") **The 30 % rule's
+    denominator.** K1's check found that the arithmetic below takes the barriered stages as additive; the
+    driver's pass without barriers takes 1.13 s, so K1 judges on that pass's median and measures the ceiling
+    first (its decisions 15, 18 and 19). A second code path
     is kept on the canonical driver's elapsed time at equal work and accuracy, with submission,
     synchronisation and collection included. A stage's own timing explains the result; it does not decide.
     - For K1: the tail took 0.90 of 1.93 s with a barrier after each stage. Taking those as additive, the
