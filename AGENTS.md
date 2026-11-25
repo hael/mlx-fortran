@@ -16,7 +16,8 @@ at the same sources.
    `doc/implementation_notes/planned/mlxf_roadmap.md` with the plan it names for your item, and the
    decisions block of the design plan
    `doc/implementation_notes/completed/mlxf_design.md` that it cites by number. To add a wrapper of an MLX
-   operation, read `.github/skills/mlxf-binding/SKILL.md`.
+   operation, read `.github/skills/mlxf-binding/SKILL.md`. When the maintainer says go on a batch of work, or
+   agent runs are prepared, launched or reviewed, read `.github/skills/mlxf-agent-runs/SKILL.md`.
 
 ## Structure
 

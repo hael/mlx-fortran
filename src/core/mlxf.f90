@@ -10,8 +10,8 @@ use mlxf_device,   only: mlx_device_count, mlx_default_device, mlx_set_default_d
                          mlx_device_info_string
 use mlxf_memory,   only: mlx_active_memory, mlx_peak_memory, mlx_reset_peak_memory, mlx_cache_memory, mlx_clear_cache, &
                          mlx_set_memory_limit, mlx_set_cache_limit
-use mlxf_array,    only: mlx_array, mlx_from, mlx_to, mlx_to_alloc, mlx_view, mlx_alloc, mlx_eval, mlx_async_eval, &
-                         mlx_synchronize, mlx_is_live, exp
+use mlxf_array,    only: mlx_array, mlx_from, mlx_to, mlx_to_alloc, mlx_item, mlx_view, mlx_alloc, mlx_eval, &
+                         mlx_async_eval, mlx_synchronize, mlx_is_live, exp
 use mlxf_ops,      only: real, aimag, conjg, sqrt, mlx_astype, mlx_bitcast, max, merge, cmplx, reshape, mlx_permute, &
                          transpose, mlx_concatenate, mlx_slice, mlx_take_along_dim, mlx_take, sum, minval, &
                          mlx_logsumexp, mlx_cumsum, minloc, mlx_zeros, mlx_arange, abs, sin, cos, tan, sinh, cosh, &
@@ -21,7 +21,18 @@ use mlxf_ops,      only: real, aimag, conjg, sqrt, mlx_astype, mlx_bitcast, max,
                          mlx_isfinite, mlx_isposinf, mlx_isneginf, mlx_round, mlx_clip, mlx_nan_to_num, atan2, modulo, &
                          min, mlx_logaddexp, mlx_floor_divide, mlx_divmod, mlx_isclose, mlx_allclose, mlx_array_equal, &
                          iand, ior, ieor, not, shiftl, mlx_right_shift, mlx_ones, mlx_full, mlx_zeros_like, &
-                         mlx_ones_like, mlx_full_like
+                         mlx_ones_like, mlx_full_like, product, maxval, all, any, count, maxloc, mlx_mean, mlx_median, &
+                         mlx_var, mlx_std, mlx_cumprod, mlx_cummax, mlx_cummin, mlx_logcumsumexp, mlx_softmax, &
+                         mlx_sort, mlx_argsort, mlx_partition, mlx_argpartition, mlx_topk, mlx_squeeze, &
+                         mlx_expand_dims, mlx_flatten, mlx_unflatten, mlx_broadcast_to, mlx_broadcast_arrays, mlx_tile, &
+                         mlx_repeat, mlx_pad, mlx_flip, cshift, mlx_movedim, mlx_swapdims, mlx_split, mlx_stack, &
+                         mlx_unstack, mlx_atleast_1d, mlx_atleast_2d, mlx_atleast_3d, mlx_diag, mlx_diagonal, &
+                         mlx_trace, mlx_tril, mlx_triu, mlx_diff, mlx_as_strided, mlx_number_of_elements, mlx_identity, &
+                         mlx_eye, mlx_tri, mlx_linspace, mlx_meshgrid, mlx_bartlett, mlx_blackman, mlx_hamming, &
+                         mlx_hanning, mlx_gather, mlx_scatter, mlx_scatter_add, mlx_scatter_max, mlx_scatter_min, &
+                         mlx_scatter_prod, mlx_put_along_dim, mlx_masked_scatter, mlx_searchsorted, mlx_unique, &
+                         mlx_slice_update, mlx_slice_update_add, mlx_slice_update_max, mlx_slice_update_min, &
+                         mlx_slice_update_prod
 use mlxf_linalg,   only: matmul
 use mlxf_fft,      only: mlx_fft, mlx_ifft, mlx_rfft, mlx_irfft, mlx_fft2, mlx_ifft2
 use mlxf_compile,  only: mlx_function, mlx_compile
@@ -33,7 +44,7 @@ public :: mlx_device_count, mlx_default_device, mlx_set_default_device, mlx_devi
 public :: mlx_device_info_string
 public :: mlx_active_memory, mlx_peak_memory, mlx_reset_peak_memory, mlx_cache_memory, mlx_clear_cache
 public :: mlx_set_memory_limit, mlx_set_cache_limit
-public :: mlx_array, mlx_from, mlx_to, mlx_to_alloc, mlx_view, mlx_alloc, mlx_eval, mlx_async_eval
+public :: mlx_array, mlx_from, mlx_to, mlx_to_alloc, mlx_item, mlx_view, mlx_alloc, mlx_eval, mlx_async_eval
 public :: mlx_synchronize, mlx_is_live, exp
 public :: real, &
     &aimag, &
@@ -118,6 +129,77 @@ public :: real, &
     &mlx_zeros_like, &
     &mlx_ones_like, &
     &mlx_full_like, &
+    &product, &
+    &maxval, &
+    &all, &
+    &any, &
+    &count, &
+    &maxloc, &
+    &mlx_mean, &
+    &mlx_median, &
+    &mlx_var, &
+    &mlx_std, &
+    &mlx_cumprod, &
+    &mlx_cummax, &
+    &mlx_cummin, &
+    &mlx_logcumsumexp, &
+    &mlx_softmax, &
+    &mlx_sort, &
+    &mlx_argsort, &
+    &mlx_partition, &
+    &mlx_argpartition, &
+    &mlx_topk, &
+    &mlx_squeeze, &
+    &mlx_expand_dims, &
+    &mlx_flatten, &
+    &mlx_unflatten, &
+    &mlx_broadcast_to, &
+    &mlx_broadcast_arrays, &
+    &mlx_tile, &
+    &mlx_repeat, &
+    &mlx_pad, &
+    &mlx_flip, &
+    &cshift, &
+    &mlx_movedim, &
+    &mlx_swapdims, &
+    &mlx_split, &
+    &mlx_stack, &
+    &mlx_unstack, &
+    &mlx_atleast_1d, &
+    &mlx_atleast_2d, &
+    &mlx_atleast_3d, &
+    &mlx_diag, &
+    &mlx_diagonal, &
+    &mlx_trace, &
+    &mlx_tril, &
+    &mlx_triu, &
+    &mlx_diff, &
+    &mlx_as_strided, &
+    &mlx_number_of_elements, &
+    &mlx_identity, &
+    &mlx_eye, &
+    &mlx_tri, &
+    &mlx_linspace, &
+    &mlx_meshgrid, &
+    &mlx_bartlett, &
+    &mlx_blackman, &
+    &mlx_hamming, &
+    &mlx_hanning, &
+    &mlx_gather, &
+    &mlx_scatter, &
+    &mlx_scatter_add, &
+    &mlx_scatter_max, &
+    &mlx_scatter_min, &
+    &mlx_scatter_prod, &
+    &mlx_put_along_dim, &
+    &mlx_masked_scatter, &
+    &mlx_searchsorted, &
+    &mlx_unique, &
+    &mlx_slice_update, &
+    &mlx_slice_update_add, &
+    &mlx_slice_update_max, &
+    &mlx_slice_update_min, &
+    &mlx_slice_update_prod, &
     &matmul, &
     &mlx_fft, &
     &mlx_ifft, &

@@ -104,7 +104,7 @@ MAX_DUMMIES = 5
 DEFS_EXCEPTIONS = {}
 ENTRY_CALLS = ('mlxf_enter', 'mlxf_guard_thread', 'mlxf_require_device')
 # helpers an entry may call first instead: each must itself open with an entry call
-ENTRY_HELPERS = ('mlxf_unary', 'mlxf_binary', 'mlxf_weak_scalar', 'mlxf_int_op', 'mlxf_dtype_op', 'mlxf_vector_op', 'mlxf_reduce_op', 'mlxf_ternary_op', 'mlxf_take_op', 'mlxf_scan_op', 'mlxf_slice_op', 'mlxf_concat_op', 'mlxf_zeros_op', 'mlxf_range_op', 'mlxf_fft_op', 'mlxf_fft2_op', 'mlxf_close_op', 'mlxf_compare_op', 'mlxf_nan_op', 'mlxf_binary_vector_op', 'mlxf_full_op', 'mlxf_binary_int_op')
+ENTRY_HELPERS = ('mlxf_unary', 'mlxf_binary', 'mlxf_weak_scalar', 'mlxf_int_op', 'mlxf_dtype_op', 'mlxf_vector_op', 'mlxf_reduce_op', 'mlxf_ternary_op', 'mlxf_take_op', 'mlxf_scan_op', 'mlxf_slice_op', 'mlxf_concat_op', 'mlxf_zeros_op', 'mlxf_range_op', 'mlxf_fft_op', 'mlxf_fft2_op', 'mlxf_close_op', 'mlxf_compare_op', 'mlxf_nan_op', 'mlxf_binary_vector_op', 'mlxf_full_op', 'mlxf_binary_int_op', 'mlxf_reduce_all_op', 'mlxf_reduce_dims_op', 'mlxf_var_all_op', 'mlxf_var_op', 'mlxf_var_dims_op', 'mlxf_int2_op', 'mlxf_int3_op', 'mlxf_trace_op', 'mlxf_scan_all_op', 'mlxf_scan_plain_op', 'mlxf_scan_plain_all_op', 'mlxf_roll_op', 'mlxf_unflatten_op', 'mlxf_vector2_op', 'mlxf_strided_op', 'mlxf_count_op', 'mlxf_window_op', 'mlxf_identity_op', 'mlxf_eye_op', 'mlxf_linspace_op', 'mlxf_linspace_endpoint_op', 'mlxf_list_op', 'mlxf_vector_list_op', 'mlxf_meshgrid_op', 'mlxf_split_op', 'mlxf_split_sections_op', 'mlxf_unstack_op', 'mlxf_unstack_dim_op', 'mlxf_pad_op', 'mlxf_pad_width_op', 'mlxf_gather_op', 'mlxf_gather_single_op', 'mlxf_slice_dynamic_op', 'mlxf_scatter_op', 'mlxf_put_op', 'mlxf_ternary_vector_op', 'mlxf_text_op', 'mlxf_slice_update_op', 'mlxf_unique_op')
 # the lifetime bindings touch shared state only through a live handle: they may open with the one-thread guard
 # conditional on one (between empty handles they run anywhere; nothing they do needs initialisation)
 ENTRY_IF_LIVE = ('assign_array', 'kill_array', 'function_assign', 'function_kill')
@@ -127,7 +127,7 @@ PARITY_PHASES = range(1, 9)
 # the mlx-c release the ledger lists: the minimum; a newer one's differences are warnings, an older one fails
 PARITY_MLXC_VERSION = '0.8.0'
 # the pending lines of the ledger; may only shrink
-PARITY_PENDING = 274
+PARITY_PENDING = 128
 
 
 def sources(root):

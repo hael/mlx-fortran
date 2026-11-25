@@ -243,4 +243,29 @@ type(elem_tolerance), parameter :: ELEM_TOLERANCES(41) = [&
 ! to this separate bound, twice the largest error of seed 1 on the GPU; the CPU keeps its tolerance above
 real(real64), parameter :: ELEM_GPU_EXPM1 = 4.010555858e-05_real64
 
+! the reduction testers' fixtures per seed: a form with dimensions runs on this many at once, so that a seed's
+! largest error is taken over about a thousand reduced values
+integer, parameter :: REDUCE_NBATCH = 16
+! the reductions, scans, softmax, linspace and windows, an error relative to max(1, |reference|) over every form
+! of the function: calibrated on seed 1 and frozen as ELEM_TOLERANCES is, max(2 x the largest error on either
+! device, the floor of the result's kind); a float64 result MLX computes in float32 on the CPU (logsumexp,
+! logcumsumexp, softmax) is held to the float32 bound. The windows are float32 only
+type(elem_tolerance), parameter :: REDUCE_TOLERANCES(16) = [&
+    &elem_tolerance('sum', 1.795589924e-06_real64, ELEM_FLOOR64), &
+    &elem_tolerance('product', ELEM_FLOOR32, 2.251676254e-15_real64), &
+    &elem_tolerance('mlx_mean', ELEM_FLOOR32, ELEM_FLOOR64), &
+    &elem_tolerance('mlx_median', ELEM_FLOOR32, ELEM_FLOOR64), &
+    &elem_tolerance('mlx_var', 8.436885142e-07_real64, 1.117111451e-15_real64), &
+    &elem_tolerance('mlx_std', ELEM_FLOOR32, ELEM_FLOOR64), &
+    &elem_tolerance('mlx_logsumexp', ELEM_FLOOR32, ELEM_FLOOR32), &
+    &elem_tolerance('mlx_cumsum', 3.725346026e-06_real64, ELEM_FLOOR64), &
+    &elem_tolerance('mlx_cumprod', 6.648052118e-07_real64, ELEM_FLOOR64), &
+    &elem_tolerance('mlx_logcumsumexp', 5.597391568e-07_real64, ELEM_FLOOR32), &
+    &elem_tolerance('mlx_softmax', ELEM_FLOOR32, ELEM_FLOOR32), &
+    &elem_tolerance('mlx_linspace', ELEM_FLOOR32, ELEM_FLOOR64), &
+    &elem_tolerance('mlx_bartlett', ELEM_FLOOR32, ELEM_FLOOR64), &
+    &elem_tolerance('mlx_blackman', ELEM_FLOOR32, ELEM_FLOOR64), &
+    &elem_tolerance('mlx_hamming', ELEM_FLOOR32, ELEM_FLOOR64), &
+    &elem_tolerance('mlx_hanning', ELEM_FLOOR32, ELEM_FLOOR64)]
+
 end module mlxf_test_defs

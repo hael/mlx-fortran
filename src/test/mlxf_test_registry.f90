@@ -18,6 +18,10 @@ use mlxf_ops_tester,                         only: run_all_ops_tests
 use mlxf_ops_math_tester,                    only: run_all_ops_math_tests
 use mlxf_ops_logic_tester,                   only: run_all_ops_logic_tests
 use mlxf_ops_create_tester,                  only: run_all_ops_create_tests
+use mlxf_ops_reduce_tester,                  only: run_all_ops_reduce_tests
+use mlxf_ops_sort_tester,                    only: run_all_ops_sort_tests
+use mlxf_ops_shape_tester,                   only: run_all_ops_shape_tests
+use mlxf_ops_index_tester,                   only: run_all_ops_index_tests
 use mlxf_linalg_tester,                      only: run_all_linalg_tests
 use mlxf_fft_tester,                         only: run_all_fft_tests
 use mlxf_compile_tester,                     only: run_all_compile_tests
@@ -86,6 +90,10 @@ contains
                 call run_suite('ops_math',   run_all_ops_math_tests,   suite, ran)
                 call run_suite('ops_logic',  run_all_ops_logic_tests,  suite, ran)
                 call run_suite('ops_create', run_all_ops_create_tests, suite, ran)
+                call run_suite('ops_reduce', run_all_ops_reduce_tests, suite, ran)
+                call run_suite('ops_sort',   run_all_ops_sort_tests,   suite, ran)
+                call run_suite('ops_shape',  run_all_ops_shape_tests,  suite, ran)
+                call run_suite('ops_index',  run_all_ops_index_tests,  suite, ran)
             case('linalg')
                 call run_suite('linalg', run_all_linalg_tests, suite, ran)
             case('fft')

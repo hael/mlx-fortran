@@ -4,14 +4,16 @@
 ! derived type, allocate(source=), an array intrinsic) is detected through the registry and stops at its next
 ! use. One type and one ownership implementation; the submodules share only what this interface declares.
 module mlxf_array
-use, intrinsic :: iso_c_binding,   only: c_bool, c_int, c_ptr, c_size_t, c_double, c_float_kind => c_float
-use, intrinsic :: iso_fortran_env, only: int32, int64, real32, real64
+use, intrinsic :: iso_c_binding,   only: c_bool, c_int, c_ptr, c_size_t, c_double, c_char, c_int64_t, &
+                                         c_float_kind => c_float
+use, intrinsic :: iso_fortran_env, only: int8, int16, int32, int64, real32, real64
 use mlxf_c_types, only: mlxc_array, mlxc_stream, mlxc_vector_array, mlxc_optional_dtype, mlxc_optional_float
 use mlxf_defs,    only: mlxf_slice_spec, mlxf_fft_spec, mlxf_range_spec, mlxf_close_spec, mlxf_nan_spec, &
-                        mlxf_shape_spec
+                        mlxf_shape_spec, mlxf_reduce_spec, mlxf_scan_spec, mlxf_pad_spec, mlxf_strided_spec, &
+                        mlxf_count_spec, mlxf_linspace_spec, mlxf_index_spec
 implicit none
 
-public :: mlx_array, mlx_from, mlx_to, mlx_to_alloc, mlx_view, mlx_alloc, mlx_eval, mlx_async_eval
+public :: mlx_array, mlx_from, mlx_to, mlx_to_alloc, mlx_item, mlx_view, mlx_alloc, mlx_eval, mlx_async_eval
 public :: mlxf_int_op, mlxf_dtype_op, &
     &mlxf_vector_op, &
     &mlxf_reduce_op, &
@@ -29,7 +31,46 @@ public :: mlxf_int_op, mlxf_dtype_op, &
     &mlxf_nan_op, &
     &mlxf_binary_vector_op, &
     &mlxf_full_op, &
-    &mlxf_binary_int_op
+    &mlxf_binary_int_op, &
+    &mlxf_reduce_all_op, &
+    &mlxf_reduce_dims_op, &
+    &mlxf_var_all_op, &
+    &mlxf_var_op, &
+    &mlxf_var_dims_op, &
+    &mlxf_int2_op, &
+    &mlxf_int3_op, &
+    &mlxf_trace_op, &
+    &mlxf_scan_all_op, &
+    &mlxf_scan_plain_op, &
+    &mlxf_scan_plain_all_op, &
+    &mlxf_roll_op, &
+    &mlxf_unflatten_op, &
+    &mlxf_vector2_op, &
+    &mlxf_strided_op, &
+    &mlxf_count_op, &
+    &mlxf_window_op, &
+    &mlxf_identity_op, &
+    &mlxf_eye_op, &
+    &mlxf_linspace_op, &
+    &mlxf_linspace_endpoint_op, &
+    &mlxf_list_op, &
+    &mlxf_vector_list_op, &
+    &mlxf_meshgrid_op, &
+    &mlxf_split_op, &
+    &mlxf_split_sections_op, &
+    &mlxf_unstack_op, &
+    &mlxf_unstack_dim_op, &
+    &mlxf_pad_op, &
+    &mlxf_pad_width_op, &
+    &mlxf_gather_op, &
+    &mlxf_gather_single_op, &
+    &mlxf_slice_dynamic_op, &
+    &mlxf_scatter_op, &
+    &mlxf_put_op, &
+    &mlxf_ternary_vector_op, &
+    &mlxf_text_op, &
+    &mlxf_slice_update_op, &
+    &mlxf_unique_op
 public :: mlxf_vector_import, mlxf_vector_export
 public :: mlxf_weak_scalar
 public :: mlx_synchronize, mlx_is_live, exp, mlxf_handle, mlxf_unary, mlxf_binary, mlxc_unary_op, mlxc_binary_op
@@ -351,6 +392,457 @@ abstract interface
         type(mlxc_stream), value        :: s
         integer(c_int) :: mlxc_binary_int_op
     end function mlxc_binary_int_op
+    ! int f(mlx_array* res, const mlx_array a, bool keepdims, const mlx_stream s)
+    function mlxc_flag_op( res, a, keepdims, s ) bind(c)
+        import
+        type(mlxc_array),  intent(inout) :: res
+        type(mlxc_array),  value         :: a
+        logical(c_bool),   value         :: keepdims
+        type(mlxc_stream), value         :: s
+        integer(c_int) :: mlxc_flag_op
+    end function mlxc_flag_op
+    ! int f(mlx_array* res, const mlx_array a, const int* axes, size_t axes_num, bool keepdims, const mlx_stream
+    ! s)
+    function mlxc_reduce_dims_op( res, a, axes, axes_num, keepdims, s ) bind(c)
+        import
+        type(mlxc_array),  intent(inout) :: res
+        type(mlxc_array),  value         :: a
+        integer(c_int),    intent(in)    :: axes(*)
+        integer(c_size_t), value         :: axes_num
+        logical(c_bool),   value         :: keepdims
+        type(mlxc_stream), value         :: s
+        integer(c_int) :: mlxc_reduce_dims_op
+    end function mlxc_reduce_dims_op
+    ! int f(mlx_array* res, const mlx_array a, bool keepdims, int ddof, const mlx_stream s)
+    function mlxc_var_all_op( res, a, keepdims, ddof, s ) bind(c)
+        import
+        type(mlxc_array),  intent(inout) :: res
+        type(mlxc_array),  value         :: a
+        logical(c_bool),   value         :: keepdims
+        integer(c_int),    value         :: ddof
+        type(mlxc_stream), value         :: s
+        integer(c_int) :: mlxc_var_all_op
+    end function mlxc_var_all_op
+    ! int f(mlx_array* res, const mlx_array a, int axis, bool keepdims, int ddof, const mlx_stream s)
+    function mlxc_var_op( res, a, axis, keepdims, ddof, s ) bind(c)
+        import
+        type(mlxc_array),  intent(inout) :: res
+        type(mlxc_array),  value         :: a
+        integer(c_int),    value         :: axis
+        logical(c_bool),   value         :: keepdims
+        integer(c_int),    value         :: ddof
+        type(mlxc_stream), value         :: s
+        integer(c_int) :: mlxc_var_op
+    end function mlxc_var_op
+    ! int f(mlx_array* res, const mlx_array a, const int* axes, size_t axes_num, bool keepdims, int ddof, const
+    ! mlx_stream s)
+    function mlxc_var_dims_op( res, a, axes, axes_num, keepdims, ddof, s ) bind(c)
+        import
+        type(mlxc_array),  intent(inout) :: res
+        type(mlxc_array),  value         :: a
+        integer(c_int),    intent(in)    :: axes(*)
+        integer(c_size_t), value         :: axes_num
+        logical(c_bool),   value         :: keepdims
+        integer(c_int),    value         :: ddof
+        type(mlxc_stream), value         :: s
+        integer(c_int) :: mlxc_var_dims_op
+    end function mlxc_var_dims_op
+    ! int f(mlx_array* res, const mlx_array a, int i, int j, const mlx_stream s)
+    function mlxc_int2_op( res, a, i, j, s ) bind(c)
+        import
+        type(mlxc_array),  intent(inout) :: res
+        type(mlxc_array),  value         :: a
+        integer(c_int),    value         :: i
+        integer(c_int),    value         :: j
+        type(mlxc_stream), value         :: s
+        integer(c_int) :: mlxc_int2_op
+    end function mlxc_int2_op
+    ! int f(mlx_array* res, const mlx_array a, int i, int j, int k, const mlx_stream s)
+    function mlxc_int3_op( res, a, i, j, k, s ) bind(c)
+        import
+        type(mlxc_array),  intent(inout) :: res
+        type(mlxc_array),  value         :: a
+        integer(c_int),    value         :: i
+        integer(c_int),    value         :: j
+        integer(c_int),    value         :: k
+        type(mlxc_stream), value         :: s
+        integer(c_int) :: mlxc_int3_op
+    end function mlxc_int3_op
+    ! int f(mlx_array* res, const mlx_array a, int offset, int axis1, int axis2, mlx_dtype dtype, const mlx_stream
+    ! s)
+    function mlxc_trace_op( res, a, offset, axis1, axis2, dtype, s ) bind(c)
+        import
+        type(mlxc_array),  intent(inout) :: res
+        type(mlxc_array),  value         :: a
+        integer(c_int),    value         :: offset
+        integer(c_int),    value         :: axis1
+        integer(c_int),    value         :: axis2
+        integer(c_int),    value         :: dtype
+        type(mlxc_stream), value         :: s
+        integer(c_int) :: mlxc_trace_op
+    end function mlxc_trace_op
+    ! int f(mlx_array* res, const mlx_array a, bool reverse, bool inclusive, mlx_optional_dtype dtype, const
+    ! mlx_stream s)
+    function mlxc_scan_all_op( res, a, reverse, inclusive, dtype, s ) bind(c)
+        import
+        type(mlxc_array),          intent(inout) :: res
+        type(mlxc_array),          value         :: a
+        logical(c_bool),           value         :: reverse
+        logical(c_bool),           value         :: inclusive
+        type(mlxc_optional_dtype), value         :: dtype
+        type(mlxc_stream),         value         :: s
+        integer(c_int) :: mlxc_scan_all_op
+    end function mlxc_scan_all_op
+    ! int f(mlx_array* res, const mlx_array a, int axis, bool reverse, bool inclusive, const mlx_stream s)
+    function mlxc_scan_plain_op( res, a, axis, reverse, inclusive, s ) bind(c)
+        import
+        type(mlxc_array),  intent(inout) :: res
+        type(mlxc_array),  value         :: a
+        integer(c_int),    value         :: axis
+        logical(c_bool),   value         :: reverse
+        logical(c_bool),   value         :: inclusive
+        type(mlxc_stream), value         :: s
+        integer(c_int) :: mlxc_scan_plain_op
+    end function mlxc_scan_plain_op
+    ! int f(mlx_array* res, const mlx_array a, bool reverse, bool inclusive, const mlx_stream s)
+    function mlxc_scan_plain_all_op( res, a, reverse, inclusive, s ) bind(c)
+        import
+        type(mlxc_array),  intent(inout) :: res
+        type(mlxc_array),  value         :: a
+        logical(c_bool),   value         :: reverse
+        logical(c_bool),   value         :: inclusive
+        type(mlxc_stream), value         :: s
+        integer(c_int) :: mlxc_scan_plain_all_op
+    end function mlxc_scan_plain_all_op
+    ! int f(mlx_array* res, const mlx_array a, const int* shift, size_t shift_num, int axis, const mlx_stream s)
+    function mlxc_roll_op( res, a, shift, shift_num, axis, s ) bind(c)
+        import
+        type(mlxc_array),  intent(inout) :: res
+        type(mlxc_array),  value         :: a
+        integer(c_int),    intent(in)    :: shift(*)
+        integer(c_size_t), value         :: shift_num
+        integer(c_int),    value         :: axis
+        type(mlxc_stream), value         :: s
+        integer(c_int) :: mlxc_roll_op
+    end function mlxc_roll_op
+    ! int f(mlx_array* res, const mlx_array a, int axis, const int* shape, size_t shape_num, const mlx_stream s)
+    function mlxc_unflatten_op( res, a, axis, shape, shape_num, s ) bind(c)
+        import
+        type(mlxc_array),  intent(inout) :: res
+        type(mlxc_array),  value         :: a
+        integer(c_int),    value         :: axis
+        integer(c_int),    intent(in)    :: shape(*)
+        integer(c_size_t), value         :: shape_num
+        type(mlxc_stream), value         :: s
+        integer(c_int) :: mlxc_unflatten_op
+    end function mlxc_unflatten_op
+    ! int f(mlx_array* res, const mlx_array a, const int* u, size_t u_num, const int* v, size_t v_num, const
+    ! mlx_stream s)
+    function mlxc_vector2_op( res, a, u, u_num, v, v_num, s ) bind(c)
+        import
+        type(mlxc_array),  intent(inout) :: res
+        type(mlxc_array),  value         :: a
+        integer(c_int),    intent(in)    :: u(*)
+        integer(c_size_t), value         :: u_num
+        integer(c_int),    intent(in)    :: v(*)
+        integer(c_size_t), value         :: v_num
+        type(mlxc_stream), value         :: s
+        integer(c_int) :: mlxc_vector2_op
+    end function mlxc_vector2_op
+    ! int f(mlx_array* res, const mlx_array a, const int* shape, size_t shape_num, const int64_t* strides, size_t
+    ! strides_num, size_t offset, const mlx_stream s)
+    function mlxc_strided_op( res, a, shape, shape_num, strides, strides_num, offset, s ) bind(c)
+        import
+        type(mlxc_array),   intent(inout) :: res
+        type(mlxc_array),   value         :: a
+        integer(c_int),     intent(in)    :: shape(*)
+        integer(c_size_t),  value         :: shape_num
+        integer(c_int64_t), intent(in)    :: strides(*)
+        integer(c_size_t),  value         :: strides_num
+        integer(c_size_t),  value         :: offset
+        type(mlxc_stream),  value         :: s
+        integer(c_int) :: mlxc_strided_op
+    end function mlxc_strided_op
+    ! int f(mlx_array* res, const mlx_array a, const int* axes, size_t axes_num, bool inverted, mlx_dtype dtype,
+    ! const mlx_stream s)
+    function mlxc_count_op( res, a, axes, axes_num, inverted, dtype, s ) bind(c)
+        import
+        type(mlxc_array),  intent(inout) :: res
+        type(mlxc_array),  value         :: a
+        integer(c_int),    intent(in)    :: axes(*)
+        integer(c_size_t), value         :: axes_num
+        logical(c_bool),   value         :: inverted
+        integer(c_int),    value         :: dtype
+        type(mlxc_stream), value         :: s
+        integer(c_int) :: mlxc_count_op
+    end function mlxc_count_op
+    ! int f(mlx_array* res, int M, const mlx_stream s)
+    function mlxc_window_op( res, m, s ) bind(c)
+        import
+        type(mlxc_array),  intent(inout) :: res
+        integer(c_int),    value         :: m
+        type(mlxc_stream), value         :: s
+        integer(c_int) :: mlxc_window_op
+    end function mlxc_window_op
+    ! int f(mlx_array* res, int n, mlx_dtype dtype, const mlx_stream s)
+    function mlxc_identity_op( res, n, dtype, s ) bind(c)
+        import
+        type(mlxc_array),  intent(inout) :: res
+        integer(c_int),    value         :: n
+        integer(c_int),    value         :: dtype
+        type(mlxc_stream), value         :: s
+        integer(c_int) :: mlxc_identity_op
+    end function mlxc_identity_op
+    ! int f(mlx_array* res, int n, int m, int k, mlx_dtype dtype, const mlx_stream s)
+    function mlxc_eye_op( res, n, m, k, dtype, s ) bind(c)
+        import
+        type(mlxc_array),  intent(inout) :: res
+        integer(c_int),    value         :: n
+        integer(c_int),    value         :: m
+        integer(c_int),    value         :: k
+        integer(c_int),    value         :: dtype
+        type(mlxc_stream), value         :: s
+        integer(c_int) :: mlxc_eye_op
+    end function mlxc_eye_op
+    ! int f(mlx_array* res, double start, double stop, int num, mlx_dtype dtype, const mlx_stream s)
+    function mlxc_linspace_op( res, start, stop, num, dtype, s ) bind(c)
+        import
+        type(mlxc_array),  intent(inout) :: res
+        real(c_double),    value         :: start
+        real(c_double),    value         :: stop
+        integer(c_int),    value         :: num
+        integer(c_int),    value         :: dtype
+        type(mlxc_stream), value         :: s
+        integer(c_int) :: mlxc_linspace_op
+    end function mlxc_linspace_op
+    ! int f(mlx_array* res, double start, double stop, int num, bool endpoint, mlx_dtype dtype, const mlx_stream
+    ! s)
+    function mlxc_linspace_endpoint_op( res, start, stop, num, endpoint, dtype, s ) bind(c)
+        import
+        type(mlxc_array),  intent(inout) :: res
+        real(c_double),    value         :: start
+        real(c_double),    value         :: stop
+        integer(c_int),    value         :: num
+        logical(c_bool),   value         :: endpoint
+        integer(c_int),    value         :: dtype
+        type(mlxc_stream), value         :: s
+        integer(c_int) :: mlxc_linspace_endpoint_op
+    end function mlxc_linspace_endpoint_op
+    ! int f(mlx_array* res, const mlx_vector_array arrays, const mlx_stream s)
+    function mlxc_list_op( res, arrays, s ) bind(c)
+        import
+        type(mlxc_array),        intent(inout) :: res
+        type(mlxc_vector_array), value         :: arrays
+        type(mlxc_stream),       value         :: s
+        integer(c_int) :: mlxc_list_op
+    end function mlxc_list_op
+    ! int f(mlx_vector_array* res, const mlx_vector_array inputs, const mlx_stream s)
+    function mlxc_vector_list_op( res, inputs, s ) bind(c)
+        import
+        type(mlxc_vector_array), intent(inout) :: res
+        type(mlxc_vector_array), value         :: inputs
+        type(mlxc_stream),       value         :: s
+        integer(c_int) :: mlxc_vector_list_op
+    end function mlxc_vector_list_op
+    ! int f(mlx_vector_array* res, const mlx_vector_array arrays, bool sparse, const char* indexing, const
+    ! mlx_stream s)
+    function mlxc_meshgrid_op( res, arrays, sparse, indexing, s ) bind(c)
+        import
+        type(mlxc_vector_array), intent(inout) :: res
+        type(mlxc_vector_array), value         :: arrays
+        logical(c_bool),         value         :: sparse
+        character(kind=c_char),  intent(in)    :: indexing(*)
+        type(mlxc_stream),       value         :: s
+        integer(c_int) :: mlxc_meshgrid_op
+    end function mlxc_meshgrid_op
+    ! int f(mlx_vector_array* res, const mlx_array a, int num_splits, int axis, const mlx_stream s)
+    function mlxc_split_op( res, a, num_splits, axis, s ) bind(c)
+        import
+        type(mlxc_vector_array), intent(inout) :: res
+        type(mlxc_array),        value         :: a
+        integer(c_int),          value         :: num_splits
+        integer(c_int),          value         :: axis
+        type(mlxc_stream),       value         :: s
+        integer(c_int) :: mlxc_split_op
+    end function mlxc_split_op
+    ! int f(mlx_vector_array* res, const mlx_array a, const int* indices, size_t indices_num, int axis, const
+    ! mlx_stream s)
+    function mlxc_split_sections_op( res, a, indices, indices_num, axis, s ) bind(c)
+        import
+        type(mlxc_vector_array), intent(inout) :: res
+        type(mlxc_array),        value         :: a
+        integer(c_int),          intent(in)    :: indices(*)
+        integer(c_size_t),       value         :: indices_num
+        integer(c_int),          value         :: axis
+        type(mlxc_stream),       value         :: s
+        integer(c_int) :: mlxc_split_sections_op
+    end function mlxc_split_sections_op
+    ! int f(mlx_vector_array* res, const mlx_array a, const mlx_stream s)
+    function mlxc_unstack_op( res, a, s ) bind(c)
+        import
+        type(mlxc_vector_array), intent(inout) :: res
+        type(mlxc_array),        value         :: a
+        type(mlxc_stream),       value         :: s
+        integer(c_int) :: mlxc_unstack_op
+    end function mlxc_unstack_op
+    ! int f(mlx_vector_array* res, const mlx_array a, int axis, const mlx_stream s)
+    function mlxc_unstack_dim_op( res, a, axis, s ) bind(c)
+        import
+        type(mlxc_vector_array), intent(inout) :: res
+        type(mlxc_array),        value         :: a
+        integer(c_int),          value         :: axis
+        type(mlxc_stream),       value         :: s
+        integer(c_int) :: mlxc_unstack_dim_op
+    end function mlxc_unstack_dim_op
+    ! int f(mlx_array* res, const mlx_array a, const int* axes, size_t axes_num, const int* low_pad_size, size_t
+    ! low_pad_size_num, const int* high_pad_size, size_t high_pad_size_num, const mlx_array pad_value, const char*
+    ! mode, const mlx_stream s)
+    function mlxc_pad_op( res, a, axes, axes_num, low_pad_size, low_pad_size_num, high_pad_size, high_pad_size_num, pad_value, mode, s ) bind(c)
+        import
+        type(mlxc_array),       intent(inout) :: res
+        type(mlxc_array),       value         :: a
+        integer(c_int),         intent(in)    :: axes(*)
+        integer(c_size_t),      value         :: axes_num
+        integer(c_int),         intent(in)    :: low_pad_size(*)
+        integer(c_size_t),      value         :: low_pad_size_num
+        integer(c_int),         intent(in)    :: high_pad_size(*)
+        integer(c_size_t),      value         :: high_pad_size_num
+        type(mlxc_array),       value         :: pad_value
+        character(kind=c_char), intent(in)    :: mode(*)
+        type(mlxc_stream),      value         :: s
+        integer(c_int) :: mlxc_pad_op
+    end function mlxc_pad_op
+    ! int f(mlx_array* res, const mlx_array a, int pad_width, const mlx_array pad_value, const char* mode, const
+    ! mlx_stream s)
+    function mlxc_pad_width_op( res, a, pad_width, pad_value, mode, s ) bind(c)
+        import
+        type(mlxc_array),       intent(inout) :: res
+        type(mlxc_array),       value         :: a
+        integer(c_int),         value         :: pad_width
+        type(mlxc_array),       value         :: pad_value
+        character(kind=c_char), intent(in)    :: mode(*)
+        type(mlxc_stream),      value         :: s
+        integer(c_int) :: mlxc_pad_width_op
+    end function mlxc_pad_width_op
+    ! int f(mlx_array* res, const mlx_array a, const mlx_vector_array indices, const int* axes, size_t axes_num,
+    ! const int* slice_sizes, size_t slice_sizes_num, const mlx_stream s)
+    function mlxc_gather_op( res, a, indices, axes, axes_num, slice_sizes, slice_sizes_num, s ) bind(c)
+        import
+        type(mlxc_array),        intent(inout) :: res
+        type(mlxc_array),        value         :: a
+        type(mlxc_vector_array), value         :: indices
+        integer(c_int),          intent(in)    :: axes(*)
+        integer(c_size_t),       value         :: axes_num
+        integer(c_int),          intent(in)    :: slice_sizes(*)
+        integer(c_size_t),       value         :: slice_sizes_num
+        type(mlxc_stream),       value         :: s
+        integer(c_int) :: mlxc_gather_op
+    end function mlxc_gather_op
+    ! int f(mlx_array* res, const mlx_array a, const mlx_array indices, int axis, const int* slice_sizes, size_t
+    ! slice_sizes_num, const mlx_stream s)
+    function mlxc_gather_single_op( res, a, indices, axis, slice_sizes, slice_sizes_num, s ) bind(c)
+        import
+        type(mlxc_array),  intent(inout) :: res
+        type(mlxc_array),  value         :: a
+        type(mlxc_array),  value         :: indices
+        integer(c_int),    value         :: axis
+        integer(c_int),    intent(in)    :: slice_sizes(*)
+        integer(c_size_t), value         :: slice_sizes_num
+        type(mlxc_stream), value         :: s
+        integer(c_int) :: mlxc_gather_single_op
+    end function mlxc_gather_single_op
+    ! int f(mlx_array* res, const mlx_array a, const mlx_array start, const int* axes, size_t axes_num, const int*
+    ! slice_size, size_t slice_size_num, const mlx_stream s)
+    function mlxc_slice_dynamic_op( res, a, start, axes, axes_num, slice_size, slice_size_num, s ) bind(c)
+        import
+        type(mlxc_array),  intent(inout) :: res
+        type(mlxc_array),  value         :: a
+        type(mlxc_array),  value         :: start
+        integer(c_int),    intent(in)    :: axes(*)
+        integer(c_size_t), value         :: axes_num
+        integer(c_int),    intent(in)    :: slice_size(*)
+        integer(c_size_t), value         :: slice_size_num
+        type(mlxc_stream), value         :: s
+        integer(c_int) :: mlxc_slice_dynamic_op
+    end function mlxc_slice_dynamic_op
+    ! int f(mlx_array* res, const mlx_array a, const mlx_vector_array indices, const mlx_array updates, const int*
+    ! axes, size_t axes_num, const mlx_stream s)
+    function mlxc_scatter_op( res, a, indices, updates, axes, axes_num, s ) bind(c)
+        import
+        type(mlxc_array),        intent(inout) :: res
+        type(mlxc_array),        value         :: a
+        type(mlxc_vector_array), value         :: indices
+        type(mlxc_array),        value         :: updates
+        integer(c_int),          intent(in)    :: axes(*)
+        integer(c_size_t),       value         :: axes_num
+        type(mlxc_stream),       value         :: s
+        integer(c_int) :: mlxc_scatter_op
+    end function mlxc_scatter_op
+    ! int f(mlx_array* res, const mlx_array a, const mlx_array indices, const mlx_array values, int axis, const
+    ! mlx_stream s)
+    function mlxc_put_op( res, a, indices, values, axis, s ) bind(c)
+        import
+        type(mlxc_array),  intent(inout) :: res
+        type(mlxc_array),  value         :: a
+        type(mlxc_array),  value         :: indices
+        type(mlxc_array),  value         :: values
+        integer(c_int),    value         :: axis
+        type(mlxc_stream), value         :: s
+        integer(c_int) :: mlxc_put_op
+    end function mlxc_put_op
+    ! int f(mlx_array* res, const mlx_array src, const mlx_array update, const mlx_array start, const int* axes,
+    ! size_t axes_num, const mlx_stream s)
+    function mlxc_ternary_vector_op( res, src, update, start, axes, axes_num, s ) bind(c)
+        import
+        type(mlxc_array),  intent(inout) :: res
+        type(mlxc_array),  value         :: src
+        type(mlxc_array),  value         :: update
+        type(mlxc_array),  value         :: start
+        integer(c_int),    intent(in)    :: axes(*)
+        integer(c_size_t), value         :: axes_num
+        type(mlxc_stream), value         :: s
+        integer(c_int) :: mlxc_ternary_vector_op
+    end function mlxc_ternary_vector_op
+    ! int f(mlx_array* res, const mlx_array a, const mlx_array b, const char* text, const mlx_stream s)
+    function mlxc_text_op( res, a, b, text, s ) bind(c)
+        import
+        type(mlxc_array),       intent(inout) :: res
+        type(mlxc_array),       value         :: a
+        type(mlxc_array),       value         :: b
+        character(kind=c_char), intent(in)    :: text(*)
+        type(mlxc_stream),      value         :: s
+        integer(c_int) :: mlxc_text_op
+    end function mlxc_text_op
+    ! int f(mlx_array* res, const mlx_array src, const mlx_array update, const int* start, size_t start_num, const
+    ! int* stop, size_t stop_num, const int* strides, size_t strides_num, const mlx_stream s)
+    function mlxc_slice_update_op( res, src, update, start, start_num, stop, stop_num, strides, strides_num, s ) bind(c)
+        import
+        type(mlxc_array),  intent(inout) :: res
+        type(mlxc_array),  value         :: src
+        type(mlxc_array),  value         :: update
+        integer(c_int),    intent(in)    :: start(*)
+        integer(c_size_t), value         :: start_num
+        integer(c_int),    intent(in)    :: stop(*)
+        integer(c_size_t), value         :: stop_num
+        integer(c_int),    intent(in)    :: strides(*)
+        integer(c_size_t), value         :: strides_num
+        type(mlxc_stream), value         :: s
+        integer(c_int) :: mlxc_slice_update_op
+    end function mlxc_slice_update_op
+    ! int f(mlx_vector_array* res, const mlx_array a, int size, bool return_index, bool return_inverse, bool
+    ! return_counts, const mlx_array fill_value, const mlx_stream s)
+    function mlxc_unique_op( res, a, size, return_index, return_inverse, return_counts, fill_value, s ) bind(c)
+        import
+        type(mlxc_vector_array), intent(inout) :: res
+        type(mlxc_array),        value         :: a
+        integer(c_int),          value         :: size
+        logical(c_bool),         value         :: return_index
+        logical(c_bool),         value         :: return_inverse
+        logical(c_bool),         value         :: return_counts
+        type(mlxc_array),        value         :: fill_value
+        type(mlxc_stream),       value         :: s
+        integer(c_int) :: mlxc_unique_op
+    end function mlxc_unique_op
 end interface
 
 interface exp
@@ -380,6 +872,16 @@ interface mlx_from
         integer(int32), target, contiguous, intent(in) :: x(..)
         type(mlx_array) :: a
     end function from_i32
+
+    module function from_i8( x ) result(a)
+        integer(int8), target, contiguous, intent(in) :: x(..)
+        type(mlx_array) :: a
+    end function from_i8
+
+    module function from_i16( x ) result(a)
+        integer(int16), target, contiguous, intent(in) :: x(..)
+        type(mlx_array) :: a
+    end function from_i16
 
     module function from_i64( x ) result(a)
         integer(int64), target, contiguous, intent(in) :: x(..)
@@ -416,6 +918,18 @@ interface mlx_to
         type(mlx_array), intent(in)                        :: a
         integer,         optional, intent(out)             :: status
     end subroutine to_i32
+
+    module subroutine to_i8( y, a, status )
+        integer(int8),   target, contiguous, intent(inout) :: y(..)
+        type(mlx_array), intent(in)                        :: a
+        integer,         optional, intent(out)             :: status
+    end subroutine to_i8
+
+    module subroutine to_i16( y, a, status )
+        integer(int16),  target, contiguous, intent(inout) :: y(..)
+        type(mlx_array), intent(in)                        :: a
+        integer,         optional, intent(out)             :: status
+    end subroutine to_i16
 
     module subroutine to_i64( y, a, status )
         integer(int64),  target, contiguous, intent(inout) :: y(..)
@@ -455,6 +969,18 @@ interface mlx_to_alloc
         integer,         optional, intent(out)              :: status
     end subroutine to_alloc_i32
 
+    module subroutine to_alloc_i8( y, a, status )
+        integer(int8),   allocatable, target, intent(inout) :: y(..)
+        type(mlx_array), intent(in)                         :: a
+        integer,         optional, intent(out)              :: status
+    end subroutine to_alloc_i8
+
+    module subroutine to_alloc_i16( y, a, status )
+        integer(int16),  allocatable, target, intent(inout) :: y(..)
+        type(mlx_array), intent(in)                         :: a
+        integer,         optional, intent(out)              :: status
+    end subroutine to_alloc_i16
+
     module subroutine to_alloc_i64( y, a, status )
         integer(int64),  allocatable, target, intent(inout) :: y(..)
         type(mlx_array), intent(in)                         :: a
@@ -467,6 +993,56 @@ interface mlx_to_alloc
         integer,         optional, intent(out)              :: status
     end subroutine to_alloc_l
 end interface mlx_to_alloc
+
+interface mlx_item
+    module subroutine item_r32( a, value, status )
+        type(mlx_array), intent(in)            :: a
+        real(real32),    intent(out)           :: value
+        integer,         optional, intent(out) :: status
+    end subroutine item_r32
+
+    module subroutine item_r64( a, value, status )
+        type(mlx_array), intent(in)            :: a
+        real(real64),    intent(out)           :: value
+        integer,         optional, intent(out) :: status
+    end subroutine item_r64
+
+    module subroutine item_c32( a, value, status )
+        type(mlx_array), intent(in)            :: a
+        complex(real32), intent(out)           :: value
+        integer,         optional, intent(out) :: status
+    end subroutine item_c32
+
+    module subroutine item_i8( a, value, status )
+        type(mlx_array), intent(in)            :: a
+        integer(int8),   intent(out)           :: value
+        integer,         optional, intent(out) :: status
+    end subroutine item_i8
+
+    module subroutine item_i16( a, value, status )
+        type(mlx_array), intent(in)            :: a
+        integer(int16),  intent(out)           :: value
+        integer,         optional, intent(out) :: status
+    end subroutine item_i16
+
+    module subroutine item_i32( a, value, status )
+        type(mlx_array), intent(in)            :: a
+        integer(int32),  intent(out)           :: value
+        integer,         optional, intent(out) :: status
+    end subroutine item_i32
+
+    module subroutine item_i64( a, value, status )
+        type(mlx_array), intent(in)            :: a
+        integer(int64),  intent(out)           :: value
+        integer,         optional, intent(out) :: status
+    end subroutine item_i64
+
+    module subroutine item_l( a, value, status )
+        type(mlx_array), intent(in)            :: a
+        logical(c_bool), intent(out)           :: value
+        integer,         optional, intent(out) :: status
+    end subroutine item_l
+end interface mlx_item
 
 interface mlx_view
     module subroutine view_r32( a, p, status )
@@ -492,6 +1068,18 @@ interface mlx_view
         integer(int32),  pointer, intent(inout) :: p(..)
         integer,         optional, intent(out)  :: status
     end subroutine view_i32
+
+    module subroutine view_i8( a, p, status )
+        type(mlx_array), intent(in)             :: a
+        integer(int8),   pointer, intent(inout) :: p(..)
+        integer,         optional, intent(out)  :: status
+    end subroutine view_i8
+
+    module subroutine view_i16( a, p, status )
+        type(mlx_array), intent(in)             :: a
+        integer(int16),  pointer, intent(inout) :: p(..)
+        integer,         optional, intent(out)  :: status
+    end subroutine view_i16
 
     module subroutine view_i64( a, p, status )
         type(mlx_array), intent(in)             :: a
@@ -542,6 +1130,24 @@ interface mlx_alloc
         logical,        optional, intent(out)  :: zero_copy
         type(mlx_array) :: a
     end function alloc_i32
+
+    module function alloc_i8( fshape, mold, view, status, zero_copy ) result(a)
+        integer,       intent(in)             :: fshape(:)
+        integer(int8), intent(in)             :: mold
+        integer(int8), pointer, intent(inout) :: view(..)
+        integer,       optional, intent(out)  :: status
+        logical,       optional, intent(out)  :: zero_copy
+        type(mlx_array) :: a
+    end function alloc_i8
+
+    module function alloc_i16( fshape, mold, view, status, zero_copy ) result(a)
+        integer,        intent(in)             :: fshape(:)
+        integer(int16), intent(in)             :: mold
+        integer(int16), pointer, intent(inout) :: view(..)
+        integer,        optional, intent(out)  :: status
+        logical,        optional, intent(out)  :: zero_copy
+        type(mlx_array) :: a
+    end function alloc_i16
 
     module function alloc_i64( fshape, mold, view, status, zero_copy ) result(a)
         integer,        intent(in)             :: fshape(:)
@@ -989,11 +1595,11 @@ interface
         character(len=*), intent(in)    :: proc
     end subroutine mlxf_vector_op
     module subroutine mlxf_reduce_op( r, f, a, option, proc )
-        type(mlx_array),  intent(inout) :: r
-        procedure(mlxc_reduce_op)       :: f
-        type(mlx_array),  intent(in)    :: a
-        integer,          intent(in)    :: option
-        character(len=*), intent(in)    :: proc
+        type(mlx_array),        intent(inout) :: r
+        procedure(mlxc_reduce_op)             :: f
+        type(mlx_array),        intent(in)    :: a
+        type(mlxf_reduce_spec), intent(in)    :: option
+        character(len=*),       intent(in)    :: proc
     end subroutine mlxf_reduce_op
     module subroutine mlxf_ternary_op( r, f, a, proc )
         type(mlx_array),  intent(inout) :: r
@@ -1009,11 +1615,11 @@ interface
         character(len=*), intent(in)    :: proc
     end subroutine mlxf_take_op
     module subroutine mlxf_scan_op( r, f, a, option, proc )
-        type(mlx_array),  intent(inout) :: r
-        procedure(mlxc_scan_op)         :: f
-        type(mlx_array),  intent(in)    :: a
-        integer,          intent(in)    :: option
-        character(len=*), intent(in)    :: proc
+        type(mlx_array),      intent(inout) :: r
+        procedure(mlxc_scan_op)             :: f
+        type(mlx_array),      intent(in)    :: a
+        type(mlxf_scan_spec), intent(in)    :: option
+        character(len=*),     intent(in)    :: proc
     end subroutine mlxf_scan_op
     module subroutine mlxf_slice_op( r, f, a, option, proc )
         type(mlx_array),       intent(inout) :: r
@@ -1096,6 +1702,271 @@ interface
         integer,          intent(in)    :: option
         character(len=*), intent(in)    :: proc
     end subroutine mlxf_binary_int_op
+    module subroutine mlxf_reduce_all_op( r, f, a, option, proc )
+        type(mlx_array),        intent(inout) :: r
+        procedure(mlxc_flag_op)               :: f
+        type(mlx_array),        intent(in)    :: a
+        type(mlxf_reduce_spec), intent(in)    :: option
+        character(len=*),       intent(in)    :: proc
+    end subroutine mlxf_reduce_all_op
+    module subroutine mlxf_reduce_dims_op( r, f, a, option, proc )
+        type(mlx_array),        intent(inout) :: r
+        procedure(mlxc_reduce_dims_op)        :: f
+        type(mlx_array),        intent(in)    :: a
+        type(mlxf_reduce_spec), intent(in)    :: option
+        character(len=*),       intent(in)    :: proc
+    end subroutine mlxf_reduce_dims_op
+    module subroutine mlxf_var_all_op( r, f, a, option, proc )
+        type(mlx_array),        intent(inout) :: r
+        procedure(mlxc_var_all_op)            :: f
+        type(mlx_array),        intent(in)    :: a
+        type(mlxf_reduce_spec), intent(in)    :: option
+        character(len=*),       intent(in)    :: proc
+    end subroutine mlxf_var_all_op
+    module subroutine mlxf_var_op( r, f, a, option, proc )
+        type(mlx_array),        intent(inout) :: r
+        procedure(mlxc_var_op)                :: f
+        type(mlx_array),        intent(in)    :: a
+        type(mlxf_reduce_spec), intent(in)    :: option
+        character(len=*),       intent(in)    :: proc
+    end subroutine mlxf_var_op
+    module subroutine mlxf_var_dims_op( r, f, a, option, proc )
+        type(mlx_array),        intent(inout) :: r
+        procedure(mlxc_var_dims_op)           :: f
+        type(mlx_array),        intent(in)    :: a
+        type(mlxf_reduce_spec), intent(in)    :: option
+        character(len=*),       intent(in)    :: proc
+    end subroutine mlxf_var_dims_op
+    module subroutine mlxf_int2_op( r, f, a, option, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_int2_op)         :: f
+        type(mlx_array),  intent(in)    :: a
+        integer,          intent(in)    :: option(2)
+        character(len=*), intent(in)    :: proc
+    end subroutine mlxf_int2_op
+    module subroutine mlxf_int3_op( r, f, a, option, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_int3_op)         :: f
+        type(mlx_array),  intent(in)    :: a
+        integer,          intent(in)    :: option(3)
+        character(len=*), intent(in)    :: proc
+    end subroutine mlxf_int3_op
+    module subroutine mlxf_trace_op( r, f, a, option, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_trace_op)        :: f
+        type(mlx_array),  intent(in)    :: a
+        integer,          intent(in)    :: option(4)
+        character(len=*), intent(in)    :: proc
+    end subroutine mlxf_trace_op
+    module subroutine mlxf_scan_all_op( r, f, a, option, proc )
+        type(mlx_array),      intent(inout) :: r
+        procedure(mlxc_scan_all_op)         :: f
+        type(mlx_array),      intent(in)    :: a
+        type(mlxf_scan_spec), intent(in)    :: option
+        character(len=*),     intent(in)    :: proc
+    end subroutine mlxf_scan_all_op
+    module subroutine mlxf_scan_plain_op( r, f, a, option, proc )
+        type(mlx_array),      intent(inout) :: r
+        procedure(mlxc_scan_plain_op)       :: f
+        type(mlx_array),      intent(in)    :: a
+        type(mlxf_scan_spec), intent(in)    :: option
+        character(len=*),     intent(in)    :: proc
+    end subroutine mlxf_scan_plain_op
+    module subroutine mlxf_scan_plain_all_op( r, f, a, option, proc )
+        type(mlx_array),      intent(inout) :: r
+        procedure(mlxc_scan_plain_all_op)   :: f
+        type(mlx_array),      intent(in)    :: a
+        type(mlxf_scan_spec), intent(in)    :: option
+        character(len=*),     intent(in)    :: proc
+    end subroutine mlxf_scan_plain_all_op
+    module subroutine mlxf_roll_op( r, f, a, option, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_roll_op)         :: f
+        type(mlx_array),  intent(in)    :: a
+        integer,          intent(in)    :: option(:)
+        character(len=*), intent(in)    :: proc
+    end subroutine mlxf_roll_op
+    module subroutine mlxf_unflatten_op( r, f, a, option, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_unflatten_op)    :: f
+        type(mlx_array),  intent(in)    :: a
+        integer,          intent(in)    :: option(:)
+        character(len=*), intent(in)    :: proc
+    end subroutine mlxf_unflatten_op
+    module subroutine mlxf_vector2_op( r, f, a, option, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_vector2_op)      :: f
+        type(mlx_array),  intent(in)    :: a
+        integer,          intent(in)    :: option(:,:)
+        character(len=*), intent(in)    :: proc
+    end subroutine mlxf_vector2_op
+    module subroutine mlxf_strided_op( r, f, a, option, proc )
+        type(mlx_array),         intent(inout) :: r
+        procedure(mlxc_strided_op)             :: f
+        type(mlx_array),         intent(in)    :: a
+        type(mlxf_strided_spec), intent(in)    :: option
+        character(len=*),        intent(in)    :: proc
+    end subroutine mlxf_strided_op
+    module subroutine mlxf_count_op( r, f, a, option, proc )
+        type(mlx_array),       intent(inout) :: r
+        procedure(mlxc_count_op)             :: f
+        type(mlx_array),       intent(in)    :: a
+        type(mlxf_count_spec), intent(in)    :: option
+        character(len=*),      intent(in)    :: proc
+    end subroutine mlxf_count_op
+    module subroutine mlxf_window_op( r, f, option, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_window_op)       :: f
+        integer,          intent(in)    :: option
+        character(len=*), intent(in)    :: proc
+    end subroutine mlxf_window_op
+    module subroutine mlxf_identity_op( r, f, option, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_identity_op)     :: f
+        integer,          intent(in)    :: option(2)
+        character(len=*), intent(in)    :: proc
+    end subroutine mlxf_identity_op
+    module subroutine mlxf_eye_op( r, f, option, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_eye_op)          :: f
+        integer,          intent(in)    :: option(4)
+        character(len=*), intent(in)    :: proc
+    end subroutine mlxf_eye_op
+    module subroutine mlxf_linspace_op( r, f, option, proc )
+        type(mlx_array),          intent(inout) :: r
+        procedure(mlxc_linspace_op)             :: f
+        type(mlxf_linspace_spec), intent(in)    :: option
+        character(len=*),         intent(in)    :: proc
+    end subroutine mlxf_linspace_op
+    module subroutine mlxf_linspace_endpoint_op( r, f, option, proc )
+        type(mlx_array),          intent(inout) :: r
+        procedure(mlxc_linspace_endpoint_op)    :: f
+        type(mlxf_linspace_spec), intent(in)    :: option
+        character(len=*),         intent(in)    :: proc
+    end subroutine mlxf_linspace_endpoint_op
+    module subroutine mlxf_list_op( r, f, a, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_list_op)         :: f
+        type(mlx_array),  intent(in)    :: a(:)
+        character(len=*), intent(in)    :: proc
+    end subroutine mlxf_list_op
+    module subroutine mlxf_vector_list_op( r, f, a, proc )
+        type(mlx_array),  allocatable, intent(out) :: r(:)
+        procedure(mlxc_vector_list_op)             :: f
+        type(mlx_array),  intent(in)               :: a(:)
+        character(len=*), intent(in)               :: proc
+    end subroutine mlxf_vector_list_op
+    module subroutine mlxf_meshgrid_op( r, f, a, option, proc )
+        type(mlx_array),  allocatable, intent(out) :: r(:)
+        procedure(mlxc_meshgrid_op)                :: f
+        type(mlx_array),  intent(in)               :: a(:)
+        logical,          intent(in)               :: option
+        character(len=*), intent(in)               :: proc
+    end subroutine mlxf_meshgrid_op
+    module subroutine mlxf_split_op( r, f, a, option, proc )
+        type(mlx_array),  allocatable, intent(out) :: r(:)
+        procedure(mlxc_split_op)                   :: f
+        type(mlx_array),  intent(in)               :: a
+        integer,          intent(in)               :: option(2)
+        character(len=*), intent(in)               :: proc
+    end subroutine mlxf_split_op
+    module subroutine mlxf_split_sections_op( r, f, a, option, proc )
+        type(mlx_array),  allocatable, intent(out) :: r(:)
+        procedure(mlxc_split_sections_op)          :: f
+        type(mlx_array),  intent(in)               :: a
+        integer,          intent(in)               :: option(:)
+        character(len=*), intent(in)               :: proc
+    end subroutine mlxf_split_sections_op
+    module subroutine mlxf_unstack_op( r, f, a, proc )
+        type(mlx_array),  allocatable, intent(out) :: r(:)
+        procedure(mlxc_unstack_op)                 :: f
+        type(mlx_array),  intent(in)               :: a
+        character(len=*), intent(in)               :: proc
+    end subroutine mlxf_unstack_op
+    module subroutine mlxf_unstack_dim_op( r, f, a, option, proc )
+        type(mlx_array),  allocatable, intent(out) :: r(:)
+        procedure(mlxc_unstack_dim_op)             :: f
+        type(mlx_array),  intent(in)               :: a
+        integer,          intent(in)               :: option
+        character(len=*), intent(in)               :: proc
+    end subroutine mlxf_unstack_dim_op
+    module subroutine mlxf_pad_op( r, f, a, option, proc )
+        type(mlx_array),     intent(inout) :: r
+        procedure(mlxc_pad_op)             :: f
+        type(mlx_array),     intent(in)    :: a(:)
+        type(mlxf_pad_spec), intent(in)    :: option
+        character(len=*),    intent(in)    :: proc
+    end subroutine mlxf_pad_op
+    module subroutine mlxf_pad_width_op( r, f, a, option, proc )
+        type(mlx_array),     intent(inout) :: r
+        procedure(mlxc_pad_width_op)       :: f
+        type(mlx_array),     intent(in)    :: a(:)
+        type(mlxf_pad_spec), intent(in)    :: option
+        character(len=*),    intent(in)    :: proc
+    end subroutine mlxf_pad_width_op
+    module subroutine mlxf_gather_op( r, f, a, option, proc )
+        type(mlx_array),       intent(inout) :: r
+        procedure(mlxc_gather_op)            :: f
+        type(mlx_array),       intent(in)    :: a(:)
+        type(mlxf_index_spec), intent(in)    :: option
+        character(len=*),      intent(in)    :: proc
+    end subroutine mlxf_gather_op
+    module subroutine mlxf_gather_single_op( r, f, a, option, proc )
+        type(mlx_array),       intent(inout) :: r
+        procedure(mlxc_gather_single_op)     :: f
+        type(mlx_array),       intent(in)    :: a(:)
+        type(mlxf_index_spec), intent(in)    :: option
+        character(len=*),      intent(in)    :: proc
+    end subroutine mlxf_gather_single_op
+    module subroutine mlxf_slice_dynamic_op( r, f, a, option, proc )
+        type(mlx_array),       intent(inout) :: r
+        procedure(mlxc_slice_dynamic_op)     :: f
+        type(mlx_array),       intent(in)    :: a(:)
+        type(mlxf_index_spec), intent(in)    :: option
+        character(len=*),      intent(in)    :: proc
+    end subroutine mlxf_slice_dynamic_op
+    module subroutine mlxf_scatter_op( r, f, a, option, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_scatter_op)      :: f
+        type(mlx_array),  intent(in)    :: a(:)
+        integer,          intent(in)    :: option(:)
+        character(len=*), intent(in)    :: proc
+    end subroutine mlxf_scatter_op
+    module subroutine mlxf_put_op( r, f, a, option, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_put_op)          :: f
+        type(mlx_array),  intent(in)    :: a(:)
+        integer,          intent(in)    :: option
+        character(len=*), intent(in)    :: proc
+    end subroutine mlxf_put_op
+    module subroutine mlxf_ternary_vector_op( r, f, a, option, proc )
+        type(mlx_array),  intent(inout)   :: r
+        procedure(mlxc_ternary_vector_op) :: f
+        type(mlx_array),  intent(in)      :: a(:)
+        integer,          intent(in)      :: option(:)
+        character(len=*), intent(in)      :: proc
+    end subroutine mlxf_ternary_vector_op
+    module subroutine mlxf_text_op( r, f, a, option, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_text_op)         :: f
+        type(mlx_array),  intent(in)    :: a(:)
+        character(len=*), intent(in)    :: option
+        character(len=*), intent(in)    :: proc
+    end subroutine mlxf_text_op
+    module subroutine mlxf_slice_update_op( r, f, a, option, proc )
+        type(mlx_array),       intent(inout) :: r
+        procedure(mlxc_slice_update_op)      :: f
+        type(mlx_array),       intent(in)    :: a(:)
+        type(mlxf_slice_spec), intent(in)    :: option
+        character(len=*),      intent(in)    :: proc
+    end subroutine mlxf_slice_update_op
+    module subroutine mlxf_unique_op( r, f, a, option, proc )
+        type(mlx_array),  allocatable, intent(out) :: r(:)
+        procedure(mlxc_unique_op)                  :: f
+        type(mlx_array),  intent(in)               :: a(:)
+        integer,          intent(in)               :: option
+        character(len=*), intent(in)               :: proc
+    end subroutine mlxf_unique_op
     module subroutine check_dim( a, dim, proc )
         type(mlx_array),  intent(in) :: a
         integer,          intent(in) :: dim

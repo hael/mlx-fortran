@@ -50,6 +50,9 @@ endfunction()
 # unit_array (above 0.5 s, the area named by the design plan): its leak gate runs 10,000 iterations of every
 #   supported form of the handle model per device.
 # ops, linalg and fft isolate the operation families and run independent CPU/GPU oracles.
+# unit_ops (above 0.5 s in Release): its reduction sub-suite runs every form of every reduction and scan on 16
+#   seeded fixtures per seed, the whole-array forms one fixture at a time, on both devices; most of the time is
+#   the GPU's small evaluations and the first compilation of each of its kernels.
 # compile isolates callback tracing, checked callback failures and shapeless reuse on both devices.
 # Cold CPU/GPU JIT compilation can put it above 0.5 s; cached invocations are much shorter.
 # kernels: test-only models of SIMPLE's pipelines (the polar table's scoring

@@ -65,14 +65,16 @@ The full contract is [`doc/policies/binding_contract_policy.md`](doc/policies/bi
 
 | area | names |
 | --- | --- |
-| arrays | `mlx_array`, `mlx_from`, `mlx_to`, `mlx_to_alloc`, `mlx_view`, `mlx_alloc`, `mlx_is_live`, `mlx_astype`, `mlx_copy`, `mlx_zeros`, `mlx_ones`, `mlx_full`, `mlx_zeros_like`, `mlx_ones_like`, `mlx_full_like`, `mlx_arange` |
+| arrays | `mlx_array`, `mlx_from`, `mlx_to`, `mlx_to_alloc`, `mlx_item`, `mlx_view`, `mlx_alloc`, `mlx_is_live`, `mlx_astype`, `mlx_copy`, `mlx_zeros`, `mlx_ones`, `mlx_full`, `mlx_zeros_like`, `mlx_ones_like`, `mlx_full_like`, `mlx_arange`, `mlx_linspace`, `mlx_identity`, `mlx_eye`, `mlx_tri`, `mlx_meshgrid`, `mlx_bartlett`, `mlx_blackman`, `mlx_hamming`, `mlx_hanning` |
 | evaluation | `mlx_eval`, `mlx_async_eval`, `mlx_synchronize` |
 | operators | `+ - * / **`, `< <= > >= == /=`, `.and. .or. .not. .eqv. .neqv.` on arrays and scalars |
 | elementwise | `abs`, `exp`, `sqrt`, `log`, `log10`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`, `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh`, `erf`, `floor`, `ceiling`, `aint`, `modulo`, `min`, `max`, `merge`, `real`, `aimag`, `conjg`, `cmplx`, `mlx_round`, `mlx_sign`, `mlx_sigmoid`, `mlx_square`, `mlx_reciprocal`, `mlx_rsqrt`, `mlx_expm1`, `mlx_log1p`, `mlx_log2`, `mlx_erfinv`, `mlx_degrees`, `mlx_radians`, `mlx_logaddexp`, `mlx_floor_divide`, `mlx_divmod`, `mlx_clip`, `mlx_nan_to_num`, `mlx_stop_gradient` |
 | tests and predicates | `mlx_isnan`, `mlx_isinf`, `mlx_isfinite`, `mlx_isposinf`, `mlx_isneginf`, `mlx_isclose`, `mlx_allclose`, `mlx_array_equal` |
 | integers and bits | `iand`, `ior`, `ieor`, `not`, `shiftl`, `mlx_right_shift` (arithmetic) |
-| shape and indexing | `reshape`, `transpose`, `mlx_permute`, `mlx_concatenate`, `mlx_slice`, `mlx_take_along_dim`, `mlx_take`, `mlx_bitcast` |
-| reductions and scans | `sum`, `minval`, `minloc`, `mlx_logsumexp`, `mlx_cumsum` |
+| shape and indexing | `reshape`, `transpose`, `mlx_permute`, `mlx_movedim`, `mlx_swapdims`, `mlx_squeeze`, `mlx_expand_dims`, `mlx_flatten`, `mlx_unflatten`, `mlx_atleast_1d`, `mlx_atleast_2d`, `mlx_atleast_3d`, `mlx_broadcast_to`, `mlx_broadcast_arrays`, `mlx_tile`, `mlx_repeat`, `mlx_pad`, `mlx_flip`, `cshift`, `mlx_concatenate`, `mlx_stack`, `mlx_unstack`, `mlx_split`, `mlx_slice`, `mlx_slice_update` (and `_add`, `_max`, `_min`, `_prod`), `mlx_take_along_dim`, `mlx_put_along_dim`, `mlx_take`, `mlx_gather`, `mlx_scatter` (and `_add`, `_max`, `_min`, `_prod`), `mlx_masked_scatter`, `mlx_searchsorted`, `mlx_unique`, `mlx_as_strided`, `mlx_bitcast`, `mlx_number_of_elements` |
+| matrices | `mlx_diag`, `mlx_diagonal`, `mlx_trace`, `mlx_tril`, `mlx_triu` (diagonal k > 0 above the main diagonal of the Fortran matrix) |
+| reductions | `sum`, `product`, `maxval`, `minval`, `all`, `any`, `count`, `maxloc`, `minloc`, `mlx_mean`, `mlx_median`, `mlx_var`, `mlx_std`, `mlx_logsumexp` (one dimension, a list or all; `keepdims`), `mlx_softmax` (`maxloc` and `minloc`: one dimension, or the whole array's subscripts) |
+| scans and sorting | `mlx_cumsum`, `mlx_cumprod`, `mlx_cummax`, `mlx_cummin`, `mlx_logcumsumexp`, `mlx_diff`, `mlx_sort`, `mlx_argsort`, `mlx_partition`, `mlx_argpartition`, `mlx_topk` |
 | linear algebra | `matmul` (batched) |
 | Fourier transforms | `mlx_fft`, `mlx_ifft`, `mlx_rfft`, `mlx_irfft`, `mlx_fft2`, `mlx_ifft2`, `MLX_FFT_NORMS` |
 | compilation | `mlx_function` (from a Fortran callback), `mlx_compile` |

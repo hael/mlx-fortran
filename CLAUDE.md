@@ -27,7 +27,8 @@ adapted or rejected, and why.
 Skills live in `.claude/skills/` (a symlink to `.github/skills/`, shared with Copilot and Codex).
 `src/CLAUDE.md` imports `mlxf-modern-fortran`, which loads the first time a file under `src/` is read; its
 `references/testing.md` is the test rules in short. Adding a wrapper of an MLX operation: the skill
-`mlxf-binding`. Edit the `SKILL.md`, never the importing `CLAUDE.md`;
+`mlxf-binding`. A go on a batch of work, and preparing, launching, watching or reviewing agent runs: the skill
+`mlxf-agent-runs`. Edit the `SKILL.md`, never the importing `CLAUDE.md`;
 `scripts/check_guide_imports.py` (in the static gate) catches a broken import.
 
 ## Structure
@@ -91,6 +92,9 @@ Skills live in `.claude/skills/` (a symlink to `.github/skills/`, shared with Co
 - Every rule reading can check gets its check in `scripts/check_rules.py` in the same change, with a planted
   violation shown to fail; a ledger may only shrink.
 - Dead code found during work is deleted; "dead" is proved by the compiler, not by a search.
+- After the maintainer says go, the work continues until the batch is done: a decision with a recommendation is
+  taken and recorded, never asked; a finished run is fetched, rebuilt and reported in the turn it ends; no
+  machine with work waiting is left idle (skill `mlxf-agent-runs`).
 - Never commit or push; git is read-only for agents. The maintainer decides what is committed and pushed:
   leave changes in the working tree and say which are ready.
 

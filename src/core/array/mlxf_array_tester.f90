@@ -1,13 +1,14 @@
 !@descr: tests of mlxf_array: the leak gate, byte identity of data movement, memory order, views, the zero-copy table
 module mlxf_array_tester
 use, intrinsic :: iso_c_binding,   only: c_bool, c_int, c_f_pointer
-use, intrinsic :: iso_fortran_env, only: int32, int64, real32, real64
+use, intrinsic :: iso_fortran_env, only: int8, int16, int32, int64, real32, real64
 use mlxf_c_array,    only: mlxc_array_ndim, mlxc_array_shape
 use mlxf_c_ops,      only: mlxc_transpose
 use mlxf,            only: mlx_array, mlx_function, mlx_compile, MLX_DEVICES, MLX_DTYPES, mlx_from, mlx_to, &
-                           mlx_to_alloc, mlx_view, mlx_alloc, mlx_eval, mlx_synchronize, mlx_clear_cache, &
-                           mlx_active_memory, mlx_live_count, mlx_is_live, mlx_last_error, mlx_default_device, &
-                           mlx_set_default_device, exp, sum, sqrt, reshape, transpose, matmul, mlx_rfft, mlx_irfft
+                           mlx_to_alloc, mlx_item, mlx_astype, mlx_view, mlx_alloc, mlx_eval, mlx_synchronize, &
+                           mlx_clear_cache, mlx_active_memory, mlx_live_count, mlx_is_live, mlx_last_error, &
+                           mlx_default_device, mlx_set_default_device, exp, sum, sqrt, reshape, transpose, matmul, &
+                           mlx_rfft, mlx_irfft
 use mlxf_registry,   only: registry_stale_releases
 use mlxf_array,      only: mlxf_handle, mlxf_unary
 use mlxf_test_utils, only: assert_true, assert_int, bits_equal, test_devices, device_name, set_fixed_seed
@@ -55,6 +56,10 @@ contains
             call test_leak_gate(devs(i))
             call test_operation_leaks
             call test_compiled_leak
+            call test_small_integer_kinds(devs(i))
+            call test_item(devs(i))
+            call test_device_dtypes(devs(i))
+            call test_kind_leaks(devs(i))
         end do
         call mlx_set_default_device(original)
         call test_zero_copy_table
@@ -511,6 +516,257 @@ contains
         call assert_true(st /= 0 .and. .not. allocated(big) .and. index(msg, 'could not be allocated') > 0, &
             &'mlx_to_alloc to a destination that cannot be allocated returns a status and a message')
     end subroutine test_checked_failures
+
+    ! int8 and int16 at ranks 0, 2 (3,5) and 3 (3,2,5) through mlx_from, mlx_to and mlx_to_alloc, with the
+    ! extreme values; their views and their mlx_alloc buffers
+    subroutine test_small_integer_kinds( dev )
+        integer, intent(in) :: dev
+        integer(int64)               :: bits(30)
+        integer(int8)                :: i0, j0
+        integer(int8)                :: i2(3, 5), i3(3, 2, 5), back8(5)
+        integer(int8),  allocatable  :: j2(:,:), j3(:,:,:)
+        integer(int8),  pointer      :: p8(:,:), v8(:)
+        integer(int16)               :: k0, l0
+        integer(int16)               :: k2(3, 5), k3(3, 2, 5), back(7)
+        integer(int16), allocatable  :: l2(:,:), l3(:,:,:)
+        integer(int16), pointer      :: p16(:,:,:), v16(:)
+        type(mlx_array)              :: a
+        integer                      :: st, s2, s3, dkind, i
+        logical                      :: ok
+        write(*,'(A)') 'test_small_integer_kinds'
+        call set_fixed_seed(21)
+        bits = random_i64(30)
+        i0 = int(-128, int8)
+        a  = mlx_from(i0)
+        call mlx_to(j0, a, status=st)
+        i2 = reshape(int(ibits(bits(1:15), 3, 8)-128_int64, int8), [3, 5])
+        i2(1, 1) = huge(1_int8)
+        i2(2, 1) = int(-128, int8)
+        a  = mlx_from(i2)
+        call mlx_to_alloc(j2, a, status=s2)
+        call mlx_view(a, p8, status=s3)
+        ok = s3 == 0 .and. associated(p8)
+        if( ok ) ok = all(shape(p8) == [3, 5])
+        if( ok ) ok = all(p8 == i2)
+        call assert_true(ok, device_name(dev)//': an int8 array can be viewed in Fortran order')
+        i3 = reshape(int(ibits(bits(1:30), 11, 8)-128_int64, int8), [3, 2, 5])
+        a  = mlx_from(i3)
+        call mlx_to_alloc(j3, a, status=s3)
+        dkind = a%kind()
+        call assert_true(st == 0 .and. s2 == 0 .and. s3 == 0 .and. i0 == j0 .and. all(i2 == j2) .and. &
+            &all(i3 == j3) .and. dkind == MLX_DTYPES%int8, device_name(dev)//': int8 ranks 0, 2, 3 round-trip')
+        k0 = int(-32768, int16)
+        a  = mlx_from(k0)
+        call mlx_to(l0, a, status=st)
+        k2 = reshape(int(ibits(bits(1:15), 5, 16)-32768_int64, int16), [3, 5])
+        k2(1, 1) = huge(1_int16)
+        k2(2, 1) = int(-32768, int16)
+        a  = mlx_from(k2)
+        call mlx_to_alloc(l2, a, status=s2)
+        k3 = reshape(int(ibits(bits(1:30), 17, 16)-32768_int64, int16), [3, 2, 5])
+        a  = mlx_from(k3)
+        call mlx_to_alloc(l3, a, status=s3)
+        dkind = a%kind()
+        call assert_true(st == 0 .and. s2 == 0 .and. s3 == 0 .and. k0 == l0 .and. all(k2 == l2) .and. &
+            &all(k3 == l3) .and. dkind == MLX_DTYPES%int16, device_name(dev)//': int16 ranks 0, 2, 3 round-trip')
+        call mlx_view(a, p16, status=st)
+        ok = st == 0 .and. associated(p16)
+        if( ok ) ok = all(shape(p16) == [3, 2, 5])
+        if( ok ) ok = all(p16 == k3)
+        call assert_true(ok, device_name(dev)//': an int16 array can be viewed in Fortran order')
+        a = mlx_alloc([7], 0_int16, v16, status=st)
+        ok = st == 0 .and. associated(v16)
+        if( ok )then
+            v16 = [(int(1000*i-4000, int16), i=1, 7)]
+            call mlx_to(back, a, status=st)
+            dkind = a%kind()
+            ok = st == 0 .and. all(back == [(int(1000*i-4000, int16), i=1, 7)]) .and. dkind == MLX_DTYPES%int16
+        endif
+        call assert_true(ok, device_name(dev)//': data written through the view of an int16 mlx_alloc is the array''s')
+        a = mlx_alloc([5], 0_int8, v8, status=st)
+        ok = st == 0 .and. associated(v8)
+        if( ok )then
+            v8 = [(int(20*i-60, int8), i=1, 5)]
+            call mlx_to(back8, a, status=st)
+            dkind = a%kind()
+            ok = st == 0 .and. all(back8 == [(int(20*i-60, int8), i=1, 5)]) .and. dkind == MLX_DTYPES%int8
+        endif
+        call assert_true(ok, device_name(dev)//': data written through the view of an int8 mlx_alloc is the array''s')
+        a = mlx_from(k2)
+        call mlx_to(j2, a, status=st)
+        call assert_true(st /= 0, device_name(dev)//': mlx_to of an int16 array into an int8 array is refused with a status')
+    end subroutine test_small_integer_kinds
+
+    ! mlx_item of every transfer kind, and its checked refusals
+    subroutine test_item( dev )
+        integer, intent(in) :: dev
+        type(mlx_array) :: a
+        real(real32)    :: r4
+        real(real64)    :: r8
+        complex(real32) :: c4
+        integer(int8)   :: i1
+        integer(int16)  :: i2
+        integer(int32)  :: i4
+        integer(int64)  :: i8
+        logical(c_bool) :: l1
+        integer         :: st
+        write(*,'(A)') 'test_item'
+        a = mlx_from(1.5_real32)
+        call mlx_item(a, r4, status=st)
+        call assert_true(st == 0 .and. bits_equal(r4, 1.5_real32), device_name(dev)//': mlx_item returns a float32 element')
+        a = mlx_from([2.5_real32])
+        call mlx_item(a, r4, status=st)
+        call assert_true(st == 0 .and. bits_equal(r4, 2.5_real32), device_name(dev)//': mlx_item takes one element of any rank')
+        a = mlx_from([1._real32, 2._real32, 4._real32])
+        a = sum(a)
+        call mlx_item(a, r4)
+        call assert_true(bits_equal(r4, 7._real32), device_name(dev)//': mlx_item evaluates a lazy rank-0 result')
+        a = mlx_from(cmplx(1.25_real32, -2.5_real32, real32))
+        call mlx_item(a, c4, status=st)
+        call assert_true(st == 0 .and. bits_equal(c4, cmplx(1.25_real32, -2.5_real32, real32)), &
+            &device_name(dev)//': mlx_item returns a complex64 element')
+        a = mlx_from(int(-128, int8))
+        call mlx_item(a, i1, status=st)
+        call assert_true(st == 0 .and. i1 == int(-128, int8), device_name(dev)//': mlx_item returns an int8 element')
+        a = mlx_from(int(-32768, int16))
+        call mlx_item(a, i2, status=st)
+        call assert_true(st == 0 .and. i2 == int(-32768, int16), device_name(dev)//': mlx_item returns an int16 element')
+        a = mlx_from(-huge(1_int32))
+        call mlx_item(a, i4, status=st)
+        call assert_true(st == 0 .and. i4 == -huge(1_int32), device_name(dev)//': mlx_item returns an int32 element')
+        a = mlx_from(huge(1_int64)-7_int64)
+        call mlx_item(a, i8, status=st)
+        call assert_true(st == 0 .and. i8 == huge(1_int64)-7_int64, device_name(dev)//': mlx_item returns an int64 element')
+        a = mlx_from(.true._c_bool)
+        call mlx_item(a, l1, status=st)
+        call assert_true(st == 0 .and. l1, device_name(dev)//': mlx_item returns a boolean element')
+        if( dev == MLX_DEVICES%cpu )then
+            a = mlx_from(0.1_real64)
+            call mlx_item(a, r8, status=st)
+            call assert_true(st == 0 .and. bits_equal(r8, 0.1_real64), device_name(dev)//': mlx_item returns a float64 element')
+        endif
+        a = mlx_from(3_int32)
+        r4 = 9._real32
+        call mlx_item(a, r4, status=st)
+        call assert_true(st /= 0 .and. bits_equal(r4, 0._real32), &
+            &device_name(dev)//': mlx_item into another kind is refused with a status and converts nothing')
+        a = mlx_from([1._real32, 2._real32])
+        call mlx_item(a, r4, status=st)
+        call assert_true(st /= 0, device_name(dev)//': mlx_item of two elements is refused with a status')
+    end subroutine test_item
+
+    ! the dtypes that exist on the device only: mlx_astype reaches them, kind() names them, values survive the
+    ! way back, and no Fortran array takes them
+    subroutine test_device_dtypes( dev )
+        integer, intent(in) :: dev
+        integer, parameter :: CODES(6) = [MLX_DTYPES%uint8, MLX_DTYPES%uint16, MLX_DTYPES%uint32, MLX_DTYPES%uint64, &
+            &MLX_DTYPES%float16, MLX_DTYPES%bfloat16]
+        type(mlx_array) :: a, u, b
+        integer(int32)  :: x(5), y(5)
+        real(real32)    :: z(5)
+        integer         :: c, st
+        logical         :: ok
+        write(*,'(A)') 'test_device_dtypes'
+        x = [0, 1, 2, 100, 255]
+        a = mlx_from(x)
+        ok = .true.
+        do c = 1, size(CODES)
+            u = mlx_astype(a, CODES(c))
+            if( u%kind() /= CODES(c) ) ok = .false.
+            b = mlx_astype(u, MLX_DTYPES%int32)
+            call mlx_to(y, b, status=st)
+            if( st /= 0 .or. any(y /= x) ) ok = .false.
+        end do
+        call assert_true(ok, device_name(dev)//': unsigned integers and 16-bit floats hold small whole numbers exactly')
+        u = mlx_astype(a, MLX_DTYPES%uint8)
+        call mlx_to(y, u, status=st)
+        call assert_true(st /= 0, device_name(dev)//': mlx_to of a uint8 array into an int32 array is refused with a status')
+        a = mlx_from([-1_int32])
+        u = mlx_astype(a, MLX_DTYPES%uint8)
+        u = mlx_astype(u, MLX_DTYPES%int32)
+        call mlx_to(y(1:1), u, status=st)
+        call assert_true(st == 0 .and. y(1) == 255, device_name(dev)//': -1 as uint8 is 255 (negative control: the dtype is unsigned)')
+        a = mlx_from([0.1_real32, 1._real32, 1.5_real32, 2._real32, 1024._real32])
+        u = mlx_astype(a, MLX_DTYPES%float16)
+        u = mlx_astype(u, MLX_DTYPES%float32)
+        call mlx_to(z, u, status=st)
+        call assert_true(st == 0 .and. abs(z(1)-0.1_real32) > 0._real32 .and. abs(z(1)-0.1_real32) < 1.e-4_real32 .and. &
+            &bits_equal(z(3), 1.5_real32), device_name(dev)//': float16 rounds 0.1 to half precision and keeps 1.5')
+    end subroutine test_device_dtypes
+
+    ! the leak gate of the transfer kinds: every movement of int8 and int16 data and mlx_item of every kind,
+    ! 10,000 times, leaves the active memory, the live count and the stale releases where they were
+    subroutine test_kind_leaks( dev )
+        integer, intent(in) :: dev
+        integer(int64) :: mem0
+        integer        :: it, live0, stale0
+        write(*,'(A)') 'test_kind_leaks'
+        call kind_leak_body(dev)
+        call mlx_synchronize()
+        call mlx_clear_cache()
+        mem0 = mlx_active_memory()
+        live0 = mlx_live_count()
+        stale0 = registry_stale_releases()
+        do it = 1, NITER
+            call kind_leak_body(dev)
+        end do
+        call mlx_synchronize()
+        call mlx_clear_cache()
+        call assert_true(mem0 == mlx_active_memory(), device_name(dev)//': the transfer-kind loop returns active memory exactly')
+        call assert_int(live0, mlx_live_count(), device_name(dev)//': the transfer-kind loop returns live handles exactly')
+        call assert_int(stale0, registry_stale_releases(), device_name(dev)//': the transfer-kind loop has no stale release')
+    end subroutine test_kind_leaks
+
+    ! one iteration: int8 and int16 in, out, allocated, viewed and borrowed; one element of every kind
+    subroutine kind_leak_body( dev )
+        integer, intent(in) :: dev
+        type(mlx_array)             :: a, b, u
+        integer(int8)               :: x8(4, 3), y8(4, 3), e8
+        integer(int8),  allocatable :: z8(:,:)
+        integer(int8),  pointer     :: p8(:,:), v8(:)
+        integer(int16)              :: x16(4, 3), y16(4, 3), e16
+        integer(int16), allocatable :: z16(:,:)
+        integer(int16), pointer     :: p16(:,:), v16(:)
+        real(real32)                :: r4
+        real(real64)                :: r8
+        complex(real32)             :: c4
+        integer(int32)              :: i4
+        integer(int64)              :: i8
+        logical(c_bool)             :: l1
+        integer                     :: st
+        x8 = 3_int8
+        x16 = 300_int16
+        a = mlx_from(x8)
+        call mlx_to(y8, a, status=st)
+        call mlx_to_alloc(z8, a, status=st)
+        call mlx_view(a, p8, status=st)
+        b = mlx_from(x16)
+        call mlx_to(y16, b, status=st)
+        call mlx_to_alloc(z16, b, status=st)
+        call mlx_view(b, p16, status=st)
+        a = mlx_alloc([8], 0_int8, v8, status=st)
+        b = mlx_alloc([8], 0_int16, v16, status=st)
+        u = mlx_astype(b, MLX_DTYPES%uint16)
+        call mlx_eval(u)
+        a = mlx_from(7_int8)
+        call mlx_item(a, e8, status=st)
+        a = mlx_from(7_int16)
+        call mlx_item(a, e16, status=st)
+        a = mlx_from(7_int32)
+        call mlx_item(a, i4, status=st)
+        a = mlx_from(7_int64)
+        call mlx_item(a, i8, status=st)
+        a = mlx_from(7._real32)
+        call mlx_item(a, r4, status=st)
+        a = mlx_from(cmplx(7._real32, 1._real32, real32))
+        call mlx_item(a, c4, status=st)
+        a = mlx_from(.true._c_bool)
+        call mlx_item(a, l1, status=st)
+        if( dev == MLX_DEVICES%cpu )then
+            a = mlx_from(7._real64)
+            call mlx_item(a, r8, status=st)
+        endif
+    end subroutine kind_leak_body
 
     ! which mlx_alloc sizes Metal takes without a copy (printed), and that the data written through the view
     ! is the array's either way

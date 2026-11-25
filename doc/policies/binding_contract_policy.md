@@ -55,9 +55,20 @@ written, the skill `mlxf-modern-fortran`.
   runs along MLX's last, contiguous axis; `matmul(a, b)` has Fortran semantics on dimensions 1 and 2, is
   batched over dimensions 3 to r and calls `mlx_matmul(b, a)`; `transpose(a)` swaps dimensions 1 and 2 without
   a copy; `mlx_permute(a, order)`: dimension i of the result is dimension `order(i)` of `a`.
+- MLX's row-major order of the reversed shape is Fortran's array element order. A function that flattens when
+  MLX is given no axis (`mlx_sort`, `mlx_argsort`, `mlx_partition`, `mlx_topk`, the scans, `mlx_repeat`,
+  `mlx_concatenate`, `mlx_flatten`) therefore acts on the elements in array element order and returns a rank-1
+  array; `maxloc(a)` and `minloc(a)` turn MLX's position in that order into Fortran subscripts.
+- A matrix argument is the Fortran matrix in dimensions 1 and 2, which MLX sees transposed. The wrappers
+  translate so that "lower", "upper" and a diagonal's number mean what they mean in Fortran: diagonal k > 0
+  holds the elements (i, i + k), above the main diagonal. `mlx_tril(a, k)` calls MLX's `triu` with -k and
+  `mlx_triu` its `tril`; `mlx_diag` and `mlx_eye` pass -k; `mlx_tri` adds one transpose node (a view) to MLX's
+  triangle. `mlx_diagonal` and `mlx_trace` take the two dimensions by number (1 and 2 by default).
 - Index values and positions are 1-based in arguments (`mlx_take_along_dim`, `mlx_scatter_add`, slice
-  bounds, `kth`) and results (`minloc`, `mlx_argsort`); the wrapper shifts them inside the graph and casts
-  index results to int32. Slices are `mlx_slice(a, lower, upper[, stride])` with inclusive bounds from 1.
+  bounds, `kth` of `mlx_partition` and `mlx_argpartition`, the cut positions of `mlx_split`) and results
+  (`minloc`, `maxloc`, `mlx_argsort`, `mlx_argpartition`); the wrapper shifts them inside the graph and casts
+  index results to int32. `mlx_as_strided`'s `offset` is a count of elements skipped, not a position, and its
+  strides are in elements per Fortran dimension. Slices are `mlx_slice(a, lower, upper[, stride])` with inclusive bounds from 1.
 - A user never writes a C-order shape or a 0-based axis. The one exception is the source of a custom Metal
   kernel, which indexes MLX's row-major, 0-based layout.
 
@@ -179,12 +190,20 @@ written, the skill `mlxf-modern-fortran`.
 
 ## 5. Kinds and scalars
 
-- real32 is float32, real64 float64 (CPU device only), complex(real32) complex64, int32, int64, logical(c_bool)
-  bool; `a%kind()` returns one of `MLX_DTYPES%bool`, `%int32`, `%int64`, `%float32`, `%float64`,
-  `%complex64`. The vocabularies (`MLX_DEVICES`, `MLX_DTYPES`) and `MLXF_HARD_ERROR_STATUS` are declared in
+- real32 is float32, real64 float64 (CPU device only), complex(real32) complex64, int8, int16, int32, int64,
+  logical(c_bool) bool: these eight kinds move through `mlx_from`, `mlx_to`, `mlx_to_alloc`, `mlx_view`,
+  `mlx_alloc` and `mlx_item`. `a%kind()` returns one of `MLX_DTYPES%bool`, `%int8`, `%int16`, `%int32`,
+  `%int64`, `%float32`, `%float64`, `%complex64`, or a dtype that exists on the device only: `%uint8`,
+  `%uint16`, `%uint32`, `%uint64`, `%float16`, `%bfloat16`. Fortran has no standard kind for those six:
+  `mlx_astype` converts to and from them, operations take and return them, and a transfer of one is refused
+  ("differ in kind") until it is converted.
+- `call mlx_item(a, value[, status])` evaluates an array of one element (rank 0, or any rank of size 1) and
+  returns the element in a scalar of `a`'s kind. It is a checked procedure: another kind or another size is
+  refused through `status`, and nothing is converted. The vocabularies (`MLX_DEVICES`, `MLX_DTYPES`) and `MLXF_HARD_ERROR_STATUS` are declared in
   `mlxf_defs` and reach users through `mlxf`. complex(real64) has no specific. Nothing converts silently except the scalar rule below.
 - On the CPU device MLX computes some float64 operations in float32 (at MLX v0.32.4: `exp`, `sin`, `cos`,
-  `erf`, `mlx_erfinv`, `mlx_sigmoid`, `mlx_logaddexp` and every FFT); tests hold them to float32 tolerances.
+  `erf`, `mlx_erfinv`, `mlx_sigmoid`, `mlx_logaddexp`, `mlx_logsumexp`, `mlx_logcumsumexp`, `mlx_softmax` and
+  every FFT); tests hold them to float32 tolerances.
 - On the GPU, MLX v0.32.4's float32 `expm1` loses accuracy as its argument grows: an error relative to
   `max(1, |expm1(x)|)` of about 20 float32 epsilons at x = 0.5 and 168 at x = 10, against below 1 on the CPU
   (`doc/collaboration/apple_questions.md`, question 20; `scripts/probes/expm1_gpu_probe.c`). `mlx_expm1` is
@@ -280,27 +299,112 @@ written, the skill `mlxf-modern-fortran`.
   must be preserved.
 - `reshape(a,shape)` traverses the input in Fortran order, including a strided input. `transpose` swaps
   dimensions 1 and 2 while preserving batch dimensions. `mlx_permute(a,order)` requires a permutation
-  of 1 through rank. `mlx_concatenate(arrays,dim)` takes a nonempty array of handles.
+  of 1 through rank. `mlx_concatenate(arrays[,dim])` takes a nonempty array of handles; without `dim` it
+  joins the arrays' elements, each in array element order, into a rank-1 array.
 - `mlx_slice(a,lower,upper[,stride])` takes one bound per dimension, inclusive and in range 1 through
   extent; stride defaults to one and may be negative but never zero. Oppositely ordered bounds give
-  an empty slice. `mlx_take_along_dim(a,indices,dim)` takes int32/int64 one-based indices of compatible
+  an empty slice. `mlx_take_along_dim(a,indices,dim)` takes integer one-based indices of compatible
   rank and shape and shifts them inside the graph. It does not check index values for the Fortran
   range: index 0 becomes MLX index -1 and wraps to the last element of the selected dimension.
   Callers needing strict bounds must validate indices before constructing the graph.
 - `mlx_take(a,indices,dim)` gathers whole slices: the indices' Fortran shape takes the place of dimension
   `dim`, `r(.., i1, .., ik, ..) = a(.., indices(i1, .., ik), ..)`. Its indices are one-based, shifted in
   the graph and unchecked, as `mlx_take_along_dim`'s (0 wraps to the last slice). Gathering a slab per index
-  is cheaper than `mlx_take_along_dim`, which computes one index per output element.
+  is cheaper than `mlx_take_along_dim`, which computes one index per output element. `mlx_take(a,indices)`
+  without `dim` takes one-based positions in array element order and has the indices' shape.
+- **Gather and scatter.** `mlx_gather(a,indices,dim,slice_sizes)` and `mlx_gather(a,indices,dims,slice_sizes)`
+  (an array of index arrays, one per listed dimension) take slabs of `a`: `slice_sizes` gives the slab's
+  extent along every dimension of `a`, the indices its one-based start along the listed ones. The result
+  has the slab's shape followed by the index arrays' shape (MLX's layout, index dimensions first, read in
+  Fortran order). `mlx_scatter(a,indices,updates,dim)` / `(a,indices,updates,dims)` write slabs back:
+  `updates` has `a`'s shape with extent 1 along the listed dimensions, followed by the index arrays' shape;
+  where positions repeat, which update stays is undefined. `mlx_scatter_add`, `mlx_scatter_max`,
+  `mlx_scatter_min` and `mlx_scatter_prod` combine instead (repeats accumulate).
+  `mlx_put_along_dim(a,indices,values,dim)` writes element by element, the inverse of `mlx_take_along_dim`.
+  `mlx_scatter_add(a,indices,updates,dim)` with one index array chooses by rank: updates of rank
+  `rank(indices) + rank(a)` are slabs; otherwise it adds element by element as `mlx_put_along_dim` writes
+  (MLX's `scatter_add_axis`). No index is checked against the extents. Index arrays are of any integer
+  dtype.
+- `mlx_masked_scatter(a,mask,src)` replaces the elements where the boolean `mask` holds by the elements of
+  `src`, taken in array element order; a mask of lower rank has the shape of `a`'s last dimensions.
+- `mlx_slice(a,start,dims,slice_sizes)` is the dynamic slice: `start` is a rank-1 integer array of the graph
+  holding one one-based position per listed dimension, `slice_sizes` the extents along every dimension; a
+  dynamic section that leaves the array is not checked and reads or writes outside it.
+  `mlx_slice_update(a,update,lower,upper[,stride])` returns `a` with the section replaced by `update`
+  (bounds as `mlx_slice`'s; `update` broadcasts to the section with leading dimensions aligned);
+  `mlx_slice_update_add`, `_max`, `_min`, `_prod` combine with the section instead;
+  `mlx_slice_update(a,update,start,dims)` is the dynamic form.
+- `mlx_searchsorted(sorted,values[,side])` returns, with the values' shape, the one-based int32 positions
+  from 1 to n + 1 at which each value would be inserted into the ascending rank-1 `sorted`; `side` is
+  `'left'` (the default, before equal elements) or `'right'`.
+- `call mlx_unique(a,size,results[,fill])` returns four arrays: the distinct values in ascending order in
+  `size` slots (a graph's shapes are fixed, so the caller gives the number of slots; unused ones hold
+  `fill`, the smallest value by default; a smaller `size` truncates), the one-based position in array
+  element order of each value's first occurrence, the one-based slot of every element (with `a`'s shape),
+  and the count of each value (zero in an unused slot).
 - `mlx_bitcast(a,dtype)` reads `a`'s bytes as another dtype and converts no value (MLX's `view`; the name
   `mlx_view` is the Fortran pointer view of section 4). Where the item sizes differ, the first Fortran
   dimension scales by their ratio: a float32 `(2n, ...)` array whose pairs along dimension 1 are (real,
   imaginary) reads as complex64 `(n, ...)`, and back. A contiguous input is reinterpreted in place; MLX
   copies a strided one first.
-- `sum(a,dim)`, `minval(a,dim)`, `minloc(a,dim)` and `mlx_logsumexp(a,dim)` remove the selected dimension.
-  `minloc` returns one-based int32 positions, choosing the first equal minimum; for a zero-size array it
-  returns zeros of the reduced shape, as Fortran's `minloc` does, where MLX's argmin refuses the array. `mlx_logsumexp` uses
-  MLX's stable reduction; its test bound is `1e-5 * max(1, abs(logsumexp(x)))`, in log units,
-  including CPU float64 (the exponential uses float32 precision). `mlx_cumsum(a,dim)` preserves shape and is forward and inclusive.
+- **Reductions** take one dimension, a list or neither: `sum`, `product`, `maxval`, `minval`, `all`, `any`,
+  `count`, `mlx_mean`, `mlx_median`, `mlx_logsumexp` are `f(a[,dim][,keepdims])` and `f(a,dims[,keepdims])`;
+  `mlx_var` and `mlx_std` add `ddof` (the divisor is the count less `ddof`, 0 by default). Without `dim` or
+  `dims` every dimension is reduced and the result is rank 0. The reduced dimensions are removed, or kept with
+  extent 1 under `keepdims=.true.`. `all`, `any` and `count` treat a nonzero element as true; `count` is
+  int32, `all` and `any` boolean; `mlx_mean` of an integer array is float32. Optional arguments are passed by
+  keyword (`sum(a, keepdims=.true.)`). `mlx_logsumexp` uses MLX's stable reduction; the first test
+  of its `(a,dim)` form keeps the bound `1e-5 * max(1, abs(logsumexp(x)))`, in log units, including CPU
+  float64 (the exponential uses float32 precision).
+- `minloc(a,dim[,keepdims])` and `maxloc(a,dim[,keepdims])` return one-based int32 positions, choosing the
+  first equal extremum; for a zero-size array they return zeros, as Fortran's do, where MLX's argmin and
+  argmax refuse the array. `minloc(a)` and `maxloc(a)` return the subscripts of the first extremum in array
+  element order as a rank-1 int32 array of size rank, as Fortran's do.
+- **Scans**: `mlx_cumsum`, `mlx_cumprod`, `mlx_cummax`, `mlx_cummin`, `mlx_logcumsumexp` are
+  `f(a[,dim][,reverse][,inclusive])`. They preserve the shape along `dim`; without `dim` they scan the
+  elements in array element order and return rank 1. `reverse` scans from the last element; an exclusive scan
+  leaves each element out of its own result (the first is the scan's identity: 0 for a sum, 1 for a product).
+  MLX's optional result dtype is not offered.
+- `mlx_softmax(a[,dim][,precise])` and `mlx_softmax(a,dims[,precise])`: along dimension 1 when no dimension is
+  given, jointly over a list.
+- **Sorting**: `mlx_sort(a[,dim])`, `mlx_argsort(a[,dim])`, `mlx_partition(a,kth[,dim])`,
+  `mlx_argpartition(a,kth[,dim])`, `mlx_topk(a,k[,dim])`. `kth` is the one-based sorted position put in
+  place (below 1 stops, as a cut position of `mlx_split` below 1 does); positions returned are one-based int32. `mlx_topk` returns the k largest values (MLX returns no
+  positions), in no defined order. `mlx_argsort` kept equal elements in their original order in every test
+  on both devices (lines of 3 to 5 elements with ties); MLX documents no stability, so do not rely on it.
+- **Shape**: `mlx_squeeze(a[,dim])`/`(a,dims)`, `mlx_expand_dims(a,dim)`/`(a,dims)` (positions in the
+  result), `mlx_flatten(a[,start_dim,end_dim])` (merges the dimensions in array element order),
+  `mlx_unflatten(a,dim,shape)`, `mlx_broadcast_to(a,shape)`, `mlx_tile(a,reps)` (one repetition count per
+  dimension, the first dimensions when fewer are given), `mlx_repeat(a,repeats[,dim])`,
+  `mlx_flip(a[,dim])`/`(a,dims)` (every dimension when none is given), `mlx_movedim(a,source,destination)`,
+  `mlx_swapdims(a,dim1,dim2)`, `mlx_diff(a[,n,dim])` (first difference along dimension 1 by default),
+  `mlx_atleast_1d`, `mlx_atleast_2d` ((n) becomes (n, 1)) and `mlx_atleast_3d` (MLX's rule read in Fortran
+  order: (n) becomes (1, n, 1) and (m, n) becomes (1, m, n)). `cshift(a,shift[,dim])` is Fortran's: element i
+  of the result is element i + shift, along dimension 1 by default (MLX's roll by -shift);
+  `cshift(a,shifts,dims)` shifts each listed dimension. `mlx_pad(a,width[,value,mode])` pads every side of
+  every dimension, `mlx_pad(a,low,high[,value,mode])` takes the widths before and after each Fortran
+  dimension; `value` is an array (zero by default) and `mode` goes to MLX as given (`'constant'` by default; `'edge'`
+  is tested).
+  `mlx_as_strided(a,shape,strides[,offset])`: element (i1, ..., ir) of the result is element
+  `1 + offset + sum((i_d - 1)*strides(d))` of `a` in array element order (a strided `a` is made contiguous
+  first, since MLX strides over the buffer); nothing checks that it lies inside.
+  `mlx_number_of_elements(a[,dims,inverted,dtype])` is the product of the extents as a rank-0 array.
+- **Lists of arrays** come back through an allocatable `intent(out)` array of handles, so these are
+  subroutines: `call mlx_split(a,num,parts[,dim])` (equal parts) and `call mlx_split(a,indices,parts[,dim])`
+  (cut before each one-based position: `[4, 7]` gives 1:3, 4:6 and 7:), `call mlx_unstack(a,parts[,dim])`,
+  `call mlx_broadcast_arrays(arrays,results)`, `call mlx_meshgrid(arrays,grids[,sparse])`. An omitted `dim`
+  is the last dimension for `mlx_split`, `mlx_unstack` and `mlx_stack(arrays[,dim])` (MLX's first axis), where
+  `dim` of `mlx_stack` is the new dimension's position in the result. `mlx_meshgrid` uses matrix indexing in
+  the Fortran view: grid i has shape (n1, ..., nk) and varies along dimension i (extent 1 elsewhere when
+  sparse); MLX's `indexing` argument is not offered (its `'xy'` is the same call with the first two arrays,
+  and the first two grids returned, exchanged).
+- **Matrices and constructors**: `mlx_diag(a[,k])`, `mlx_diagonal(a[,offset,dim1,dim2])` (the diagonal is
+  dimension 1 of the result, the other dimensions follow in order), `mlx_trace(a[,offset,dim1,dim2,dtype])`,
+  `mlx_tril(a[,k])`, `mlx_triu(a[,k])` (on dimensions 1 and 2 of every batch), `mlx_identity(n[,dtype])`,
+  `mlx_eye(n[,m,k,dtype])` and `mlx_tri(n[,m,k,dtype])` (shape (n, m)), all in the Fortran view of section 2.
+  `mlx_linspace(start,stop[,num,endpoint,dtype])` takes real64 bounds, 50 points and float32 by default and
+  includes `stop` unless `endpoint=.false.`. `mlx_bartlett(m)`, `mlx_blackman(m)`, `mlx_hamming(m)` and
+  `mlx_hanning(m)` are float32 windows of m points.
 - **Elementwise functions** keep the intrinsic's name where the value semantics agree, with an array result
   whose kind follows MLX's rules: `abs`, `sin`, `cos`, `tan`, `sinh`, `cosh`, `tanh`, `log`, `log10`, `erf`,
   `asin`, `acos`, `atan`, `asinh`, `acosh`, `atanh`, `atan2(y,x)`, `modulo(a,p)`, `min(a,b)`, `iand`, `ior`,
@@ -319,8 +423,8 @@ written, the skill `mlxf-modern-fortran`.
   `mlx_isneginf`; `mlx_isclose(a,b[,rtol,atol,equal_nan])` is `|a-b| <= atol + rtol*|b|` with NumPy's
   defaults rtol = 1e-5, atol = 1e-8 and NaNs unequal; `mlx_allclose` (same arguments) and
   `mlx_array_equal(a,b[,equal_nan])` (same shape and values, any dtypes) return rank-0 boolean arrays.
-- **Dimension 1 by default.** A function whose MLX default is the last axis (a softmax, the norms and
-  `rope` of `fast`, attention) acts on Fortran dimension 1, the contiguous one, when no dimension is given.
+- **Dimension 1 by default.** A function whose MLX default is the last axis (a softmax, `mlx_diff`, the norms
+  and `rope` of `fast`, attention) acts on Fortran dimension 1, the contiguous one, when no dimension is given.
 - `mlx_zeros(shape[,dtype])` and `mlx_ones(shape[,dtype])` default to float32.
   `mlx_full(shape,vals[,dtype])` takes an array (broadcast with leading dimensions aligned, of its kind by
   default) or a scalar (float32 for a real value, int32 for an integer one, by default).
