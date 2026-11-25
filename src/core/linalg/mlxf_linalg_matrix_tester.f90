@@ -8,13 +8,14 @@
 module mlxf_linalg_matrix_tester
 use, intrinsic :: ieee_arithmetic, only: ieee_value, ieee_positive_inf, ieee_negative_inf
 use, intrinsic :: iso_fortran_env, only: output_unit, int32, real32, real64
-use mlxf,            only: mlx_array, mlx_from, mlx_to, mlx_set_default_device, mlx_default_device, MLX_DEVICES, &
-                           MLX_DTYPES, mlx_inv, mlx_pinv, mlx_tri_inv, mlx_det, mlx_slogdet, mlx_cholesky, &
-                           mlx_cholesky_inv, mlx_qr, mlx_lu, mlx_lu_factor, mlx_svd, mlx_eigh, mlx_eigvalsh, mlx_eig, &
-                           mlx_eigvals, mlx_solve, mlx_solve_triangular, mlx_norm, mlx_norm_matrix, norm2
-use mlxf_test_utils, only: assert_true, test_devices, device_name, judge_error, find_tolerance, family_seeds, &
-                           seeded_uniform, seeded_array, shaped_error
-use mlxf_test_defs,  only: ELEM_CEILING, MATRIX_TOLERANCES, LINALG_RESIDUAL_FACTOR, elem_tolerance
+use mlxf,             only: mlx_array, mlx_from, mlx_to, mlx_set_default_device, mlx_default_device, MLX_DEVICES, &
+                            MLX_DTYPES, mlx_inv, mlx_pinv, mlx_tri_inv, mlx_det, mlx_slogdet, mlx_cholesky, &
+                            mlx_cholesky_inv, mlx_qr, mlx_lu, mlx_lu_factor, mlx_svd, mlx_eigh, mlx_eigvalsh, mlx_eig, &
+                            mlx_eigvals, mlx_solve, mlx_solve_triangular, mlx_norm, mlx_norm_matrix, norm2
+use mlxf_test_utils,  only: assert_true, test_devices, device_name, judge_error, find_tolerance, family_seeds, &
+                            seeded_uniform, seeded_array, shaped_error
+use mlxf_test_defs,   only: ELEM_CEILING, MATRIX_TOLERANCES, LINALG_RESIDUAL_FACTOR, elem_tolerance
+use mlxf_test_reduce, only: nan_maxval
 implicit none
 private
 public :: run_all_linalg_matrix_tests
@@ -724,7 +725,7 @@ contains
         end do
         measured(1) = max(measured(1), fro(ain-back)/fro(ain))
         measured(2) = max(measured(2), fro(matmul(transpose(uv), uv)-identity(m)), fro(matmul(vv, transpose(vv))-identity(k)))
-        measured(3) = max(measured(3), maxval(abs(sv-sig(kk:1:-1)))/fro(ain), maxval(abs(only-sig(kk:1:-1)))/fro(ain))
+        measured(3) = max(measured(3), nan_maxval(abs(sv-sig(kk:1:-1)))/fro(ain), nan_maxval(abs(only-sig(kk:1:-1)))/fro(ain))
     end subroutine svd_case
 
     ! a = u diag(s) vt for a tall and a wide matrix, with the singular values alone agreeing
@@ -830,7 +831,7 @@ contains
                     if( any(wv(2:) < wv(:N-1)) ) exact = .false.
                     measured(1) = max(measured(1), fro(matmul(xin, vv)-vv*spread(wv, 1, N))/fro(xin))
                     measured(2) = max(measured(2), fro(matmul(transpose(vv), vv)-identity(N)))
-                    measured(3) = max(measured(3), maxval(abs(wv-lam))/fro(xin), maxval(abs(only-lam))/fro(xin))
+                    measured(3) = max(measured(3), nan_maxval(abs(wv-lam))/fro(xin), nan_maxval(abs(only-lam))/fro(xin))
                 end do
                 call judge_residual(measured(1), N, wide, 'mlx_eigh a v = v w', seeds(s))
                 call judge_residual(measured(2), N, wide, 'mlx_eigh orthonormal eigenvectors', seeds(s))
@@ -913,7 +914,7 @@ contains
                 shaped = shaped .and. ok
                 measured(1) = fro(matmul(xc, vv)-vv*spread(wv, 1, N))/(fro(xc)*fro(vv))
                 measured(2) = max(spectra_apart(wv, lam), spectra_apart(only, lam))/fro(xc)
-                measured(3) = maxval(abs(only-wv))/fro(xc)
+                measured(3) = nan_maxval(abs(only-wv))/fro(xc)
                 call judge_residual(measured(1), N, .false., 'mlx_eig a v = v w'//operand(wide), seeds(s))
                 call judge_residual(measured(2), N, .false., 'mlx_eig and mlx_eigvals eigenvalues'//operand(wide), seeds(s))
                 call judge_residual(measured(3), N, .false., 'mlx_eigvals in mlx_eig''s order'//operand(wide), seeds(s))

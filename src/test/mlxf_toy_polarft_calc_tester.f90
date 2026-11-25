@@ -1,20 +1,23 @@
-!@descr: tests of the toy polar calculator's dense route: the fixture, the ring oracle, the draw, the contract, schedule identity
+!@descr: tests of the toy polar calculator's dense route: the fixture, the ring oracle, the draw, the contract, schedule identity, the tail's forms
 ! The fixture is analytic in its rules and seeded in its values: references, particles and CTFs on rings of
 ! PFTSZ samples (half of the full ring, the other half the conjugate), handed to the calculator through its
 ! setters; the calculator memoizes them. The ring oracle computes every rotation's distance directly on the full
 ! rings, in double precision, with no transform; the draw is checked in double precision on the device's own rows.
+! On the GPU every check runs with both forms of the tail, and the fused form is held to the compiled one.
 module mlxf_toy_polarft_calc_tester
 use, intrinsic :: iso_fortran_env, only: int64, real32, real64
 use mlxf,                  only: mlx_set_default_device, mlx_default_device, mlx_live_count, mlx_active_memory, &
                                  mlx_synchronize, mlx_clear_cache, MLX_DEVICES
 use mlxf_test_defs,        only: POLAR_DIST_MAX, POLAR_DIST_INVALID, POLAR_DIST_VALID, POLAR_FIXTURE_ERR_CPU, &
                                  POLAR_FIXTURE_ROT_CPU, POLAR_ROW_FACTOR, POLAR_FIXTURE_ROT_Q, POLAR_SEED_CALIBRATION, &
-                                 POLAR_SEED_JUDGED, parameters, polar_table_block, polar_table_entries, polar_row_check
+                                 POLAR_SEED_JUDGED, POLARFT_TAILS, POLARFT_TAIL_ROW_TOL, POLARFT_TAIL_ROT_FIX, &
+                                 parameters, polar_table_block, polar_table_entries, polar_row_check
 use mlxf_toy_polarft_calc, only: polarft_calc
 use mlxf_oracle_polar,     only: polar_full_ring, polar_dft_matrix, polar_dft_bins, polar_keyed_u, polar_first_min, &
                                  polar_row_weights, polar_compare_rows, polar_draws_off, polar_report_draws
 use mlxf_test_utils,       only: assert_true, assert_false, assert_int, device_name, set_fixed_seed, bits_equal, &
-                                 test_devices
+                                 test_devices, tests_run
+use mlxf_test_reduce,      only: nan_maxval
 implicit none
 private
 public :: run_all_polarft_calc_tests
@@ -60,7 +63,20 @@ type :: fixture
     real(real32),    allocatable :: temps(:)
     real(real64),    allocatable :: wsq(:)
     complex(real32), allocatable :: banks(:,:,:)
+    integer                      :: tail = POLARFT_TAILS%graph
 end type fixture
+
+! the fused tail against the compiled one on the same rows: the rows' largest difference and the distances'
+! where the drawn rotations agree (both relative to the compiled row's largest valid |d|), the pairs whose drawn
+! rotation differs, the entries of different validity, and the draws that do not hold on either form's own rows
+type :: tail_check
+    real(real64) :: err_rows  = 0._real64
+    real(real64) :: err_dists = 0._real64
+    integer      :: nrot      = 0
+    integer      :: valid_off = 0
+    integer      :: draws_off = 0
+    integer      :: npairs    = 0
+end type tail_check
 
 ! a scored case: one half's references ids (global, in order) and the batch of particles pids under the tile
 ! plan (rt, bt)
@@ -85,17 +101,31 @@ contains
             call mlx_set_default_device(devs(i))
             write(*,'(a)') '  on the '//device_name(devs(i))
             if( devs(i) == MLX_DEVICES%cpu ) call report_calibration
-            call test_fixture_rows(devs(i))
-            call test_fallbacks(devs(i))
-            call test_convention(devs(i))
-            call test_lists_and_tiles(devs(i))
-            call test_refusals(devs(i))
-            call test_rebuild(devs(i))
-            call test_schedule_identity(devs(i))
-            call test_lifecycle(devs(i))
+            call run_device_tests(devs(i), POLARFT_TAILS%graph)
+            if( devs(i) == MLX_DEVICES%gpu )then
+                write(*,'(a)') '  on the gpu, with the fused tail'
+                call run_device_tests(devs(i), POLARFT_TAILS%metal)
+                call test_tail_forms
+            endif
         end do
         call mlx_set_default_device(original)
     end subroutine run_all_polarft_calc_tests
+
+    ! the device's checks with one form of the tail, and their count
+    subroutine run_device_tests( dev, form )
+        integer, intent(in) :: dev, form
+        integer :: n0
+        n0 = tests_run
+        call test_fixture_rows(dev, form)
+        call test_fallbacks(dev, form)
+        call test_convention(dev, form)
+        call test_lists_and_tiles(dev, form)
+        call test_refusals(dev, form)
+        call test_rebuild(dev, form)
+        call test_schedule_identity(dev, form)
+        call test_lifecycle(dev, form)
+        write(*,'(a,i0,a)') '    ', tests_run - n0, ' checks of the device'
+    end subroutine run_device_tests
 
     ! ---- the fixture -------------------------------------------------------------------------------------
 
@@ -296,7 +326,7 @@ contains
             end do
             worst = max(worst, abs(acc / (2._real64 * fx%wsq(pid)) - d(rot, 2, 1)))
         end do
-        call assert_true(worst <= 1.e-12_real64 * maxval(abs(d(:, 2, 1))), 'the ring oracle''s expanded sums '//&
+        call assert_true(worst <= 1.e-12_real64 * nan_maxval(abs(d(:, 2, 1))), 'the ring oracle''s expanded sums '//&
             &'equal the squared distance of particle and rotated reference over twice the weighted square sum')
         call assert_true(minloc(d(:, 1, 1), dim=1) /= minloc(d(:, 2, 1), dim=1) .or. &
             &abs(d(1, 1, 1) - d(1, 2, 1)) > 0._real64, 'the oracle''s rows differ between references')
@@ -372,6 +402,8 @@ contains
         call pftc%set_sigma2_weights(real(fx%w, real64))
         nbad = nbad + refused(pftc)
         call pftc%set_tile_plan(sel%tiles(2), sel%tiles(1))
+        nbad = nbad + refused(pftc)
+        call pftc%set_tail_form(fx%tail)
         nbad = nbad + refused(pftc)
         call pftc%set_block_options(.true., .false.)
         do j = 1, size(sel%ids)
@@ -555,13 +587,14 @@ contains
     end subroutine report_calibration
 
     ! fixture seed 2, both halves, all references, the canonical tile plan: the oracle rows and the draw
-    subroutine test_fixture_rows( dev )
-        integer, intent(in) :: dev
+    subroutine test_fixture_rows( dev , form )
+        integer, intent(in) :: dev, form
         type(fixture)         :: fx
         type(polar_row_check) :: chk(2)
         integer               :: h
         write(*,'(a)') 'test_fixture_rows'
         fx = make_fixture(POLAR_SEED_JUDGED)
+        fx%tail = form
         do h = 1, 2
             chk(h) = judge(device_name(dev)//' fixture', fx, selection_of(h, ALL_REFS, half_ptcls(h), [RT, BT]), &
                 &.true.)
@@ -576,8 +609,8 @@ contains
     ! the draw's fallbacks: u = 0 draws the first rotation of positive weight, u >= 1 (no rotation reaches it)
     ! the minimising rotation, a row without a valid rotation gives (invalid, 1); and the cutoff: a rotation
     ! whose weight argument is 82 has no weight, so u = 0 skips it even where it comes first
-    subroutine test_fallbacks( dev )
-        integer, intent(in) :: dev
+    subroutine test_fallbacks( dev , form )
+        integer, intent(in) :: dev, form
         type(fixture)             :: fx
         type(polarft_calc)        :: pftc
         type(polar_table_block)   :: blk
@@ -586,6 +619,7 @@ contains
         integer                   :: nbad, ir, b, nfirst, nmin, ninv, nrows_valid, m, imin, i2, pick_r, pick_b
         write(*,'(a)') 'test_fallbacks'
         fx = make_fixture(POLAR_SEED_JUDGED)
+        fx%tail = form
         call make_calc(pftc, fx, selection_of(1, ALL_REFS, half_ptcls(1), [RT, BT]), nbad)
         call assert_int(0, nbad, 'the references and particles are set and memoized')
         blk   = make_block(fx, ALL_REFS, half_ptcls(1))
@@ -663,8 +697,8 @@ contains
 
     ! the rotation convention against the construction: an ordinary particle built from reference src rotated
     ! by shift samples has its minimising rotation against src at shift + 1, on the device's rows
-    subroutine test_convention( dev )
-        integer, intent(in) :: dev
+    subroutine test_convention( dev , form )
+        integer, intent(in) :: dev, form
         type(fixture)             :: fx
         type(polar_table_block)   :: blk
         type(polar_table_entries) :: ent
@@ -672,6 +706,7 @@ contains
         integer, allocatable      :: pids(:)
         write(*,'(a)') 'test_convention'
         fx       = make_fixture(POLAR_SEED_JUDGED)
+        fx%tail = form
         nok      = 0
         nchecked = 0
         do h = 1, 2
@@ -693,12 +728,13 @@ contains
 
     ! ordered reference lists: one state's references (1..4), the shared representatives [7, 2, 5] in that
     ! order, and full tiles (rt 8, bt 6) instead of partial ones: each held to the oracle
-    subroutine test_lists_and_tiles( dev )
-        integer, intent(in) :: dev
+    subroutine test_lists_and_tiles( dev , form )
+        integer, intent(in) :: dev, form
         type(fixture)         :: fx
         type(polar_row_check) :: chk
         write(*,'(a)') 'test_lists_and_tiles'
         fx  = make_fixture(POLAR_SEED_JUDGED)
+        fx%tail = form
         chk = judge(device_name(dev)//' one state', fx, selection_of(2, [1, 2, 3, 4], half_ptcls(2), [RT, BT]), &
             &.true.)
         call assert_int(4*6, chk%npairs, 'one state''s four references score 24 pairs')
@@ -711,8 +747,8 @@ contains
     end subroutine test_lists_and_tiles
 
     ! what does not match the memoized state is refused before scoring, and a refused block queues nothing
-    subroutine test_refusals( dev )
-        integer, intent(in) :: dev
+    subroutine test_refusals( dev , form )
+        integer, intent(in) :: dev, form
         type(fixture)             :: fx
         type(polarft_calc)        :: pftc
         type(polar_table_block)   :: blk, bad
@@ -722,6 +758,7 @@ contains
         integer                   :: i3(3, 6), nbad, live0, pid
         write(*,'(a)') 'test_refusals'
         fx  = make_fixture(POLAR_SEED_JUDGED)
+        fx%tail = form
         blk = make_block(fx, ALL_REFS, half_ptcls(1))
         call feed_calc(pftc, fx, selection_of(1, ALL_REFS, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], [RT, BT]), nbad)
         call score_block(pftc, blk, ent)
@@ -795,8 +832,8 @@ contains
     ! references that change are memoized again and their bins made again; a particle set again is memoized
     ! again: until then blocks are refused, afterwards the entries match the oracle of the new references and
     ! differ from the old ones
-    subroutine test_rebuild( dev )
-        integer, intent(in) :: dev
+    subroutine test_rebuild( dev , form )
+        integer, intent(in) :: dev, form
         type(fixture)             :: fa, fb
         type(polarft_calc)        :: pftc
         type(polar_table_block)   :: blk
@@ -807,6 +844,8 @@ contains
         write(*,'(a)') 'test_rebuild'
         fa  = make_fixture(POLAR_SEED_JUDGED)
         fb  = make_fixture(POLAR_SEED_JUDGED + 10)
+        fa%tail = form
+        fb%tail = form
         call make_calc(pftc, fa, selection_of(2, ALL_REFS, half_ptcls(2), [RT, BT]), nbad)
         call assert_int(0, nbad, 'the first references are memoized')
         blk = make_block(fa, ALL_REFS, half_ptcls(2))
@@ -850,8 +889,8 @@ contains
 
     ! with inputs, variates and the canonical tile plan fixed, entries are identical by global pair in three
     ! repeats, for outer batches of 6 and of 4 (then 2) particles, and synchronous against two slots
-    subroutine test_schedule_identity( dev )
-        integer, intent(in) :: dev
+    subroutine test_schedule_identity( dev , form )
+        integer, intent(in) :: dev, form
         type(fixture)             :: fx
         type(polarft_calc)        :: pftc
         type(polar_table_block)   :: blk, b1, b2
@@ -860,6 +899,7 @@ contains
         logical                   :: same
         write(*,'(a)') 'test_schedule_identity'
         fx = make_fixture(POLAR_SEED_JUDGED)
+        fx%tail = form
         do h = 1, 2
             pids = half_ptcls(h)
             call make_calc(pftc, fx, selection_of(h, ALL_REFS, pids, [RT, BT]), nbad)
@@ -904,6 +944,80 @@ contains
         end do
     end subroutine test_schedule_identity
 
+    ! the fused tail against the compiled one on the GPU, the fixture's both halves under the canonical tile plan:
+    ! both read the same rows of the inverse transform. Seed 1 is the calibration, printed; seeds 2 and 3 are held
+    ! to the frozen tolerances, and each form's draw to its own rows
+    subroutine test_tail_forms
+        integer, parameter :: SEEDS_JUDGED(2) = [POLAR_SEED_JUDGED, POLAR_SEED_JUDGED + 1]
+        type(tail_check)   :: chk
+        character(len=16)  :: label
+        integer            :: k
+        write(*,'(a)') 'test_tail_forms'
+        chk = compare_tail_forms(POLAR_SEED_CALIBRATION)
+        write(*,'(a,es23.16,a,es23.16,a,i0,a,i0,a,i0,a,i0)') '    calibration (fixture seed 1, gpu, fused against '//&
+            &'compiled): rows ', chk%err_rows, ', distances ', chk%err_dists, ', drawn rotations differing ', &
+            &chk%nrot, ' of ', chk%npairs, '; validity off ', chk%valid_off, ', draws off ', chk%draws_off
+        do k = 1, size(SEEDS_JUDGED)
+            write(label, '(a,i0)') 'gpu seed ', SEEDS_JUDGED(k)
+            chk = compare_tail_forms(SEEDS_JUDGED(k))
+            write(*,'(a,es10.3,a,es10.3,a,i0,a,i0)') '    '//trim(label)//', fused against compiled: rows ', &
+                &chk%err_rows, ', distances ', chk%err_dists, ', drawn rotations differing ', chk%nrot, ' of ', chk%npairs
+            call assert_int(NREFS * NPTCLS, chk%npairs, trim(label)//': both forms score the fixture''s 96 pairs')
+            call assert_true(chk%err_rows <= POLARFT_TAIL_ROW_TOL, trim(label)//': the fused rows are the compiled '//&
+                &'ones within POLARFT_TAIL_ROW_TOL')
+            call assert_true(chk%nrot <= POLARFT_TAIL_ROT_FIX, trim(label)//': the drawn rotations differ in at most '//&
+                &'POLARFT_TAIL_ROT_FIX pairs')
+            call assert_true(chk%err_dists <= POLARFT_TAIL_ROW_TOL, trim(label)//': where the rotations agree the '//&
+                &'distances agree within POLARFT_TAIL_ROW_TOL')
+            call assert_int(0, chk%valid_off, trim(label)//': every entry has the same validity in both forms')
+            call assert_int(0, chk%draws_off, trim(label)//': each form''s draw holds on its own rows')
+        end do
+    end subroutine test_tail_forms
+
+    ! the two forms of fixture seed's both halves compared (see tail_check)
+    function compare_tail_forms( seed ) result(chk)
+        integer, intent(in) :: seed
+        type(tail_check)          :: chk
+        type(fixture)             :: fx
+        type(selection)           :: sel
+        type(polar_table_block)   :: blk
+        type(polar_table_entries) :: eg, em
+        type(polar_row_check)     :: c
+        real(real64)              :: dmax
+        integer                   :: h, ir, b
+        fx = make_fixture(seed)
+        do h = 1, 2
+            sel     = selection_of(h, ALL_REFS, half_ptcls(h), [RT, BT])
+            fx%tail = POLARFT_TAILS%graph
+            call score_case(fx, sel, blk, eg)
+            fx%tail = POLARFT_TAILS%metal
+            call score_case(fx, sel, blk, em)
+            if( .not. allocated(eg%rows) .or. .not. allocated(em%rows) )then
+                chk%valid_off = chk%valid_off + 1
+                return
+            endif
+            c = polar_compare_rows(real(eg%rows, real64), em)
+            chk%err_rows  = max(chk%err_rows, c%err)
+            chk%valid_off = chk%valid_off + c%valid_off
+            chk%npairs    = chk%npairs + c%npairs
+            chk%nrot      = chk%nrot + count(eg%irots /= em%irots)
+            chk%draws_off = chk%draws_off + polar_draws_off(eg, blk%temps, blk%u) + polar_draws_off(em, blk%temps, blk%u)
+            do b = 1, size(eg%irots, 2)
+                do ir = 1, size(eg%irots, 1)
+                    if( eg%irots(ir, b) /= em%irots(ir, b) ) cycle
+                    if( bits_equal(eg%dists(ir, b), em%dists(ir, b)) ) cycle
+                    dmax = nan_maxval(pack(abs(real(eg%rows(:, ir, b), real64)), eg%rows(:, ir, b) < POLAR_DIST_VALID))
+                    if( dmax > 0._real64 )then
+                        chk%err_dists = max(chk%err_dists, abs(real(em%dists(ir, b), real64) - &
+                            &real(eg%dists(ir, b), real64)) / dmax)
+                    else
+                        chk%valid_off = chk%valid_off + 1
+                    endif
+                end do
+            end do
+        end do
+    end function compare_tail_forms
+
     ! the entries of particles 1..4 (e1) and 5..6 (e2) equal those of the whole block (e0), bit for bit
     logical function same_entries( e1, e2, e0 )
         type(polar_table_entries), intent(in) :: e1, e2, e0
@@ -915,13 +1029,14 @@ contains
 
     ! after a warm cycle, create/use/kill cycles and a calculator left to finalization return the live count and
     ! the active memory to their warm values; kill twice is harmless
-    subroutine test_lifecycle( dev )
-        integer, intent(in) :: dev
+    subroutine test_lifecycle( dev , form )
+        integer, intent(in) :: dev, form
         type(fixture)  :: fx
         integer(int64) :: mem0
         integer        :: live0, it, nbad
         write(*,'(a)') 'test_lifecycle'
         fx   = make_fixture(POLAR_SEED_JUDGED)
+        fx%tail = form
         nbad = 0
         call lifecycle_cycle(fx, .true., nbad)
         call mlx_synchronize()

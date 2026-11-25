@@ -1,1 +1,1 @@
-!@descr: test-only code compiled into mlxf_test_exec: assertions, the suite registry, the toys that mirror SIMPLE (polarft_calc, its GPU workspace, eul_prob_tab), their oracle and benchmark
+!@descr: test-only code compiled into mlxf_test_exec: assertions, the suite registry, the toys that mirror SIMPLE (polarft_calc, its GPU workspace, eul_prob_tab; projector, its GPU workspace and the batch projector), their oracles and benchmarks

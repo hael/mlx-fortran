@@ -6,11 +6,13 @@
 ! Core, memoization, block scoring and the shift maps are submodules, as in SIMPLE.
 module mlxf_toy_polarft_calc
 use, intrinsic :: iso_fortran_env, only: int64, real32, real64
-use mlxf_test_defs,             only: POLAR_CANON_BT, POLAR_CANON_RT, POLARFT_STAGE_N, NSHIFTMAPS, parameters
+use mlxf_test_defs,             only: POLAR_CANON_BT, POLAR_CANON_RT, POLARFT_STAGE_N, NSHIFTMAPS, POLARFT_TAILS, &
+                                      POLARFT_REF_ROUTES, parameters
 use mlxf_toy_polarft_workspace, only: polarft_workspace
+use mlxf_toy_projector,         only: projector
 implicit none
 
-public :: polarft_calc
+public :: polarft_calc, vol_pad2ref_pfts_opt
 private
 
 ! the reference parities, and the slots a caller may have in flight
@@ -38,12 +40,15 @@ type :: polarft_calc
     integer                              :: kfromto(2) = 0
     integer                              :: nk         = 0
     integer                              :: ldim(3)    = 0
+    integer                              :: nspace     = 0
+    integer                              :: nstates    = 1
     integer,                 allocatable :: pinds(:)
     logical,                 allocatable :: iseven(:)
     real(real64),            allocatable :: wsqsums_ptcls(:)
     real(real64),            allocatable :: kshell_sqsums_ptcls(:,:)
     real(real32),            allocatable :: sigma2_wk(:,:)
     real(real64),            allocatable :: sigma2_wk8(:,:)
+    real(real32),            allocatable :: polar(:,:,:)
     real(real32),            allocatable :: ctfmats(:,:,:)
     complex(real64),         allocatable :: pfts_refs(:,:,:)
     complex(real32),         allocatable :: pfts_ptcls(:,:,:)
@@ -67,6 +72,8 @@ type :: polarft_calc
     logical                              :: l_weights        = .false.
     integer                              :: bt               = POLAR_CANON_BT
     integer                              :: rt               = POLAR_CANON_RT
+    integer                              :: tail             = POLARFT_TAILS%graph
+    integer                              :: route            = POLARFT_REF_ROUTES%host
     logical                              :: l_rows           = .false.
     logical                              :: l_profile        = .false.
     integer                              :: slot_ieo(NSLOTS) = 0
@@ -97,13 +104,18 @@ type :: polarft_calc
     procedure :: set_eo
     procedure :: set_sigma2_weights
     procedure :: set_tile_plan
+    procedure :: set_tail_form
+    procedure :: set_ref_route
     procedure :: message
     procedure :: get_nrefs
     procedure :: get_pftsz
+    procedure :: get_kfromto
+    procedure :: get_polar_coords
     procedure :: ptcl_iseven
     ! memoization
     procedure :: reallocate_ptcls
     procedure :: set_ref_pft
+    procedure :: get_ref_pft
     procedure :: set_ptcl_pft
     procedure :: set_ptcl_ctfmat
     procedure :: memoize_refs
@@ -178,6 +190,21 @@ interface
         integer,             intent(in)    :: bt, rt
     end subroutine set_tile_plan
 
+    ! the form of the dense score's tail (POLARFT_TAILS): the compiled graph, or the fused Metal kernel (GPU only);
+    ! the reference bins follow it
+    module subroutine set_tail_form( self, form )
+        class(polarft_calc), intent(inout) :: self
+        integer,             intent(in)    :: form
+    end subroutine set_tail_form
+
+    ! the route of the projected references (POLARFT_REF_ROUTES): through set_ref_pft and the host memos, the
+    ! reference and the default; or resident on the device from the projected bank to the tiles, where the shift
+    ! maps are refused. Refused while references wait to be memoized; the reference bins follow it
+    module subroutine set_ref_route( self, route )
+        class(polarft_calc), intent(inout) :: self
+        integer,             intent(in)    :: route
+    end subroutine set_ref_route
+
     ! the reason the last call was refused, or an empty string when it was carried out
     pure module function message( self ) result(msg)
         class(polarft_calc), intent(in) :: self
@@ -191,6 +218,31 @@ interface
     pure module integer function get_pftsz( self )
         class(polarft_calc), intent(in) :: self
     end function get_pftsz
+
+    pure module function get_kfromto( self ) result(kfromto)
+        class(polarft_calc), intent(in) :: self
+        integer :: kfromto(2)
+    end function get_kfromto
+
+    ! the polar coordinates of the half ring, dimension 1 (h = sin(a) k) or 2 (k = -cos(a) k) of every shell and
+    ! angle a = (irot - 1) 2 pi / nrots, in single precision as SIMPLE's table; another dimension is refused
+    ! (message) and gives zeros
+    module subroutine get_polar_coords( self, dim, coords )
+        class(polarft_calc), intent(inout) :: self
+        integer,             intent(in)    :: dim
+        real(real32),        intent(out)   :: coords(self%kfromto(1):self%kfromto(2), self%pftsz)
+    end subroutine get_polar_coords
+
+    ! the bank of state's nspace references (references (state - 1) nspace + 1 .. state nspace) of the parity
+    ! iseven, projected from the expanded vol_pad under the rotation matrices eulspace(:, :, 1 .. nspace), handed
+    ! to the calculator through set_ref_pft; memoize_refs follows. A refusal (message) sets no reference.
+    module subroutine vol_pad2ref_pfts_opt( self, vol_pad, eulspace, state, iseven )
+        class(polarft_calc), intent(inout) :: self
+        class(projector),    intent(inout) :: vol_pad
+        real(real32),        intent(in)    :: eulspace(:,:,:)
+        integer,             intent(in)    :: state
+        logical,             intent(in)    :: iseven
+    end subroutine vol_pad2ref_pfts_opt
 
     ! whether particle iptcl (project index) is of the even half; false when the calculator does not hold it
     pure module logical function ptcl_iseven( self, iptcl )
@@ -230,6 +282,16 @@ interface
         complex(real64),     intent(in)    :: pft(self%pftsz, self%kfromto(1):self%kfromto(2))
         logical,             intent(in)    :: iseven
     end subroutine set_ref_pft
+
+    ! the polar section of reference iref of one parity: on the device route the projected section, copied from the
+    ! device; on the host route the section while it is staged (the memos replace it); otherwise refused (message)
+    ! with pft at zero
+    module subroutine get_ref_pft( self, iref, iseven, pft )
+        class(polarft_calc), intent(inout) :: self
+        integer,             intent(in)    :: iref
+        logical,             intent(in)    :: iseven
+        complex(real32),     intent(inout) :: pft(self%pftsz, self%kfromto(1):self%kfromto(2))
+    end subroutine get_ref_pft
 
     ! the polar section of particle iptcl, a project index, set after its CTF; its square sum per shell is
     ! memoized here; memoize_ptcls follows the last one

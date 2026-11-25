@@ -1,12 +1,15 @@
 # toy_mirror.txt -- the mirror ledger of the toys (doc/policies/toy_example_policy.md, section 4).
 #
-# One line per public type and per public type-bound procedure of every toy module (mlxf_toy_<stem>, src/test):
+# One line per public type, per public type-bound procedure and per public module procedure of every toy module
+# (mlxf_toy_<stem>, src/test; a tester's entries are the registry's):
 #     <toy module> <name> <SIMPLE module> <name>      mirrored: the name is SIMPLE's, and so is the dummy list
 #     <toy module> <name> addition <reason>           no counterpart in SIMPLE: named for what it does
-# A name is a type T or a binding T%binding. Rule `mirror` of scripts/check_rules.py holds the ledger to the
-# code; rule `arity` exempts the mirrored procedures from the five-dummy limit and no others.
+# A name is a type T, a binding T%binding or a procedure. Rule `mirror` of scripts/check_rules.py holds the ledger
+# to the code; rule `arity` exempts the mirrored procedures from the five-dummy limit and no others.
 #
-# Read from SIMPLE commit d354efee2 (src/main/pftc/simple_polarft_calc.f90 and its submodules).
+# Read from SIMPLE commit d354efee2 (src/main/pftc/simple_polarft_calc.f90 and its submodules; for the projector
+# src/main/image/simple_projector.f90, simple_projector_pft_batch.f90 and, for the procedures projector inherits
+# from image, simple_image.f90 and simple_image_fft.f90).
 
 # ---- the polar calculator ----
 mlxf_toy_polarft_calc polarft_calc simple_polarft_calc polarft_calc
@@ -30,8 +33,14 @@ mlxf_toy_polarft_calc polarft_calc%setup_shiftmaps simple_polarft_calc polarft_c
 mlxf_toy_polarft_calc polarft_calc%kill_shiftmap simple_polarft_calc polarft_calc%kill_shiftmap
 mlxf_toy_polarft_calc polarft_calc%gen_shiftmap simple_polarft_calc polarft_calc%gen_shiftmap
 mlxf_toy_polarft_calc polarft_calc%shiftmap_mode simple_polarft_calc polarft_calc%shiftmap_mode
+mlxf_toy_polarft_calc polarft_calc%get_kfromto simple_polarft_calc polarft_calc%get_kfromto
+mlxf_toy_polarft_calc polarft_calc%get_polar_coords simple_polarft_calc polarft_calc%get_polar_coords
+mlxf_toy_polarft_calc polarft_calc%get_ref_pft simple_polarft_calc polarft_calc%get_ref_pft
+mlxf_toy_polarft_calc vol_pad2ref_pfts_opt simple_polarft_calc vol_pad2ref_pfts_opt
 mlxf_toy_polarft_calc polarft_calc%set_sigma2_weights addition the fixtures have the shell weights k / sigma2 themselves; SIMPLE derives them from the spectra of assign_sigma2_noise in memoize_sigma2_weights
 mlxf_toy_polarft_calc polarft_calc%set_tile_plan addition the particles and references of a workspace tile; no SIMPLE procedure or parameter carries the GPU route's layout
+mlxf_toy_polarft_calc polarft_calc%set_tail_form addition the dense score's tail as the compiled graph or the fused Metal kernel; SIMPLE has one CPU kernel
+mlxf_toy_polarft_calc polarft_calc%set_ref_route addition the projected references through the host memos or resident on the device to the tiles; SIMPLE's bank is a host section of pfts_refs
 mlxf_toy_polarft_calc polarft_calc%kill_ref_bins addition releases the device's tiles and keeps the host memos, so that a benchmark can change the tile plan or the device
 mlxf_toy_polarft_calc polarft_calc%ref_bins_current addition inquiry: the reference bins are those of the memoized references and tile plan (SIMPLE compares ref_gen_bins with ref_gen and stops)
 mlxf_toy_polarft_calc polarft_calc%message addition inquiry: the reason of the last refusal; a mirrored procedure has no status argument and SIMPLE stops where the toy refuses
@@ -84,3 +93,44 @@ mlxf_toy_polarft_workspace polarft_workspace%kill_maps addition releases every m
 mlxf_toy_polarft_workspace polarft_workspace%map_order addition inquiry: the Bessel orders a map keeps
 mlxf_toy_polarft_workspace polarft_workspace%map_term_counts addition inquiry: the radius-order terms kept and executed
 mlxf_toy_polarft_workspace polarft_workspace%map_seconds addition inquiry: the profiled map stages' accumulated seconds
+mlxf_toy_polarft_workspace polarft_workspace%set_sections addition the device route: a projected bank of sections kept on the device until memoize_refs
+mlxf_toy_polarft_workspace polarft_workspace%memoize_sections addition the device route: the ring transforms of the sections made on the device, as memoize_refs makes them on the host
+mlxf_toy_polarft_workspace polarft_workspace%new_from_memos addition the device route: the resident tiles made on the device from the device memos, as new makes them from the host memos
+mlxf_toy_polarft_workspace polarft_workspace%get_section addition the device route: one projected section copied to the host (get_ref_pft's device half)
+mlxf_toy_polarft_workspace polarft_workspace%has_sections addition inquiry: projected sections wait to be memoized
+mlxf_toy_polarft_workspace polarft_workspace%has_memos addition inquiry: device memos wait to become tiles
+
+# ---- the projector (src/main/image/simple_projector.f90; new, set_rmat, pad_fft and kill are image's) ----
+mlxf_toy_projector projector simple_projector projector
+mlxf_toy_projector projector%new simple_projector projector%new
+mlxf_toy_projector projector%set_rmat simple_projector projector%set_rmat
+mlxf_toy_projector projector%get_cmat simple_projector projector%get_cmat
+mlxf_toy_projector projector%pad_fft simple_projector projector%pad_fft
+mlxf_toy_projector projector%expand_cmat simple_projector projector%expand_cmat
+mlxf_toy_projector projector%is_expanded simple_projector projector%is_expanded
+mlxf_toy_projector projector%kill_expanded simple_projector projector%kill_expanded
+mlxf_toy_projector projector%kill simple_projector projector%kill
+mlxf_toy_projector projector%set_fproject_form addition the polar gather as the graph or the fused Metal kernel; SIMPLE has one loop nest with an offload directive
+mlxf_toy_projector projector%set_fproject_tile addition the directions of one tile of the gather and the fused kernel's threads per group; no SIMPLE procedure or parameter carries the GPU route's layout
+mlxf_toy_projector projector%fproject_seconds addition inquiry: the seconds of the stages (pad and transform, expansion, projection), the benchmark's columns
+mlxf_toy_projector projector%message addition inquiry: the reason of the last refusal; SIMPLE stops where the toy refuses
+
+# ---- the batch projector (src/main/image/simple_projector_pft_batch.f90) ----
+mlxf_toy_projector_pft_batch fproject_polar_batch_opt simple_projector_pft_batch fproject_polar_batch_opt
+mlxf_toy_projector_pft_batch fproject_polar_batch_resident addition the same bank left on the device for the calculator's device route; SIMPLE's bank is a host section of pfts_refs
+
+# ---- the projector's GPU workspace: everything here is the toy's own (the seam, policy section 2, point 6) ----
+mlxf_toy_projector_workspace projector_workspace addition the one type that holds a projector's MLX handles: the padded transform, the expanded cube, the fused gather's kernels
+mlxf_toy_projector_workspace projector_workspace%transform addition the padded real cube uploaded and transformed on the device (pad_fft's device half)
+mlxf_toy_projector_workspace projector_workspace%expand addition the expanded cube made from the transform by device gathers (expand_cmat's device half)
+mlxf_toy_projector_workspace projector_workspace%kill_cube addition releases the expanded cube (kill_expanded's device half)
+mlxf_toy_projector_workspace projector_workspace%project addition the bank of sections of a projection, tile by tile, in the graph or the fused form
+mlxf_toy_projector_workspace projector_workspace%set_form addition the gather's form
+mlxf_toy_projector_workspace projector_workspace%set_tile addition the gather's directions per tile and the fused kernel's threads per group
+mlxf_toy_projector_workspace projector_workspace%copy_transform addition the padded transform copied to the host (get_cmat's device half)
+mlxf_toy_projector_workspace projector_workspace%has_transform addition inquiry: the padded transform is held
+mlxf_toy_projector_workspace projector_workspace%has_cube addition inquiry: the expanded cube is held
+mlxf_toy_projector_workspace projector_workspace%seconds addition inquiry: the seconds of the expansions and projections
+mlxf_toy_projector_workspace projector_workspace%set_message addition the projector's refusals are kept with the workspace's own, so that one message reports either
+mlxf_toy_projector_workspace projector_workspace%message addition inquiry: the reason of the last refusal or failure
+mlxf_toy_projector_workspace projector_workspace%kill addition releases the transform, the cube and the kernels

@@ -420,50 +420,66 @@ contains
         call mlxf_check(mlxc_array_item_bool(value, mlxf_handle(a, 'mlx_item')), 'mlx_item', status)
     end subroutine item_l
 
-    ! the Fortran shape an allocatable of rank yrank receives from a; false (status set) when the ranks differ
-    logical function alloc_shape( a, yrank, s, status )
+    ! the Fortran shape an allocatable of rank yrank receives from a; false (status set) when a's kind is not
+    ! dtype or the ranks differ. Nothing is allocated or released before it passes
+    logical function alloc_check( a, yrank, dtype, s, status )
         type(mlx_array),      intent(in)  :: a
         integer,              intent(in)  :: yrank
+        integer(c_int),       intent(in)  :: dtype
         integer, allocatable, intent(out) :: s(:)
         integer, optional,    intent(out) :: status
+        alloc_check = .false.
+        if( mlxc_array_dtype(mlxf_handle(a, 'mlx_to_alloc')) /= dtype )then
+            call mlxf_report('mlx_to_alloc', 'the Fortran array and the mlx_array differ in kind', status)
+            return
+        endif
         s = a%shape()
-        alloc_shape = size(s) == yrank
-        if( .not. alloc_shape ) call mlxf_report('mlx_to_alloc', 'the allocatable and the mlx_array differ in rank', &
-            &status)
-    end function alloc_shape
+        if( size(s) /= yrank )then
+            call mlxf_report('mlx_to_alloc', 'the allocatable and the mlx_array differ in rank', status)
+            return
+        endif
+        alloc_check = .true.
+    end function alloc_check
 
-    ! allocates y (rank 1 to 7) to a's shape and copies a into it
+    ! allocates y (rank 1 to 7) to a's shape and copies a into it. The copy fills a new allocation that replaces
+    ! y only when it succeeds: on any failure that returns a status, y keeps its allocation and its values
     module subroutine to_alloc_r32( y, a, status )
-        real(real32), allocatable, target, intent(inout) :: y(..)
-        type(mlx_array),                   intent(in)    :: a
-        integer, optional,                 intent(out)   :: status
+        real(real32),    allocatable, target, intent(inout) :: y(..)
+        type(mlx_array), intent(in)                         :: a
+        integer,         optional, intent(out)              :: status
+        real(real32), allocatable, target :: t1(:), t2(:,:), t3(:,:,:), t4(:,:,:,:), t5(:,:,:,:,:), t6(:,:,:,:,:,:), &
+            &t7(:,:,:,:,:,:,:)
         integer, allocatable :: s(:)
         integer              :: ast
+        logical              :: nonempty
+        type(c_ptr)          :: p
         call mlxf_enter('mlx_to_alloc')
-        if( .not. alloc_shape(a, rank(y), s, status) ) return
+        if( .not. alloc_check(a, rank(y), MLXC_FLOAT32, s, status) ) return
+        nonempty = product(int(s, int64)) > 0_int64
+        p = c_null_ptr
         ast = 0
         select rank( y )
             rank(1)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1)), stat=ast)
+                allocate(t1(s(1)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t1)
             rank(2)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1), s(2)), stat=ast)
+                allocate(t2(s(1), s(2)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t2)
             rank(3)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1), s(2), s(3)), stat=ast)
+                allocate(t3(s(1), s(2), s(3)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t3)
             rank(4)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1), s(2), s(3), s(4)), stat=ast)
+                allocate(t4(s(1), s(2), s(3), s(4)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t4)
             rank(5)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1), s(2), s(3), s(4), s(5)), stat=ast)
+                allocate(t5(s(1), s(2), s(3), s(4), s(5)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t5)
             rank(6)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1), s(2), s(3), s(4), s(5), s(6)), stat=ast)
+                allocate(t6(s(1), s(2), s(3), s(4), s(5), s(6)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t6)
             rank(7)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1), s(2), s(3), s(4), s(5), s(6), s(7)), stat=ast)
+                allocate(t7(s(1), s(2), s(3), s(4), s(5), s(6), s(7)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t7)
             rank default
                 call mlxf_report('mlx_to_alloc', 'the allocatable has a rank outside 1 to 7', status)
                 return
@@ -472,44 +488,65 @@ contains
             call mlxf_report('mlx_to_alloc', 'the destination could not be allocated', status)
             return
         endif
-        if( size(y, kind=int64) == 0_int64 )then
-            call copy_out(a, c_null_ptr, shape(y, kind=int64), MLXC_FLOAT32, status)
-        else
-            call copy_out(a, c_loc(y), shape(y, kind=int64), MLXC_FLOAT32, status)
+        call copy_out(a, p, int(s, int64), MLXC_FLOAT32, status)
+        if( present(status) )then
+            if( status /= 0 ) return
         endif
+        select rank( y )
+            rank(1)
+                call move_alloc(t1, y)
+            rank(2)
+                call move_alloc(t2, y)
+            rank(3)
+                call move_alloc(t3, y)
+            rank(4)
+                call move_alloc(t4, y)
+            rank(5)
+                call move_alloc(t5, y)
+            rank(6)
+                call move_alloc(t6, y)
+            rank(7)
+                call move_alloc(t7, y)
+        end select
     end subroutine to_alloc_r32
 
     module subroutine to_alloc_r64( y, a, status )
-        real(real64), allocatable, target, intent(inout) :: y(..)
-        type(mlx_array),                   intent(in)    :: a
-        integer, optional,                 intent(out)   :: status
+        real(real64),    allocatable, target, intent(inout) :: y(..)
+        type(mlx_array), intent(in)                         :: a
+        integer,         optional, intent(out)              :: status
+        real(real64), allocatable, target :: t1(:), t2(:,:), t3(:,:,:), t4(:,:,:,:), t5(:,:,:,:,:), t6(:,:,:,:,:,:), &
+            &t7(:,:,:,:,:,:,:)
         integer, allocatable :: s(:)
         integer              :: ast
+        logical              :: nonempty
+        type(c_ptr)          :: p
         call mlxf_enter('mlx_to_alloc')
-        if( .not. alloc_shape(a, rank(y), s, status) ) return
+        if( .not. alloc_check(a, rank(y), MLXC_FLOAT64, s, status) ) return
+        nonempty = product(int(s, int64)) > 0_int64
+        p = c_null_ptr
         ast = 0
         select rank( y )
             rank(1)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1)), stat=ast)
+                allocate(t1(s(1)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t1)
             rank(2)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1), s(2)), stat=ast)
+                allocate(t2(s(1), s(2)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t2)
             rank(3)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1), s(2), s(3)), stat=ast)
+                allocate(t3(s(1), s(2), s(3)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t3)
             rank(4)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1), s(2), s(3), s(4)), stat=ast)
+                allocate(t4(s(1), s(2), s(3), s(4)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t4)
             rank(5)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1), s(2), s(3), s(4), s(5)), stat=ast)
+                allocate(t5(s(1), s(2), s(3), s(4), s(5)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t5)
             rank(6)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1), s(2), s(3), s(4), s(5), s(6)), stat=ast)
+                allocate(t6(s(1), s(2), s(3), s(4), s(5), s(6)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t6)
             rank(7)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1), s(2), s(3), s(4), s(5), s(6), s(7)), stat=ast)
+                allocate(t7(s(1), s(2), s(3), s(4), s(5), s(6), s(7)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t7)
             rank default
                 call mlxf_report('mlx_to_alloc', 'the allocatable has a rank outside 1 to 7', status)
                 return
@@ -518,44 +555,65 @@ contains
             call mlxf_report('mlx_to_alloc', 'the destination could not be allocated', status)
             return
         endif
-        if( size(y, kind=int64) == 0_int64 )then
-            call copy_out(a, c_null_ptr, shape(y, kind=int64), MLXC_FLOAT64, status)
-        else
-            call copy_out(a, c_loc(y), shape(y, kind=int64), MLXC_FLOAT64, status)
+        call copy_out(a, p, int(s, int64), MLXC_FLOAT64, status)
+        if( present(status) )then
+            if( status /= 0 ) return
         endif
+        select rank( y )
+            rank(1)
+                call move_alloc(t1, y)
+            rank(2)
+                call move_alloc(t2, y)
+            rank(3)
+                call move_alloc(t3, y)
+            rank(4)
+                call move_alloc(t4, y)
+            rank(5)
+                call move_alloc(t5, y)
+            rank(6)
+                call move_alloc(t6, y)
+            rank(7)
+                call move_alloc(t7, y)
+        end select
     end subroutine to_alloc_r64
 
     module subroutine to_alloc_c32( y, a, status )
         complex(real32), allocatable, target, intent(inout) :: y(..)
-        type(mlx_array),                      intent(in)    :: a
-        integer, optional,                    intent(out)   :: status
+        type(mlx_array), intent(in)                         :: a
+        integer,         optional, intent(out)              :: status
+        complex(real32), allocatable, target :: t1(:), t2(:,:), t3(:,:,:), t4(:,:,:,:), t5(:,:,:,:,:), t6(:,:,:,:,:,:), &
+            &t7(:,:,:,:,:,:,:)
         integer, allocatable :: s(:)
         integer              :: ast
+        logical              :: nonempty
+        type(c_ptr)          :: p
         call mlxf_enter('mlx_to_alloc')
-        if( .not. alloc_shape(a, rank(y), s, status) ) return
+        if( .not. alloc_check(a, rank(y), MLXC_COMPLEX64, s, status) ) return
+        nonempty = product(int(s, int64)) > 0_int64
+        p = c_null_ptr
         ast = 0
         select rank( y )
             rank(1)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1)), stat=ast)
+                allocate(t1(s(1)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t1)
             rank(2)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1), s(2)), stat=ast)
+                allocate(t2(s(1), s(2)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t2)
             rank(3)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1), s(2), s(3)), stat=ast)
+                allocate(t3(s(1), s(2), s(3)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t3)
             rank(4)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1), s(2), s(3), s(4)), stat=ast)
+                allocate(t4(s(1), s(2), s(3), s(4)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t4)
             rank(5)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1), s(2), s(3), s(4), s(5)), stat=ast)
+                allocate(t5(s(1), s(2), s(3), s(4), s(5)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t5)
             rank(6)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1), s(2), s(3), s(4), s(5), s(6)), stat=ast)
+                allocate(t6(s(1), s(2), s(3), s(4), s(5), s(6)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t6)
             rank(7)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1), s(2), s(3), s(4), s(5), s(6), s(7)), stat=ast)
+                allocate(t7(s(1), s(2), s(3), s(4), s(5), s(6), s(7)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t7)
             rank default
                 call mlxf_report('mlx_to_alloc', 'the allocatable has a rank outside 1 to 7', status)
                 return
@@ -564,44 +622,65 @@ contains
             call mlxf_report('mlx_to_alloc', 'the destination could not be allocated', status)
             return
         endif
-        if( size(y, kind=int64) == 0_int64 )then
-            call copy_out(a, c_null_ptr, shape(y, kind=int64), MLXC_COMPLEX64, status)
-        else
-            call copy_out(a, c_loc(y), shape(y, kind=int64), MLXC_COMPLEX64, status)
+        call copy_out(a, p, int(s, int64), MLXC_COMPLEX64, status)
+        if( present(status) )then
+            if( status /= 0 ) return
         endif
+        select rank( y )
+            rank(1)
+                call move_alloc(t1, y)
+            rank(2)
+                call move_alloc(t2, y)
+            rank(3)
+                call move_alloc(t3, y)
+            rank(4)
+                call move_alloc(t4, y)
+            rank(5)
+                call move_alloc(t5, y)
+            rank(6)
+                call move_alloc(t6, y)
+            rank(7)
+                call move_alloc(t7, y)
+        end select
     end subroutine to_alloc_c32
 
     module subroutine to_alloc_i32( y, a, status )
-        integer(int32), allocatable, target, intent(inout) :: y(..)
-        type(mlx_array),                     intent(in)    :: a
-        integer, optional,                   intent(out)   :: status
+        integer(int32),  allocatable, target, intent(inout) :: y(..)
+        type(mlx_array), intent(in)                         :: a
+        integer,         optional, intent(out)              :: status
+        integer(int32), allocatable, target :: t1(:), t2(:,:), t3(:,:,:), t4(:,:,:,:), t5(:,:,:,:,:), t6(:,:,:,:,:,:), &
+            &t7(:,:,:,:,:,:,:)
         integer, allocatable :: s(:)
         integer              :: ast
+        logical              :: nonempty
+        type(c_ptr)          :: p
         call mlxf_enter('mlx_to_alloc')
-        if( .not. alloc_shape(a, rank(y), s, status) ) return
+        if( .not. alloc_check(a, rank(y), MLXC_INT32, s, status) ) return
+        nonempty = product(int(s, int64)) > 0_int64
+        p = c_null_ptr
         ast = 0
         select rank( y )
             rank(1)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1)), stat=ast)
+                allocate(t1(s(1)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t1)
             rank(2)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1), s(2)), stat=ast)
+                allocate(t2(s(1), s(2)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t2)
             rank(3)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1), s(2), s(3)), stat=ast)
+                allocate(t3(s(1), s(2), s(3)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t3)
             rank(4)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1), s(2), s(3), s(4)), stat=ast)
+                allocate(t4(s(1), s(2), s(3), s(4)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t4)
             rank(5)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1), s(2), s(3), s(4), s(5)), stat=ast)
+                allocate(t5(s(1), s(2), s(3), s(4), s(5)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t5)
             rank(6)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1), s(2), s(3), s(4), s(5), s(6)), stat=ast)
+                allocate(t6(s(1), s(2), s(3), s(4), s(5), s(6)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t6)
             rank(7)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1), s(2), s(3), s(4), s(5), s(6), s(7)), stat=ast)
+                allocate(t7(s(1), s(2), s(3), s(4), s(5), s(6), s(7)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t7)
             rank default
                 call mlxf_report('mlx_to_alloc', 'the allocatable has a rank outside 1 to 7', status)
                 return
@@ -610,44 +689,65 @@ contains
             call mlxf_report('mlx_to_alloc', 'the destination could not be allocated', status)
             return
         endif
-        if( size(y, kind=int64) == 0_int64 )then
-            call copy_out(a, c_null_ptr, shape(y, kind=int64), MLXC_INT32, status)
-        else
-            call copy_out(a, c_loc(y), shape(y, kind=int64), MLXC_INT32, status)
+        call copy_out(a, p, int(s, int64), MLXC_INT32, status)
+        if( present(status) )then
+            if( status /= 0 ) return
         endif
+        select rank( y )
+            rank(1)
+                call move_alloc(t1, y)
+            rank(2)
+                call move_alloc(t2, y)
+            rank(3)
+                call move_alloc(t3, y)
+            rank(4)
+                call move_alloc(t4, y)
+            rank(5)
+                call move_alloc(t5, y)
+            rank(6)
+                call move_alloc(t6, y)
+            rank(7)
+                call move_alloc(t7, y)
+        end select
     end subroutine to_alloc_i32
 
     module subroutine to_alloc_i8( y, a, status )
         integer(int8),   allocatable, target, intent(inout) :: y(..)
         type(mlx_array), intent(in)                         :: a
         integer,         optional, intent(out)              :: status
+        integer(int8), allocatable, target :: t1(:), t2(:,:), t3(:,:,:), t4(:,:,:,:), t5(:,:,:,:,:), t6(:,:,:,:,:,:), &
+            &t7(:,:,:,:,:,:,:)
         integer, allocatable :: s(:)
         integer              :: ast
+        logical              :: nonempty
+        type(c_ptr)          :: p
         call mlxf_enter('mlx_to_alloc')
-        if( .not. alloc_shape(a, rank(y), s, status) ) return
+        if( .not. alloc_check(a, rank(y), MLXC_INT8, s, status) ) return
+        nonempty = product(int(s, int64)) > 0_int64
+        p = c_null_ptr
         ast = 0
         select rank( y )
             rank(1)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1)), stat=ast)
+                allocate(t1(s(1)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t1)
             rank(2)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1), s(2)), stat=ast)
+                allocate(t2(s(1), s(2)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t2)
             rank(3)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1), s(2), s(3)), stat=ast)
+                allocate(t3(s(1), s(2), s(3)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t3)
             rank(4)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1), s(2), s(3), s(4)), stat=ast)
+                allocate(t4(s(1), s(2), s(3), s(4)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t4)
             rank(5)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1), s(2), s(3), s(4), s(5)), stat=ast)
+                allocate(t5(s(1), s(2), s(3), s(4), s(5)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t5)
             rank(6)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1), s(2), s(3), s(4), s(5), s(6)), stat=ast)
+                allocate(t6(s(1), s(2), s(3), s(4), s(5), s(6)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t6)
             rank(7)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1), s(2), s(3), s(4), s(5), s(6), s(7)), stat=ast)
+                allocate(t7(s(1), s(2), s(3), s(4), s(5), s(6), s(7)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t7)
             rank default
                 call mlxf_report('mlx_to_alloc', 'the allocatable has a rank outside 1 to 7', status)
                 return
@@ -656,44 +756,65 @@ contains
             call mlxf_report('mlx_to_alloc', 'the destination could not be allocated', status)
             return
         endif
-        if( size(y, kind=int64) == 0_int64 )then
-            call copy_out(a, c_null_ptr, shape(y, kind=int64), MLXC_INT8, status)
-        else
-            call copy_out(a, c_loc(y), shape(y, kind=int64), MLXC_INT8, status)
+        call copy_out(a, p, int(s, int64), MLXC_INT8, status)
+        if( present(status) )then
+            if( status /= 0 ) return
         endif
+        select rank( y )
+            rank(1)
+                call move_alloc(t1, y)
+            rank(2)
+                call move_alloc(t2, y)
+            rank(3)
+                call move_alloc(t3, y)
+            rank(4)
+                call move_alloc(t4, y)
+            rank(5)
+                call move_alloc(t5, y)
+            rank(6)
+                call move_alloc(t6, y)
+            rank(7)
+                call move_alloc(t7, y)
+        end select
     end subroutine to_alloc_i8
 
     module subroutine to_alloc_i16( y, a, status )
-        integer(int16), allocatable, target, intent(inout) :: y(..)
-        type(mlx_array),                     intent(in)    :: a
-        integer, optional,                   intent(out)   :: status
+        integer(int16),  allocatable, target, intent(inout) :: y(..)
+        type(mlx_array), intent(in)                         :: a
+        integer,         optional, intent(out)              :: status
+        integer(int16), allocatable, target :: t1(:), t2(:,:), t3(:,:,:), t4(:,:,:,:), t5(:,:,:,:,:), t6(:,:,:,:,:,:), &
+            &t7(:,:,:,:,:,:,:)
         integer, allocatable :: s(:)
         integer              :: ast
+        logical              :: nonempty
+        type(c_ptr)          :: p
         call mlxf_enter('mlx_to_alloc')
-        if( .not. alloc_shape(a, rank(y), s, status) ) return
+        if( .not. alloc_check(a, rank(y), MLXC_INT16, s, status) ) return
+        nonempty = product(int(s, int64)) > 0_int64
+        p = c_null_ptr
         ast = 0
         select rank( y )
             rank(1)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1)), stat=ast)
+                allocate(t1(s(1)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t1)
             rank(2)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1), s(2)), stat=ast)
+                allocate(t2(s(1), s(2)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t2)
             rank(3)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1), s(2), s(3)), stat=ast)
+                allocate(t3(s(1), s(2), s(3)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t3)
             rank(4)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1), s(2), s(3), s(4)), stat=ast)
+                allocate(t4(s(1), s(2), s(3), s(4)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t4)
             rank(5)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1), s(2), s(3), s(4), s(5)), stat=ast)
+                allocate(t5(s(1), s(2), s(3), s(4), s(5)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t5)
             rank(6)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1), s(2), s(3), s(4), s(5), s(6)), stat=ast)
+                allocate(t6(s(1), s(2), s(3), s(4), s(5), s(6)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t6)
             rank(7)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1), s(2), s(3), s(4), s(5), s(6), s(7)), stat=ast)
+                allocate(t7(s(1), s(2), s(3), s(4), s(5), s(6), s(7)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t7)
             rank default
                 call mlxf_report('mlx_to_alloc', 'the allocatable has a rank outside 1 to 7', status)
                 return
@@ -702,44 +823,65 @@ contains
             call mlxf_report('mlx_to_alloc', 'the destination could not be allocated', status)
             return
         endif
-        if( size(y, kind=int64) == 0_int64 )then
-            call copy_out(a, c_null_ptr, shape(y, kind=int64), MLXC_INT16, status)
-        else
-            call copy_out(a, c_loc(y), shape(y, kind=int64), MLXC_INT16, status)
+        call copy_out(a, p, int(s, int64), MLXC_INT16, status)
+        if( present(status) )then
+            if( status /= 0 ) return
         endif
+        select rank( y )
+            rank(1)
+                call move_alloc(t1, y)
+            rank(2)
+                call move_alloc(t2, y)
+            rank(3)
+                call move_alloc(t3, y)
+            rank(4)
+                call move_alloc(t4, y)
+            rank(5)
+                call move_alloc(t5, y)
+            rank(6)
+                call move_alloc(t6, y)
+            rank(7)
+                call move_alloc(t7, y)
+        end select
     end subroutine to_alloc_i16
 
     module subroutine to_alloc_i64( y, a, status )
-        integer(int64), allocatable, target, intent(inout) :: y(..)
-        type(mlx_array),                     intent(in)    :: a
-        integer, optional,                   intent(out)   :: status
+        integer(int64),  allocatable, target, intent(inout) :: y(..)
+        type(mlx_array), intent(in)                         :: a
+        integer,         optional, intent(out)              :: status
+        integer(int64), allocatable, target :: t1(:), t2(:,:), t3(:,:,:), t4(:,:,:,:), t5(:,:,:,:,:), t6(:,:,:,:,:,:), &
+            &t7(:,:,:,:,:,:,:)
         integer, allocatable :: s(:)
         integer              :: ast
+        logical              :: nonempty
+        type(c_ptr)          :: p
         call mlxf_enter('mlx_to_alloc')
-        if( .not. alloc_shape(a, rank(y), s, status) ) return
+        if( .not. alloc_check(a, rank(y), MLXC_INT64, s, status) ) return
+        nonempty = product(int(s, int64)) > 0_int64
+        p = c_null_ptr
         ast = 0
         select rank( y )
             rank(1)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1)), stat=ast)
+                allocate(t1(s(1)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t1)
             rank(2)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1), s(2)), stat=ast)
+                allocate(t2(s(1), s(2)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t2)
             rank(3)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1), s(2), s(3)), stat=ast)
+                allocate(t3(s(1), s(2), s(3)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t3)
             rank(4)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1), s(2), s(3), s(4)), stat=ast)
+                allocate(t4(s(1), s(2), s(3), s(4)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t4)
             rank(5)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1), s(2), s(3), s(4), s(5)), stat=ast)
+                allocate(t5(s(1), s(2), s(3), s(4), s(5)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t5)
             rank(6)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1), s(2), s(3), s(4), s(5), s(6)), stat=ast)
+                allocate(t6(s(1), s(2), s(3), s(4), s(5), s(6)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t6)
             rank(7)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1), s(2), s(3), s(4), s(5), s(6), s(7)), stat=ast)
+                allocate(t7(s(1), s(2), s(3), s(4), s(5), s(6), s(7)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t7)
             rank default
                 call mlxf_report('mlx_to_alloc', 'the allocatable has a rank outside 1 to 7', status)
                 return
@@ -748,44 +890,65 @@ contains
             call mlxf_report('mlx_to_alloc', 'the destination could not be allocated', status)
             return
         endif
-        if( size(y, kind=int64) == 0_int64 )then
-            call copy_out(a, c_null_ptr, shape(y, kind=int64), MLXC_INT64, status)
-        else
-            call copy_out(a, c_loc(y), shape(y, kind=int64), MLXC_INT64, status)
+        call copy_out(a, p, int(s, int64), MLXC_INT64, status)
+        if( present(status) )then
+            if( status /= 0 ) return
         endif
+        select rank( y )
+            rank(1)
+                call move_alloc(t1, y)
+            rank(2)
+                call move_alloc(t2, y)
+            rank(3)
+                call move_alloc(t3, y)
+            rank(4)
+                call move_alloc(t4, y)
+            rank(5)
+                call move_alloc(t5, y)
+            rank(6)
+                call move_alloc(t6, y)
+            rank(7)
+                call move_alloc(t7, y)
+        end select
     end subroutine to_alloc_i64
 
     module subroutine to_alloc_l( y, a, status )
         logical(c_bool), allocatable, target, intent(inout) :: y(..)
-        type(mlx_array),                      intent(in)    :: a
-        integer, optional,                    intent(out)   :: status
+        type(mlx_array), intent(in)                         :: a
+        integer,         optional, intent(out)              :: status
+        logical(c_bool), allocatable, target :: t1(:), t2(:,:), t3(:,:,:), t4(:,:,:,:), t5(:,:,:,:,:), t6(:,:,:,:,:,:), &
+            &t7(:,:,:,:,:,:,:)
         integer, allocatable :: s(:)
         integer              :: ast
+        logical              :: nonempty
+        type(c_ptr)          :: p
         call mlxf_enter('mlx_to_alloc')
-        if( .not. alloc_shape(a, rank(y), s, status) ) return
+        if( .not. alloc_check(a, rank(y), MLXC_BOOL, s, status) ) return
+        nonempty = product(int(s, int64)) > 0_int64
+        p = c_null_ptr
         ast = 0
         select rank( y )
             rank(1)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1)), stat=ast)
+                allocate(t1(s(1)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t1)
             rank(2)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1), s(2)), stat=ast)
+                allocate(t2(s(1), s(2)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t2)
             rank(3)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1), s(2), s(3)), stat=ast)
+                allocate(t3(s(1), s(2), s(3)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t3)
             rank(4)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1), s(2), s(3), s(4)), stat=ast)
+                allocate(t4(s(1), s(2), s(3), s(4)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t4)
             rank(5)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1), s(2), s(3), s(4), s(5)), stat=ast)
+                allocate(t5(s(1), s(2), s(3), s(4), s(5)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t5)
             rank(6)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1), s(2), s(3), s(4), s(5), s(6)), stat=ast)
+                allocate(t6(s(1), s(2), s(3), s(4), s(5), s(6)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t6)
             rank(7)
-                if( allocated(y) ) deallocate(y)
-                allocate(y(s(1), s(2), s(3), s(4), s(5), s(6), s(7)), stat=ast)
+                allocate(t7(s(1), s(2), s(3), s(4), s(5), s(6), s(7)), stat=ast)
+                if( ast == 0 .and. nonempty ) p = c_loc(t7)
             rank default
                 call mlxf_report('mlx_to_alloc', 'the allocatable has a rank outside 1 to 7', status)
                 return
@@ -794,11 +957,26 @@ contains
             call mlxf_report('mlx_to_alloc', 'the destination could not be allocated', status)
             return
         endif
-        if( size(y, kind=int64) == 0_int64 )then
-            call copy_out(a, c_null_ptr, shape(y, kind=int64), MLXC_BOOL, status)
-        else
-            call copy_out(a, c_loc(y), shape(y, kind=int64), MLXC_BOOL, status)
+        call copy_out(a, p, int(s, int64), MLXC_BOOL, status)
+        if( present(status) )then
+            if( status /= 0 ) return
         endif
+        select rank( y )
+            rank(1)
+                call move_alloc(t1, y)
+            rank(2)
+                call move_alloc(t2, y)
+            rank(3)
+                call move_alloc(t3, y)
+            rank(4)
+                call move_alloc(t4, y)
+            rank(5)
+                call move_alloc(t5, y)
+            rank(6)
+                call move_alloc(t6, y)
+            rank(7)
+                call move_alloc(t7, y)
+        end select
     end subroutine to_alloc_l
 
 end submodule mlxf_array_transfer

@@ -4,12 +4,13 @@
 ! the windows are judged against real64 formulas by the frozen tolerances of mlxf_test_defs.
 module mlxf_ops_create_tester
 use, intrinsic :: iso_fortran_env, only: real32, real64
-use mlxf,            only: mlx_array, mlx_from, mlx_to, mlx_set_default_device, mlx_default_device, MLX_DEVICES, &
-                           MLX_DTYPES, mlx_astype, mlx_ones, mlx_full, mlx_zeros_like, mlx_ones_like, mlx_full_like, &
-                           mlx_identity, mlx_eye, mlx_tri, mlx_linspace, mlx_meshgrid, mlx_bartlett, mlx_blackman, &
-                           mlx_hamming, mlx_hanning
-use mlxf_test_utils, only: assert_true, assert_int, test_devices, device_name
-use mlxf_test_defs,  only: ELEM_SEED_CALIBRATION, ELEM_SEEDS_JUDGED, REDUCE_TOLERANCES, elem_tolerance
+use mlxf,             only: mlx_array, mlx_from, mlx_to, mlx_set_default_device, mlx_default_device, MLX_DEVICES, &
+                            MLX_DTYPES, mlx_astype, mlx_ones, mlx_full, mlx_zeros_like, mlx_ones_like, mlx_full_like, &
+                            mlx_identity, mlx_eye, mlx_tri, mlx_linspace, mlx_meshgrid, mlx_bartlett, mlx_blackman, &
+                            mlx_hamming, mlx_hanning
+use mlxf_test_utils,  only: assert_true, assert_int, test_devices, device_name
+use mlxf_test_defs,   only: ELEM_SEED_CALIBRATION, ELEM_SEEDS_JUDGED, REDUCE_TOLERANCES, elem_tolerance
+use mlxf_test_reduce, only: nan_maxval
 implicit none
 private
 public :: run_all_ops_create_tests
@@ -253,7 +254,7 @@ contains
                 call mlx_to(y32, r)
                 y = real(y32, real64)
             endif
-            err = maxval(abs(y-ref)/max(1._real64, abs(ref)))
+            err = nan_maxval(abs(y-ref)/max(1._real64, abs(ref)))
         endif
         write(line,'(A,ES16.9,A,F8.3,A)') '    error '//trim(label)//' '//device_name(mlx_default_device())//': ', err, &
             &' (', err/real(epsilon(1._real32), real64), ' eps32)'

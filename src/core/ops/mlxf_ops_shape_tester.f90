@@ -413,6 +413,12 @@ contains
         r = mlx_as_strided(b, [2, 2], [1, N2], offset=1)
         call expect(r, [2, 2], [((flat(2+(i-1)+(j-1)*N2), i=1, 2), j=1, 2)], &
             &'mlx_as_strided: element (i, j) is element 1 + offset + (i - 1) s1 + (j - 1) s2 in array element order')
+        r = mlx_as_strided(b, [N2], [-1], offset=N2-1)
+        call expect(r, [N2], flat(N2:1:-1), 'mlx_as_strided with a negative stride walks back from its offset')
+        r = mlx_as_strided(b, [N2*N3], [1])
+        call expect(r, [N2*N3], flat, 'mlx_as_strided may reach the last element of a')
+        r = mlx_as_strided(b, [0, N3], [1, 10*N2*N3], offset=5*N2*N3)
+        call assert_int(0, int(r%size()), 'mlx_as_strided: an empty view reaches no element, whatever its strides and offset')
         r = mlx_as_strided(b, [N3, N2], [N2, 1])
         call expect(r, [N3, N2], flat2(transpose(m)), 'mlx_as_strided with exchanged strides is the transpose')
         t = transpose(b)

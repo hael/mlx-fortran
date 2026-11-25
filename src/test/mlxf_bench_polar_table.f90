@@ -14,13 +14,15 @@ use mlxf,                  only: mlx_set_default_device, mlx_default_device, mlx
 use mlxf_test_defs,        only: POLAR_ROW_FACTOR, POLAR_BLOCK_ERR_CPU, POLAR_BLOCK_ROT_CPU, POLAR_BLOCK_ROT_Q, &
                                  POLAR_SEED_CALIBRATION, POLAR_SEED_JUDGED, POLAR_GRID_B, POLAR_GRID_R, &
                                  POLAR_BUDGET_SHARE, POLAR_CANON_BT, POLAR_CANON_RT, POLAR_BLOCK_BT, POLAR_BLOCK_RT, &
-                                 POLAR_PROB_BETA, polar_table_refs, polar_table_block, polar_table_entries, &
+                                 POLAR_PROB_BETA, POLAR_DIST_VALID, POLARFT_TAILS, POLARFT_TAIL_ROW_TOL, &
+                                 POLARFT_TAIL_ROT_BLK, polar_table_refs, polar_table_block, polar_table_entries, &
                                  polar_map_results, polar_row_check, parameters, SHIFTMAP_SCREEN, SHIFTMAP_WINDOW
 use mlxf_toy_polarft_calc, only: polarft_calc
 use mlxf_toy_eul_prob_tab, only: eul_prob_tab
 use mlxf_oracle_polar,     only: polar_dft_matrix, polar_keyed_u, polar_compare_rows, polar_draws_off, &
                                  polar_report_draws, polar_memo_rows
 use mlxf_test_utils,       only: assert_true, assert_int, test_devices, device_name, set_fixed_seed, bits_equal
+use mlxf_test_reduce,      only: nan_maxval
 implicit none
 private
 
@@ -33,10 +35,14 @@ integer, parameter :: BLOCK_NREFS  = 1000
 integer, parameter :: POOL_RINGS = 1000
 ! the particles' inverse temperatures, in turn: the production median (about 420) and three around it
 real(real32), parameter :: TEMP_LEVELS(4) = [1._real32, 30._real32, 420._real32, 1.e4_real32]
-! the estimate's count of rotation-row temporaries a tile's tail holds at once (conservative)
-integer, parameter :: TAIL_ROWS = 12
-! the formulation the dense rows record: packed real products, the inverse real FFT and the compiled tail
-character(len=*), parameter :: FORMULATION = 'B+compiled'
+! the estimate's count of rotation-row temporaries a tile's tail holds at once: the compiled tail's (conservative)
+! and the fused one's (the inverse transform's rows it reads)
+integer, parameter :: TAIL_ROWS       = 12
+integer, parameter :: TAIL_ROWS_FUSED = 1
+! the formulation the dense rows record: packed real products, the inverse real FFT and the compiled tail, or the
+! fused one
+character(len=*), parameter :: FORMULATION       = 'B+compiled'
+character(len=*), parameter :: FORMULATION_FUSED = 'B+metal'
 ! the digest's starting state (any non-zero value), the go file's polling interval in microseconds and the
 ! seconds after which a process that was never told to go gives up
 integer(int64), parameter :: DIGEST_START = 88172645463325252_int64
@@ -58,9 +64,9 @@ end type bench_case
 
 ! the keys each suite reads, blank separated; test and suite belong to the executable
 character(len=*), parameter :: SUITE_KEYS(6) = [character(len=96) :: &
-    &'accuracy cases case bt rt device', &
-    &'time cases case cases_list bt rt device nthr nparts part go', &
-    &'profile cases case bt rt device nthr', &
+    &'accuracy cases case bt rt device tail', &
+    &'time cases case cases_list bt rt device nthr nparts part go passes tail', &
+    &'profile cases case bt rt device nthr tail', &
     &'overlap cases case bt rt device nthr outer load', &
     &'stream seconds nthr', &
     &'shiftmap cases case grid maps ptiles device evidence widths revision nthr']
@@ -152,11 +158,25 @@ type :: half_table
     real(real64)              :: submit_s = 0._real64
 end type half_table
 
-! a tile plan of a workspace
+! a tile plan of a workspace, and the form of its tail
 type :: bench_config
-    integer :: bt = POLAR_BLOCK_BT
-    integer :: rt = POLAR_BLOCK_RT
+    integer :: bt   = POLAR_BLOCK_BT
+    integer :: rt   = POLAR_BLOCK_RT
+    integer :: tail = POLARFT_TAILS%graph
 end type bench_config
+
+! the fused tail against the compiled one on the block (see the calculator's tester): the rows' largest
+! difference and the distances' where the drawn rotations agree, relative to the compiled row's largest valid |d|;
+! the pairs whose drawn rotation differs, the entries of different validity, the draws that do not hold on either
+! form's own rows
+type :: form_check
+    real(real64) :: err_rows  = 0._real64
+    real(real64) :: err_dists = 0._real64
+    integer      :: nrot      = 0
+    integer      :: valid_off = 0
+    integer      :: draws_off = 0
+    integer      :: npairs    = 0
+end type form_check
 
 interface
     integer(c_int) function getloadavg( loadavg, nelem ) bind(c, name='getloadavg')
@@ -269,9 +289,27 @@ contains
     function arg_config( dflt ) result(cfg)
         type(bench_config), intent(in) :: dflt
         type(bench_config) :: cfg
-        cfg%bt = arg_int('bt', dflt%bt)
-        cfg%rt = arg_int('rt', dflt%rt)
+        cfg%bt   = arg_int('bt', dflt%bt)
+        cfg%rt   = arg_int('rt', dflt%rt)
+        cfg%tail = dflt%tail
+        select case( arg_str('tail', 'graph') )
+            case( 'graph' )
+                cfg%tail = POLARFT_TAILS%graph
+            case( 'metal' )
+                cfg%tail = POLARFT_TAILS%metal
+            case default
+                write(*,'(a)') 'bench_polar_table: tail= is graph or metal'
+                error stop 2
+        end select
     end function arg_config
+
+    ! the formulation of a configuration's dense rows
+    function formulation_of( cfg ) result(f)
+        type(bench_config), intent(in) :: cfg
+        character(len=:), allocatable :: f
+        f = FORMULATION
+        if( cfg%tail == POLARFT_TAILS%metal ) f = FORMULATION_FUSED
+    end function formulation_of
 
     ! a case of the key = value file (blocks [case name]); stops when absent, a benchmark's usage error
     function read_case( path, name ) result(cs)
@@ -777,10 +815,11 @@ contains
         if( allocated(t%rows) ) ent%rows = t%rows(:, :, c0:c1)
     end function entries_of
 
-    ! the calculator's reference bins under cfg, on the current device
+    ! the calculator's reference bins under cfg (tile plan and tail), on the current device
     subroutine prepare( pftc, cfg )
         type(polarft_calc), intent(inout) :: pftc
         type(bench_config), intent(in)    :: cfg
+        call pftc%set_tail_form(cfg%tail)
         call pftc%set_tile_plan(cfg%bt, cfg%rt)
         call pftc%memoize_ref_bins
         call assert_int(0, refused(pftc), 'bench_polar_table: the references are prepared: '//pftc%message())
@@ -828,13 +867,17 @@ contains
         cs%nptcls = BLOCK_NPTCLS
         cfg       = arg_config(bench_config())
         call test_devices(devs)
+        if( cfg%tail == POLARFT_TAILS%metal .and. any(devs /= MLX_DEVICES%gpu) )then
+            write(*,'(a)') 'bench_polar_table: suite=accuracy tail=metal runs on the GPU only (device=gpu)'
+            error stop 2
+        endif
         original = mlx_default_device()
         call make_data(d2, cs, POLAR_SEED_JUDGED, .true.)
         or2 = oracle_halves(d2)
         call feed_calc(pftc2, d2)
         do i = 1, size(devs)
             call mlx_set_default_device(devs(i))
-            write(*,'(a)') '  on the '//device_name(devs(i))//', formulation '//FORMULATION
+            write(*,'(a)') '  on the '//device_name(devs(i))//', formulation '//formulation_of(cfg)
             if( devs(i) == MLX_DEVICES%cpu )then
                 if( .not. allocated(or1) )then
                     call make_data(d1, cs, POLAR_SEED_CALIBRATION, .true.)
@@ -848,6 +891,14 @@ contains
             call block_sensitivity(pftc2, d2, or2, cfg)
             call block_identity(pftc2, d2, cfg)
             call pftc2%kill_ref_bins
+            if( cfg%tail == POLARFT_TAILS%metal )then
+                if( .not. allocated(or1) )then
+                    call make_data(d1, cs, POLAR_SEED_CALIBRATION, .true.)
+                    or1 = oracle_halves(d1)
+                    call feed_calc(pftc1, d1)
+                endif
+                call block_tail_forms(pftc1, d1, pftc2, d2, cfg)
+            endif
         end do
         call mlx_set_default_device(original)
         call pftc1%kill
@@ -906,6 +957,88 @@ contains
         call report_digest('accuracy', 'block seed='//trim(seed)//' '//plan_label(cfg, plan), digest_halves(t))
     end function score_and_compare
 
+    ! the fused tail against the compiled one on the GPU, on the block's both halves under cfg's tile plan, both
+    ! reading the same rows of the inverse transform: block seed 1 is the calibration, printed; block seed 2 is
+    ! held to the frozen tolerances, and each form's draw to its own rows
+    subroutine block_tail_forms( pftc1, d1, pftc2, d2, cfg )
+        type(polarft_calc), intent(inout) :: pftc1, pftc2
+        type(bench_data),   intent(in)    :: d1, d2
+        type(bench_config), intent(in)    :: cfg
+        type(form_check) :: chk
+        chk = compare_forms(pftc1, d1, cfg)
+        call pftc1%kill_ref_bins
+        write(*,'(a,es23.16,a,es23.16,a,i0,a,i0,a,i0,a,i0)') '    calibration (block seed 1, gpu, fused against '//&
+            &'compiled): rows ', chk%err_rows, ', distances ', chk%err_dists, ', drawn rotations differing ', &
+            &chk%nrot, ' of ', chk%npairs, '; validity off ', chk%valid_off, ', draws off ', chk%draws_off
+        chk = compare_forms(pftc2, d2, cfg)
+        call pftc2%kill_ref_bins
+        write(*,'(a,es10.3,a,es10.3,a,i0,a,i0)') '    block seed 2, fused against compiled: rows ', chk%err_rows, &
+            &', distances ', chk%err_dists, ', drawn rotations differing ', chk%nrot, ' of ', chk%npairs
+        call assert_int(BLOCK_NPTCLS * BLOCK_NREFS, chk%npairs, 'both forms score the block''s 64,000 pairs')
+        call assert_true(chk%err_rows <= POLARFT_TAIL_ROW_TOL, 'gpu block: the fused rows are the compiled ones '//&
+            &'within POLARFT_TAIL_ROW_TOL')
+        call assert_true(chk%nrot <= POLARFT_TAIL_ROT_BLK, 'gpu block: the drawn rotations differ in at most '//&
+            &'POLARFT_TAIL_ROT_BLK pairs')
+        call assert_true(chk%err_dists <= POLARFT_TAIL_ROW_TOL, 'gpu block: where the rotations agree the distances '//&
+            &'agree within POLARFT_TAIL_ROW_TOL')
+        call assert_int(0, chk%valid_off, 'gpu block: every entry has the same validity in both forms')
+        call assert_int(0, chk%draws_off, 'gpu block: each form''s draw holds on its own rows')
+    end subroutine block_tail_forms
+
+    ! every particle of d filled with rows by both forms under cfg's tile plan, compared half by half
+    function compare_forms( pftc, d, cfg ) result(chk)
+        type(polarft_calc), intent(inout) :: pftc
+        type(bench_data),   intent(in)    :: d
+        type(bench_config), intent(in)    :: cfg
+        type(form_check)          :: chk
+        type(bench_config)        :: g
+        type(eul_prob_tab)        :: tab
+        type(half_table)          :: tg, tm
+        type(polar_table_entries) :: eg, em
+        type(polar_table_block)   :: blk
+        type(polar_row_check)     :: c
+        real(real64)              :: dmax
+        integer                   :: h, i, c0, c1, ir, b
+        g      = cfg
+        g%tail = POLARFT_TAILS%graph
+        call prepare(pftc, g)
+        call make_driver(tab, pftc, d, [(i, i = 1, d%cs%nptcls)], canonical_plan(.true.))
+        call fill_table(tab, [(i, i = 1, d%cs%nptcls)], tg)
+        call prepare(pftc, cfg)
+        call make_driver(tab, pftc, d, [(i, i = 1, d%cs%nptcls)], canonical_plan(.true.))
+        call fill_table(tab, [(i, i = 1, d%cs%nptcls)], tm)
+        if( .not. allocated(tg%rows) .or. .not. allocated(tm%rows) )then
+            chk%valid_off = 1
+            return
+        endif
+        do h = 1, 2
+            c0  = merge(1, tg%n1 + 1, h == 1)
+            c1  = merge(tg%n1, size(tg%dists, 2), h == 1)
+            eg  = entries_of(tg, c0, c1)
+            em  = entries_of(tm, c0, c1)
+            blk = make_block(d, h, half_ptcls(d%cs%nptcls, h), 1_int64, 1)
+            c   = polar_compare_rows(real(eg%rows, real64), em)
+            chk%err_rows  = max(chk%err_rows, c%err)
+            chk%valid_off = chk%valid_off + c%valid_off
+            chk%npairs    = chk%npairs + c%npairs
+            chk%nrot      = chk%nrot + count(eg%irots /= em%irots)
+            chk%draws_off = chk%draws_off + polar_draws_off(eg, blk%temps, blk%u) + polar_draws_off(em, blk%temps, blk%u)
+            do b = 1, size(eg%irots, 2)
+                do ir = 1, size(eg%irots, 1)
+                    if( eg%irots(ir, b) /= em%irots(ir, b) ) cycle
+                    if( bits_equal(eg%dists(ir, b), em%dists(ir, b)) ) cycle
+                    dmax = nan_maxval(pack(abs(real(eg%rows(:, ir, b), real64)), eg%rows(:, ir, b) < POLAR_DIST_VALID))
+                    if( dmax > 0._real64 )then
+                        chk%err_dists = max(chk%err_dists, abs(real(em%dists(ir, b), real64) - &
+                            &real(eg%dists(ir, b), real64)) / dmax)
+                    else
+                        chk%valid_off = chk%valid_off + 1
+                    endif
+                end do
+            end do
+        end do
+    end function compare_forms
+
     function canonical_plan( rows ) result(plan)
         logical, intent(in) :: rows
         type(score_plan) :: plan
@@ -923,7 +1056,7 @@ contains
         type(bench_config), intent(in)    :: cfg
         type(polar_row_check) :: chk
         chk = score_and_compare(pftc, d, dor, cfg, canonical_plan(.true.))
-        write(*,'(a,es23.16,a,i0,a,i0,a,i0,a,i0,a,i0)') '    calibration (block seed 1, cpu, '//FORMULATION// &
+        write(*,'(a,es23.16,a,i0,a,i0,a,i0,a,i0,a,i0)') '    calibration (block seed 1, cpu, '//formulation_of(cfg)// &
             &'): e_cpu = ', chk%err, ', n_cpu = ', chk%argmin_off, ' of ', chk%npairs, ' pairs; validity off ', &
             &chk%valid_off, ', draws off ', chk%draws_bad, ', mixed rows ', chk%mixed
     end subroutine report_block_calibration
@@ -942,13 +1075,13 @@ contains
         plan = canonical_plan(.true.)
         plan%report = .true.
         chk  = score_and_compare(pftc, d, dor, cfg, plan)
-        write(*,'(a,es10.3,a,i0,a,i0,a)') '    block seed 2 ('//dev//', '//FORMULATION//'): row error ', chk%err, &
+        write(*,'(a,es10.3,a,i0,a,i0,a)') '    block seed 2 ('//dev//', '//formulation_of(cfg)//'): row error ', chk%err, &
             &', minimising rotation differs in ', chk%argmin_off, ' of ', chk%npairs, ' pairs'
         call assert_int(BLOCK_NPTCLS * BLOCK_NREFS, chk%npairs, 'the accuracy block scores 64,000 pairs')
         call assert_int(0, chk%valid_off, dev//' block: every entry is valid or invalid as in the oracle')
         call assert_int(0, chk%draws_bad, dev//' block: the draw lies in the device row''s cumulative interval '//&
             &'within 1e-4 W, and the entry''s distance is the row''s')
-        call assert_block_bounds(dev//' block '//FORMULATION, chk)
+        call assert_block_bounds(dev//' block '//formulation_of(cfg), chk)
     end subroutine judge_block
 
     ! the block's frozen bounds: row error at most POLAR_ROW_FACTOR e_cpu, minimising-rotation disagreements at
@@ -1142,14 +1275,15 @@ contains
         bpad  = real(((cs%nptcls / 2 + cfg%bt - 1) / cfg%bt) * cfg%bt, real64)
         refs  = 2._real64 * 4._real64 * nk * rpad * n1 * 8._real64
         inputs = n1 * nk * bpad * 8._real64 * 4._real64 + rpad * bpad * 4._real64 * 2._real64
-        tile   = real(cfg%bt, real64) * real(cfg%rt, real64) * (n1 * 16._real64 + nrots * 4._real64 * TAIL_ROWS)
+        tile   = real(cfg%bt, real64) * real(cfg%rt, real64) * (n1 * 16._real64 + nrots * 4._real64 * &
+            &merge(TAIL_ROWS_FUSED, TAIL_ROWS, cfg%tail == POLARFT_TAILS%metal))
         estimate_bytes = refs + real(nslots, real64) * (inputs + tile)
     end function estimate_bytes
 
     ! the sweep of decision 13's grid over one case (case=) or the cases named by cases_list=: configurations
     ! above the particles per half, above the references or beyond the budget are pruned before any allocation;
-    ! each kept one is prepared, warmed up and timed best of 3 (both halves, all particles, from the memos
-    ! through the entries in Fortran arrays)
+    ! each kept one is prepared, warmed up and timed over passes= passes (default 3; both halves, all particles,
+    ! from the memos through the entries in Fortran arrays): the best pass and the median
     subroutine bench_time
         type(bench_case)              :: cs
         type(bench_data)              :: d
@@ -1223,10 +1357,11 @@ contains
         type(score_plan)              :: plan
         character(len=:), allocatable :: status
         integer,          allocatable :: pids(:)
-        real(real64)                  :: walls(3), t0, prep, est, cpu_s
+        real(real64),     allocatable :: walls(:)
+        real(real64)                  :: t0, prep, est, cpu_s
         real(real64)                  :: peak, cache
         real                          :: load1
-        integer                       :: i, rep, nh
+        integer                       :: i, rep, nh, npasses
         ! one call per half: the whole case's half, or the larger half of a part
         nh     = d%cs%nptcls / 2
         if( d%pfromto(2) - d%pfromto(1) + 1 < d%cs%nptcls ) nh = max(size(part_ptcls(d, 1)), size(part_ptcls(d, 2)))
@@ -1237,6 +1372,12 @@ contains
         if( status == 'timed' )then
             if( est > budget_bytes() ) status = budget_status()
         endif
+        npasses = arg_int('passes', 3)
+        if( npasses < 1 )then
+            write(*,'(a)') 'bench_polar_table: passes= needs at least one pass'
+            error stop 2
+        endif
+        allocate(walls(npasses))
         walls = -1._real64
         prep  = -1._real64
         peak  = -1._real64
@@ -1255,7 +1396,7 @@ contains
             call fill_table(tab, pids, t)
             call mlx_synchronize()
             call mlx_reset_peak_memory()
-            do rep = 1, 3
+            do rep = 1, npasses
                 t0 = clock_s()
                 call fill_table(tab, pids, t)
                 cpu_s      = cpu_s + t%cpu_s
@@ -1268,26 +1409,49 @@ contains
             call pftc%kill_ref_bins
             call mlx_clear_cache()
         endif
-        call write_time_row(d, cfg, [walls, prep, est, peak, cache, cpu_s / 3._real64], load1, status)
+        call write_time_row(d, cfg, [walls(1:min(3, npasses)), [(-1._real64, i = npasses + 1, 3)], prep, est, peak, &
+            &cache, cpu_s / real(npasses, real64), minval(walls), median_of(walls)], load1, status)
     end subroutine time_config
 
+    ! the median of x (the mean of the two middle values when their number is even)
+    real(real64) function median_of( x )
+        real(real64), intent(in) :: x(:)
+        real(real64) :: v(size(x)), s
+        integer      :: i, j, n
+        n = size(x)
+        v = x
+        do i = 2, n
+            s = v(i)
+            j = i - 1
+            do while( j >= 1 )
+                if( v(j) <= s ) exit
+                v(j + 1) = v(j)
+                j        = j - 1
+            end do
+            v(j + 1) = s
+        end do
+        median_of = 0.5_real64 * (v((n + 1) / 2) + v(n / 2 + 1))
+    end function median_of
+
     ! a row of bench_polar_table.tsv: SIMPLE's case columns by name, then the tile, formulation, device,
-    ! precision, preparation and memory; vals = wall_rep1..3, prep_s, est_bytes, mlx_peak_bytes,
-    ! mlx_cache_bytes, cpu_s
+    ! precision, preparation and memory, then the passes and their median; vals = wall_rep1..3 (the first three
+    ! passes), prep_s, est_bytes, mlx_peak_bytes, mlx_cache_bytes, cpu_s, the best pass, the median pass
     subroutine write_time_row( d, cfg, vals, load1, status )
         type(bench_data),   intent(in) :: d
         type(bench_config), intent(in) :: cfg
-        real(real64),       intent(in) :: vals(8)
+        real(real64),       intent(in) :: vals(10)
         real,               intent(in) :: load1
         character(len=*),   intent(in) :: status
         character(len=*), parameter :: TSV = 'bench_polar_table.tsv'
         character(len=1), parameter :: T = achar(9)
-        real(real64)                :: wall, pairs, padded
+        real(real64)                :: wall, wmed, pairs, padded
         integer                     :: u, nrots, rpad, bpad, np
         logical                     :: l_new
         nrots  = 2 * d%cs%pftsz
         wall   = -1._real64
-        if( all(vals(1:3) > 0._real64) ) wall = minval(vals(1:3))
+        wmed   = -1._real64
+        if( vals(9) > 0._real64 ) wall = vals(9)
+        if( vals(10) > 0._real64 ) wmed = vals(10)
         np     = d%pfromto(2) - d%pfromto(1) + 1
         pairs  = real(d%cs%nrefs, real64) * real(np, real64)
         rpad   = ((d%cs%nrefs + cfg%rt - 1) / cfg%rt) * cfg%rt
@@ -1300,17 +1464,19 @@ contains
             &'nrots'//T//'kfrom'//T//'kto'//T//'B'//T//'R'//T//'formulation'//T//'device'//T//'precision'//T//&
             &'load1'//T//'wall_s'//T//'wall_rep1'//T//'wall_rep2'//T//'wall_rep3'//T//'pairs_per_s'//T//&
             &'useful_pairs'//T//'padded_pairs'//T//'prep_s'//T//'host_cpu_s'//T//'est_bytes'//T//'mlx_peak_bytes'//&
-            &T//'mlx_cache_bytes'//T//'status'
-        write(u,'(a,10(a,i0),a,a,a,a,a,a,a,f6.2,4(a,f10.4),a,es12.5,2(a,es12.5),2(a,f10.4),3(a,es12.5),a,a)') &
+            &T//'mlx_cache_bytes'//T//'status'//T//'passes'//T//'wall_median_s'
+        write(u,'(a,10(a,i0),a,a,a,a,a,a,a,f6.2,4(a,f10.4),a,es12.5,2(a,es12.5),2(a,f10.4),3(a,es12.5),a,a,a,i0,a,f10.4)') &
             &trim(d%cs%name), T, d%cs%nspace, T, d%cs%nstates, T, d%cs%nrefs, T, d%cs%nptcls, T, d%cs%pftsz, T, &
-            &nrots, T, d%cs%kfrom, T, d%cs%kto, T, cfg%bt, T, cfg%rt, T, FORMULATION, T, &
+            &nrots, T, d%cs%kfrom, T, d%cs%kto, T, cfg%bt, T, cfg%rt, T, formulation_of(cfg), T, &
             &device_name(mlx_default_device()), T, precision_mode(), T, load1, T, wall, T, vals(1), T, vals(2), T, &
             &vals(3), T, merge(pairs / wall, -1._real64, wall > 0._real64), T, pairs, T, padded, T, vals(4), T, &
-            &vals(8), T, vals(5), T, vals(6), T, vals(7), T, status
+            &vals(8), T, vals(5), T, vals(6), T, vals(7), T, status, T, arg_int('passes', 3), T, wmed
         close(u)
-        write(*,'(a,i0,a,i0,a,f9.4,a,es11.4,2(a,es10.3),a)') '    '//trim(d%cs%name)//' '//FORMULATION//' B=', &
+        write(*,'(a,i0,a,i0,a,f9.4,a,es11.4,2(a,es10.3),a)') '    '//trim(d%cs%name)//' '//formulation_of(cfg)//' B=', &
             &cfg%bt, ' R=', cfg%rt, ' wall=', wall, ' s, ', merge(pairs / wall, -1._real64, wall > 0._real64), &
             &' pairs/s, peak ', vals(6), ' B, cache ', vals(7), ' B: '//status
+        write(*,'(a,i0,a,f9.4,a,es11.4,a)') '    passes ', arg_int('passes', 3), ', median wall=', wmed, ' s, ', &
+            &merge(pairs / wmed, -1._real64, wmed > 0._real64), ' pairs/s'
     end subroutine write_time_row
 
     ! ---- profile ---------------------------------------------------------------------------------------------
@@ -1366,7 +1532,7 @@ contains
             &T//'device'//T//'precision'//T//'wall_s'//T//'terms_s'//T//'products_s'//T//'transform_s'//T//&
             &'distances_draw_s'//T//'concat_s'//T//'copyout_host_s'//T//'prep_s'//T//'cold_first_s'
         write(u,'(a,3(a,i0),2(a,i0),a,a,a,a,a,a,9(a,f10.4))') trim(cs%name), T, cs%nrefs, T, cs%nptcls, T, &
-            &cs%pftsz, T, cfg%bt, T, cfg%rt, T, FORMULATION, T, device_name(mlx_default_device()), T, &
+            &cs%pftsz, T, cfg%bt, T, cfg%rt, T, formulation_of(cfg), T, device_name(mlx_default_device()), T, &
             &precision_mode(), T, wbest, T, best(1), T, best(2), T, best(3), T, best(4), T, best(5), T, &
             &wbest - sum(best), T, prep, T, cold
         close(u)

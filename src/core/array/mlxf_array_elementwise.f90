@@ -1,12 +1,12 @@
 !@descr: unary and binary signature helpers, weak scalars, arithmetic, comparisons, boolean operators and exp
 submodule (mlxf_array) mlxf_array_elementwise
 use, intrinsic :: iso_c_binding, only: c_float
-use mlxf_c_types,  only: MLXC_FLOAT64, MLXC_COMPLEX64
+use mlxf_c_types,  only: MLXC_FLOAT64, MLXC_COMPLEX64, MLXC_FLOAT16, MLXC_BFLOAT16
 use mlxf_c_array,  only: mlxc_array_free, mlxc_array_new_float32, mlxc_array_new_float64, mlxc_array_new_complex, &
                          mlxc_array_dtype, mlxc_array_new
 use mlxf_c_ops,    only: mlxc_add, mlxc_subtract, mlxc_multiply, mlxc_divide, mlxc_less, mlxc_less_equal, mlxc_greater, &
                          mlxc_greater_equal, mlxc_equal, mlxc_not_equal, mlxc_logical_and, mlxc_logical_or, &
-                         mlxc_negative, mlxc_logical_not, mlxc_exp
+                         mlxc_negative, mlxc_logical_not, mlxc_exp, mlxc_astype
 use mlxf_c_stream, only: mlxc_stream_free
 use mlxf_error,    only: mlxf_check
 use mlxf_device,   only: mlxf_require_device, mlxf_default_stream
@@ -57,18 +57,33 @@ contains
     end subroutine mlxf_binary
 
     ! a Fortran scalar as a 0-d array of a's kind: weak, so it never changes the result's kind (float32
-    ! with integer and boolean arrays)
+    ! with integer and boolean arrays). A 0-d array is not weak in MLX: a float32 one would promote a half
+    ! array to float32, so a half array's scalar is made in its own dtype (rounded through float32)
     module subroutine mlxf_weak_scalar( r, a, x, proc )
         type(mlx_array),  intent(inout) :: r
         type(mlx_array),  intent(in)    :: a
         real(real64),     intent(in)    :: x
         character(len=*), intent(in)    :: proc
+        type(mlxc_array)  :: h, res
+        type(mlxc_stream) :: s
+        integer(c_int)    :: dtype, ierr
         call mlxf_require_device(proc)
-        select case( mlxc_array_dtype(mlxf_handle(a, proc)) )
+        dtype = mlxc_array_dtype(mlxf_handle(a, proc))
+        select case( dtype )
             case( MLXC_FLOAT64 )
                 call adopt(r, mlxc_array_new_float64(real(x, c_double)), proc)
             case( MLXC_COMPLEX64 )
                 call adopt(r, mlxc_array_new_complex(real(x, c_float), 0._c_float), proc)
+            case( MLXC_FLOAT16, MLXC_BFLOAT16 )
+                h = mlxc_array_new_float32(real(x, c_float))
+                res = mlxc_array_new()
+                s = mlxf_default_stream(proc)
+                ierr = mlxc_astype(res, h, dtype, s)
+                call mlxf_check(mlxc_stream_free(s), proc)
+                call mlxf_check(mlxc_array_free(h), proc)
+                if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
+                call mlxf_check(ierr, proc)
+                call adopt(r, res, proc)
             case default
                 call adopt(r, mlxc_array_new_float32(real(x, c_float)), proc)
         end select

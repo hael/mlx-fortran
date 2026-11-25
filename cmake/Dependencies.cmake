@@ -14,7 +14,7 @@
 # XEMA's policy: a missing dependency fails loudly and says how to install it), not CMake's list of file names.
 set(FPHSA_NAME_MISMATCHED TRUE)
 find_package(MLXC CONFIG QUIET
-    HINTS "${CMAKE_SOURCE_DIR}/.deps/install")
+    HINTS "${PROJECT_SOURCE_DIR}/.deps/install")
 unset(FPHSA_NAME_MISMATCHED)
 # A config that was found but rejected itself (a dependency of it missing) leaves MLXC_DIR set: its own
 # reason is the useful message there, not the search.
@@ -32,10 +32,10 @@ if(NOT MLXC_FOUND)
     else()
         set(_mlxf_root "MLXC_ROOT: not set")
     endif()
-    if(EXISTS "${CMAKE_SOURCE_DIR}/.deps/install")
-        set(_mlxf_deps "${CMAKE_SOURCE_DIR}/.deps/install: present, but holds no mlx-c")
+    if(EXISTS "${PROJECT_SOURCE_DIR}/.deps/install")
+        set(_mlxf_deps "${PROJECT_SOURCE_DIR}/.deps/install: present, but holds no mlx-c")
     else()
-        set(_mlxf_deps "${CMAKE_SOURCE_DIR}/.deps/install: absent (scripts/build_mlx_deps.sh not run)")
+        set(_mlxf_deps "${PROJECT_SOURCE_DIR}/.deps/install: absent (scripts/build_mlx_deps.sh not run)")
     endif()
     find_program(_mlxf_brew brew)
     if(_mlxf_brew)

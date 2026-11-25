@@ -7,13 +7,15 @@
 # Runs, and fails on the first that fails:
 #   check_descr.py              one leading !@descr: line and at most one module or submodule per file
 #   check_rules.py              the rules reading can check (layout, inf, surface, cbind, libc, reexport,
-#                               cbstop, prints, state, arity, ctorcall, ctorexpr, entry, defs, findpkg, parity, mirror), with ledgers
+#                               cbstop, prints, state, arity, ctorcall, ctorexpr, entry, defs, findpkg, parity, mirror,
+#                               nanmax, cmakeroot), with ledgers
 #                               that may only shrink
 #   check_test_registry.py      the suite registry, the testers and the CTest areas agree
 #   check_guide_imports.py      every folder CLAUDE.md import names a file
 #   check_submodule_linkage.py  no submodule calls a private plain procedure of its module
 #   format_use_blocks.py        the one form of every use block, tree-wide
 #   restyle_fortran.py --check  the house layout of every Fortran file under src/ and test/, tree-wide
+#   ctest_budget.py --self-test the fast gate's transcript check on complete, failed and truncated runs
 # then warns, never fails, about Fortran sources under src/ and test/ that git does not track: the targets
 # glob their sources, so such a file builds here and is missing from a commit. Run restyle_fortran.py on the
 # files you touched to fix what its check reports. scripts/run_fast_gate.sh runs this first.
@@ -40,6 +42,7 @@ run scripts/check_guide_imports.py "$ROOT"
 run scripts/check_submodule_linkage.py "$ROOT"
 run scripts/format_use_blocks.py --check
 run scripts/restyle_fortran.py --check --tree
+run scripts/ctest_budget.py --self-test
 if git -C "$ROOT" --no-optional-locks rev-parse --is-inside-work-tree > /dev/null 2>&1; then
     untracked=$(git -C "$ROOT" --no-optional-locks ls-files --others --exclude-standard -- src test |
         grep -E '\.([Ff](90|08)|inc|c|h)$')

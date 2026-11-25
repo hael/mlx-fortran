@@ -1,6 +1,7 @@
-!@descr: the polar workspace's lifecycle: reference memos validated and prepared as resident tiles, teardown
+!@descr: the polar workspace's lifecycle: reference memos validated and prepared as resident tiles with their tail, teardown
 submodule (mlxf_toy_polarft_workspace) mlxf_toy_polarft_workspace_lifecycle
-use mlxf, only: mlx_from, mlx_eval, mlx_compile
+use mlxf, only: mlx_from, mlx_to, mlx_eval, mlx_compile, mlx_zeros, mlx_slice, mlx_slice_update, mlx_concatenate, &
+                mlx_fft, mlx_rfft, mlx_permute, reshape, conjg, real, aimag, MLX_DTYPES
 implicit none
 
 contains
@@ -12,7 +13,6 @@ contains
         integer,                  intent(out)   :: status
         complex(real32), allocatable :: tiles(:,:,:,:), g(:,:)
         real(real32),    allocatable :: rtiles(:,:,:,:)
-        type(mlx_function)           :: f
         integer                      :: n1, nk2, nrefs, ntiles, t, c, r, k, p, ierr
         call drop_tiles(self)
         status = 1
@@ -57,9 +57,30 @@ contains
         deallocate(tiles)
         self%refs = mlx_from(rtiles)
         deallocate(rtiles)
-        ! the distances and draw as one compiled function, traced at the first tile on the current device
-        f         = mlx_function(polar_tail_callback)
-        self%tail = mlx_compile(f, shapeless=.false.)
+        call finish_tiles(self, spec, nrefs, status)
+    end subroutine polarft_workspace_new
+
+    ! the tail of spec's form beside the tiles in self%refs, the tiles evaluated and the preparation recorded; a
+    ! failure drops the tiles (status /= 0, message)
+    subroutine finish_tiles( self, spec, nrefs, status )
+        class(polarft_workspace), intent(inout) :: self
+        type(polarft_tile_spec),  intent(in)    :: spec
+        integer,                  intent(in)    :: nrefs
+        integer,                  intent(out)   :: status
+        type(mlx_function) :: f
+        integer            :: ierr
+        status = 1
+        if( spec%tail == POLARFT_TAILS%metal )then
+            call polarft_workspace_new_tail(self, spec, ierr)
+            if( ierr /= 0 )then
+                call drop_tiles(self)
+                return
+            endif
+        else
+            ! the distances and draw as one compiled function, traced at the first tile on the current device
+            f         = mlx_function(polar_tail_callback)
+            self%tail = mlx_compile(f, shapeless=.false.)
+        endif
         call mlx_eval(self%refs, status=ierr)
         if( ierr /= 0 )then
             self%msg = 'polarft_workspace%new: the reference tiles could not be evaluated'
@@ -72,10 +93,165 @@ contains
         self%rt       = spec%rt
         self%bt       = spec%bt
         self%nrefs    = nrefs
-        self%ntiles   = ntiles
+        self%ntiles   = (nrefs + spec%rt - 1) / spec%rt
         self%prepared = .true.
         status        = 0
-    end subroutine polarft_workspace_new
+    end subroutine finish_tiles
+
+    module subroutine set_sections( self, bank, iref_from, nrefs, status )
+        class(polarft_workspace), intent(inout) :: self
+        type(mlx_array),          intent(in)    :: bank
+        integer,                  intent(in)    :: iref_from, nrefs
+        integer,                  intent(out)   :: status
+        integer, allocatable :: bs(:)
+        status   = 1
+        self%msg = ''
+        bs       = bank%shape()
+        if( size(bs) /= 2 )then
+            self%msg = 'polarft_workspace%set_sections: refused: the bank is not (pftsz nk, nspace)'
+            return
+        endif
+        if( iref_from < 1 .or. iref_from + bs(2) - 1 > nrefs )then
+            self%msg = 'polarft_workspace%set_sections: refused: the bank does not fit the references'
+            return
+        endif
+        if( self%l_sections .and. (self%sec_npts /= bs(1) .or. self%sec_nrefs /= nrefs) )then
+            self%msg = 'polarft_workspace%set_sections: refused: the bank does not match the sections held'
+            return
+        endif
+        call self%memo_ref%kill()
+        call self%memo_ref2%kill()
+        self%l_memos = .false.
+        if( iref_from == 1 .and. bs(2) == nrefs )then
+            ! a bank of every reference replaces the sections
+            self%sections = bank
+        else if( .not. self%l_sections )then
+            self%sections = mlx_slice_update(mlx_zeros([bs(1), nrefs], dtype=MLX_DTYPES%complex64), bank, &
+                &[1, iref_from], [bs(1), iref_from + bs(2) - 1])
+        else
+            self%sections = mlx_slice_update(self%sections, bank, [1, iref_from], [bs(1), iref_from + bs(2) - 1])
+        endif
+        self%sec_npts   = bs(1)
+        self%sec_nrefs  = nrefs
+        self%l_sections = .true.
+        status = 0
+    end subroutine set_sections
+
+    module subroutine memoize_sections( self, pftsz, nk, status )
+        class(polarft_workspace), intent(inout) :: self
+        integer,                  intent(in)    :: pftsz, nk
+        integer,                  intent(out)   :: status
+        type(mlx_array) :: z, ring(2), full, a2
+        status   = 1
+        self%msg = ''
+        if( .not. self%l_sections )then
+            self%msg = 'polarft_workspace%memoize_sections: refused: no projected sections'
+            return
+        endif
+        if( pftsz * nk /= self%sec_npts )then
+            self%msg = 'polarft_workspace%memoize_sections: refused: the sections are not pftsz nk points'
+            return
+        endif
+        z       = reshape(self%sections, [pftsz, nk, self%sec_nrefs])
+        ring(1) = z
+        ring(2) = conjg(z)
+        full    = mlx_concatenate(ring, dim=1)
+        self%memo_ref = mlx_slice(mlx_fft(full, dim=1), [1, 1, 1], [pftsz + 1, nk, self%sec_nrefs])
+        a2      = real(z) * real(z) + aimag(z) * aimag(z)
+        ring(1) = a2
+        ring(2) = a2
+        full    = mlx_concatenate(ring, dim=1)
+        self%memo_ref2 = conjg(mlx_rfft(full, dim=1))
+        call mlx_eval(self%memo_ref, status=status)
+        if( status == 0 ) call mlx_eval(self%memo_ref2, status=status)
+        if( status /= 0 )then
+            self%msg = 'polarft_workspace%memoize_sections: the memos could not be evaluated'
+            call self%memo_ref%kill()
+            call self%memo_ref2%kill()
+            return
+        endif
+        call self%sections%kill()
+        self%l_sections = .false.
+        self%l_memos    = .true.
+    end subroutine memoize_sections
+
+    module subroutine new_from_memos( self, spec, status )
+        class(polarft_workspace), intent(inout) :: self
+        type(polarft_tile_spec),  intent(in)    :: spec
+        integer,                  intent(out)   :: status
+        type(mlx_array) :: g(2), a, re, im, top(2), bottom(2), half(2)
+        integer         :: n1, nk2, nrefs, ntiles, npad
+        call drop_tiles(self)
+        status = 1
+        if( .not. self%l_memos )then
+            self%msg = 'polarft_workspace%new_from_memos: refused: no device memos (memoize_refs on the device route)'
+            return
+        endif
+        if( spec%pftsz < 2 .or. mod(spec%pftsz, 2) /= 0 .or. spec%nk < 1 .or. spec%rt < 1 .or. spec%bt < 1 )then
+            self%msg = 'polarft_workspace%new_from_memos: refused: invalid tile plan'
+            return
+        endif
+        n1     = spec%pftsz + 1
+        nk2    = 2 * spec%nk
+        nrefs  = self%sec_nrefs
+        ntiles = (nrefs + spec%rt - 1) / spec%rt
+        npad   = ntiles * spec%rt - nrefs
+        ! G per bin: rows 1..nk ft_ref2, rows nk+1..2nk conj(ft_ref), a column per reference, zero columns last
+        g(1) = self%memo_ref2
+        g(2) = conjg(self%memo_ref)
+        a    = mlx_concatenate(g, dim=2)
+        if( npad > 0 )then
+            g(1) = a
+            g(2) = mlx_zeros([n1, nk2, npad], dtype=MLX_DTYPES%complex64)
+            a    = mlx_concatenate(g, dim=3)
+        endif
+        a  = mlx_permute(reshape(a, [n1, nk2, spec%rt, ntiles]), [2, 3, 1, 4])
+        ! the tile G of every bin as the real block [[Re G, Im G], [-Im G, Re G]]
+        re = real(a)
+        im = aimag(a)
+        top(1)    = re
+        top(2)    = im
+        bottom(1) = -im
+        bottom(2) = re
+        half(1)   = mlx_concatenate(top, dim=2)
+        half(2)   = mlx_concatenate(bottom, dim=2)
+        self%refs = mlx_concatenate(half, dim=1)
+        call finish_tiles(self, spec, nrefs, status)
+        if( status /= 0 ) return
+        call self%memo_ref%kill()
+        call self%memo_ref2%kill()
+        self%l_memos = .false.
+    end subroutine new_from_memos
+
+    module subroutine get_section( self, iref, pft, status )
+        class(polarft_workspace), intent(inout) :: self
+        integer,                  intent(in)    :: iref
+        complex(real32),          intent(out)   :: pft(:,:)
+        integer,                  intent(out)   :: status
+        status   = 1
+        self%msg = ''
+        pft      = cmplx(0._real32, 0._real32, real32)
+        if( .not. self%l_sections )then
+            self%msg = 'polarft_workspace%get_section: refused: no projected sections'
+            return
+        endif
+        if( iref < 1 .or. iref > self%sec_nrefs .or. size(pft) /= self%sec_npts )then
+            self%msg = 'polarft_workspace%get_section: refused: no such section, or the wrong shape'
+            return
+        endif
+        call mlx_to(pft, reshape(mlx_slice(self%sections, [1, iref], [self%sec_npts, iref]), shape(pft)), status=status)
+        if( status /= 0 ) self%msg = 'polarft_workspace%get_section: the section could not be copied'
+    end subroutine get_section
+
+    pure module logical function has_sections( self )
+        class(polarft_workspace), intent(in) :: self
+        has_sections = self%l_sections
+    end function has_sections
+
+    pure module logical function has_memos( self )
+        class(polarft_workspace), intent(in) :: self
+        has_memos = self%l_memos
+    end function has_memos
 
     ! the reason the memos cannot be prepared under spec, or an empty string
     subroutine check_refs( spec, ft_ref, ft_ref2, msg )
@@ -104,6 +280,13 @@ contains
         class(polarft_workspace), intent(inout) :: self
         call drop_tiles(self)
         call self%kill_maps()
+        call self%sections%kill()
+        call self%memo_ref%kill()
+        call self%memo_ref2%kill()
+        self%l_sections = .false.
+        self%l_memos    = .false.
+        self%sec_npts   = 0
+        self%sec_nrefs  = 0
     end subroutine polarft_workspace_kill
 
     ! the reference tiles, the blocks in flight and the record of their preparation; the shift maps stay
@@ -112,6 +295,11 @@ contains
         integer :: i
         call self%refs%kill()
         call self%tail%kill()
+        call self%tail_kernel%kill()
+        call self%tail_kernel_rows%kill()
+        call self%tail_par%kill()
+        self%l_tail_rows = .false.
+        self%tail_form   = POLARFT_TAILS%graph
         do i = 1, POLARFT_NSLOTS
             call self%slots(i)%dists%kill()
             call self%slots(i)%irots%kill()

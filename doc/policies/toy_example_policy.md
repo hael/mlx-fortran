@@ -72,11 +72,14 @@ points of section 7 the same day.
 
 ## 4. The mirror ledger and its check
 
-- `scripts/toy_mirror.txt` holds one line per public type and per type-bound procedure of every `mlxf_toy_*`
-  module: the toy's module and name, then SIMPLE's module and name, or `addition` with a reason. Its header
-  records the SIMPLE commit that was read. Code comments never carry a commit.
+- `scripts/toy_mirror.txt` holds one line per public type, per type-bound procedure and per public module
+  procedure of every `mlxf_toy_*` module (SIMPLE's `vol_pad2ref_pfts_opt` and `fproject_polar_batch_opt` are
+  module procedures, so their toys are too): the toy's module and name, then SIMPLE's module and name, or
+  `addition` with a reason. A tester's entries (`mlxf_toy_*_tester`) are the registry's and need no line. Its
+  header records the SIMPLE commit that was read. Code comments never carry a commit.
 - Rule `mirror` of `scripts/check_rules.py` fails when:
-  - a public type or type-bound procedure of a `mlxf_toy_*` module is missing from the ledger;
+  - a public type, type-bound procedure or public module procedure of a `mlxf_toy_*` module is missing from the
+    ledger;
   - a line names a SIMPLE counterpart but the toy's name differs from it;
   - an `addition` line has no reason.
 - The rule and the ledger enter with the first refactoring under this policy, in the same change, with a
@@ -101,7 +104,10 @@ with its submodules `_core`, `_memo`, `_block`, `_shiftmap`), its GPU workspace 
 (`mlxf_toy_eul_prob_tab.f90`). No code is exempt any more: the ledger `scripts/toy_mirror.txt` lists every
 public type and binding of the three modules, and rule `mirror` holds it to the code. The toy's differences
 from SIMPLE are in [`mlxf_kernel_families.md`](../implementation_notes/planned/mlxf_kernel_families.md),
-section 3.
+section 3. The projector of family B1 (run `mlxf_kernel_k2`, 2026-11-25: `mlxf_toy_projector` with its workspace
+and `mlxf_toy_projector_pft_batch`) was written under the policy from the start; its two mirrored module
+procedures (`fproject_polar_batch_opt`, `vol_pad2ref_pfts_opt`) brought public procedures into the ledger
+(section 4), and its differences are in the same note's section 4.
 
 ## 7. Names, arity and drivers (Hans, 2026-11-24: "Accept all three")
 

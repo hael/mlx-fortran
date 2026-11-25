@@ -1,16 +1,21 @@
 #!/bin/bash
-# scripts/run_parts.sh -- one split of the dense table among simultaneous part processes, measured.
+# scripts/run_parts.sh -- one split of a benchmark among simultaneous part processes, measured.
 #
-#   scripts/run_parts.sh EXEC NPARTS NTHR OUTDIR cases=FILE [key=value ...]
+#   scripts/run_parts.sh EXEC NPARTS NTHR OUTDIR [key=value ...]
 #
-# Starts NPARTS processes of `EXEC test=bench_polar_table suite=time nparts=NPARTS part=<p> nthr=NTHR` (plus
-# the keys given: cases=, case=, bt=, rt=), each in OUTDIR/part_<p> with OMP_NUM_THREADS=NTHR and, unless it
-# is set, MLX_ENABLE_TF32=0. Every process makes its data and writes its ready file; when all are ready the
-# go file is created and they score together. One row of the series table (RUN_PARTS_TSV, default
+# Starts NPARTS processes of `EXEC test=BENCH suite=SUITE nparts=NPARTS part=<p> nthr=NTHR` (plus the keys given:
+# for the dense table cases=, case=, bt=, rt=, passes=, ...), each in OUTDIR/part_<p> with OMP_NUM_THREADS=NTHR and, unless it
+# is set, MLX_ENABLE_TF32=0. BENCH, SUITE and the rate's unit come from RUN_PARTS_BENCH (default
+# bench_polar_table), RUN_PARTS_SUITE (default time) and RUN_PARTS_UNIT (default pairs); the benchmark writes its
+# rows to BENCH.tsv with the rate in column 20, the work in 21, the MLX peak and cache in 26 and 27 and the median
+# pass in 30. Every process makes its data and writes its ready file; when all are ready the
+# go file is created and they work together. One row of the series table (RUN_PARTS_TSV, default
 # OUTDIR/../run_parts.tsv) records the split:
-#   the seconds from go to the last exit, the processes' rates (pairs per second, best of 3) and their sum,
+#   the seconds from go to the last exit, the processes' rates (units per second over the best pass) and their sum,
 #   the largest and the summed peak footprint, maximum resident size, MLX peak and MLX cache, the machine's
-#   lowest free and available memory (sampled once a second from go), the load before and after, the status.
+#   lowest free and available memory (sampled once a second from go), the load before and after, the status,
+#   the keys, and last the sum of the processes' median rates (each its units over its median pass).
+# OUTDIR/summary.txt adds the spread of the processes' exits (the last less the first).
 # OUTDIR/summary.txt has the same per process, with each digest line.
 #
 # Before anything starts:
@@ -27,8 +32,11 @@
 # Processes that are not this script's are never touched. macOS and Linux.
 set -u
 usage() { sed -n '2,5p' "$0" >&2; exit 2; }
-[ $# -ge 5 ] || usage
+[ $# -ge 4 ] || usage
 EXEC=$1; NPARTS=$2; NTHR=$3; OUTDIR=$4; shift 4
+BENCH="${RUN_PARTS_BENCH:-bench_polar_table}"
+SUITE="${RUN_PARTS_SUITE:-time}"
+UNIT="${RUN_PARTS_UNIT:-pairs}"
 case "$NPARTS$NTHR" in *[!0-9]*|'') usage ;; esac
 [ "$NPARTS" -ge 1 ] && [ "$NTHR" -ge 1 ] || usage
 [ -x "$EXEC" ] || { echo "run_parts: no executable $EXEC" >&2; exit 2; }
@@ -79,7 +87,7 @@ foreign() {
 }
 header() {
     [ -s "$TSV" ] && return
-    printf 'date\tdir\tnparts\tnthr\tstatus\tgo_to_last_exit_s\tsum_pairs_per_s\tmin_pairs_per_s\tmax_pairs_per_s\tmax_footprint_B\tsum_footprint_B\tmax_rss_B\tsum_rss_B\tmax_mlx_peak_B\tsum_mlx_peak_B\tsum_mlx_cache_B\tmin_free_B\tmin_available_B\tmem_total_B\tpredicted_sum_footprint_B\tload_before\tload_after\tkeys\n' > "$TSV"
+    printf 'date\tdir\tnparts\tnthr\tstatus\tgo_to_last_exit_s\tsum_%s_per_s\tmin_%s_per_s\tmax_%s_per_s\tmax_footprint_B\tsum_footprint_B\tmax_rss_B\tsum_rss_B\tmax_mlx_peak_B\tsum_mlx_peak_B\tsum_mlx_cache_B\tmin_free_B\tmin_available_B\tmem_total_B\tpredicted_sum_footprint_B\tload_before\tload_after\tkeys\tsum_median_%s_per_s\n' "$UNIT" "$UNIT" "$UNIT" "$UNIT" > "$TSV"
 }
 row() {
     header
@@ -155,7 +163,7 @@ while [ $p -le "$NPARTS" ]; do
     mkdir -p "$d"
     (
         cd "$d" || exit 1
-        $TIMER "$EXEC" test=bench_polar_table suite=time nparts="$NPARTS" part=$p nthr="$NTHR" go="$GO" \
+        $TIMER "$EXEC" test="$BENCH" suite="$SUITE" nparts="$NPARTS" part=$p nthr="$NTHR" go="$GO" \
             ${KEYS[@]+"${KEYS[@]}"} > stdout.log 2> time.log
         echo $? > rc
         now > end_time
@@ -200,30 +208,36 @@ UP_AFTER=$(uptime)
 # ---- the record ----
 field() { awk -v pat="$1" '$0 ~ pat {print $1}' "$2" | tail -1; }
 {
-    echo "run_parts: $NPARTS processes, $NTHR threads each, keys: ${KEYS[*]}"
+    echo "run_parts: $NPARTS processes, $NTHR threads each, $BENCH suite=$SUITE, keys: ${KEYS[*]}"
     echo "executable: $EXEC"
     echo "MLX_ENABLE_TF32=$MLX_ENABLE_TF32 OMP_NUM_THREADS=$OMP_NUM_THREADS"
     echo "uptime before: $UP_BEFORE"
     echo "uptime after:  $UP_AFTER"
     echo "go at $T_GO"
 } > "$OUTDIR/summary.txt"
+SUMMED=0
+T_FIRST=""
 T_LAST=0; SUMR=0; MINR=0; MAXR=0; MAXFP=0; SUMFP=0; MAXRSS=0; SUMRSS=0; MAXPK=0; SUMPK=0; SUMCA=0
 p=1
 while [ $p -le "$NPARTS" ]; do
     d="$OUTDIR/part_$p"
     rc=$(cat "$d/rc"); te=$(cat "$d/end_time")
+    T_FIRST=$(awk -v a="$T_FIRST" -v b="$te" 'BEGIN{if (a == "" || b < a) print b; else print a}')
     [ "$rc" = 0 ] || status=failed
-    rate=$(awk -F'\t' 'NR > 1 {v = $20} END{print v + 0}' "$d/bench_polar_table.tsv" 2>/dev/null)
-    peak=$(awk -F'\t' 'NR > 1 {v = $26} END{print v + 0}' "$d/bench_polar_table.tsv" 2>/dev/null)
-    cache=$(awk -F'\t' 'NR > 1 {v = $27} END{print v + 0}' "$d/bench_polar_table.tsv" 2>/dev/null)
+    rate=$(awk -F'\t' 'NR > 1 {v = $20} END{print v + 0}' "$d/$BENCH.tsv" 2>/dev/null)
+    peak=$(awk -F'\t' 'NR > 1 {v = $26} END{print v + 0}' "$d/$BENCH.tsv" 2>/dev/null)
+    cache=$(awk -F'\t' 'NR > 1 {v = $27} END{print v + 0}' "$d/$BENCH.tsv" 2>/dev/null)
+    # the median rate: the useful units over the median pass (0 when the row has no median)
+    mrate=$(awk -F'\t' 'NR > 1 {v = ($30 + 0 > 0) ? $21 / $30 : 0} END{printf "%.5e\n", v + 0}' "$d/$BENCH.tsv" 2>/dev/null)
     if [ "$OS" = Darwin ]; then
         rss=$(field 'maximum resident set size' "$d/time.log"); fp=$(field 'peak memory footprint' "$d/time.log")
     else
         rss=$(awk '/Maximum resident set size/{print $NF * 1024}' "$d/time.log"); fp=$rss
     fi
+    mrate=${mrate:-0}; SUMMED=$(awk -v a="$SUMMED" -v b="$mrate" 'BEGIN{printf "%.5e", a + b}')
     rate=${rate:-0}; peak=${peak:-0}; cache=${cache:-0}; rss=${rss:-0}; fp=${fp:-0}
-    echo "part $p: exit $rc, end $te, pairs_per_s $rate, mlx_peak_B $peak, mlx_cache_B $cache, max_rss_B $rss, peak_footprint_B $fp" >> "$OUTDIR/summary.txt"
-    grep -h -E '^ +(digest|part) ' "$d/stdout.log" >> "$OUTDIR/summary.txt"
+    echo "part $p: exit $rc, end $te, ${UNIT}_per_s $rate, median_${UNIT}_per_s $mrate, mlx_peak_B $peak, mlx_cache_B $cache, max_rss_B $rss, peak_footprint_B $fp" >> "$OUTDIR/summary.txt"
+    grep -h -E '^ +(digest|part|passes) ' "$d/stdout.log" >> "$OUTDIR/summary.txt"
     set -- $(awk -v p=$p -v tl="$T_LAST" -v te="$te" -v sr="$SUMR" -v mn="$MINR" -v mx="$MAXR" -v r="$rate" -v mf="$MAXFP" \
     -v sf="$SUMFP" -v f="$fp" -v mr="$MAXRSS" -v srs="$SUMRSS" -v rs="$rss" -v mp="$MAXPK" -v sp="$SUMPK" -v pk="$peak" \
     -v sc="$SUMCA" -v ca="$cache" 'BEGIN{
@@ -238,17 +252,20 @@ while [ $p -le "$NPARTS" ]; do
     p=$((p + 1))
 done
 ELAPSED=$(awk -v a="$T_GO" -v b="$T_LAST" 'BEGIN{printf "%.3f", b - a}')
+SPREAD=$(awk -v a="$T_FIRST" -v b="$T_LAST" 'BEGIN{printf "%.3f", b - a}')
 {
     echo "status: $status"
     echo "go_to_last_exit_s: $ELAPSED"
-    echo "sum_pairs_per_s: $SUMR (per process $MINR to $MAXR)"
+    echo "exit_spread_s: $SPREAD (the last exit less the first)"
+    echo "sum_${UNIT}_per_s: $SUMR (per process $MINR to $MAXR)"
+    echo "sum_median_${UNIT}_per_s: $SUMMED"
     echo "peak_footprint_B: largest $MAXFP, summed $SUMFP (predicted $PRED)"
     echo "max_rss_B: largest $MAXRSS, summed $SUMRSS"
     echo "mlx_peak_B: largest $MAXPK, summed $SUMPK; mlx_cache_B summed $SUMCA"
     echo "machine: lowest free $MINFREE B, lowest available $MINAVAIL B of $TOTAL B"
     echo "load: before $LOAD_BEFORE, after $LOAD_AFTER"
 } >> "$OUTDIR/summary.txt"
-row "$status$TAB$ELAPSED$TAB$SUMR$TAB$MINR$TAB$MAXR$TAB$MAXFP$TAB$SUMFP$TAB$MAXRSS$TAB$SUMRSS$TAB$MAXPK$TAB$SUMPK$TAB$SUMCA$TAB$MINFREE$TAB$MINAVAIL$TAB$TOTAL$TAB$PRED$TAB$LOAD_BEFORE$TAB$LOAD_AFTER$TAB${KEYS[*]}"
+row "$status$TAB$ELAPSED$TAB$SUMR$TAB$MINR$TAB$MAXR$TAB$MAXFP$TAB$SUMFP$TAB$MAXRSS$TAB$SUMRSS$TAB$MAXPK$TAB$SUMPK$TAB$SUMCA$TAB$MINFREE$TAB$MINAVAIL$TAB$TOTAL$TAB$PRED$TAB$LOAD_BEFORE$TAB$LOAD_AFTER$TAB${KEYS[*]}$TAB$SUMMED"
 cat "$OUTDIR/summary.txt"
 case "$status" in
     ok) exit 0 ;;

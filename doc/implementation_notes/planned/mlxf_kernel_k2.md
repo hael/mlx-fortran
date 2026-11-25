@@ -1,6 +1,9 @@
 # K2: the polar projection (B1) as a toy `projector`, and the protected-update probe (run `mlxf_kernel_k2`, on the M5 Ultra)
 
-Status, 2026-11-25: planned and ruled (the maintainer's go); run in the session on the M5 Ultra, in order K1, K8, K2. Base: the commit that holds this plan (the maintainer commits it with the pending
+Status, 2026-11-25: delivered by run `mlxf_kernel_k2` (Phases 0 to 6, [report](../completed/mlxf_kernel_k2_report.md)):
+the fused gather and the device route kept; the probe's outcome C by the letter, B by the diagnosis (a ruling for
+K6). Planned and ruled (the maintainer's go); run in the session on the M5 Ultra, in order K1, K8, K2 (R0: K2 before
+K8's remaining phases). Base: the commit that holds this plan (the maintainer commits it with the pending
 work; the run pins the hash in Phase 0 and records it). The code this note was checked against is `1e0ae97` with
 the working tree of 2026-11-25 (parity Phases 4 and 10, the polar and pose oracles). SIMPLE is read at
 `d354efee2`. Machine: the M5 Ultra only (arun host `local`; 30 cores, 103.1 GB, the only GPU). Supersedes:
@@ -648,3 +651,408 @@ the probe is not finished); the phase's gates.
 ## Progress
 
 (one entry per phase, written by the run)
+
+### Phase 0, the base and the probes (2026-11-25, 11:54 to 12:08, M5 Ultra)
+
+- **Machine and base.** Apple M5 Ultra, 30 cores, 103,079,215,104 B; macOS 27.2.1; GNU Fortran 16.2.0; CMake 4.5.1;
+  MLX 0.32.4 and mlx-c 0.8.0 (Homebrew). Base `6a4d5f9` plus the maintainer's uncommitted tree of 2026-11-25 with
+  K1's kept result and K8's Phase 0 (ruling R0): 65 lines of `git status`, checksums in
+  `scratch/keep/phase0/base_checksums.txt`. SIMPLE read at `d354efee201216677191f577f488a31d8de4a115`. Evidence below is
+  under `/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k2_work/`.
+- **Builds** (the run's recipe, `scratch/build.sh`): Debug 7 s, Release 16 s from scratch with `MLXF_WERROR=ON`, 0
+  warnings, fast gate 9 of 9 in both (`scratch/keep/phase0/{build,gate}_{Debug,Release}.log`).
+- **Counts** (*measured*, `scratch/keep/phase0/unit_*_{debug,release}.log`), the same in Debug and Release: `unit_core` 82,
+  `unit_array` 193, `unit_ops` 2,462, `unit_linalg` 632, `unit_fft` 194, `unit_compile` 63, `unit_fast` 94,
+  `unit_kernels` 1,281 (`polarft_calc` 327, `polar_shiftmap` 794, `eul_prob_tab` 105, `polarft_tail` 55).
+  Decision 25 as R0 restates it, except `unit_core`: 82 in Debug too (R0: 80 to 82). One GPU device.
+- **Decision 23's digests, twice** (`scratch/keep/phase0/digests_{a,b}.log`, `scratch/digests.sh`): 16 lines, identical in the
+  two runs and equal to K1's record: accuracy on the CPU device `6C2823C473029BD2` (seed 1), `C8B49BC7A6676AF2` (seed
+  2, every plan, one call in order, identity), `B754BBDACD79D649` (reversed), `1D586C19F54A9F3A` (shuffled); on
+  the GPU `EF6D23726EFF3EF7`, `9FADF409D4A20F7D`, `A58EB9A70285325E`; `time` 2500_4 B=64 R=250 on the GPU
+  `3457E99553A08BFD`. All are repeatable; every later phase that edits a family-A file is held to them.
+- **The oracles alone** (the reports' recipe, `-std=f2018 -Wall -Wextra -Werror` at `-O0 -g -fcheck=all` and
+  `-O2`; `scratch/keep/phase0/oracle_*_{O0,O2}.log`): `mlxf_oracle_dft` 12 of 12 (largest 7.98e-15), `mlxf_oracle_projection`
+  32 of 32 (largest 2.14e-08, the window read to seven digits against its 5e-7), `mlxf_oracle_gridding` 13 of 13
+  (8.8e-16), at both levels.
+- **The probes** (`scratch/keep/phase0/probes/`, `k2_probe.f90` against the Release install):
+  1. A Metal kernel with a **complex64 output of rank 2** (37 by 5) builds and runs: 0 of 185 values differ in their
+     bits from Fortran's. The float32 `(2 npts, T)` fallback read by `mlx_bitcast` also agrees. Decision 8's output
+     stands as complex64.
+  2. A **float32 atomic output** with colliding `atomic_fetch_add_explicit` (65,536 threads, 7 bins and a rank-0
+     total, init 0) builds and runs: every bin exact (the addends are multiples of 1/8). The uint32
+     compare-and-exchange fallback also works.
+  3. **`mlx_take` without a dimension**, complex64 cube of 325³ = 34,328,125 elements, 74,938,500 positions (one
+     tile of 250): correct values; GPU 0.0060 s, CPU device 2.07 s (best of 3 after a warm-up); `mlx_peak_memory`
+     1.474e9 B on both (*measured*: cube 0.275e9, positions 0.300e9, result 0.600e9 B, one result being replaced).
+  4. **`mlx_rfftn` of a 320³ real array** on the GPU: 0.0020 s, peak 0.791e9 B; on a seeded 16³ cube 1.90e-7 of the
+     largest magnitude against `oracle_dft_3d` (1.6 float32 epsilons).
+  5. **The stencil base** `sign(t) floor(|t| + 0.5)`, graph (`mlx_sign`, `floor`, `abs`) and kernel
+     (`metal::sign`, `metal::floor`, `metal::fabs`), equals Fortran's `nint` on ±0.5, ±1.5, ±2.5, 124.5 and -0;
+     both give 1 on the largest float32 below 0.5 (0.49999997), where `nint` gives 0: the sum rounds up. Such a
+     coordinate is a near tie (decision 14) and is not judged.
+  6. A **`threadgroup` array declared in the kernel's body** (64 floats, a barrier, a group sum) builds and runs
+     correctly (for decision 21's question only).
+  None meets a stop.
+- **Dry run of the fixtures** (`scratch/keep/phase0/probes/dryrun.log`; the tester's rules restated in double precision from
+  the single-precision inputs: SIMPLE's polar table in float32, Euler angles uniform on the sphere through SIMPLE's
+  `euler2m`, rounded once): with seeded draws the 8-cube needed 1 redraw in 3 seeds and the chain's 16-cube 1 in 3,
+  and every fast fixture then has **0 near ties**; the phantom's three rotations have 0. The bench's golden-angle
+  spiral (2,500 directions, in-plane angle 0) has **16,637 near ties** of 27,755,000 samples (0.060 %, *measured*;
+  the expected share is 3 × 2e-4) and no direction beyond the reach of decision 8 (L = 162). The edge fixture's
+  four edge queries reach dimension 1's taps ±8 and ±7 beyond -6 .. 6 (the period-13 map), the boundary queries
+  the taps 5 .. 7 and -7 .. -5, and the shell N/2 = 3 at 90° the tap 7 = M/2 + 1.
+- **SIMPLE read again** (`git show d354efee2:<path>`). Dummy lists kept: `new(self, ldim, smpd)`, `set_rmat(self,
+  rmat, ft)`, `pad_fft(self, self_out)`, `expand_cmat(self)`, `kill_expanded(self)`, `is_expanded(self)`,
+  `kill(self)`, `fproject_polar_batch_opt(vol_pad, eulspace, nspace, pftc, refs_state)`, `vol_pad2ref_pfts_opt(self,
+  vol_pad, eulspace, state, iseven)`, `get_kfromto(self)`, `get_polar_coords(self, dim, coords)`. Differences
+  beyond section 3's table: (a) `image%new` has two more optional dummies, `fft_nthreads` and `fft_measure`, dropped
+  with `wthreads`; (b) SIMPLE's `projector` does not override `kill`: `image%kill` leaves `cmat_exp`, and
+  `read_mask_filter_reproject_refvols` calls `kill` before `kill_expanded`; the toy's `kill` releases the whole
+  workspace (the cube with it), so its `kill_expanded` after `kill` finds nothing; (c) `fproject_polar_batch_opt`
+  takes `vol_pad` with `intent(in)`; the toy's is `intent(inout)` (its workspace builds the kernel objects and adds
+  the seconds); (d) `apod_fast_device` returns 0 for `|x| > 1.5`, a branch the stencil never reaches; the toy keeps
+  it; (e) `pad_fft` writes each voxel at `1 + modulo(i - 1 - N/2, M)` and scales by the float32 reciprocal of M³,
+  which the toy restates; (f) the polar table is computed in single precision (`dang = twopi/nrots`,
+  `sin(angtab) k`), which the toy restates; (g) `get_polar_coords` stops on a dimension other than 1 or 2, where the
+  toy refuses. None contradicts section 3.
+- **What it means, in short.** The base is as R0 describes it and its digests are stable; every wrapper the plan
+  needs works at the bench's sizes (the complex64 output and the float32 atomic output, untested before, both
+  work); the fast fixtures are free of near ties and the bench has 0.06 % of its samples near one.
+
+### Phase 1, the graph form on the small fixtures (2026-11-25, 12:08 to 12:33, M5 Ultra)
+
+- **Files.** New: `src/test/mlxf_toy_projector.f90` (type `projector`), `mlxf_toy_projector_workspace.f90` (type
+  `projector_workspace`: the padded transform, the expanded cube, the gather), `mlxf_toy_projector_pft_batch.f90`
+  (`fproject_polar_batch_opt` and its resident form), `mlxf_toy_projector_tester.f90` (suite `projector`),
+  `mlxf_oracle_projection_tester.f90` (suite `oracle_projection`). Changed: `mlxf_test_defs.f90` (`parameters`
+  gains `nspace`, `nstates`, `box_crop`; SIMPLE's `KBWINSZ`, `KBALPHA`, `OSMPL_PAD_FAC`, `MAXIMGBATCHSZ`;
+  `PROJ_FORMS`, `POLARFT_REF_ROUTES`, `PROJ_TILE_DEFAULT`, `PROJ_TG_DEFAULT`, `PROJ_TIE_MARGIN`, `PROJ_BUDGET_B`,
+  `PROJ_FIXTURE_ERR`, the record `fproject_spec`), `mlxf_toy_polarft_calc.f90` and `_core.f90` (`get_kfromto`,
+  `get_polar_coords` with SIMPLE's single-precision table made in `new`, `vol_pad2ref_pfts_opt` on the host route),
+  `mlxf_test_registry.f90` (two rows), `test.inf`, `test/CMakeLists.txt` (the area's comment),
+  `scripts/toy_mirror.txt` (3 calculator lines, 12 projector lines, 2 batch lines, 13 workspace lines),
+  `scripts/check_rules.py` (rule `mirror` for public module procedures, decision 22),
+  `doc/policies/toy_example_policy.md` (section 4).
+- **`oracle_projection`** asserts the 12 and 32 self-checks against their own limits: 44 checks, host only.
+- **The tolerance, frozen before the judged seeds** (`scratch/keep/phase1/calibration/calib1.run.log`, a build of
+  the tree whose seeded loop held seed 1 alone): the largest error over the judged samples of seed 1 on both
+  devices (*measured*): phantom 3.296e-7 (CPU) and 3.266e-7 (GPU); seeded cube 3.573e-7 and 3.621e-7; the phantom's
+  edge and boundary queries 9.241e-7 and **1.502975125e-6** (GPU); the shell N/2 at the edge 2.802e-7 and 3.968e-7.
+  **`PROJ_FIXTURE_ERR` = 1.502975125e-06** (*measured*, below the ceiling 1e-5), the gate 3.006e-6.
+- **Judged** (`scratch/keep/phase1/gate/unit_kernels_release.log`, the same in Debug): seed 2 4.300e-7 (CPU) and
+  5.015e-7 (GPU), seed 3 6.476e-7 and 6.365e-7; the edge queries and the controls as in calibration (the controls:
+  constant spectrum 3.18e-7, identity at the oracle's own polar coordinates 2.70e-7 and 2.88e-7, the wave's values
+  9.0e-8, Hermitian pairs 2.79e-7 and 2.75e-7 against twice the gate). The three fast fixtures have 0 near ties
+  (asserted). Repeatability (three fresh projections, bit for bit) and the lifecycle (100 cycles: `mlx_live_count`
+  and `mlx_active_memory` return) hold on both devices.
+- **Plants** (`scratch/keep/phase1/plants/`, each a patched copy of the tree built apart, the repository never
+  edited): weights not normalised and the factor 8 omitted fail the constant spectrum (and most fixtures); sine and
+  cosine exchanged fails the identity control; positions in C order and the rotation transposed fail the wave's
+  pattern; no conjugate for h < 0 fails the Hermitian pairs; half-to-even rounding fails the edge and boundary
+  queries; period M on dimension 1 fails the edge queries and the shell N/2; one window coefficient changed by 1e-4
+  of itself fails the seeded cube on every seed (the tolerance has teeth); a bank that changes by one unit per pass
+  fails the repeatability. The restored tree passes. Decision 22's plants (`scratch/keep/phase1/rule_plants/`): a
+  public procedure without a ledger line, a mirrored line whose name differs, an addition with six dummies, each
+  fail `check_rules.py`; a mirrored public procedure with six dummies passes (the exemption).
+- **Gates** (`scratch/keep/phase1/gate/`): Debug and Release from scratch with `MLXF_WERROR=ON`, 0 warnings, fast gate
+  9 of 9; `scripts/check_tree.sh` passed; both formatters on the 9 touched Fortran files. Counts (*measured*, both
+  builds): `unit_kernels` 1,383 (1,281 + `oracle_projection` 44 + `projector` 58: 29 per device), every other area
+  as in Phase 0 except `unit_core` 80: the registry suite's two checks of a reused freed address, which macOS's
+  allocator decides (R0's 80 to 82). Decision 23: the 16 digest lines equal Phase 0's (`scratch/keep/phase1/digests.log`).
+  `projector` takes 0.28 s in Release.
+- **Decisions taken under delegation.**
+  1. The calibration set is the judged samples of the phantom with its edge and boundary queries (the edge fixture
+     is the phantom, and decision 14 judges those queries in full) and of the seeded cube of seed 1. The edge
+     queries read the high end of the phantom's spectrum, where the transform's rounding (relative to the largest
+     coefficient) is largest beside the few terms a sample sums; they set the number.
+  2. The wave control (decision 15, row 3) judges its values relative to the largest sample the wave can give,
+     8 max|F| = 4: the transform's rounding enters all 27 terms of a sample, the wave only one or two. Its pattern
+     is exact: a sample counts as non-zero above half the smallest non-zero oracle value (the threshold is asserted
+     above 1e-5). The wave lives on a 12-grid padded by 1 (M = N), shells 1 and 2, so no tap leaves -6 .. 5.
+  3. The identity control is judged against the oracle at its own polar coordinates (`oracle_proj_polar_coords`),
+     not the calculator's table: the first run of the sine-cosine plant passed because the oracle had been given
+     the planted table. The fixtures keep decision 5's widened table.
+  4. The lifecycle reads the live count and active memory after `mlx_synchronize`: a GPU buffer is released when the
+     work that used it completes, and one run in six failed without the wait.
+  5. `pad_fft` evaluates the padded transform (decision 10 lists the waits at `expand_cmat` and in the projection):
+     the stages are then timed apart, and the transform takes 2 ms at the bench (Phase 0).
+  6. The padded real cube is staged in the padded projector's own volume (`rmat`, M³), as SIMPLE stages it before
+     its in-place transform: the one host copy decision 10 names.
+  7. `projector%ws` is a public component, the counterpart of SIMPLE's public `cmat_exp` ("made public for the sole
+     purpose of GPU optimization"); `fproject_polar_batch_opt` reaches the gather through it, and the projector's
+     refusals are kept with the workspace's (`set_message`), so one `message()` reports both.
+  8. `fproject_spec` carries the polar points and the rotation rows (rule `arity`); the resident form is named
+     `fproject_polar_batch_resident`.
+  9. Rule `mirror` asks no line for a tester's public entries (`mlxf_toy_*_tester`): they are the registry's.
+  10. `get_polar_coords` takes `self` with `intent(inout)`: a refused dimension is reported through `message()`.
+- **Deviation.** The development runs before the freeze printed seeds 2 and 3 with the ceiling as the gate; the
+  frozen number comes from the separate seed-1 build by the rule above (the largest of seed 1's judged samples) and
+  nothing was chosen from those prints.
+- **What it means, in short.** The graph form of SIMPLE's polar gather agrees with the double-precision oracle to
+  1.5e-6 of a sample's terms on both devices, every control has teeth, and family A did not move.
+
+### Phase 2, the fused kernel (2026-11-25, 12:33 to 12:37, M5 Ultra)
+
+- **Files.** `src/test/mlxf_toy_projector_workspace.f90` (the kernel `fproject_polar_batch_opt_kernel`, its two
+  objects per launch, the refusal on the CPU device; written with Phase 1 and first exercised here),
+  `mlxf_toy_projector_tester.f90` (the fused form's runs, `test_forms_agree`, `test_fused_refusals`),
+  `mlxf_test_registry.f90` (the suite's comment: above 0.5 s in Release).
+- **The kernel** (decision 8): grid `[npts, T, 1]`, one thread per sample, SIMPLE's order of operations, real and
+  imaginary parts accumulated apart, a complex64 output `(npts, T)`; inputs the cube, the points `(2, npts)`, the
+  tile's rotation rows `(2, 3, T)` and the 17 window numbers; `E`, `L`, `NPTS` and the factor 8 as template
+  integers. The phantom's tiles are 2 and 1 (a tile of one direction hands in six rotation numbers, which MLX
+  passes in `constant` memory), the seeded cube's 4 and 2.
+- **Under Phase 1's frozen gate 3.006e-6, on the GPU** (`scratch/keep/phase2/gate/unit_kernels_release.log`,
+  *measured*): phantom 2.925e-7; seeded cube 4.095e-7 (seed 1), 3.257e-7 (2), 5.600e-7 (3); edge and boundary
+  queries 1.503e-6; shell N/2 3.968e-7; controls: constant spectrum 7.9e-8, identity 2.32e-7, wave values 1.6e-8
+  (its pattern exact), Hermitian pairs 2.35e-7. Repeatability and the lifecycle (two kernel objects per projector)
+  hold. **The two forms differ by at most 2.60e-7 (phantom) and 4.77e-7 (seeded) of a sample's terms**; 28 of 36
+  and 134 of 144 samples differ in their bits (*measured*, reported).
+- **Refusals.** On the CPU device the fused form is refused through `message()` ("runs on the GPU only") and leaves
+  `refs_state` at zero; a threadgroup of 2,048 is refused by `set_fproject_tile`; after either, the same projector
+  projects in the graph form. A source that does not compile (plant `k11`: a missing semicolon) makes every fused
+  projection a refusal ("the projection of a tile of directions failed", MLX's reason in `mlx_last_error()`), and
+  the projector then projects in the graph form (`scratch/keep/phase2/plants/k11_no_compile.run.log`).
+- **Plants on the kernel's source** (`scratch/keep/phase2/plants/`, GPU, the fused form's checks): weights not
+  normalised (k1) and the factor 8 omitted (k2) fail the constant spectrum and every fixture; positions in C order
+  (k4) and the rotation rows read as a 3 by 2 array (k5) fail the wave's pattern; half-to-even rounding (`rint`, k7)
+  fails the edge and boundary queries; the coefficient c1 changed by 1e-4 of itself (k9) fails the phantom and every
+  seed; a pass-dependent factor (k10) fails both repeatability checks. The shared plants fail the fused checks too:
+  sine and cosine exchanged (identity), no conjugate (Hermitian pairs and the fixtures), period M on dimension 1
+  (edge queries and shell N/2).
+- **Gates** (`scratch/keep/phase2/gate/`): Debug and Release from scratch, 0 warnings, fast gate 9 of 9,
+  `check_tree.sh` passed, formatters run. Counts (*measured*): `unit_kernels` 1,421 in both (`projector` 96: 32 on
+  the CPU, 64 on the GPU), every other area unchanged (`unit_core` 82 in Debug, 81 in Release: the allocator's
+  reused address). No family-A file was edited, so decision 23 was not re-run. `projector` takes 0.57 s in Release.
+- **Decisions taken under delegation.**
+  1. The kernel objects live in the projector's workspace, so a new projector (each parity, as SIMPLE makes one)
+     builds them again; MLX compiles the source once per process, and an object is 0.2 ms (binding policy,
+     section 12). Decision 8 had them built once and reused over the parities.
+  2. The 15 coefficients, 2/W and 1/W reach the kernel as a 17-element input made by the same function as the
+     graph's scalars, so both forms use the same bits; the kernel keeps SIMPLE's `|x| > 1.5` branch.
+  3. The kernel-source plant for a transposed rotation reads the two rows as a 3 by 2 array (the kernel receives
+     rows 1 and 2 only); the shared plant transposes the matrix in `fproject_polar_batch_opt`.
+- **What it means, in short.** The fused gather passes every gate the graph form passes, under the same frozen
+  tolerance; it agrees with the graph form to 5e-7 of a sample's terms and fails, as it should, on every plant.
+
+### Phase 3, the chained test with A (2026-11-25, 12:37 to 12:45, M5 Ultra)
+
+- **Files.** `mlxf_toy_polarft_calc.f90` (`set_ref_route`, the member `route`), `_core.f90` (`set_ref_route`; the
+  device route of `vol_pad2ref_pfts_opt`), `_memo.f90` (the device route of `memoize_refs` and `memoize_ref_bins`),
+  `_shiftmap.f90` (`new_shiftmap`, and so `setup_shiftmaps`, refused on the device route),
+  `mlxf_toy_polarft_workspace.f90` and `_lifecycle.f90` (the sections, the device memos, the tiles made from them:
+  `set_sections`, `memoize_sections`, `new_from_memos`, `has_sections`, `has_memos`; the tail and evaluation of
+  `new` moved into `finish_tiles`, which both paths call), `mlxf_test_defs.f90` (`PROJ_CHAIN_ERR_HOST`,
+  `PROJ_CHAIN_ERR_DEVICE`), `mlxf_toy_projector_tester.f90` (suite `projector_chain`), `mlxf_test_registry.f90`,
+  `scripts/toy_mirror.txt` (6 lines).
+- **The chain** (decision 12's row): two seeded 16-cubes (even, odd) padded to 32, pftsz 16, shells 2 to 7, six
+  seeded directions shared by the parities, four particles per parity made from the oracle's sections (a CTF in
+  [0.2, 1) times a rotated section plus noise of 0.3 of the shell's rms); SIMPLE's loop per parity, then
+  `memoize_refs`, the particles, `memoize_ref_bins` (tile plan 4 references by 3 particles), one block per half
+  with its full rows. The oracle chain: `oracle_proj_gather` on `oracle_proj_padded_field` (times 8) in double
+  precision, then every rotation's distance on the full rings (`polar_full_ring`), compared by
+  `polar_compare_rows` (family A's measure).
+- **Frozen before the judged seeds** (`scratch/keep/phase3/calibration/calib_chain.run.log`, seed 1 alone, *measured*):
+  host route 2.611e-7 (CPU graph), 3.750e-7 (GPU graph), 3.561e-7 (GPU fused); device route 3.269e-7, 4.168e-7,
+  3.561e-7. **`PROJ_CHAIN_ERR_HOST` = 3.750339276e-07, `PROJ_CHAIN_ERR_DEVICE` = 4.168030557e-07** (gates 7.50e-7
+  and 8.34e-7; the ceiling 1e-4).
+- **Judged** (`scratch/keep/phase3/gate/unit_kernels_release.log`): seeds 2 and 3, host route 2.09e-7 to 3.87e-7,
+  device route 2.14e-7 to 3.93e-7, over both devices and both forms; no minimising rotation or validity differs in
+  any run. **The routes' rows differ by at most 1.9e-7 of the host rows' largest |d|** (*measured*; 380 to 566 of
+  1,536 row values differ in their bits: the device route's float32 ring transforms against the host route's
+  double-precision ones). Three runs of each route and form give the same rows bit for bit.
+- **Refusals** (asserted): a block scored before `memoize_ref_bins` on either route; `setup_shiftmaps` and
+  `new_shiftmap` on the device route; `set_ref_route` while the projected sections wait.
+- **Plants** (`scratch/keep/phase3/plants/`): the two parities exchanged where the bank enters the calculator (both
+  routes) fails all 18 row gates; a bank that changes by one unit per projection fails the six repeatability checks.
+- **Gates** (`scratch/keep/phase3/gate/`): Debug and Release from scratch, 0 warnings, fast gate 9 of 9,
+  `check_tree.sh` passed, formatters run on the 9 touched Fortran files. Counts (*measured*, both builds):
+  `unit_kernels` 1,486 (`projector_chain` 65: 22 on the CPU, 43 on the GPU), `unit_core` 82, the others unchanged.
+  Decision 23: the 16 digest lines equal Phase 0's (`scratch/keep/phase3/digests.log`). `projector_chain` takes 0.30 s
+  in Release.
+- **Decisions taken under delegation.**
+  1. The chain's tolerances are calibrated over both devices and both forms on seed 1, the largest per route (the
+     fused form exists in this phase, unlike Phase 1's calibration).
+  2. The oracle's rows are the ring formula in double precision on the oracle's sections, with `mlxf_oracle_polar`'s
+     full ring and row comparison; its memo-level oracle (`polar_memo_rows`) takes single-precision memos and is not
+     used.
+  3. The device route's memos are float32 FFTs on the device (the full ring `[z; conj z]` by `mlx_fft`, bins 1 to
+     pftsz + 1; `|z|²` repeated by `mlx_rfft`, conjugated); the tiles are assembled there by concatenation and a
+     permutation into `new`'s layout; after `memoize_ref_bins` only the tiles remain, so `kill_ref_bins` then
+     `memoize_ref_bins` is refused on this route (no memos), where the host route makes them again.
+  4. On the device route the projection evaluates the bank (as the resident form does) and `memoize_refs` evaluates
+     the memos: the host waits there, where decision 10 has it wait nowhere before `memoize_ref_bins`. The bank is
+     then complete before the parity's cube is released, and `suite=time` ends at evaluated banks without the bench
+     holding a handle.
+  5. `new` still allocates and zeroes the host memos `ft_ref` and `ft_ref2` on the device route (family A's `new`
+     is unchanged); Phase 4 reports the footprint with them.
+- **What it means, in short.** The projected references reach family A's dense rows on both routes within 4e-7 of
+  the double-precision chain, the routes agree to 2e-7, and the device route keeps the references on the device
+  from the volume to the tiles.
+
+### Phase 4, the bench and the verdict (2026-11-25, 12:45 to 13:04, M5 Ultra)
+
+- **Files.** New: `src/test/mlxf_bench_projector.f90` (`test=bench_projector`, suites `time`, `chain`, `accuracy`; keys
+  checked per suite; one row per invocation in `./bench_projector.tsv`, the series columns 20, 21, 26, 27 and 30 at
+  the places `run_parts.sh` reads). Changed: `scripts/run_parts.sh` (`RUN_PARTS_BENCH`, `RUN_PARTS_SUITE`,
+  `RUN_PARTS_UNIT`, defaults `bench_polar_table`, `time`, `pairs`; the summary adds the exits' spread),
+  `mlxf_test_registry.f90` (`BENCHES`), `mlxf_test_defs.f90` (`PROJ_BENCH_ERR`), `mlxf_toy_polarft_calc.f90`,
+  `_memo.f90`, `mlxf_toy_polarft_workspace.f90`, `_lifecycle.f90` (`get_ref_pft`, mirrored, and the workspace's
+  `get_section`; a bank of every reference replaces the sections), `mlxf_toy_projector.f90` and
+  `mlxf_toy_projector_workspace.f90` (`get_cmat`, mirrored, and `copy_transform`), `mlxf_toy_projector_tester.f90`
+  (both checked in `projector_chain`: 10 checks), `scripts/toy_mirror.txt` (4 lines).
+- **The launcher's defaults are unchanged** (`scratch/keep/phase4/polar_split/`): one split of `bench_polar_table`
+  (2500_4, 64 by 250, one process, 30 threads) wrote a series row whose header equals K1's byte for byte, 1.767e7
+  pairs/s, 5.98 s from go to exit, the digest `3457E99553A08BFD`, peak footprint 20.81e9 B (K1: 1.77e7, 6.05 s,
+  20.81e9 B).
+- **Accuracy** (`scratch/keep/phase4/accuracy/`; 16 directions, one in 156 of the spiral; 177,632 samples, of which
+  **107 are near a tie**, reported apart: their largest error 7.0e-6). Seed 1 (*measured*): CPU graph 1.4503e-5, GPU
+  graph **1.451613272e-05**, GPU fused 1.4145e-5. **`PROJ_BENCH_ERR` = 1.451613272e-05** (frozen, ceiling 1e-4; the
+  error is the float32 coordinates near 124, not the transform, since the oracle reads the device's own). Seed 2
+  judged against the gate 2.903e-5: 1.3378e-5 (CPU graph), 1.3388e-5 (GPU graph), 1.3545e-5 (GPU fused).
+- **The sweeps** (decision 9, one process, 30 threads, best of 3 after a warm-up; `scratch/keep/phase4/sweep/`,
+  load 2.0 to 3.3): graph T = 64 1.0043 s, T = 250 1.4209 s; fused T = 250: g = 32 0.0532 s, 64 0.0546, 256 0.0531,
+  1024 0.0532; T = 2500: 32 0.0397, 64 **0.0384**, 256 0.0388, 1024 0.0385. **Frozen at 12:58:37, before the verdict
+  runs** (`sweep/canonical_frozen_at.txt`): **graph T = 64; fused T = 2500, g = 64.** Every tile shape and
+  threadgroup of a form gives the same bits (the graph's two tiles one digest pair, the fused form's eight another).
+- **Decision 19's verdict: the fused kernel is kept** (`scratch/keep/phase4/splits/time_{graph,fused}/`, both forms
+  interleaved, the launcher's guard and load wait before each, load 1.9 to 2.6). The driver (both banks evaluated
+  from the two host volumes) at one process, median pass (*measured*): graph 0.9765 and 0.9652 s, fused 0.0397 and
+  0.0395 s, **ratio 24.6 and 24.4**; from go to the last exit 5.437/1.620 = 3.36 and 5.383/1.619 = 3.32. At three
+  processes from go to the last exit: 10.700/2.031 = **5.27** and 12.696/2.014 = **6.30**. Six processes (reported):
+  21.061/2.690 = 7.83. Every ratio is above 1.30 in both invocations. The fused driver's stages (best pass): pad and
+  transform 0.019 s, expansion 0.0095 s, projection 0.006 s (graph: 0.920 s).
+- **Decision 11's verdict: the device route is kept** (`splits/chain_{host,device}/`, fused form, one process, two
+  invocations): from the evaluated banks to the reference bins ready, host route 1.0464 and 1.0457 s, device route
+  0.0322 and 0.0298 s: **ratio 32.5 and 35.1** (the 30 % rule is 1.30). The dense score of 64 particles per parity
+  takes 0.030 s after the host route and 0.020 s after the device route; its digests are equal over every pass and
+  part of a route (`D551260813537086` host, `13290575B1F951CC` device: the routes' memos differ in rounding).
+- **Decision 18's splits** (*measured*; work = 4 passes of 55,510,000 samples per process, the go window also holding
+  the digests of every pass or, for the chain, the particles and score):
+
+  | Series | n | go to last exit (s) | exit spread (s) | summed median rate | work rate | max footprint (B) | summed footprint (B) | MLX peak (B) | lowest free (B) |
+  | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+  | time, graph T 64 | 1 | 5.437 / 5.383 | 0 | 5.68e7 / 5.75e7 | 4.08e7 / 4.12e7 | 5.21e9 | 5.21e9 | 2.00e9 | 67.7e9 |
+  | time, graph | 3 | 10.700 / 12.696 | 1.66 / 1.40 | 8.22e7 / 6.70e7 | 6.23e7 / 5.25e7 | 5.21e9 | 15.62e9 | 2.00e9 | 57.4e9 |
+  | time, graph | 6 | 21.061 | 3.07 | 7.73e7 | 6.33e7 | 5.21e9 | 31.25e9 | 2.00e9 | 41.6e9 |
+  | time, fused T 2500 g 64 | 1 | 1.620 / 1.619 | 0 | 1.40e9 / 1.41e9 | 1.37e8 / 1.37e8 | 4.15e9 | 4.15e9 | 1.94e9 | 68.9e9 |
+  | time, fused | 3 | 2.031 / 2.014 | 0.03 / 0.04 | 3.79e9 / 3.33e9 | 3.28e8 / 3.31e8 | 4.15e9 | 12.46e9 | 1.94e9 | 60.6e9 |
+  | time, fused | 6 | 2.690 | 0.28 | 7.43e9 | 4.95e8 | 4.15e9 | 24.92e9 | 1.94e9 | 48.0e9 |
+  | chain, host | 1 | 4.983 / 4.983 | 0 | 5.09e7 / 5.09e7 | 4.46e7 / 4.46e7 | 9.36e9 | 9.36e9 | 4.01e9 | 63.8e9 |
+  | chain, device | 1 | 0.774 / 0.752 | 0 | 8.19e8 / 8.57e8 | 2.87e8 / 2.95e8 | 12.69e9 | 12.69e9 | 4.69e9 | 73.1e9 |
+  | chain, device | 3 | 2.275 | 1.30 | 2.18e9 | 2.93e8 | 12.70e9 | 38.09e9 | 4.69e9 | 49.3e9 |
+  | chain, device | 6 | 2.798 | 1.18 | 2.98e9 | 4.76e8 | 12.70e9 | 76.17e9 | 4.69e9 | 0.76e9 |
+
+  Every split ran (the guard predicted within 0.1 % of the measured sums; the largest, chain on the device route at six
+  processes, 76.2e9 B against the limit 82.5e9 B, left 0.76e9 B free). **The two rate measures disagree by far more
+  than 10 % in every row** (work rate over summed medians 0.07 to 0.88): the go window holds work besides the passes,
+  the bank digests of every pass (5,000 copies of one section each) and, for the chain, the particles and the score;
+  with the fused form the passes are a small part of it. Decision 19's rule was applied as written on both measures
+  and holds on both. The roadmap's conditions (reported): no total rate at 3 or 6 processes falls below 0.8 of one
+  process's on either measure; the summed footprint exceeds 51.5e9 B for the device route's chain at six processes
+  (76.2e9 B), of which each process holds 11.3e9 B of MLX cache (resident set 1.37e9 B).
+- **The seam, measured** (one process): after the time suite the device holds the two banks, 444,104,960 B active
+  (*measured*, decision 10's 444,080,000 B of samples); MLX peak 1.94e9 B (fused) and 2.00e9 B (graph T = 64); peak
+  footprint 4.15e9 and 5.21e9 B, of which the calculator's host memos are 0.89e9 B (decision 11) and MLX's cache
+  2.4e9 to 3.4e9 B. The chain: MLX peak 4.01e9 B (host route) and 4.69e9 B (device route); resident set 4.93e9 and
+  1.36e9 B; peak footprint 9.36e9 and 12.69e9 B (the device route's MLX cache 11.3e9 B).
+- **Applied.** Both kept paths stay; the defaults stay the references (`PROJ_FORMS%graph`, `POLARFT_REF_ROUTES%host`).
+  Nothing was removed.
+- **Gates** (`scratch/keep/phase4/gate_final/`): Debug and Release from scratch after the freeze, 0 warnings, fast gate
+  9 of 9, `check_tree.sh` passed, formatters run. Counts (*measured*, both builds): `unit_kernels` 1,496
+  (`projector_chain` 75), `unit_core` 82, the others unchanged. Decision 23: the 16 digest lines equal Phase 0's
+  (`scratch/keep/phase4/digests_final.log`).
+- **Decisions taken under delegation.**
+  1. `suite=time` and `suite=chain` read `passes=` (3 by default) as K1's bench does; a part projects all 2,500
+     directions of both parities (decision 18), `nparts=` and `part=` only label it.
+  2. The time suite's calculator is made before the go and kept over the passes (the canonical driver is the
+     per-parity loop); the chain's is made per pass. The banks' digests come from `get_ref_pft` (SIMPLE's
+     `polarft_calc%get_ref_pft`, mirrored) reference by reference after each pass, outside the pass's time; the
+     accuracy oracle reads the device's padded transform through `get_cmat` (SIMPLE's `image%get_cmat`, mirrored),
+     which is held between `pad_fft` and `expand_cmat` only.
+  3. The chain's own stage is measured as the time of `vol_pad2ref_pfts_opt` less the projection stage (the copy-out
+     and `set_ref_pft` on the host route, `set_sections` on the device route), plus `memoize_refs` and
+     `memoize_ref_bins`: "from the evaluated banks to the reference bins ready".
+  4. The verdict of decision 19 at one process is read on the median pass and on the time from go to the last exit;
+     both hold. The work rate of R0 counts the warm-up and the three timed passes of every part.
+  5. The bench's estimate counts 24 B per gathered term of a graph tile (values, weights, positions, products), not
+     the plan's 16 B, and adds the chain's tiles and a bank's copy.
+- **What it means, in short.** At SIMPLE's bench the fused gather makes the reprojection of a state 24 times faster at
+  one process (0.04 s against 0.97 s) and 5 to 6 times faster from go to the last exit at three processes; it is kept.
+  The device route turns the 1.05 s of host transforms and packing between the banks and the bins into 0.03 s; it is
+  kept. What is left of the fused driver is the pad and transform and the expansion (73 % of 0.039 s).
+
+### Phase 5, the protected-update probe (2026-11-25, 13:05 to 13:15, M5 Ultra)
+
+- **Files.** New: `src/test/mlxf_bench_insert_probe.f90` (`test=bench_insert_probe suite=probe`). Changed:
+  `mlxf_test_defs.f90` (`PROBE_ERR_CAP`), `mlxf_test_registry.f90` (`BENCHES`), `doc/collaboration/apple_questions.md`
+  (question 26, section K). `src/test/test.inf` already names the benchmarks.
+- **The probe** (decision 20): one thread per (pixel, plane) adds its 27 deposits, the numerator 4 omega W c as
+  (real, imaginary) and the density omega W q, with `atomic_fetch_add_explicit` to float32 outputs under
+  `atomic_outputs` and `init_value` 0 (81 atomic additions per pixel); the control is the same source with plain
+  read-modify-write additions. The deposit rule is the oracle's `lattice_insert` (the disc, the skip of pixels
+  without data or with three negative h taps, the halo), the window the projector's. `oracle_grid_selfcheck` is
+  asserted first (13 of 13). A pixel whose coordinate lies within `PROJ_TIE_MARGIN` of a half-integer is given no
+  data in both (decision 14's rule: 0, 4, 7,725 and 7,000 pixels in the four cases). The float32 atomic output
+  built (Phase 0), so no fallback was needed.
+- **Results** (`scratch/keep/phase5/probe_run/probe.log`, Release, one process, load 2.7 to 2.5; *measured*):
+
+  | Case | Planes | Deposits | Error over the sum of terms: numerator / density | Coordinates alone (double precision) | Voxels whose bits differ from run 1 (largest of the repeats) | Largest such difference | Control loses (density / numerator moduli) | Seconds per batch, protected / unprotected |
+  | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+  | the oracle's 3 planes, n = 8 | 3 | | 1.73e-6 / 1.68e-6 | 1.62e-6 | 81 (2 repeats) | | 58 % | |
+  | seeded, n = 16 | 64 | | 6.52e-6 / 6.52e-6 | 5.34e-6 | 2,555 (2 repeats) | | 96 % | |
+  | n = 160, seeded orientations | 1,000 | 284,313,105 | 1.07e-4 / 1.07e-4 | 1.09e-4 | 1,139,762 of 2,341,350 (9 repeats) | 9.7e-7 | 59 % / 33 % | 0.0369 / 0.0042 |
+  | n = 160, one orientation | 1,000 | 281,043,000 | 3.25e-6 / 8.07e-5 | 8.12e-5 | 43,169 of 2,341,350 (9 repeats) | 2.4e-6 | 98 % / 86 % | 0.0072 / 0.0026 |
+
+  Scratch: MLX peak 2.60e8 B less 1.78e8 B of resident grids (and their running sums), pixels and one batch's
+  planes: **8.1e7 B**. Deposits per touched voxel: 232 (seeded), 6,509 (one orientation); the plan's 120 per voxel
+  is over all 2,341,350 voxels.
+- **The outcome, by decision 20's conditions: C** (outside the cap 1e-5 at both large cases). **The diagnosis:** the
+  excess is set by single-precision coordinates, not by the protection. The same deposits in double precision from
+  coordinates rounded to float32 differ from the oracle by 1.09e-4 and 8.1e-5, as much as the atomic kernel does;
+  the error grows with the box (1.6e-6 at n = 8, 5.3e-6 at 16, 1.1e-4 at 160), as the rounding of `h R(1,a) +
+  k R(2,a)` near 80 moves the window's edge weights, which dominate the voxels they alone reach; the kernel's own
+  variation between runs is at most 2.4e-6 of a voxel's terms, and one million float atomic additions of 0.1 sum
+  to within 3.5e-6 of the exact value, closer than a sequential float32 sum
+  (`scratch/keep/phase5/atomic_sum_rounding.log`). **Read that way the atomic update is in character B**: correct to
+  the coordinates' floor and not bit-repeatable (49 % of the voxels differ between runs with seeded orientations,
+  1.8 % with one orientation). Every form that computes coordinates in single precision (`mlx_scatter_add`, the
+  sorted form) meets the same floor. **Ruling needed** (reserved, section 6): whether K6 starts from C by the letter
+  (`mlx_scatter_add` and the sorted form) or from B (a deterministic form required, the atomic kernel the speed
+  reference), and whether its cap is judged against an oracle on the kernel's single-precision coordinates.
+- **Exit items.** The unprotected control differs from the oracle on the one-orientation case (it loses 98 % of the
+  density's mass; 43,179 voxels beyond the cap), so the fixture collides. The Apple question is question 26.
+- **Gates** (`scratch/keep/phase5/gate/`): Debug and Release from scratch, 0 warnings, fast gate 9 of 9,
+  `check_tree.sh` passed, formatters run. Counts (*measured*): `unit_kernels` 1,496, `unit_core` 80 (Debug) and 81
+  (Release), the others unchanged (the probe is a benchmark, outside the areas). Decision 23's digests equal Phase 0's
+  (`scratch/keep/phase5/digests.log`).
+- **Decisions taken under delegation.**
+  1. Pixels near a tie get no data in both the kernel and the oracle (the projection's rule), since a pixel whose
+     stencil rounds apart moves its deposits to other voxels; their counts are reported.
+  2. The numerator's error is over the sum of |terms| of the voxel, computed by the oracle itself on the data's
+     moduli (the weights are positive); the density's terms are all positive, so its sum is the density.
+  3. The batches' outputs are added by the graph after each launch (two launches of 500 planes), as SIMPLE adds
+     batches into resident grids; the seconds are per launch with its evaluation, best of three.
+  4. The probe reports, not gated, the deposits in double precision from single-precision coordinates (the
+     diagnosis above), and the error of 1e6 atomic additions in a separate scratch probe.
+  5. The suite is named `probe` and reads no key.
+- **What it means, in short.** The atomic insertion builds, runs 0.037 s per 500 planes at n = 160, and is
+  as accurate as single-precision coordinates allow, but not bit-repeatable; plain additions lose most of the mass.
+  By the letter the outcome is C; by the diagnosis it is B. The cap 1e-5 cannot be met by any form on float32
+  coordinates at this box, so K6's plan needs the ruling above before it is written.
+
+### Phase 6, the record (2026-11-25, 13:16 to 13:25, M5 Ultra)
+
+- **Files.** New: `doc/implementation_notes/completed/mlxf_kernel_k2_report.md`. Changed:
+  `doc/implementation_notes/planned/mlxf_kernel_families.md` (section 2a's row B1; section 4: B1 as built, the
+  seam with measured bytes, "Differences from SIMPLE (B1)", the numbers, the open decision on the intermediate
+  array closed; section 5: the probe; section 8's row K2; its Progress), `mlxf_roadmap.md` (the rank 2 row,
+  decision 14's measurement), `doc/policies/toy_example_policy.md` (section 6), `test_environment_policy.md` (the
+  area `kernels`, the benches), `binding_contract_policy.md` (section 12: the complex64 output, the float32 atomic
+  output and a body's `threadgroup` array, as measured), `doc/implementation_notes/README.md` (the index),
+  `doc/history/2026-11.md` (the entry), `README.md` (the status and the `src/test/` row), this note's banner.
+- **Exit.** The report exists; `scripts/check_tree.sh` passes (`scratch/keep/phase6/check_tree.log`); `git status`
+  shows the base's paths and the file table's only (`scratch/keep/phase6/status.txt`); Debug and Release from
+  scratch, 0 warnings, fast gate 9 of 9 (`scratch/keep/phase6/gate/`).
+- **What it means, in short.** K2's results are in the notes that cite them; the one open question is the ruling
+  K6 needs on the probe's reading.

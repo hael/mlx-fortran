@@ -6,12 +6,12 @@
 ! evaluated on the grid SIMPLE's rule gives, in real64, with no Bessel table and no transform.
 module mlxf_toy_eul_prob_tab_tester
 use, intrinsic :: iso_fortran_env, only: real32, real64
-use mlxf,                  only: mlx_set_default_device, mlx_default_device, mlx_live_count
-use mlxf_test_defs,        only: POLAR_MAP_CAP_L2, SHIFTMAP_WINDOW, parameters, polar_map_results
+use mlxf,                  only: mlx_set_default_device, mlx_default_device, mlx_live_count, MLX_DEVICES
+use mlxf_test_defs,        only: POLAR_MAP_CAP_L2, SHIFTMAP_WINDOW, POLARFT_TAILS, parameters, polar_map_results
 use mlxf_toy_polarft_calc, only: polarft_calc
 use mlxf_toy_eul_prob_tab, only: eul_prob_tab
 use mlxf_oracle_polar,     only: polar_full_ring, polar_keyed_u
-use mlxf_test_utils,       only: assert_true, assert_int, device_name, bits_equal, test_devices
+use mlxf_test_utils,       only: assert_true, assert_int, device_name, bits_equal, test_devices, tests_run
 implicit none
 private
 public :: run_all_eul_prob_tab_tests
@@ -37,13 +37,14 @@ real(real64), parameter :: RHO_STEP    = 4._real64
 real(real32), parameter :: TEMP_SHARP = 1.e4_real32
 
 ! the analytic fixture: rings of the references (per half) and of the particles, the CTFs, the weights per half,
-! and each particle's source reference, rotation (0-based) and cell of the window's grid
+! each particle's source reference, rotation (0-based) and cell of the window's grid, and the tail's form
 type :: tab_fixture
     real(real64)    :: w(NK, 2)
     complex(real32) :: rref(PFTSZ, NK, NREF, 2)
     complex(real32) :: x(PFTSZ, NK, NPTCL)
     real(real32)    :: ctf(PFTSZ, NK, NPTCL)
     integer         :: src(NPTCL), rot(NPTCL), irho(NPTCL), ialpha(NPTCL)
+    integer         :: tail = POLARFT_TAILS%graph
 end type tab_fixture
 
 contains
@@ -57,13 +58,26 @@ contains
         do i = 1, size(devs)
             call mlx_set_default_device(devs(i))
             write(*,'(a)') '  on the '//device_name(devs(i))
-            call test_fill_order_and_draws(devs(i))
-            call test_blocks_slots_range(devs(i))
-            call test_coarse_maps(devs(i))
-            call test_refusals(devs(i))
+            call run_device_tests(devs(i), POLARFT_TAILS%graph)
+            if( devs(i) == MLX_DEVICES%gpu )then
+                write(*,'(a)') '  on the gpu, with the fused tail'
+                call run_device_tests(devs(i), POLARFT_TAILS%metal)
+            endif
         end do
         call mlx_set_default_device(original)
     end subroutine run_all_eul_prob_tab_tests
+
+    ! the device's checks with one form of the tail, and their count
+    subroutine run_device_tests( dev, form )
+        integer, intent(in) :: dev, form
+        integer :: n0
+        n0 = tests_run
+        call test_fill_order_and_draws(dev, form)
+        call test_blocks_slots_range(dev, form)
+        call test_coarse_maps(dev, form)
+        call test_refusals(dev, form)
+        write(*,'(a,i0,a)') '    ', tests_run - n0, ' checks of the device'
+    end subroutine run_device_tests
 
     ! ---- the fixture -------------------------------------------------------------------------------------
 
@@ -200,6 +214,8 @@ contains
         nbad = nbad + refused(pftc)
         call pftc%set_tile_plan(2, 3)
         nbad = nbad + refused(pftc)
+        call pftc%set_tail_form(fx%tail)
+        nbad = nbad + refused(pftc)
         do h = 1, 2
             do j = 1, NREF
                 call pftc%set_ref_pft(j, cmplx(fx%rref(:, :, j, h), kind=real64), h == 1)
@@ -242,8 +258,8 @@ contains
     ! one fill of every particle: the batch comes back with the even half first; an unshifted particle's entry
     ! against its source reference is the known rotation; every entry is the calculator's own score of the same
     ! block with the oracle module's keyed variates, bit for bit; an entry's distance is its row's at its rotation
-    subroutine test_fill_order_and_draws( dev )
-        integer, intent(in) :: dev
+    subroutine test_fill_order_and_draws( dev , form )
+        integer, intent(in) :: dev, form
         type(tab_fixture)         :: fx
         type(polarft_calc)        :: pftc
         type(eul_prob_tab)        :: tab
@@ -254,6 +270,7 @@ contains
         logical                   :: same
         write(*,'(a)') 'test_fill_order_and_draws'
         fx = make_fixture()
+        fx%tail = form
         call feed_calc(pftc, fx, nbad)
         call assert_int(0, nbad, 'the calculator is set and memoized: '//pftc%message())
         call make_driver(tab, pftc, n)
@@ -305,14 +322,16 @@ contains
             &'the fill records its host seconds')
         call tab%kill
         call tab%kill
-        call assert_int(live0, mlx_live_count(), device_name(dev)//': the driver holds no array of its own')
+        ! the fused form's workspaces keep the rows variant the first block with rows built
+        call assert_int(live0 + merge(2, 0, form == POLARFT_TAILS%metal), mlx_live_count(), device_name(dev)//&
+            &': the driver holds no array of its own')
         call pftc%kill
     end subroutine test_fill_order_and_draws
 
     ! blocks of one tile of particles with two in flight, and a part of the range, give the entries of one
     ! block per half, bit for bit: a particle keeps its place in its tile, which is what its entry depends on
-    subroutine test_blocks_slots_range( dev )
-        integer, intent(in) :: dev
+    subroutine test_blocks_slots_range( dev , form )
+        integer, intent(in) :: dev, form
         type(tab_fixture)         :: fx
         type(polarft_calc)        :: pftc
         type(eul_prob_tab)        :: tab
@@ -322,6 +341,7 @@ contains
         logical                   :: same
         write(*,'(a)') 'test_blocks_slots_range'
         fx = make_fixture()
+        fx%tail = form
         call feed_calc(pftc, fx, nbad)
         call make_driver(tab, pftc, n)
         call assert_int(0, nbad + n, 'the calculator and the driver are made')
@@ -354,8 +374,8 @@ contains
     ! the fill sets the two coarse maps up by SIMPLE's rule and reads each particle's candidates on the window:
     ! the band ends at the rule's shell, every mode lies on the rule's grid, and its loss is the direct residual
     ! at that cell of that grid
-    subroutine test_coarse_maps( dev )
-        integer, intent(in) :: dev
+    subroutine test_coarse_maps( dev , form )
+        integer, intent(in) :: dev, form
         type(tab_fixture)         :: fx
         type(polarft_calc)        :: pftc
         type(eul_prob_tab)        :: tab
@@ -366,6 +386,7 @@ contains
         integer                   :: nbad, n, i, j, c, cands(NCAND, NPTCL)
         write(*,'(a)') 'test_coarse_maps'
         fx = make_fixture()
+        fx%tail = form
         call feed_calc(pftc, fx, nbad)
         call make_driver(tab, pftc, n)
         call assert_int(0, nbad + n, 'the calculator and the driver are made')
@@ -409,8 +430,8 @@ contains
     end subroutine test_coarse_maps
 
     ! what the driver cannot carry out is refused with its reason, and the calculator's refusals come through
-    subroutine test_refusals( dev )
-        integer, intent(in) :: dev
+    subroutine test_refusals( dev , form )
+        integer, intent(in) :: dev, form
         type(tab_fixture)  :: fx
         type(polarft_calc) :: pftc
         type(eul_prob_tab) :: tab
@@ -418,6 +439,7 @@ contains
         integer            :: nbad, i
         write(*,'(a)') 'test_refusals'
         fx    = make_fixture()
+        fx%tail = form
         temps = TEMP_SHARP
         call tab%fill_tab_range(1, NPTCL)
         call assert_true(index(tab%message(), 'new_pipeline') > 0, device_name(dev)//': a driver that was not '//&

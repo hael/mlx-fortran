@@ -33,7 +33,8 @@ Rules:
   arity      no procedure has more than five dummy arguments; one that needs more takes a spec type.
              Exempt: every bind(c) procedure and interface (the generated layer's, and callbacks whose
              signature C fixes; a bind(c) procedure written for any other reason is a review finding), and a
-             procedure of a toy module (mlxf_toy_*) that the mirror ledger lists as mirrored: it keeps
+             procedure of a toy module (mlxf_toy_*) that the mirror ledger lists as mirrored (a binding's
+             implementation or a public module procedure): it keeps
              SIMPLE's dummy list, as a bind(c) procedure keeps C's. An addition obeys the rule
   ctorcall   no array constructor holds a reference to a library function by name: the mlx_* and mlxf_*
              names of src/core/mlxf.f90's public statements (the generics that keep an intrinsic's name,
@@ -77,12 +78,21 @@ Rules:
              that its Progress has not closed; and the count of pending lines equals PARITY_PENDING (a ratchet:
              lower it in the same change)
   mirror     scripts/toy_mirror.txt, the mirror ledger (doc/policies/toy_example_policy.md), has one line per
-             public type and per public type-bound procedure of every toy module (a module mlxf_toy_<stem>
-             under src/test): the toy's module and name (T, or T%binding), then SIMPLE's module and name, or
-             `addition` and a reason. A type or binding without a line fails; so does a line that names
+             public type, per public type-bound procedure and per public module procedure of every toy module (a
+             module mlxf_toy_<stem> under src/test): the toy's module and name (T, T%binding or the procedure),
+             then SIMPLE's module and name, or `addition` and a reason (a tester's entries, *_tester, are the
+             registry's, not the toy's, and need no line). A type, binding or procedure without a line fails; so
+             does a line that names
              nothing the code has, a name listed twice, a mirrored line whose toy name differs from SIMPLE's or
              whose module is not mlxf_toy_<stem> beside simple_<stem>, an addition without a reason, and a
              ledger whose header does not record the SIMPLE commit that was read
+  nanmax     test code (src/test, test/, *_tester.f90) reduces with nan_maxval (src/test/mlxf_test_reduce.f90),
+             never maxval(abs(...)): maxval may skip a NaN among finite values, so an error reduced with it
+             passes a corrupt element. A reduction along a dimension (dim=) builds a reference array and is
+             left alone
+  cmakeroot  the CMake files name the library's own directories (PROJECT_SOURCE_DIR, PROJECT_BINARY_DIR,
+             CMAKE_CURRENT_*), never CMAKE_SOURCE_DIR or CMAKE_BINARY_DIR, which name a parent project's when
+             mlx-fortran is added with add_subdirectory()
 
 Python 3.7 or newer, standard library only; it runs before the compile.
 """
@@ -945,6 +955,32 @@ def cmake_files(root):
     return out
 
 
+NANMAX = re.compile(r'(?<![\w%])maxval\s*\(\s*abs\s*\(', re.I)
+NANMAX_HOME = 'src/test/mlxf_test_reduce.f90'
+TOP_DIRS = re.compile(r'\$\{CMAKE_(SOURCE|BINARY)_DIR\}')
+
+
+def check_nanmax(rel, lines, out):
+    if rel == NANMAX_HOME:
+        return
+    if not (rel.startswith('src/test/') or rel.startswith('test/') or rel.endswith('_tester.f90')):
+        return
+    for start, stmt in logical_lines([code_of(l) for l in lines]):
+        if NANMAX.search(stmt) and not re.search(r'\bdim\s*=', stmt, re.I):
+            out.append('%s:%d: nanmax: maxval(abs(...)) may skip a NaN; reduce with nan_maxval '
+                       '(mlxf_test_reduce)' % (rel, start))
+
+
+def check_cmakeroot(root, out):
+    for rel in cmake_files(root):
+        for n, line in enumerate(read(root, rel).split('\n'), 1):
+            if TOP_DIRS.search(re.sub(r'#.*', '', line)):
+                out.append('%s:%d: cmakeroot: CMAKE_SOURCE_DIR or CMAKE_BINARY_DIR names a parent project when '
+                           'mlx-fortran is embedded; use PROJECT_SOURCE_DIR, PROJECT_BINARY_DIR or '
+                           'CMAKE_CURRENT_*' % (rel, n))
+    return out
+
+
 def check_findpkg(root, out):
     for rel in cmake_files(root):
         text = '\n'.join(re.sub(r'#.*', '', l) for l in read(root, rel).split('\n'))
@@ -1180,6 +1216,29 @@ def toy_surface(lines):
     return out
 
 
+def toy_procedures(lines):
+    """the public module procedures of a toy module: the names of its public statements that are not its types"""
+    types, listed_public, depth = set(), set(), 0
+    for s in statements(lines):
+        low = s.lower()
+        if re.match(r'^contains\b', low):
+            break
+        if re.match(r'^(abstract\s+)?interface\b', low):
+            depth += 1
+            continue
+        if re.match(r'^end\s*interface\b', low):
+            depth -= 1
+            continue
+        if depth:
+            continue
+        m = re.match(r'^type\s*((?:,\s*[\w()]+\s*)*)(?:::)?\s*(\w+)$', low)
+        if m and not low.startswith('type('):
+            types.add(m.group(2))
+        elif re.match(r'^public\s*::', low):
+            listed_public.update(split_names(low.split('::', 1)[1]))
+    return sorted(listed_public - types)
+
+
 def read_mirror(root, out):
     """the ledger's lines: {(toy module, toy name): (line number, 'mirrored' or 'addition', SIMPLE's module, SIMPLE's
     name or the reason)}; None when there is no ledger"""
@@ -1234,24 +1293,27 @@ def check_mirror(root, files, out):
         lines = read(root, rel).split('\n')
         name, is_sub = toy_module(lines)
         if name and not is_sub:
-            surfaces[name] = (rel, toy_surface(lines))
+            procedures = [] if name.endswith('_tester') else toy_procedures(lines)
+            surfaces[name] = (rel, toy_surface(lines), procedures)
     entries = read_mirror(root, out)
     if entries is None:
         if surfaces:
             out.append('%s: mirror: the ledger is missing, and %d toy module(s) exist' % (MIRROR_LEDGER, len(surfaces)))
         return {}
     known, exempt = set(), {}
-    for module, (rel, types) in sorted(surfaces.items()):
+    for module, (rel, types, procedures) in sorted(surfaces.items()):
+        names = [(p, p) for p in procedures]
         for t, bindings in sorted(types.items()):
-            for name, impl in [(t, '')] + [('%s%%%s' % (t, b), i) for b, i in sorted(bindings.items())]:
-                known.add((module, name))
-                if (module, name) not in entries:
-                    out.append('%s: mirror: %s of %s has no line in %s' % (rel, name, module, MIRROR_LEDGER))
-                elif entries[(module, name)][1] == 'mirrored' and impl:
-                    exempt.setdefault(module, set()).add(impl)
+            names += [(t, '')] + [('%s%%%s' % (t, b), i) for b, i in sorted(bindings.items())]
+        for name, impl in names:
+            known.add((module, name))
+            if (module, name) not in entries:
+                out.append('%s: mirror: %s of %s has no line in %s' % (rel, name, module, MIRROR_LEDGER))
+            elif entries[(module, name)][1] == 'mirrored' and impl:
+                exempt.setdefault(module, set()).add(impl)
     for (module, name), entry in sorted(entries.items(), key=lambda e: e[1][0]):
         if (module, name) not in known:
-            out.append('%s:%d: mirror: %s %s is not a public type or binding of a toy module'
+            out.append('%s:%d: mirror: %s %s is not a public type, binding or procedure of a toy module'
                        % (MIRROR_LEDGER, entry[0], module, name))
     return exempt
 
@@ -1293,6 +1355,7 @@ def main():
         check_arity(rel, lines, out, mirrored.get(toy_module(lines)[0], ()) if rel.startswith(TOY_DIR) else ())
         check_ctorcall(rel, lines, api, out)
         check_ctorexpr(rel, lines, out, tree_functions)
+        check_nanmax(rel, lines, out)
         n = sum(1 for r in raws if BIND_MLX.search(r))
         if n:
             cbind[rel] = n
@@ -1315,6 +1378,7 @@ def main():
     check_defs(root, files, out)
     check_entry(root, files, api, out)
     check_findpkg(root, out)
+    check_cmakeroot(root, out)
     check_parity(root, files, api, out)
     ledger_check('cbind', cbind, CBIND_LEDGER, out)
     ledger_check('libc', libc, LIBC_LEDGER, out)

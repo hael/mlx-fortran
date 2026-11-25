@@ -54,7 +54,7 @@ of `d354efee2` added.
 | Family | Domain object (SIMPLE's class) | Methods kept | Driver (SIMPLE's caller) |
 | --- | --- | --- | --- |
 | A | `polarft_calc` (`pftc/simple_polarft_calc.f90` and its submodules) | `new`, `kill`, `reallocate_ptcls`, `set_ref_pft`, `set_ptcl_pft`, `set_ptcl_ctfmat`, `set_eo`, `memoize_refs`, `memoize_ptcls`, `memoize_ref_bins`, `score_block_posterior`, `new_shiftmap`, `setup_shiftmaps`, `kill_shiftmap`, `gen_shiftmap`, `shiftmap_mode`, and the inquiries `get_nrefs`, `get_pftsz`, `ptcl_iseven`, `wsqsum_ptcl_band` (built: `src/test/mlxf_toy_polarft_calc.f90`) | `eul_prob_tab` with `new_pipeline`, `fill_tab_range` (its steps `cut_blocks`, `process_block`, `finish_particle_map`) and `kill` (built: `src/test/mlxf_toy_eul_prob_tab.f90`); later `eul_prob_tab_neigh` and `shiftmap_srch` |
-| B1 | `projector` (`image/simple_projector.f90`, `simple_projector_pft_batch.f90`) | `fproject_polar_batch_opt` | the reprojection model's `vol_pad2ref_pfts_opt`, which fills `polarft_calc` through `set_ref_pft` |
+| B1 | `projector` (`image/simple_projector.f90`, `simple_projector_pft_batch.f90`) | `new`, `set_rmat`, `get_cmat`, `pad_fft`, `expand_cmat`, `is_expanded`, `kill_expanded`, `kill`; `fproject_polar_batch_opt` (built: `src/test/mlxf_toy_projector.f90`, `_workspace.f90`, `_pft_batch.f90`, K2) | the reprojection model's `vol_pad2ref_pfts_opt`, which fills `polarft_calc` through `set_ref_pft`, or on the toy's device route through the workspace (built: `src/test/mlxf_toy_polarft_core.f90`) |
 | B2 | `cartft_calc` (`cftc/simple_cartft_calc.f90`) | `new`, `kill`, `set_ref`, `new_ptcls`, the particle setters, `pose_normal_terms`, `shift_normal_terms` | `cartft_pose_opt` (`cftc/simple_cartft_pose_opt.f90`) |
 | C | `reconstructor` (`volume/simple_reconstructor.f90`) | `insert_plane_oversamp`, `compress_exp`, `sampl_dens_correct` | `calc_3Drec` (`strategies/search/simple_matcher_3Drec.f90`) with its batches of prepared planes |
 | D | `reconstructor_pcg` (`volume/simple_reconstructor_pcg.f90`) | `apply_normal_kernel`, `apply_precond`, `dot_real_volume` | `pcg_solve` (`opt/simple_pcg_solver.f90`) |
@@ -104,8 +104,9 @@ has both ([`mlxf_oracles2.md`](mlxf_oracles2.md), section 9.1.4).
   `kill`), `_memo` (the setters and the memoization), `_block` (`score_block_posterior`, the submission and
   collection of a block) and `_shiftmap` (`new_shiftmap`, `setup_shiftmaps`, `gen_shiftmap`, `shiftmap_mode`);
 - `mlxf_toy_polarft_workspace.f90`, the type `polarft_workspace` that holds every MLX handle and compiled
-  function, with its submodules `_lifecycle`, `_score` (the dense score with its compiled tail and tiling) and
-  `_shiftmap` (the Fourier-Bessel maps);
+  function, with its submodules `_lifecycle`, `_score` (the dense score with its compiled tail and tiling),
+  `_tail` (the fused tail, a custom Metal kernel per tile, the form `metal`) and `_shiftmap` (the Fourier-Bessel
+  maps);
 - `mlxf_toy_eul_prob_tab.f90`, the driver `eul_prob_tab` with `fill_tab_range`;
 - `mlxf_oracle_polar.f90`, the oracle, and `mlxf_bench_polar_table.f90`, the benchmark, whose suites fill
   their tables through the driver.
@@ -121,7 +122,8 @@ tile plan 64 by 250, on the M5 Ultra):
   `kill` or the next `memoize_ref_bins`: one iteration of a part process. A shift map adds 2.63e9 B for both
   parities (*measured*: 9.77e9 B of active memory with the tiles) from `new_shiftmap` or `setup_shiftmaps`
   until `kill_shiftmap`. A block in flight holds its graph: the MLX peak is 10.26e9 B while a half of 1,000
-  particles is scored, and MLX keeps 3.28e9 B in its cache afterwards (*measured*).
+  particles is scored, and MLX keeps 3.28e9 B in its cache afterwards (*measured*). With the fused tail the peak
+  is 16.71e9 B: a cheap tail lets the host queue more tiles ahead of the device (*measured*, K1).
 - **What stays on the host.** The memos of the references (`ft_ref`, `ft_ref2`, both parities: 3.57e9 B) and
   of the particles (0.36e9 B) (*derived*). The raw sections do not stay: the setters stage 64 at a time and
   memoize them.
@@ -157,13 +159,16 @@ as mirrored or as an addition with its reason):
 - **The driver:** one thread walks the blocks, one or two in flight on the device (SIMPLE: an OpenMP loop
   over the blocks); `new_pipeline` takes the calculator where SIMPLE takes its builder; no assignment, no
   states, no diagnostics. `set_fill_stages` lets the benchmark run the dense score or the maps alone.
+- **The tail's form:** `set_tail_form` (an addition) selects the compiled graph form (the default, the
+  reference and the CPU path) or the fused Metal kernel (the GPU only); SIMPLE has one form, on the CPU.
 - **Refusals:** where SIMPLE stops, the toy returns with a reason in `message()` and SIMPLE's invalid values
   in the results. The types have a `final` procedure where the house rule asks for one.
 
 **What is new** (the deliverables of section 8):
 - **A1, the fused tail.** One Metal kernel per pair row: the inverse real transform, the finishing formula
   and the reduction. In the profile at the verdict plan, the tail (distances and draw) is the largest stage:
-  0.90 of 1.93 s, with a barrier after each stage (*measured*).
+  0.90 of 1.93 s, with a barrier after each stage (*measured*). Delivered by K1 and kept: one thread per pair,
+  1.65 to 1.80 times the compiled tail's rate on the driver (section 8).
 - **A2, arbitrary reference sets,** by tiles.
 - **A3, the shift lattice,** with the map reductions. Two variants:
   - **Particle-side shifts:** one ring transform per (particle, shift), shared by all that particle's
@@ -223,6 +228,51 @@ reference-side variant must also reproduce the Fourier-Bessel oracle's cells.
   - The optimizer runs in lockstep across particles, with its small step solved on the host in double
     precision.
 
+**B1 as built (K2, 2026-11-25; [plan](mlxf_kernel_k2.md), [report](../completed/mlxf_kernel_k2_report.md)).** A toy
+`projector` with the `image` procedures the reprojection calls, `fproject_polar_batch_opt` and a miniature
+`vol_pad2ref_pfts_opt` on the calculator. Two forms of the gather: the graph (27 positions and weights per sample,
+one `mlx_take`, a sum), kept as the reference and the CPU path, and one fused Metal kernel with a thread per
+sample, **kept: 24 times faster on the reprojection of a state at one process (0.040 s against 0.97 s for 2,500
+directions of both parities), 5.3 and 6.3 times from go to the last exit at three processes** (*measured*). Two
+routes into family A: the host route through `set_ref_pft` (the reference) and a device route (`set_ref_route`)
+on which the projected bank, the ring transforms and the tiles never leave the device, **kept: 0.03 s against
+1.05 s from the evaluated banks to the reference bins** (*measured*). Accuracy: 1.5e-6 of a sample's terms on the
+small fixtures, 1.45e-5 at the bench (the float32 coordinates near 124), 4e-7 of a row on the chained dense score.
+
+**The seam** (measured at the bench: box 160 padded to 320, pftsz 182, 61 shells, 2,500 directions, one state):
+
+| Question | Answer |
+| --- | --- |
+| Who owns the device state | `projector%ws` (the padded transform, the expanded cube, the fused kernel's objects), made in `new`, released in `kill`; the bank passes to `polarft_calc%ws(ieo)` in `vol_pad2ref_pfts_opt` on the device route. No tester, benchmark or driver holds a handle |
+| What is resident, and from when | From `expand_cmat` to `kill_expanded`: the expanded cube, 274,625,000 B (*derived*), one parity's at a time; the padded transform (131,891,200 B) from `pad_fft` to `expand_cmat`. On the device route the two banks, 444,104,960 B (*measured* active memory after the driver), until `memoize_refs` makes their memos and `memoize_ref_bins` the tiles (1.79e9 B for both parities, as on the host route) |
+| What the projection adds | In flight, a graph tile (MLX peak 2.00e9 B at 64 directions) or nothing beyond the bank (MLX peak 1.94e9 B with the fused form) (*measured*) |
+| What stays on the host | The two real volumes (16,384,000 B each) and the padded projector's real cube (131,072,000 B), the staging of its transform; the calculator's host memos (0.89e9 B) are allocated by `new` on either route |
+| Where the host waits | `pad_fft` (the transform), `expand_cmat` (the cube), the projection (the bank; on the host route also its copy to `refs_state`), `memoize_refs` on the device route (the memos), `memoize_ref_bins` |
+| What a part process holds | Peak footprint 4.15e9 B (fused) and 5.21e9 B (graph) for the reprojection; 9.36e9 B (host route) and 12.69e9 B (device route, 11.3e9 B of it MLX's cache) to the reference bins and a dense score (*measured*) |
+
+**Differences from SIMPLE (B1)** (read at `d354efee2`; the ledger lists each):
+- **Types.** `projector` does not extend an `image` class: it carries the `image` procedures the reprojection
+  calls (`new`, `set_rmat`, `get_cmat`, `pad_fft`, `kill`). `eulspace` is an array of rotation matrices
+  `(3, 3, nspace)`, not an `oris` object.
+- **Dummies dropped:** `new`'s `wthreads`, `fft_nthreads`, `fft_measure`; `fproject_polar_batch_opt`'s
+  `mirr_proj`. `fproject_polar_batch_opt` takes `vol_pad` with `intent(inout)` (its workspace builds kernels and
+  adds seconds); `get_polar_coords` and `get_ref_pft` take `self` with `intent(inout)` (refusals); `get_cmat` is
+  not pure (it copies from the device).
+- **Members.** `cmat_exp` is a device array in `ws`; `ws` is public as SIMPLE's `cmat_exp` is; the padded
+  transform is not kept after `expand_cmat`; there is no `kbwin` object (the window's 15 coefficients are
+  computed in double precision and rounded once). `kill` releases the whole workspace, the cube with it, so
+  SIMPLE's `kill_expanded` after `kill` finds nothing.
+- **The transform** of `pad_fft` is the device's (`mlx_rfftn`, times the float32 reciprocal of M³), not FFTW's;
+  the expansion is made by device gathers.
+- **The fill.** SIMPLE writes the bank into a section of `pfts_refs`. The host route hands each section to
+  `set_ref_pft` in `complex(real64)`; the device route (`set_ref_route`, an addition) hands the bank to the
+  workspace, makes the memos by float32 FFTs there, and refuses the shift maps.
+- **The loop** of `read_mask_filter_reproject_refvols` is written by the tester and the benchmark in SIMPLE's
+  order; no centring, mask, filter or low-resolution blend.
+- **Tiles and forms:** `set_fproject_form`, `set_fproject_tile`; SIMPLE has one loop nest and an offload
+  directive. Seconds by `fproject_seconds`. Refusals through `message()` where SIMPLE stops; `final` procedures
+  where the house rule asks for them.
+
 **SIMPLE anchors** (reading references only): `fproject_polar_batch_opt`
 (`image/simple_projector_pft_batch.f90`), `apod_fast_device` (`interp/simple_kbinterpol.f90`),
 `memoize_one_ref` (`pftc/simple_polarft_memo.f90`); `pose_normal_terms` and
@@ -248,14 +298,17 @@ bench size (the small fixture can use a host transform).
 - **B1:**
   - about 480 flop and 27 reads per sample;
   - 26.6 GFLOP for 2,500 directions, both halves, pftsz 182, 61 shells, one state;
-  - the padded volume is 132 MB as a Hermitian half at box 160;
+  - the padded volume is 132 MB as a Hermitian half at box 160 (the expanded cube SIMPLE reads, and the toy
+    keeps, is 274.6 MB: K2);
   - SIMPLE's CPU reaches about 12 ns per sample at the margin (*derived* from a recorded run).
 - **B2:** about 0.5 kflop per pixel, so about 3 Mflop per pose evaluation at 62 shells (about 6,000 pixels
   of the half plane). This is a rough count for 27 taps, to be redone in K5's plan; it replaces 2.1 kflop and
   13 Mflop, which assumed 64 taps.
 
 **Open decisions.**
-- Whether B1 writes straight into family A's layout or through an intermediate array.
+- Closed by K2: B1 writes a bank of sections (the intermediate array), from which the device route makes the
+  memos and the tiles on the device; the chain costs 0.03 s, so a kernel that writes ring transforms or tiles
+  directly is not needed.
 - B2's accumulation precision on the GPU: float32 trees, or compensated sums.
 - How the toy's lockstep optimizer treats converged particles.
 
@@ -302,9 +355,21 @@ kernel.
 - about πN²/8 + 2N samples per pose and symmetry copy, so 5.7 Mflop at N = 160;
 - SIMPLE's CPU reaches about 1.9 GFLOP/s per thread.
 
+**The protected-update probe (K2's Phase 5, roadmap decision 14).** One thread per (pixel, plane) with 81 atomic
+float32 additions per pixel, at n = 160 with two batches of 500 planes (2.84e8 deposits): 0.037 s per batch
+(seeded orientations), against 0.0042 s for plain read-modify-write additions, which lose 59 % (98 % with one
+orientation) of the density's mass. Against the gridding oracle the error is 1.07e-4 of a voxel's terms (8.1e-5
+with one orientation), above the probe's cap 1e-5: **outcome C by decision 20's letter**. The same deposits in
+double precision from float32 coordinates differ from the oracle by 1.09e-4 and 8.1e-5, so the excess is the
+coordinates' rounding, which every form on float32 coordinates shares; the atomic update itself varies by at most
+2.4e-6 between runs and is not bit-repeatable (49 % and 1.8 % of the voxels differ): **B in character**. K6's plan
+waits on the maintainer's ruling between the two readings (K2's report, section 6).
+
 **Open decisions.**
 - Whether bitwise identity with the CPU's order is required, or repeatability on the GPU is enough.
 - The block size of form 3.
+- After the probe: whether K6 starts from outcome C (`mlx_scatter_add` and the sorted form) or B (a deterministic
+  form required, the atomic kernel the speed reference), and the reference its cap is judged against.
 
 ## 6. Family D: the PCG solve
 
@@ -371,8 +436,8 @@ expected to pay; that is measured before any is written.
 
 | | Deliverable | Needs from the library | Exit |
 | --- | --- | --- | --- |
-| K1 | A1: the fused tail of the dense score | Metal kernel wrapper; the refactored polar toy and its baseline (roadmap rank 0b) | the polar-table checks pass on the GPU at their recorded counts; judged on the canonical driver's elapsed time against the compiled graph tail (roadmap decision 15), alone and at 3 and 6 processes |
-| K2 | B1: the polar projection | Metal kernel wrapper; `mlx_rfftn` for the bench | the host matrix oracle and controls pass; the chained test with A passes; timed at 2,500 directions, pftsz 182, 61 shells |
+| K1 | A1: the fused tail of the dense score | Metal kernel wrapper; the refactored polar toy and its baseline (roadmap rank 0b) | the polar-table checks pass on the GPU at their recorded counts; judged on the canonical driver's elapsed time against the compiled graph tail (roadmap decision 15), alone and at 3 and 6 processes. **Kept** (2026-11-25, the maintainer's ruling): 1.80 (`2500_4`) and 1.65 (`2500_1`) at one process, 1.74 at six of `2500_1`; `2500_4` at three not resolved by per-process rates (1.52 to 1.59 on the time to the last exit); +6e9 B peak per process; selectable, the default `graph` ([report](../completed/mlxf_kernel_k1_report.md)) |
+| K2 | B1: the polar projection | Metal kernel wrapper; `mlx_rfftn` for the bench | the host matrix oracle and controls pass; the chained test with A passes; timed at 2,500 directions, pftsz 182, 61 shells. **Delivered** (2026-11-25, [report](../completed/mlxf_kernel_k2_report.md)): the fused gather kept (24.6 and 24.4 at one process, 5.27 and 6.30 at three from go to the last exit), the device route kept (32.5 and 35.1); the probe's outcome C by the letter, B by the diagnosis (a ruling for K6) |
 | K3 | A2: arbitrary reference sets | `mlx_gather_mm` or `mlx_block_masked_mm` | listed pairs equal the dense kernel's; occupancy and rate reported for cone-shaped sets, with and without orientation order |
 | K4 | A3: the shift lattice and the map reductions | K1's tail | the reference-side variant reproduces the Fourier-Bessel oracle's cells; a particle-side variant passes a decision-level test frozen before timing (roadmap decision 13); the chosen variant passes the map gates; timed against milestone 1's maps at the M5 grids |
 | K5 | B2: the pose objective with gradient and Gauss-Newton matrix | Metal kernel wrapper | the objective, gradient and matrix match the host oracle; planted poses are recovered; evaluations per second timed |
@@ -407,4 +472,5 @@ scientific gates.
 
 ## Progress
 
-(none yet: design note)
+- 2026-11-25, run `mlxf_kernel_k2`: section 2a's row B1, section 4 (B1 as built, the seam, the differences, the
+  intermediate array closed), section 5 (the probe) and section 8's row K2 updated from K2's report.

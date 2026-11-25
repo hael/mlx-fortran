@@ -7,7 +7,8 @@
 module mlxf_oracle_projection
 use, intrinsic :: iso_fortran_env, only: real64
 use, intrinsic :: ieee_arithmetic, only: ieee_is_finite, ieee_value, ieee_positive_inf
-use mlxf_oracle_dft, only: oracle_dft_3d, oracle_flat, oracle_rel_error, oracle_finite_or_inf, oracle_all_finite
+use mlxf_oracle_dft,  only: oracle_dft_3d, oracle_flat, oracle_rel_error, oracle_finite_or_inf, oracle_all_finite
+use mlxf_test_reduce, only: nan_maxval
 implicit none
 
 public :: oracle_proj_phantom, oracle_proj_rotation, oracle_proj_polar_coords, oracle_proj_slice_coords, &
@@ -558,27 +559,27 @@ contains
         ! turn Rz(0, 1)
         do irot = 1, NROT
             r      = oracle_proj_rotation(irot)
-            err(3) = max(err(3), oracle_finite_or_inf(maxval(abs(matmul(r, transpose(r)) - R_IDENTITY))), &
+            err(3) = max(err(3), oracle_finite_or_inf(nan_maxval(abs(matmul(r, transpose(r)) - R_IDENTITY))), &
                          oracle_finite_or_inf(abs(det3(r) - 1._real64)))
             if( .not. all(ieee_is_finite(r)) ) err(3) = ieee_value(err(3), ieee_positive_inf)
         end do
-        err(3) = max(err(3), oracle_finite_or_inf(maxval(abs(matmul(rot_z(0.6_real64, 0.8_real64), &
+        err(3) = max(err(3), oracle_finite_or_inf(nan_maxval(abs(matmul(rot_z(0.6_real64, 0.8_real64), &
                                                                    rot_y(5._real64 / 13._real64, 12._real64 / 13._real64)) - &
                                                             R_OBLIQUE))), &
-                     oracle_finite_or_inf(maxval(abs(rot_z(0._real64, 1._real64) - R_QUARTER))))
+                     oracle_finite_or_inf(nan_maxval(abs(rot_z(0._real64, 1._real64) - R_QUARTER))))
         ! coordinates worked by hand: polar sample a + 12 (k - 1) + 24 (rotation - 1), slice sample
         ! 1 + h + 3 (k + 2) + 15 (rotation - 1)
-        err(4) = max(maxval(abs(tp(:, 1) - [0._real64, -2._real64, 0._real64])), &
-                     maxval(abs(tp(:, 16) - [4._real64, 0._real64, 0._real64])), &
-                     maxval(abs(tp(:, 25) - [-2._real64, 0._real64, 0._real64])), &
-                     maxval(abs(tp(:, 28) - [0._real64, -2._real64, 0._real64])), &
-                     maxval(abs(tp(:, 49) + [40._real64, 78._real64, 96._real64] / 65._real64)), &
-                     maxval(abs(tp(:, 64) - [60._real64, -208._real64, 144._real64] / 65._real64)), &
-                     maxval(abs(tp(:, 51) - [15._real64 * sqrt(3._real64) - 20._real64, &
+        err(4) = max(nan_maxval(abs(tp(:, 1) - [0._real64, -2._real64, 0._real64])), &
+                     nan_maxval(abs(tp(:, 16) - [4._real64, 0._real64, 0._real64])), &
+                     nan_maxval(abs(tp(:, 25) - [-2._real64, 0._real64, 0._real64])), &
+                     nan_maxval(abs(tp(:, 28) - [0._real64, -2._real64, 0._real64])), &
+                     nan_maxval(abs(tp(:, 49) + [40._real64, 78._real64, 96._real64] / 65._real64)), &
+                     nan_maxval(abs(tp(:, 64) - [60._real64, -208._real64, 144._real64] / 65._real64)), &
+                     nan_maxval(abs(tp(:, 51) - [15._real64 * sqrt(3._real64) - 20._real64, &
                                             -52._real64 * sqrt(3._real64) - 39._real64, &
                                             36._real64 * sqrt(3._real64) - 48._real64] / 65._real64)), &
-                     maxval(abs(ts(:, 33) - [-4._real64 / 13._real64, -28._real64 / 5._real64, -48._real64 / 65._real64])), &
-                     maxval(abs(ts(:, 29) - [4._real64, -2._real64, 0._real64])))
+                     nan_maxval(abs(ts(:, 33) - [-4._real64 / 13._real64, -28._real64 / 5._real64, -48._real64 / 65._real64])), &
+                     nan_maxval(abs(ts(:, 29) - [4._real64, -2._real64, 0._real64])))
         ! maxval and max may pass over a NaN, so the coordinates are tested first
         if( .not. (all(ieee_is_finite(tp)) .and. all(ieee_is_finite(ts))) )then
             err(4) = ieee_value(err(4), ieee_positive_inf)
@@ -620,7 +621,7 @@ contains
                 else
                     wref = [1._real64, kh, kh]
                 endif
-                err(7) = max(err(7), oracle_finite_or_inf(maxval(abs(wq - wref / sum(wref)))))
+                err(7) = max(err(7), oracle_finite_or_inf(nan_maxval(abs(wq - wref / sum(wref)))))
             end do
         end do
     end subroutine check_geometry
@@ -650,7 +651,7 @@ contains
             end do
             err(1) = max(err(1), real(count((g(s, :) > 0._real64) .neqv. (row > 0._real64)), real64))
             if( count(g(s, :) > 0._real64) /= 27 ) err(1) = max(err(1), 1._real64)
-            err(2) = max(err(2), oracle_finite_or_inf(maxval(abs(g(s, :) - row))))
+            err(2) = max(err(2), oracle_finite_or_inf(nan_maxval(abs(g(s, :) - row))))
         end do
         ! the gather against the matrix on a complex field, and on a constant
         z      = field_sequence(m)
@@ -801,7 +802,7 @@ contains
                     c      = flat_index(1 + modulo(hn(:, n), m), m)
                     row(c) = row(c) + wn(n)
                 end do
-                err = max(err, oracle_finite_or_inf(maxval(abs(g(s, :) - row))))
+                err = max(err, oracle_finite_or_inf(nan_maxval(abs(g(s, :) - row))))
                 if( .not. (all(ieee_is_finite(g(s, :))) .and. all(ieee_is_finite(row))) )then
                     err = ieee_value(err, ieee_positive_inf)
                 endif
@@ -817,7 +818,7 @@ contains
         real(real64) :: w(3), wref(3), t
         integer      :: h(3), j, a, b
         call oracle_proj_stencil(0._real64, h, w)
-        err(1) = max(err(1), oracle_finite_or_inf(maxval(abs(w - [W1_READ, W0_READ, W1_READ]))))
+        err(1) = max(err(1), oracle_finite_or_inf(nan_maxval(abs(w - [W1_READ, W0_READ, W1_READ]))))
         if( .not. all(ieee_is_finite(w)) ) err(1) = ieee_value(err(1), ieee_positive_inf)
         do j = -12, 12
             t = real(j, real64) / 8._real64
@@ -828,7 +829,7 @@ contains
                 wref(a) = i0_trapezoid(BETA_TYPED * sqrt(max(0._real64, 1._real64 - ((t - real(b + a - 2, real64)) / &
                                                                                     1.5_real64)**2)))
             end do
-            err(2) = max(err(2), oracle_finite_or_inf(maxval(abs(w - wref / sum(wref)))))
+            err(2) = max(err(2), oracle_finite_or_inf(nan_maxval(abs(w - wref / sum(wref)))))
             if( .not. all(ieee_is_finite(w)) ) err(2) = ieee_value(err(2), ieee_positive_inf)
             if( any(h /= b + [-1, 0, 1]) ) err(2) = max(err(2), 1._real64)
         end do

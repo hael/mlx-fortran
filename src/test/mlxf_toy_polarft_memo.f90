@@ -88,6 +88,37 @@ contains
         self%l_refs_pending     = .true.
     end subroutine set_ref_pft
 
+    module subroutine get_ref_pft( self, iref, iseven, pft )
+        class(polarft_calc), intent(inout) :: self
+        integer,             intent(in)    :: iref
+        logical,             intent(in)    :: iseven
+        complex(real32),     intent(inout) :: pft(self%pftsz, self%kfromto(1):self%kfromto(2))
+        integer :: ieo, j, st
+        pft = cmplx(0._real32, 0._real32, real32)
+        if( .not. self%existence )then
+            self%msg = 'polarft_calc%get_ref_pft: refused: no calculator (new)'
+            return
+        endif
+        if( iref < 1 .or. iref > self%nrefs )then
+            self%msg = 'polarft_calc%get_ref_pft: refused: the reference is outside 1..nrefs'
+            return
+        endif
+        ieo      = merge(REF_EVEN, REF_ODD, iseven)
+        self%msg = ''
+        if( self%route == POLARFT_REF_ROUTES%device )then
+            call self%ws(ieo)%get_section(iref, pft, st)
+            if( st /= 0 ) self%msg = self%ws(ieo)%message()
+            return
+        endif
+        do j = 1, self%nref_staged
+            if( self%stage_ref(1, j) == iref .and. self%stage_ref(2, j) == ieo )then
+                pft = cmplx(self%pfts_refs(:, :, j), kind=real32)
+                return
+            endif
+        end do
+        self%msg = 'polarft_calc%get_ref_pft: refused: the host route keeps only the memos of a memoized reference'
+    end subroutine get_ref_pft
+
     ! the staged references become their memos
     subroutine flush_refs( self )
         class(polarft_calc), intent(inout) :: self
@@ -266,12 +297,25 @@ contains
 
     module subroutine memoize_refs( self )
         class(polarft_calc), intent(inout) :: self
+        integer :: ieo, st
         if( .not. self%existence )then
             self%msg = 'polarft_calc%memoize_refs: refused: no calculator (new)'
             return
         endif
         self%msg = ''
-        call flush_refs(self)
+        if( self%route == POLARFT_REF_ROUTES%device )then
+            ! the device route: the ring transforms of the projected sections, made where they are
+            do ieo = 1, N_REF_PARITIES
+                if( .not. self%ws(ieo)%has_sections() ) cycle
+                call self%ws(ieo)%memoize_sections(self%pftsz, self%nk, st)
+                if( st /= 0 )then
+                    self%msg = self%ws(ieo)%message()
+                    return
+                endif
+            end do
+        else
+            call flush_refs(self)
+        endif
         self%l_refs_pending = .false.
         self%ref_gen        = self%ref_gen + 1_int64
     end subroutine memoize_refs
@@ -319,8 +363,14 @@ contains
         spec%nk           = self%nk
         spec%rt           = self%rt
         spec%bt           = self%bt
+        spec%tail         = self%tail
         do ieo = 1, N_REF_PARITIES
-            call self%ws(ieo)%new(spec, self%ft_ref(:, :, :, ieo), self%ft_ref2(:, :, :, ieo), st)
+            if( self%route == POLARFT_REF_ROUTES%device )then
+                ! the device route: the tiles from the device memos, which they replace
+                call self%ws(ieo)%new_from_memos(spec, st)
+            else
+                call self%ws(ieo)%new(spec, self%ft_ref(:, :, :, ieo), self%ft_ref2(:, :, :, ieo), st)
+            endif
             if( st /= 0 )then
                 self%msg = self%ws(ieo)%message()
                 return

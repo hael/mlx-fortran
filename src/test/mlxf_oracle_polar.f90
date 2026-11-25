@@ -4,11 +4,12 @@
 ! oracle's and its draws to its own rows. Used by the workspace's tester and by the benchmark.
 module mlxf_oracle_polar
 use, intrinsic :: iso_fortran_env, only: int64, real32, real64
-!$ use omp_lib,      only: omp_get_thread_num, omp_get_max_threads
-use mlxf_test_defs,  only: POLAR_DIST_MAX, POLAR_DIST_INVALID, POLAR_DIST_VALID, POLAR_ARG_CUTOFF, POLAR_DRAW_FLOOR, &
-                           POLAR_DRAW_TOL, POLAR_VALID_MARGIN, polar_table_refs, polar_table_block, &
-                           polar_table_entries, polar_row_check
-use mlxf_test_utils, only: bits_equal
+!$ use omp_lib,       only: omp_get_thread_num, omp_get_max_threads
+use mlxf_test_defs,   only: POLAR_DIST_MAX, POLAR_DIST_INVALID, POLAR_DIST_VALID, POLAR_ARG_CUTOFF, POLAR_DRAW_FLOOR, &
+                            POLAR_DRAW_TOL, POLAR_VALID_MARGIN, polar_table_refs, polar_table_block, &
+                            polar_table_entries, polar_row_check
+use mlxf_test_utils,  only: bits_equal
+use mlxf_test_reduce, only: nan_maxval
 implicit none
 private
 
@@ -141,7 +142,7 @@ contains
                 nvalid     = count(dor(:, ir, b) < real(POLAR_DIST_VALID, real64))
                 if( nvalid > 0 .and. nvalid < nrots ) chk%mixed = chk%mixed + 1
                 if( nvalid == 0 ) chk%invalid = chk%invalid + 1
-                dmax = maxval(abs(dor(:, ir, b)), mask=dor(:, ir, b) < real(POLAR_DIST_VALID, real64))
+                dmax = nan_maxval(pack(abs(dor(:, ir, b)), dor(:, ir, b) < real(POLAR_DIST_VALID, real64)))
                 e    = 0._real64
                 do m = 1, nrots
                     dev = real(ent%rows(m, ir, b), real64)

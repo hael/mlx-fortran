@@ -7,13 +7,14 @@
 module mlxf_ops_reduce_tester
 use, intrinsic :: iso_fortran_env, only: int32, real32, real64
 use, intrinsic :: ieee_arithmetic, only: ieee_is_nan, ieee_value, ieee_quiet_nan
-use mlxf,            only: mlx_array, mlx_from, mlx_to, mlx_set_default_device, mlx_default_device, MLX_DEVICES, &
-                           MLX_DTYPES, mlx_astype, mlx_zeros, reshape, sum, product, maxval, minval, all, any, count, &
-                           mlx_mean, mlx_median, mlx_var, mlx_std, mlx_logsumexp, maxloc, minloc, mlx_cumsum, abs, &
-                           mlx_cumprod, mlx_cummax, mlx_cummin, mlx_logcumsumexp, mlx_softmax
-use mlxf_test_utils, only: assert_true, assert_int, test_devices, device_name, set_fixed_seed
-use mlxf_test_defs,  only: ELEM_SEED_CALIBRATION, ELEM_SEEDS_JUDGED, ELEM_CEILING, REDUCE_TOLERANCES, REDUCE_NBATCH, &
-                           elem_tolerance
+use mlxf,             only: mlx_array, mlx_from, mlx_to, mlx_set_default_device, mlx_default_device, MLX_DEVICES, &
+                            MLX_DTYPES, mlx_astype, mlx_zeros, reshape, sum, product, maxval, minval, all, any, count, &
+                            mlx_mean, mlx_median, mlx_var, mlx_std, mlx_logsumexp, maxloc, minloc, mlx_cumsum, abs, &
+                            mlx_cumprod, mlx_cummax, mlx_cummin, mlx_logcumsumexp, mlx_softmax
+use mlxf_test_utils,  only: assert_true, assert_int, test_devices, device_name, set_fixed_seed
+use mlxf_test_defs,   only: ELEM_SEED_CALIBRATION, ELEM_SEEDS_JUDGED, ELEM_CEILING, REDUCE_TOLERANCES, REDUCE_NBATCH, &
+                            elem_tolerance
+use mlxf_test_reduce, only: nan_maxval
 implicit none
 private
 public :: run_all_ops_reduce_tests
@@ -263,7 +264,7 @@ contains
         if( size(y) /= size(ref) ) return
         judged = .not. ieee_is_nan(ref)
         if( any(judged .and. ieee_is_nan(y)) ) return
-        err = maxval(abs(y-ref)/max(1._real64, abs(ref)), mask=judged)
+        err = nan_maxval(pack(abs(y-ref)/max(1._real64, abs(ref)), judged))
     end function rel_error
 
     ! the shape a form's result must have: of a map, its operand's (rank 1 for the whole array); of a

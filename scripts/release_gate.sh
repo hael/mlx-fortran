@@ -7,8 +7,8 @@
 # device tests skip. A release (a tag or a published version) needs this script's passing log instead. It
 # refuses a tree with uncommitted changes to tracked files (the log names one commit) unless --allow-dirty,
 # builds Debug and Release from scratch in build_release_gate/ (MLXF_REQUIRE_GPU=ON, MLXF_WERROR=ON,
-# FORTLS=OFF), runs the fast gate on each, and fails when the gate fails, when any test reports a skip or when
-# no GPU device was opened. The log, with the toolchain, MLX and the device, is
+# FORTLS=OFF), runs the fast gate on each, then scripts/check_embed.sh, and fails when the gate fails, when any
+# test reports a skip, when no GPU device was opened or when the library cannot be embedded. The log, with the toolchain, MLX and the device, is
 # build_release_gate/release_gate_<commit>.log (ignored by git, like every build_* directory).
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -79,6 +79,11 @@ for build_type in Debug Release; do
     fi
     [[ "${ngpu:-0}" -gt 0 ]] || failed=1
 done
+if [[ $failed -eq 0 ]]; then
+    echo
+    echo "==== the library added to a parent project (add_subdirectory)"
+    "$ROOT/scripts/check_embed.sh" --jobs "$JOBS" || failed=1
+fi
 
 echo
 if [[ $failed -ne 0 ]]; then

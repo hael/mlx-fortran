@@ -11,7 +11,8 @@
 # entry. The per-entry timings are kept beside the log (ctest_fast.log.timing.txt).
 #
 # Called by every compile_*.sh between `make` and `make install` unless --exclude-tests is given (a failed
-# gate installs nothing), and by `make check`. Exit status is the budget checker's. Lifted from SIMPLE.
+# gate installs nothing), and by `make check`. The gate fails when ctest fails or when the transcript is not a
+# complete run (the budget checker); the checker only reports times otherwise. Lifted from SIMPLE.
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD="${1:-$ROOT/build}"
@@ -27,4 +28,11 @@ PY=$(sed -n 's/^MLXF_PYTHON3:INTERNAL=//p' "$BUILD/CMakeCache.txt")
 mkdir -p "$BUILD/test_runs"
 LOG="$BUILD/test_runs/ctest_fast.log"
 ( cd "$BUILD" && ctest -L fast --output-on-failure --parallel "$jobs" --timeout 600 2>&1 ) | tee "$LOG"
+ctest_status=${PIPESTATUS[0]}
 "$PY" "$ROOT/scripts/ctest_budget.py" "$LOG" --budget 60 --quiet
+budget_status=$?
+if [ "$ctest_status" -ne 0 ]; then
+    echo "run_fast_gate: ctest exited with status $ctest_status" >&2
+    exit 1
+fi
+exit "$budget_status"

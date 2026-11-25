@@ -6,13 +6,14 @@
 ! whole transform, so an element's own magnitude is no scale for it. The shifts are exact.
 module mlxf_fft_nd_tester
 use, intrinsic :: iso_fortran_env, only: real32, real64
-use mlxf,            only: mlx_array, mlx_from, mlx_to, mlx_set_default_device, mlx_default_device, MLX_DEVICES, &
-                           MLX_DTYPES, MLX_FFT_NORMS, mlx_fft2, mlx_fftn, mlx_ifftn, mlx_rfft2, mlx_irfft2, mlx_rfftn, &
-                           mlx_irfftn, mlx_fftshift, mlx_ifftshift, mlx_fftfreq, mlx_rfftfreq
-use mlxf_test_utils, only: assert_true, assert_int, test_devices, device_name, set_fixed_seed, bits_equal, judge_error, &
-                           find_tolerance
-use mlxf_test_defs,  only: ELEM_SEED_CALIBRATION, ELEM_SEEDS_JUDGED, ELEM_CEILING, FFT_TOLERANCES, FFT_NBATCH, &
-                           elem_tolerance
+use mlxf,             only: mlx_array, mlx_from, mlx_to, mlx_set_default_device, mlx_default_device, MLX_DEVICES, &
+                            MLX_DTYPES, MLX_FFT_NORMS, mlx_fft2, mlx_fftn, mlx_ifftn, mlx_rfft2, mlx_irfft2, mlx_rfftn, &
+                            mlx_irfftn, mlx_fftshift, mlx_ifftshift, mlx_fftfreq, mlx_rfftfreq
+use mlxf_test_utils,  only: assert_true, assert_int, test_devices, device_name, set_fixed_seed, bits_equal, &
+                            judge_error, find_tolerance
+use mlxf_test_defs,   only: ELEM_SEED_CALIBRATION, ELEM_SEEDS_JUDGED, ELEM_CEILING, FFT_TOLERANCES, FFT_NBATCH, &
+                            elem_tolerance
+use mlxf_test_reduce, only: nan_maxval
 implicit none
 private
 public :: run_all_fft_nd_tests
@@ -274,7 +275,7 @@ contains
             res%shaped = .false.
             return
         endif
-        res%err = max(res%err, maxval(abs(cmplx(got, kind=real64)-reshape(ref, [size(ref)])))/max(1._real64, maxval(abs(ref))))
+        res%err = max(res%err, nan_maxval(abs(cmplx(got, kind=real64)-reshape(ref, [size(ref)])))/max(1._real64, nan_maxval(abs(ref))))
     end subroutine compare
 
     ! the elements of a float32 result as complex values
@@ -501,7 +502,7 @@ contains
                 allocate(got(n))
                 call mlx_to(got, r, status=st)
                 if( st /= 0 ) shaped = .false.
-                err_full = max(err_full, maxval(abs(real(got, real64)-ref)/max(1._real64, abs(ref))))
+                err_full = max(err_full, nan_maxval(abs(real(got, real64)-ref)/max(1._real64, abs(ref))))
                 deallocate(got)
                 r = mlx_rfftfreq(n, d=d)
                 ref = [(real(j, real64), j=0, n/2)]/(real(n, real64)*d)
@@ -510,7 +511,7 @@ contains
                 allocate(got(n/2+1))
                 call mlx_to(got, r, status=st)
                 if( st /= 0 ) shaped = .false.
-                err_half = max(err_half, maxval(abs(real(got, real64)-ref)/max(1._real64, abs(ref))))
+                err_half = max(err_half, nan_maxval(abs(real(got, real64)-ref)/max(1._real64, abs(ref))))
                 deallocate(got)
             end do
             call judge_error(err_full, tol_full%f32, 'mlx_fftfreq', 'float32', seeds(k))

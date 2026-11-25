@@ -24,7 +24,8 @@ do dev = 1, 2
     if( st /= 0 ) error stop 'consumer transfer failed'
     if( any(shape(z) /= shape(expected)) ) error stop 'consumer shape mismatch'
     if( .not. all(ieee_is_finite(z)) ) error stop 'consumer non-finite result'
-    if( maxval(abs(z - expected)) > 1.e-6_real32 ) error stop 'consumer result mismatch'
+    ! all() of the comparisons: a NaN fails it, where maxval may skip one
+    if( .not. all(abs(z - expected) <= 1.e-6_real32) ) error stop 'consumer result mismatch'
     call a%kill()
     call b%kill()
     call c%kill()

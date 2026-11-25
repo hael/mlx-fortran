@@ -12,7 +12,9 @@ plan, written to `doc/how2s/how2write_agent_plans.md`.
 ## 1. Where we stand
 
 - **The library.**
-  - The generated layer binds all of mlx-c 0.8.0: 680 prototypes.
+  - The generated layer covers the 680 names of mlx-c 0.8.0's headers: 673 interfaces and 7 names skipped with
+    a reason (*exact*, `build/gen/mlxc_coverage.txt` and the generator's count). Name coverage, not ABI
+    verification.
   - The Fortran layer offers 126 public names (*exact*, the public block of `src/core/mlxf.f90`).
   - The parity ledger (`scripts/mlxc_parity.txt`) counts 125 mlx-c functions public, 46 plumbing, 146
     internal, 89 excluded and **274 pending** (*exact*).
@@ -70,8 +72,9 @@ plan, written to `doc/how2s/how2write_agent_plans.md`.
 | 1a | **Parity Phases 2 and 3**, then the API hold (delivered 2026-11-24 by run `mlxf_parity`; the hold released by Hans the same day) | [`mlxf_mlxc_parity.md`](mlxf_mlxc_parity.md) | rank 0 (its base), decision 4 | no `pending 2` or `pending 3` line; the maintainer has read the API |
 | 1b | **The wrappers the kernels need, ahead of their turn** (see below) | the parity plan, its decisions 27 and 28 (Phase 10; run `mlxf_parity_wrappers`; the hold is released, so it starts when rank 0b's result lands) | rank 1a, decision 5 | the named ledger lines are public and their area tests pass on both devices |
 | 1c | **Housekeeping** (see below) | this note, then the notes it names | rank 0 | each sub-item closed or handed to a plan |
-| 2 | **The toy kernels**, deliverables K1 to K8 | [`mlxf_kernel_families.md`](mlxf_kernel_families.md), then one plan per deliverable or family: [K1](mlxf_kernel_k1.md), [K2](mlxf_kernel_k2.md) and [K8](mlxf_kernel_k8.md) are planned (2026-11-25) and await their rulings | each deliverable's own wrappers (design note, section 8), not the whole of rank 1b; decisions 6 to 9 | each deliverable's exit in the design note |
-| 3 | **The rest of parity** (the rest of Phase 4, the random half of Phase 5, Phase 6, the other `fast` functions, Phases 8 and 9) | the parity plan | rank 1b; runs beside rank 2 on a disjoint file table | no `pending` line; the parity report |
+| 2 | **The toy kernels**, deliverables K1 to K8 | [`mlxf_kernel_families.md`](mlxf_kernel_families.md), then one plan per deliverable or family: [K1](mlxf_kernel_k1.md), [K2](mlxf_kernel_k2.md) and [K8](mlxf_kernel_k8.md) are planned and ruled (2026-11-25); K1 is delivered and kept ([report](../completed/mlxf_kernel_k1_report.md)); K2 is delivered, its fused gather and device route kept ([report](../completed/mlxf_kernel_k2_report.md)); K8's Phase 0 is done and it waits on a ruling at its F2 | each deliverable's own wrappers (design note, section 8), not the whole of rank 1b; decisions 6 to 9 | each deliverable's exit in the design note |
+| 2b | **Release hardening** (from the outside review of `c6ea867`; Hans, 2026-11-25: "Yes, plan it"): the installed package as the artifact under test, the mlx-c version in the package config, a CPU-only device mode, feedback on pull requests, a dtype table and quickstart, a contributor's path, ABI checks of representative signatures | [`mlxf_release_hardening.md`](mlxf_release_hardening.md) | the review's five release fixes verified (2026-11-25); after K2 on the M5 | the plan's release criterion: from a clean tagged tree an outside program installs, links and passes the installed-consumer test on an Apple-silicon GPU, with the documented dtype and failure behaviour |
+| 3 | **The rest of parity** (the rest of Phase 4, the random half of Phase 5, Phase 6, the other `fast` functions, Phases 8 and 9) | the parity plan | rank 1b and rank 2b (Hans, 2026-11-25: release hardening before parity's remaining phases) | no `pending` line; the parity report |
 | 4 | **SIMPLE's integration** | a SIMPLE plan, written by SIMPLE's rules | rank 2 for the family concerned | not started here |
 
 **Rank 0b: the refactoring.** Milestone 1's kernels model a GPU workspace beside SIMPLE's calculator, under
@@ -231,6 +234,12 @@ without a dimension, `mlx_gather` and the `mlx_scatter` family.
       shared-voxel updates are unprotected, so it does not show the speed of a correct scatter. The probe
       tests the premise of an easy win without moving K6 forward.
     - Recommended: yes.
+    - Measured by K2's probe (2026-11-25): one thread per (pixel, plane) with atomic float32 additions inserts
+      1,000 planes at n = 160 (2.84e8 deposits) in 0.037 s per batch of 500; plain additions lose 59 % to 98 % of
+      the mass. Against the gridding oracle its error is 1.07e-4 of a voxel's terms, above the probe's cap 1e-5
+      (outcome C by the letter), but the same deposits in double precision from float32 coordinates are 1.09e-4
+      off: the coordinates set the floor, and the update itself varies by at most 2.4e-6 and is not bit-repeatable
+      (B in character). K6's plan needs the maintainer's choice between the two readings.
 15. (2026-11-24, proposed from the review; ruled 2026-11-25 with the K1 plan, Hans: "Go") **The 30 % rule's
     denominator.** K1's check found that the arithmetic below takes the barriered stages as additive; the
     driver's pass without barriers takes 1.13 s, so K1 judges on that pass's median and measures the ceiling
@@ -241,6 +250,11 @@ without a dimension, `mlx_gather` and the `mlx_scatter` family.
       tail must run about twice as fast for the whole score to gain 30 % (*derived*: 1.93 / (1.03 + 0.90/x)
       = 1.3 at x ≈ 2.0).
     - Recommended: yes.
+    - Measured by K1 (2026-11-25): the compiled tail is about 0.65 s of the 1.13 s unbarriered pass (the
+      ceiling 2.98 and 2.31 at the judged splits) and the fused tail takes the pass to 0.63 s. Summed
+      per-process medians over-count when parts on the shared GPU drift apart; a rate of several parts is
+      read on the time from go to the last exit. Per-part memory is reported, not judged: SIMPLE trades it
+      against the number of parts (Hans, 2026-11-25).
 
 ## 5. Not planned
 

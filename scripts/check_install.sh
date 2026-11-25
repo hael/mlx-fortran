@@ -98,7 +98,9 @@ import sys
 compiler, work, prefix, incdir = sys.argv[1:]
 flags = shlex.split(subprocess.check_output(['pkg-config', '--cflags', '--libs', '--static', 'mlxf'], text=True))
 assert '-lmlxf' in flags and '-lmlxc' in flags, flags
-assert any(f.startswith('-I') and Path(f[2:]).resolve() == Path(prefix, incdir, 'mlxf') for f in flags), flags
+# both sides resolved: on macOS /var/folders and /private/var/folders name one directory
+want = Path(prefix, incdir, 'mlxf').resolve()
+assert any(f.startswith('-I') and Path(f[2:]).resolve() == want for f in flags), (flags, str(want))
 print('pkg-config:', flags, flush=True)
 subprocess.run([compiler, str(Path(work) / 'consumer/mlxf_consumer.f90')] + flags + ['-o', str(Path(work) / 'pkg consumer')], check=True, cwd=work)
 subprocess.run([str(Path(work) / 'pkg consumer')], check=True, cwd=work,

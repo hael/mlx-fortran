@@ -1,7 +1,7 @@
 # Compiler issues the library works around
 
-Reproducers of gfortran defects that bear on the handle model (`doc/policies/binding_contract_policy.md`,
-"Lifetime", the unsupported uses). Each `.f90` file stands alone and states
+Reproducers of gfortran defects the repository works around: issues 1 to 5 bear on the handle model
+(`doc/policies/binding_contract_policy.md`, "Lifetime", the unsupported uses), issue 6 on test code. Each `.f90` file stands alone and states
 the standard's requirement, the expected output and the output observed, with the date and the compiler. The
 library depends on no fix, and no gate pins a defect: a compiler that fixes one must not fail the build.
 
@@ -114,6 +114,19 @@ and at `-O3`, the same output.
   `intent(out)` output array (owner ruling, 2026-11-22; binding policy, closure callbacks), never a function
   returning an array of handles.
 
+### 6. An empty `pack()` result passed to an assumed-rank dummy has a corrupt descriptor
+
+- **File:** `gfortran_empty_pack_assumed_rank.f90` (found 2026-11-25 with 16.2.0, M5 Ultra, macOS on
+  Darwin 27.2.0, while verifying the NaN-safe test reduction; not checked on trunk).
+- **Standard:** F2018 8.5.8.7: an assumed-rank dummy takes the rank and shape of its actual, here a
+  zero-size rank-1 array, so `size(x)` is 0 and `select rank` takes `rank(1)`.
+- **Expected:** `empty: rank 1 size 0 arm 1`.
+- **Observed:** `empty: rank 1 size -1 arm default`; the nonempty control passes.
+- **Related:** not searched yet; check Bugzilla for assumed-rank and zero-size `pack` before filing.
+- **Where the repository meets it:** test code only. `nan_maxval` (`src/test/mlxf_test_reduce.f90`) has one
+  specific per rank instead of an assumed-rank dummy, since its callers pass masked `pack()` results that
+  may be empty.
+
 ## Trunk check and proposed reports, 2026-11-22
 
 The five standalone files were compiled and executed on Compiler Explorer's x86-64 Linux gfortran trunk,
@@ -216,3 +229,4 @@ ASSIGNED finalization tracker. The owner files reports; none has been filed by t
 | 3 | Related to PR 121475; file as new | (pending) | | |
 | 4 | Fixed on tested trunk snapshot | (none needed for this case) | | |
 | 5 | Related to PR 128856; file as new | (pending) | | |
+| 6 | Not yet searched | (pending) | | |

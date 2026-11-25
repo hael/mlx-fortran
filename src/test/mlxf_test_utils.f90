@@ -2,9 +2,11 @@
 ! Adapted from SIMPLE's simple_test_utils: same names and output, without SIMPLE's types.
 module mlxf_test_utils
 use, intrinsic :: iso_fortran_env, only: output_unit, int32, int64, real32, real64
-use mlxf,           only: MLX_DEVICES, MLX_DTYPES, mlx_array, mlx_from, mlx_to, reshape, mlx_device_count, &
-                          mlx_default_device
-use mlxf_test_defs, only: elem_tolerance, ELEM_SEED_CALIBRATION, ELEM_SEEDS_JUDGED
+use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+use mlxf,             only: MLX_DEVICES, MLX_DTYPES, mlx_array, mlx_from, mlx_to, reshape, mlx_device_count, &
+                            mlx_default_device
+use mlxf_test_defs,   only: elem_tolerance, ELEM_SEED_CALIBRATION, ELEM_SEEDS_JUDGED
+use mlxf_test_reduce, only: nan_maxval
 implicit none
 private
 
@@ -200,7 +202,8 @@ contains
     end function seeded_array5
 
     ! the largest error of a float32 or float64 result against ref, in array element order, relative to
-    ! max(1, bound); huge when r has another shape than want, another dtype or cannot be read
+    ! max(1, bound); huge when r has another shape than want, another dtype or cannot be read, or when ref or
+    ! bound is not finite; +infinity when the result holds a NaN or an infinity (nan_maxval)
     function flat_error( r, want, ref, bound ) result(err)
         type(mlx_array), intent(in) :: r
         integer,         intent(in) :: want(:)
@@ -225,8 +228,10 @@ contains
             return
         endif
         if( st /= 0 ) return
+        if( .not. all(ieee_is_finite(ref)) ) return
+        if( .not. all(ieee_is_finite(bound)) ) return
         err = 0._real64
-        if( size(ref) > 0 ) err = maxval(abs(got-ref)/max(1._real64, bound))
+        if( size(ref) > 0 ) err = nan_maxval(abs(got-ref)/max(1._real64, bound))
     end function flat_error
 
     function shaped_error0( r, ref, bound ) result(err)

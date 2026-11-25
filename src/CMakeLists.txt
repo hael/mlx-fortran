@@ -20,8 +20,8 @@ set(MLXF_TEST_ONLY_SOURCES "${MLXF_TEST_ONLY_SOURCES}" PARENT_SCOPE)
 # list (scripts/list_mlxc_prototypes.py). The set of files is known at configure time (--list-outputs).
 set(_mlxc_include "${MLX_C_INCLUDE_DIRS}")
 file(GLOB MLXF_MLXC_HEADERS CONFIGURE_DEPENDS "${_mlxc_include}/mlx/c/*.h")
-set(_gen_script  "${CMAKE_SOURCE_DIR}/scripts/gen_mlxc_bindings.py")
-set(_list_script "${CMAKE_SOURCE_DIR}/scripts/list_mlxc_prototypes.py")
+set(_gen_script  "${PROJECT_SOURCE_DIR}/scripts/gen_mlxc_bindings.py")
+set(_list_script "${PROJECT_SOURCE_DIR}/scripts/list_mlxc_prototypes.py")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_gen_script}")
 execute_process(
     COMMAND "${MLXF_PYTHON3}" -I "${_gen_script}" "${_mlxc_include}" "${MLXF_GEN_DIR}" --list-outputs

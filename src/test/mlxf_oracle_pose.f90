@@ -7,7 +7,8 @@
 module mlxf_oracle_pose
 use, intrinsic :: iso_fortran_env, only: real64
 use, intrinsic :: ieee_arithmetic, only: ieee_is_nan, ieee_value, ieee_quiet_nan
-use mlxf_oracle_dft, only: oracle_dft_3d, oracle_finite_or_inf
+use mlxf_oracle_dft,  only: oracle_dft_3d, oracle_finite_or_inf
+use mlxf_test_reduce, only: nan_maxval
 implicit none
 
 public :: oracle_pose_problem, oracle_pose_euler, oracle_pose_rotate, oracle_pose_reference, oracle_pose_gather, &
@@ -342,7 +343,7 @@ contains
                 status = STATUS_GRADIENT
                 exit
             endif
-            cmax = maxval(abs(cs))
+            cmax = nan_maxval(abs(cs))
             call cholesky_factor(cs, sqrt(EPS) * cmax, l, ok)
             if( .not. ok )then
                 status = STATUS_NOT_PD
@@ -1048,7 +1049,7 @@ contains
             end do
             err(1) = max(err(1), oracle_finite_or_inf(worst / scale))
             ! F(-q) is the conjugate of F(q)
-            scale = maxval(abs(f))
+            scale = nan_maxval(abs(f))
             worst = 0._real64
             do i3 = 1, n
                 do i2 = 1, n
@@ -1089,7 +1090,7 @@ contains
             call oracle_pose_gather(f, LOCS(:, iq), v, dv)
             call kernel_gather(f, LOCS(:, iq), vk, dvk)
             worst = max(worst, [oracle_finite_or_inf(abs(v - vk)), oracle_finite_or_inf(sum(abs(dv - dvk)))])
-            scale = max(scale, [abs(vk), maxval(abs(dvk))])
+            scale = max(scale, [abs(vk), nan_maxval(abs(dvk))])
         end do
         err(1) = max(err(1), oracle_finite_or_inf(maxval(worst / scale)))
         ! at a lattice point the three taps weigh 1/8, 3/4, 1/8, whose transform is the B-spline's envelope: the
@@ -1598,7 +1599,7 @@ contains
         if( any(ieee_is_nan(grad)) .or. any(ieee_is_nan(fd)) )then
             e = oracle_finite_or_inf(ieee_value(1._real64, ieee_quiet_nan))
         else
-            e = oracle_finite_or_inf(maxval(abs(grad - fd)) / maxval(abs(grad)))
+            e = oracle_finite_or_inf(nan_maxval(abs(grad - fd)) / nan_maxval(abs(grad)))
         endif
     end function gradient_difference
 
@@ -1627,7 +1628,7 @@ contains
         if( any(ieee_is_nan(a)) .or. any(ieee_is_nan(ref)) )then
             e = oracle_finite_or_inf(ieee_value(1._real64, ieee_quiet_nan))
         else
-            e = oracle_finite_or_inf(maxval(abs(a - ref)) / maxval(abs(ref)))
+            e = oracle_finite_or_inf(nan_maxval(abs(a - ref)) / nan_maxval(abs(ref)))
         endif
     end function matrix_error
 
@@ -1638,7 +1639,7 @@ contains
         if( any(ieee_is_nan(a)) )then
             e = oracle_finite_or_inf(ieee_value(1._real64, ieee_quiet_nan))
         else
-            e = oracle_finite_or_inf(maxval(abs(a)))
+            e = oracle_finite_or_inf(nan_maxval(abs(a)))
         endif
     end function vector_size
 

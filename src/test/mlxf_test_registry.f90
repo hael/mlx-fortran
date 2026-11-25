@@ -4,11 +4,12 @@
 ! A guard member is a stop the library makes by contract: it runs in a child process (mlxf_test_exec
 ! expect_aborts <group>) and its last reachable statement is the guarded call.
 module mlxf_test_registry
-use, intrinsic :: iso_fortran_env,    only: real32, real64
+use, intrinsic :: iso_fortran_env,    only: int32, real32, real64
 use mlxf,                             only: mlx_array, mlx_from, mlx_eval, mlx_live_count, mlx_last_error, &
                                             mlx_set_default_device, MLX_DEVICES, exp, mlx_fft, mlx_fft2, mlx_astype, &
                                             mlx_zeros, mlx_arange, mlx_metal_kernel, mlx_metal_kernel_spec, &
-                                            mlx_segmented_mm, mlx_qr, mlx_eigvalsh, mlx_conv2d, mlx_conv_spec
+                                            mlx_segmented_mm, mlx_qr, mlx_eigvalsh, mlx_conv2d, mlx_conv_spec, &
+                                            mlx_as_strided, matmul
 use mlxf_array_tester,                only: run_all_array_tests
 use mlxf_device_tester,               only: run_all_device_tests
 use mlxf_error_tester,                only: run_all_error_tests, run_all_recovery_half_tests
@@ -35,7 +36,13 @@ use mlxf_compile_tester,              only: run_all_compile_tests
 use mlxf_toy_polarft_calc_tester,     only: run_all_polarft_calc_tests
 use mlxf_toy_polarft_shiftmap_tester, only: run_all_polar_shiftmap_tests, run_all_polar_shiftmap_accuracy_tests
 use mlxf_toy_eul_prob_tab_tester,     only: run_all_eul_prob_tab_tests
+use mlxf_toy_polarft_tail_tester,     only: run_all_polarft_tail_tests
+use mlxf_oracle_projection_tester,    only: run_all_oracle_projection_tests
+use mlxf_toy_projector_tester,        only: run_all_projector_tests, run_all_projector_chain_tests
 use mlxf_bench_polar_table,           only: run_bench_polar_table
+use mlxf_bench_recon_pcg,             only: run_bench_recon_pcg
+use mlxf_bench_projector,             only: run_bench_projector
+use mlxf_bench_insert_probe,          only: run_bench_insert_probe
 use mlxf_test_utils,                  only: begin_test_suite, end_test_suite
 implicit none
 private
@@ -50,7 +57,8 @@ end interface
 character(len=*), parameter :: AREAS(8) = [character(len=16) :: 'core', 'array', 'ops', 'linalg', 'fft', 'compile', &
     &'fast', 'kernels']
 ! the measure-only benchmarks, run by hand (never by CTest): mlxf_test_exec test=bench_<x> suite=<mode>
-character(len=*), parameter :: BENCHES(1) = [character(len=32) :: 'polar_table']
+character(len=*), parameter :: BENCHES(4) = [character(len=32) :: 'polar_table', 'recon_pcg', 'projector', &
+    &'insert_probe']
 ! sub-suites an area runs only when suite= names them (too costly for the fast gate)
 character(len=*), parameter :: NAMED_ONLY(2) = [character(len=32) :: 'recovery_half', 'polar_shiftmap_accuracy']
 
@@ -59,7 +67,7 @@ type :: guard_member
     character(len=32) :: group = ''
 end type guard_member
 
-type(guard_member), parameter :: GUARDS(19) = [&
+type(guard_member), parameter :: GUARDS(21) = [&
     &guard_member('guard_empty_operation',   'object_contracts'), &
     &guard_member('guard_stale_handle',      'object_contracts'), &
     &guard_member('guard_openmp_region',     'object_contracts'), &
@@ -78,7 +86,9 @@ type(guard_member), parameter :: GUARDS(19) = [&
     &guard_member('guard_segments_shape',    'object_contracts'), &
     &guard_member('guard_matrix_rank',       'object_contracts'), &
     &guard_member('guard_eigh_uplo',         'object_contracts'), &
-    &guard_member('guard_conv_spec',         'object_contracts')]
+    &guard_member('guard_conv_spec',         'object_contracts'), &
+    &guard_member('guard_strided_span',      'object_contracts'), &
+    &guard_member('guard_matmul_integer',    'object_contracts')]
 
 contains
 
@@ -126,6 +136,12 @@ contains
                 call run_suite('polar_shiftmap', run_all_polar_shiftmap_tests, suite, ran)
                 call run_suite('polar_shiftmap_accuracy', run_all_polar_shiftmap_accuracy_tests, suite, ran)
                 call run_suite('eul_prob_tab', run_all_eul_prob_tab_tests, suite, ran)
+                call run_suite('polarft_tail', run_all_polarft_tail_tests, suite, ran)
+                call run_suite('oracle_projection', run_all_oracle_projection_tests, suite, ran)
+                ! projector: above 0.5 s in Release: the oracle's explicit matrices and DFTs for every fixture, and
+                ! the GPU's first compilation of the fused gather
+                call run_suite('projector', run_all_projector_tests, suite, ran)
+                call run_suite('projector_chain', run_all_projector_chain_tests, suite, ran)
             case default
                 found = .false.
                 return
@@ -161,6 +177,12 @@ contains
         select case( trim(name) )
             case('polar_table')
                 call run_bench_polar_table(mode, found)
+            case('recon_pcg')
+                call run_bench_recon_pcg(mode, found)
+            case('projector')
+                call run_bench_projector(mode, found)
+            case('insert_probe')
+                call run_bench_insert_probe(mode, found)
         end select
     end subroutine run_bench
 
@@ -218,6 +240,10 @@ contains
                 call guard_eigh_uplo
             case('guard_conv_spec')
                 call guard_conv_spec
+            case('guard_strided_span')
+                call guard_strided_span
+            case('guard_matmul_integer')
+                call guard_matmul_integer
             case('guard_empty_operation')
                 call guard_empty_operation
             case('guard_stale_handle')
@@ -335,6 +361,27 @@ contains
         w = mlx_from(k)
         r = mlx_conv2d(a, w, mlx_conv_spec(stride=[1, 1, 1]))
     end subroutine guard_conv_spec
+
+    ! a strided view that reaches one element past the end of its input stops
+    subroutine guard_strided_span
+        type(mlx_array) :: a, r
+        real(real32)    :: x(3, 4)
+        write(*,'(a)') 'guard_strided_span: mlx_as_strided reaching past the last element'
+        x = 1._real32
+        a = mlx_from(x)
+        r = mlx_as_strided(a, [3, 4], [1, 3], offset=1)
+    end subroutine guard_strided_span
+
+    ! MLX multiplies inexact matrices only: matmul of two integer arrays stops, unlike Fortran's
+    subroutine guard_matmul_integer
+        type(mlx_array) :: a, b, r
+        integer(int32)  :: x(2, 2)
+        write(*,'(a)') 'guard_matmul_integer: matmul of two int32 arrays'
+        x = 1
+        a = mlx_from(x)
+        b = mlx_from(x)
+        r = matmul(a, b)
+    end subroutine guard_matmul_integer
 
     subroutine guard_empty_operation
         type(mlx_array) :: a, b

@@ -210,8 +210,9 @@ written, the skill `mlxf-modern-fortran`.
   kept; where a GPU result near 1e-5 relative is not good enough, compute it on the CPU device. CPU float64 `sqrt` meets the float64 bound
   `1e-12 * max(1, abs(sqrt(x)))` against a double-precision reference. A float64 operation built on the
   GPU stops (Metal has no float64): a guard of `object_contracts`.
-- **Scalar operands are weak**: a Fortran scalar takes the array's kind when the array is real or complex; a
-  real scalar with a complex64 array becomes complex64; an integer or boolean array with a real scalar gives
+- **Scalar operands are weak**: a Fortran scalar takes the array's kind when the array is real or complex
+  (float16 and bfloat16 included: the scalar is made in the half kind, rounded through float32, so `h + 1.0`
+  stays half precision); a real scalar with a complex64 array becomes complex64; an integer or boolean array with a real scalar gives
   float32. A real64 literal never makes a float64 graph. Arithmetic (`**` included), comparisons, `max`, `min`,
   `atan2`, `modulo`, `mlx_logaddexp`, `mlx_floor_divide` and `mlx_clip`'s bounds accept real32 and real64
   scalars on either side, in the intrinsic's argument order. The bitwise functions (`iand`, `ior`, `ieor` on
@@ -230,9 +231,12 @@ written, the skill `mlxf-modern-fortran`.
   `mlx_alloc`, `mlx_set_default_device`, `mlx_set_memory_limit`, `mlx_device_info_size`,
   `mlx_device_info_string`, and the `apply` of `mlx_function` and of `mlx_metal_kernel`. Without `status` they
   stop. A failure the
-  library finds itself is reported the same way (`mlxf_report`): `mlx_to_alloc` allocates its destination
-  with `stat=`, and a destination that cannot be allocated returns a status, the message "the destination
-  could not be allocated", and the allocatable unallocated.
+  library finds itself is reported the same way (`mlxf_report`). **`mlx_to_alloc` changes its destination only
+  on success:** it checks the kind and the rank before touching it, fills a new allocation (made with
+  `stat=`), and moves it into the destination when the copy succeeds. On any failure that returns a status
+  the destination keeps its allocation and its values (or stays unallocated); a destination that cannot be
+  allocated gives the message "the destination could not be allocated". The old and the new allocation exist
+  together during the copy.
 - **Recovery.** After a failed evaluation the library and MLX stay usable: an evaluation that needs one
   buffer beyond the device's `max_buffer_length` returns a status whose message names the allocation, and the
   same graph at a batch that fits evaluates (1 GiB in the fast gate; half the failing batch in the sub-suite
@@ -290,7 +294,9 @@ written, the skill `mlxf-modern-fortran`.
 
 ## 10. Operations, matrices and Fourier transforms
 
-- Elementwise arithmetic includes division and unary minus; comparisons return boolean arrays, and
+- Elementwise arithmetic includes division and unary minus. **`/` is MLX's true division, not Fortran's:** two
+  integer arrays divide to float32 (7 / 2 is 3.5), where Fortran truncates; `mlx_floor_divide(a,b)` keeps the
+  integer kind and floors. Comparisons return boolean arrays, and
   `.and.`, `.or.`, `.not.` operate on those arrays. `max(a,b)` and `merge(tsource,fsource,mask)` broadcast
   with leading Fortran dimensions aligned. `exp`, `sqrt`, `real`, `aimag`, `conjg` and `mlx_astype(a,dtype)`
   operate elementwise. `real(a)` extracts the float32 real component of complex64 and converts other
@@ -434,12 +440,16 @@ written, the skill `mlxf-modern-fortran`.
   and, by default, its kind. A float64 fill keeps a real32 value's rounding. `mlx_arange(start,stop[,step,dtype])` takes real64
   scalar bounds, defaults to unit step and float32, and excludes `stop`; negative steps are supported.
 - `matmul(a,b)` multiplies Fortran dimensions 1 and 2 and broadcasts dimensions 3 and above. Complex
-  multiplication does not conjugate either operand; use `conjg` explicitly when needed.
+  multiplication does not conjugate either operand; use `conjg` explicitly when needed. **MLX multiplies
+  floating-point and complex matrices only:** operands whose promoted kind is an integer kind (two integer
+  arrays) stop, unlike Fortran's integer `matmul`; convert with `mlx_astype` first. An integer operand with a
+  real one is promoted and multiplied.
 - **Products of chosen, masked and segmented matrices.** Three products of real matrices in the Fortran view,
   with no transpose and no copy: the operands are exchanged, as for `matmul` (MLX's product of the transposes
   is the transpose of the Fortran product), and the lists and masks are exchanged with them; the only added
   node is the shift of a list or of the segments to MLX's 0-based values. With a list, a mask or segments,
-  complex and integer operands stop (without, the first two are `matmul`, which takes them).
+  complex and integer operands stop (without, the first two are `matmul`, which takes complex operands and
+  refuses two integer ones).
   - `mlx_gather_mm(a,b[,lhs_indices,rhs_indices,sorted_indices])`:
     `r(:,:,i) = matmul(a(:,:,lhs_indices(i)), b(:,:,rhs_indices(i)))`. An index is the one-based number of a
     matrix in array element order over dimensions 3 and up of its operand: matrix 4 of a (m, k, 3, 2) array is
@@ -732,11 +742,23 @@ graph form of the same computation stays as the CPU path and as the reference.
   operations; `mlx_compile` then traces the kernel as one node. `apply` takes `status=`, which the callback
   returns; building a kernel from an invalid spec stops, as an operator does on a program error, so a callback
   builds only from a spec known to be valid. The grid and the output shapes are those of the trace: a
-  compiled function that holds a kernel is for the shapes it was traced with (a shapeless reuse at other
-  shapes is not tested).
+  compiled function that holds a kernel is for the shapes it was traced with; MLX refuses to compile one
+  shapeless ("CustomKernel cannot infer output shapes", returned through the status; MLX 0.32.4).
+- **Math mode.** Kernels built through mlx-c run in MLX's default safe mode (question 21 of the Apple
+  questions): a compensated sum is honoured; `metal::precise::exp` is within one unit of the correctly
+  rounded value and plain `exp` 62 units from it (measured with MLX 0.32.4). A source that needs accuracy
+  calls the `precise` functions.
 - The gates: `unit_fast` (exact results on the GPU for the layout, a two-dimensional grid, two inputs and two
   outputs, templates and a header, a strided input with and without the copy, atomic int32 outputs with
   colliding updates, complex64 and rank-0 inputs, a kernel without inputs, a kernel inside a compiled
   function; the refusals above through `status`; the refusal on the CPU device), and two guards of
-  `object_contracts` (a spec without outputs, an empty kernel applied). Not tested: the other stops of `new`,
-  a stale kernel, an output above rank 2, a template dtype other than float32.
+  `object_contracts` (a spec without outputs, an empty kernel applied). Not tested in `unit_fast`: the other stops
+  of `new`, a stale kernel, an output above rank 2 (rank 3 worked in a probe with MLX 0.32.4), a template dtype
+  other than float32.
+- **Measured by the toys** (MLX 0.32.4, M5 Ultra). A complex64 output of rank 2 (`complex64_t`, written by
+  members) holds its values bit for bit; the toy projector's fused gather writes its bank so (`unit_kernels`,
+  suite `projector`). A float32 output under `atomic_outputs` adds colliding `atomic_fetch_add_explicit` updates
+  correctly (one million additions of 0.1 to one element within 3.5e-6 of the exact sum) but not in a repeatable
+  order: an insertion of 2.84e8 such deposits gives different bits in up to 49 % of its 2.3e6 elements from run to
+  run (`bench_insert_probe`). A `threadgroup` array declared in the body, with `threadgroup_barrier`, builds and
+  gives correct results, though MLX's documentation does not name it (question 26 of the Apple questions).

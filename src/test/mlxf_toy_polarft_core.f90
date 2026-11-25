@@ -1,5 +1,7 @@
-!@descr: the toy polar calculator's core: new, kill, the particles' halves, the shell weights, the tile plan, the message
+!@descr: the toy polar calculator's core: new, kill, the particles' halves, the shell weights, the tile plan and tail, the message
 submodule (mlxf_toy_polarft_calc) mlxf_toy_polarft_core
+use mlxf,                         only: mlx_array
+use mlxf_toy_projector_pft_batch, only: fproject_polar_batch_opt, fproject_polar_batch_resident
 implicit none
 
 contains
@@ -9,7 +11,8 @@ contains
         type(parameters),    intent(in)    :: params
         integer,             intent(in)    :: nrefs
         integer,             intent(in)    :: pfromto(2), kfromto(2)
-        integer :: i
+        real(real32) :: dang, ang
+        integer      :: i, irot, k
         call self%kill
         if( params%pftsz < 2 .or. mod(params%pftsz, 2) /= 0 )then
             self%msg = 'polarft_calc%new: refused: pftsz must be even and at least 2'
@@ -40,6 +43,18 @@ contains
         self%sigma2_wk  = 0._real32
         self%sigma2_wk8 = 0._real64
         self%ldim       = [params%box, params%box, 1]
+        self%nspace     = params%nspace
+        self%nstates    = params%nstates
+        ! SIMPLE's polar coordinates in single precision: h = sin(a) k, k = -cos(a) k
+        allocate(self%polar(2, kfromto(1):kfromto(2), self%nrots))
+        dang = 2._real32 * acos(-1._real32) / real(self%nrots, real32)
+        do irot = 1, self%nrots
+            ang = real(irot - 1, real32) * dang
+            do k = kfromto(1), kfromto(2)
+                self%polar(1, k, irot) =  sin(ang) * real(k, real32)
+                self%polar(2, k, irot) = -cos(ang) * real(k, real32)
+            end do
+        end do
         self%existence = .true.
     end subroutine new
 
@@ -55,6 +70,7 @@ contains
         if( allocated(self%pinds) ) deallocate(self%pinds)
         if( allocated(self%sigma2_wk) ) deallocate(self%sigma2_wk)
         if( allocated(self%sigma2_wk8) ) deallocate(self%sigma2_wk8)
+        if( allocated(self%polar) ) deallocate(self%polar)
         if( allocated(self%sm_islots) ) deallocate(self%sm_islots)
         if( allocated(self%sm_cands) ) deallocate(self%sm_cands)
         if( allocated(self%sm_logz) ) deallocate(self%sm_logz)
@@ -81,6 +97,8 @@ contains
         self%ptcl_gen_memo = -1_int64
         self%l_weights     = .false.
         self%ldim          = 0
+        self%nspace        = 0
+        self%nstates       = 1
         self%wk_gen        = 0_int64
         self%map_ref_gen   = -1_int64
         self%map_wk_gen    = -1_int64
@@ -95,6 +113,8 @@ contains
         self%l_refs_pending = .false.
         self%bt            = POLAR_CANON_BT
         self%rt            = POLAR_CANON_RT
+        self%tail          = POLARFT_TAILS%graph
+        self%route         = POLARFT_REF_ROUTES%host
         self%l_rows        = .false.
         self%l_profile     = .false.
         self%slot_ieo      = 0
@@ -182,6 +202,35 @@ contains
         self%rt = rt
     end subroutine set_tile_plan
 
+    module subroutine set_tail_form( self, form )
+        class(polarft_calc), intent(inout) :: self
+        integer,             intent(in)    :: form
+        if( form /= POLARFT_TAILS%graph .and. form /= POLARFT_TAILS%metal )then
+            self%msg = 'polarft_calc%set_tail_form: refused: the form is one of POLARFT_TAILS'
+            return
+        endif
+        self%msg = ''
+        if( form /= self%tail ) self%ref_gen_bins = -1_int64
+        self%tail = form
+    end subroutine set_tail_form
+
+    module subroutine set_ref_route( self, route )
+        class(polarft_calc), intent(inout) :: self
+        integer,             intent(in)    :: route
+        if( .not. self%existence )then
+            self%msg = 'polarft_calc%set_ref_route: refused: no calculator (new)'
+        else if( route /= POLARFT_REF_ROUTES%host .and. route /= POLARFT_REF_ROUTES%device )then
+            self%msg = 'polarft_calc%set_ref_route: refused: the route is one of POLARFT_REF_ROUTES'
+        else if( self%l_refs_pending )then
+            self%msg = 'polarft_calc%set_ref_route: refused: references wait to be memoized (memoize_refs)'
+        else
+            self%msg = ''
+        endif
+        if( len(self%msg) > 0 ) return
+        if( route /= self%route ) self%ref_gen_bins = -1_int64
+        self%route = route
+    end subroutine set_ref_route
+
     pure module function message( self ) result(msg)
         class(polarft_calc), intent(in) :: self
         character(len=:), allocatable :: msg
@@ -198,6 +247,83 @@ contains
         class(polarft_calc), intent(in) :: self
         get_pftsz = self%pftsz
     end function get_pftsz
+
+    pure module function get_kfromto( self ) result(kfromto)
+        class(polarft_calc), intent(in) :: self
+        integer :: kfromto(2)
+        kfromto = self%kfromto
+    end function get_kfromto
+
+    module subroutine get_polar_coords( self, dim, coords )
+        class(polarft_calc), intent(inout) :: self
+        integer,             intent(in)    :: dim
+        real(real32),        intent(out)   :: coords(self%kfromto(1):self%kfromto(2), self%pftsz)
+        coords = 0._real32
+        if( .not. self%existence )then
+            self%msg = 'polarft_calc%get_polar_coords: refused: no calculator (new)'
+            return
+        endif
+        if( dim /= 1 .and. dim /= 2 )then
+            self%msg = 'polarft_calc%get_polar_coords: refused: invalid coordinate dimension'
+            return
+        endif
+        self%msg = ''
+        coords   = self%polar(dim, self%kfromto(1):self%kfromto(2), 1:self%pftsz)
+    end subroutine get_polar_coords
+
+    module subroutine vol_pad2ref_pfts_opt( self, vol_pad, eulspace, state, iseven )
+        class(polarft_calc), intent(inout) :: self
+        class(projector),    intent(inout) :: vol_pad
+        real(real32),        intent(in)    :: eulspace(:,:,:)
+        integer,             intent(in)    :: state
+        logical,             intent(in)    :: iseven
+        complex(real32), allocatable :: refs_state(:,:,:)
+        type(mlx_array)              :: bank
+        integer                      :: iref_from, iref_to, i, st
+        if( .not. self%existence )then
+            self%msg = 'vol_pad2ref_pfts_opt: refused: no calculator (new)'
+            return
+        endif
+        if( state < 1 .or. state > self%nstates )then
+            self%msg = 'vol_pad2ref_pfts_opt: refused: state out of range'
+            return
+        endif
+        if( self%nspace < 1 )then
+            self%msg = 'vol_pad2ref_pfts_opt: refused: nspace must be at least 1'
+            return
+        endif
+        iref_from = (state - 1) * self%nspace + 1
+        iref_to   = iref_from + self%nspace - 1
+        if( iref_to > self%nrefs )then
+            self%msg = 'vol_pad2ref_pfts_opt: refused: reference range exceeds allocated bank'
+            return
+        endif
+        self%msg = ''
+        if( self%route == POLARFT_REF_ROUTES%device )then
+            ! the bank stays on the device, with the parity's workspace, until memoize_refs
+            call fproject_polar_batch_resident(vol_pad, eulspace, self%nspace, self, bank)
+            if( len(vol_pad%message()) > 0 )then
+                self%msg = vol_pad%message()
+                return
+            endif
+            call self%ws(merge(REF_EVEN, REF_ODD, iseven))%set_sections(bank, iref_from, self%nrefs, st)
+            if( st /= 0 )then
+                self%msg = self%ws(merge(REF_EVEN, REF_ODD, iseven))%message()
+                return
+            endif
+            self%l_refs_pending = .true.
+            return
+        endif
+        allocate(refs_state(self%pftsz, self%nk, self%nspace))
+        call fproject_polar_batch_opt(vol_pad, eulspace, self%nspace, self, refs_state)
+        if( len(vol_pad%message()) > 0 )then
+            self%msg = vol_pad%message()
+            return
+        endif
+        do i = 1, self%nspace
+            call self%set_ref_pft(iref_from + i - 1, cmplx(refs_state(:, :, i), kind=real64), iseven)
+        end do
+    end subroutine vol_pad2ref_pfts_opt
 
     pure module logical function ptcl_iseven( self, iptcl )
         class(polarft_calc), intent(in) :: self

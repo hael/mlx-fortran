@@ -1,6 +1,6 @@
 # K1: the fused tail of the dense score (run `mlxf_kernel_k1`, on the M5 Ultra)
 
-Status, 2026-11-25: planned and ruled (the maintainer's go); run in the session on the M5 Ultra, in order K1, K8, K2. Deliverable K1 (A1) of [`mlxf_kernel_families.md`](mlxf_kernel_families.md),
+Status, 2026-11-25: **delivered; kept by the maintainer's ruling R2** (Progress, "Ruling R2 and Phase 4"; report [`mlxf_kernel_k1_report.md`](../completed/mlxf_kernel_k1_report.md)): the fused tail is 1.65 to 1.80 times the compiled tail's rate, selectable, the default `graph`. Planned and ruled (the maintainer's go); run in the session on the M5 Ultra, in order K1, K8, K2. Deliverable K1 (A1) of [`mlxf_kernel_families.md`](mlxf_kernel_families.md),
 the roadmap's rank 2. Base: the commit that holds this plan (the maintainer commits it with the pending work:
 the Metal kernel wrapper, the n-dimensional FFTs, the linear algebra and the oracles; the run pins its hash in
 Phase 0). The code this note was checked against is `1e0ae97` with the working tree of 2026-11-25. SIMPLE is
@@ -573,3 +573,397 @@ passes; `git status` shows only file-table paths.
 
 (one entry per phase, written by the run: date, machine, base, files changed, each exit item and how it was
 met, log paths, decisions taken under delegation, what it means in short)
+
+### Phase 0, the base and the baseline (2026-11-25, 06:45 to 07:24, M5 Ultra, in the session)
+
+**Machine and base.** M5 Ultra (Mac17,15, 30 cores, 103,079,215,104 B), macOS 27.2.1, GNU Fortran 16.2.0, CMake
+4.5.1, MLX 0.32.4 and mlx-c 0.8.0 (Homebrew). Base: `1e0ae97` plus the maintainer's uncommitted working tree of
+2026-11-25 (44 lines of `git status --short`; checksums of the 121 files under `src`, `scripts`, `test` in
+`/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k1_work/scratch/keep/phase0/base_checksums.txt`). SIMPLE read at `d354efee2`. Load before the run 1.6 to 1.8 (another process
+of the maintainer's).
+
+**Files changed:** `src/test/mlxf_bench_polar_table.f90` (`suite=time` reads `passes=`, default 3; the best pass
+is the wall as before, `wall_rep1..3` are the first three passes; two columns at the end of the row, `passes` and
+`wall_median_s`; one stdout line with the median), `scripts/run_parts.sh` (each part's median rate, the useful
+pairs over the median pass; their sum in `summary.txt` and as the last column `sum_median_pairs_per_s` of the
+series table). Nothing else.
+
+| Exit item | Result | Evidence |
+| --- | --- | --- |
+| Builds on the base | Debug and Release from scratch with `MLXF_WERROR=ON`: 0 warnings, fast gate 9 of 9 | `/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k1_work/scratch/keep/phase0/build_{Debug,Release}.log` |
+| Counts of section 2 (*measured*, both builds) | `unit_core` 82, `unit_array` 179, `unit_ops` 2,402, `unit_linalg` 632, `unit_fft` 194, `unit_compile` 63, `unit_fast` 94, `unit_kernels` 1,063; `polarft_calc` 107 (CPU) and 99 (GPU), `eul_prob_tab` 35 per device. GPU devices: 1 | `/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k1_work/scratch/keep/phase0/counts_{Release,Debug}.txt` |
+| Builds with `passes=` | Debug and Release from scratch: 0 warnings, gate 9 of 9; `scripts/check_tree.sh` passes; both formatters leave the benchmark as it is | `/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k1_work/scratch/keep/phase0p/build_{Debug,Release}.log`, `check_tree.log` |
+| `passes=3` gives the base's rows and digests | The first 28 columns of the row have the base's layout and values (estimate, peak 1.02573e10 B, cache 3.28128e9 B; walls differ as walls do); digest `3457E99553A08BFD` in both | `/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k1_work/scratch/keep/phase0/step3/{base,p3}/` |
+| A key the suite does not read stops | `suite=time tail=metal` and `suite=profile passes=3` stop with status 2 naming the key; `passes=0` stops too | `/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k1_work/scratch/keep/phase0/step3/keys_stop.log` |
+| Decision 13's digests, twice | Runs a and b equal to each other and to the record of run `mlxf_toy_arch` in every line: `accuracy` CPU (8 lines: `6C2823C473029BD2`, `C8B49BC7A6676AF2` x5, `B754BBDACD79D649`, `1D586C19F54A9F3A`) and GPU (7 lines: `EF6D23726EFF3EF7` x5, `9FADF409D4A20F7D`, `A58EB9A70285325E`); `time` and `profile` GPU `3457E99553A08BFD`; `time` CPU device `4B4FF8EBDEEA9837` (once); `time` at three parts `B69FA174DE317D3C`, `4BFC1DA8533AB2F5`, `8921689A9191A114` (in 9 runs) | `/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k1_work/scratch/keep/phase0/digests_{a,b}/`, `digests_ab.log`; the parts' in `baseline/`, `protocol/`, `control/` |
+| The accuracy suite's GPU count | 76 assertions at 16 by 250 and at 64 by 250 (`device=gpu`); row error 6.514E-07, 0 of 64,000 rotations differing | `/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k1_work/scratch/keep/phase0/accuracy_counts/` |
+| Baseline as run `mlxf_toy_arch` took it, twice | 1 process: 6.048 and 6.050 s, 20.814e9 and 20.813e9 B; 3 processes: 6.564 and 6.482 s, 60.320e9 B summed (lowest free 0.37e9 and 0.47e9 B); 6 processes not run, predicted 119.58e9 B. Against the report's 6.00 to 6.09 s, 6.36 to 6.71 s, 20.8e9 and 60.3e9 B: inside | `/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k1_work/scratch/keep/phase0/baseline/run_parts.tsv` |
+| Graph form by the protocol | the table below | `/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k1_work/scratch/keep/phase0/protocol/run_parts_2500_{4,1}.tsv` |
+| Control of the protocol (graph against graph, 3 pairs) | `2500_4` at 3: ratios 0.9960, 0.9931, 1.0024, largest distance from 1 **0.0069**; `2500_1` at 6: 1.0063, 1.0010, 0.9977, **0.0063**. Both far below 0.10: no stop | `/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k1_work/scratch/keep/phase0/control.txt` |
+| `suite=profile`, twice | wall 1.940 and 2.001 s; stages (terms, products, transform, distances and draw, concatenation) 0.011, 0.551, 0.423, **0.924**, 0.003 s and 0.011, 0.580, 0.430, 0.950, 0.003 s | `/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k1_work/scratch/keep/phase0/profile/p{1,2}/` |
+
+**Frozen: the graph form by the protocol** (*measured*, Release, GPU, full precision, tile plan 64 by 250; the
+rate is the sum of the processes' median rates; the pass time is the case's pairs over it):
+
+| Split | Median rate, pairs/s | Pass time, s | Best-pass rate | Go to last exit, s | Summed footprint, B | Largest footprint | Summed MLX peak, B | Lowest free, B |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `2500_4`, 1 x 30, `passes=9` | 1.7501e7 | 1.143 | 1.7575e7 | 12.923 | 20.814e9 | 20.814e9 | 10.257e9 | 40.0e9 |
+| `2500_4`, 3 x 10 (and the 6 control runs) | 1.6910e7 (1.672e7 to 1.698e7) | 1.183 | 1.92e7 (1.84e7 to 2.13e7) | 13.586 (13.46 to 13.58) | 60.322e9 | 20.108e9 | 29.714e9 | 0.48e9 |
+| `2500_4`, 6 x 5 | not run: the guard predicts 119.58e9 B | | | | | | | |
+| `2500_1`, 1 x 30, `passes=36` | 1.7687e7 | 0.283 | 1.7909e7 | 10.957 | 8.333e9 | 8.333e9 | 4.810e9 | 51.7e9 |
+| `2500_1`, 3 x 10 | 1.6984e7 | 0.294 | 2.07e7 | 11.406 | 23.703e9 | 7.901e9 | 13.673e9 | 37.1e9 |
+| `2500_1`, 6 x 5 (and the 6 control runs) | 1.7258e7 (1.681e7 to 1.694e7) | 0.290 | 3.43e7 (3.16e7 to 3.75e7) | 11.709 (11.60 to 11.75) | 45.929e9 | 7.660e9 | 26.155e9 | 14.4e9 |
+
+The new digests of `2500_1` are frozen too: one process `DE754C8B7BDA20E0`; three parts `D853F44ECE19A074`,
+`E1AED46E2ACB3AB7`, `C80A13726E0622D6`; six parts `2CE5436CE15ED479`, `2E613BA0C9DC2076`, `B668679C721AE151`,
+`237586C19654BBD6`, `EDD04C521081D36C`, `074EAED918B2753C` (identical in all 7 runs).
+
+**The roadmap's two conditions, reported:** total rate over one process's: `2500_4` at 3, 0.966; `2500_1` at 3,
+0.960, at 6, 0.976 (*derived*): the first condition (below 0.8) is not met. Summed footprint above 51.5e9 B:
+met at 3 processes of `2500_4` (60.3e9 B), not met by `2500_1` (45.9e9 B at six).
+
+**Decisions taken under delegation.**
+1. `wall_rep1..3` keep the first three passes and `wall_s` is the best of all passes, so the row's first 28
+   columns keep their meaning at any `passes=`; `host_cpu_s` is the mean over the passes. Reason: the base's rows
+   come back unchanged at `passes=3`, and the series table's readers keep their columns.
+2. `sum_median_pairs_per_s` is the series table's last column, after `keys`. Reason: the guard and every reader
+   address the earlier columns by position.
+3. The median of an even number of passes is the mean of the two middle ones (not used: 3, 9 and 36 are odd).
+4. The digests of decision 13 were taken with the Phase 0 build (`passes=` added), not the bare base: step 3
+   shows the two give the same rows and digest, and the record is the target.
+5. The baseline's best-pass rate at three processes (3.70e7 in run 1, 1.74e7 in run 2) is not comparable between
+   runs: a part's best of three passes may run while the others idle. The median of 9 is stable (control above).
+
+**What it means, in short.** The base is the record's: every digest, every count, the baseline. The protocol
+resolves the judged splits to better than 1 % (control 0.0069 and 0.0063 against the 0.10 stop), so a 30 %
+change is far above its noise. Three or six processes give 0.96 to 0.98 of one process's rate; six parts of
+`2500_1` fit in 45.9e9 B. With the barriers the tail is 0.92 to 0.95 s of the profile's 1.94 to 2.00 s.
+
+### Phase 1, the probe (2026-11-25, 06:55 to 07:58, M5 Ultra)
+
+No repository file changed but this note. The probes are scratch programs built against the Phase 0 Release build
+(`/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k1_work/scratch/keep/phase1/k1_probe.f90`, `k1_probe_mod.f90`, `build.sh`); the prototype source in `k1_probe_mod.f90` is Phase 2's.
+
+| | Measured | Origin, file | Settles |
+| --- | --- | --- | --- |
+| P1 | One thread per pair over its row of a (364, 250, 64) input through `raw_shape`: first minimum and position equal to Fortran's `minval`/`minloc` in all 2 x 16,000 values, ties included | *measured*, `out_p1.txt` | decision 4's form holds |
+| P2 | Rows with NaN, +inf, -inf, the limit and its neighbours, `huge`: the kernel's rows equal the graph form's in every bit (0 of 4,368 differ), the entries too; -inf stays valid in both and is drawn; a row of only NaN and +inf gives (invalid, 1) in both | *measured*, `out_p2.txt` | decision 5's comparisons |
+| P3 | `fma(raw, iw, 1)` equals `ieee_fma` in all 1e6 cases; the graph form's compiled `raw * iw + 1` is not contracted (29 % of the cases differ from `ieee_fma` by a unit); `metal::precise::exp` is within 1 unit of Fortran's `exp` and bit for bit the graph form's `exp` (1e6 of 1e6); plain `exp` in the default math mode is 62 units off | *measured*, `out_p3.txt` | the source uses `metal::precise::exp`; the forms' rows differ by one unit at most (decision 11's floor) |
+| P4 | 1 then 363 terms of 2^-25: plain sum 1 exactly, compensated sum 1.0000108480453491, the expected value bit for bit. MLX 0.32.4 builds custom kernels in its default, safe math mode and the compensation is honoured | *measured*, `out_p4.txt` | **compensated sums** (decision 5) |
+| P5 | bt 1, 4, 7, 8 by rt 1, 3: one source compiles at every shape, inputs of fewer than 8 elements included; rotations equal to the graph form's in every pair, distances within one unit | *measured*, `out_p5.txt` | no padding of `iw`, `temps`, `u` |
+| P6 | float32 and int32 outputs of rank 2 and a float32 output of rank 3 are correct; the rank-3 rows equal the rank-2 rows reshaped; `irots` is int32 (dtype 7) | *measured*, `out_p6.txt` | decision 7 holds; rank 3 works (for K2 and K5) |
+| P7 | One canonical tile, median of 5 after a warm-up, three runs of two rounds: compiled graph tail 0.74 to 2.13 ms; the kernel, warm, 0.28 to 0.43 ms at every threadgroup (32: 0.284 to 0.492; 64: 0.283 to 1.031; 128: 0.283 to 0.447; 256: 0.282 to 0.430; 512: 0.292 to 0.578; 1,024: 0.322 to 0.492; grid [rt, bt, 1]: 0.282 to 1.059). In the four rounds of runs 2 and 3 no candidate is faster than 64 by more than 1 %; in the first run 256 led, the candidates being timed in a fixed order while the GPU clock rose (64 at 1.03 ms in its first round). Entries bit for bit equal across all threadgroups and the 2-D grid | *measured*, `out_p7.txt`, `out_p7_run2.txt`, `out_p7_run3.txt` | **`POLARFT_TAIL_TG` = 64** |
+| P8 | A new source's first evaluation: 48.7 ms, paid inside the submission (`apply` and `mlx_async_eval`), 4.8 ms at the wait; the same source again, a new object: 1.09 ms applied and evaluated; another output shape: 1.01 ms; the rows variant's first evaluation 25.8 ms in the submission; building an object alone 0.033 ms | *measured*, `out_p8.txt` | decision 6's costs: the compilation lands in the first tile's submission, in the warm-up pass |
+| P9 | Per tile directly 0.47 to 0.51 ms, inside a function compiled with `shapeless=.false.` 0.47 to 1.05 ms (no gain); `shapeless=.true.` refuses already at the traced shape, with a status: "[Primitive::output_shapes] CustomKernel cannot infer output shapes" (the other shape is therefore not reached) | *measured*, `out_p9.txt` | **the kernel is applied directly** (decision 8) |
+| P10 | 40 canonical tiles queued as the workspace queues them: compiled graph tail 0.650 and 0.709 ms per tile (median of 5, two processes), the prototype 0.166 and 0.173 ms: **3.9 to 4.1 times faster** (H2 holds). Entries' digests `6E7B0D3FE3C7A27D` (kernel) and `3812EA910C00B9E7` (graph) in three runs and two processes. Of the 640,000 pairs the drawn rotations differ in 7; where they agree the distances differ by at most 1.19e-7 (one unit). The graph form's `irots` is int32 | *measured*, `out_p10.txt`, `out_p10b.txt` | H2; decisions 3 and 12 |
+| P11 | The ceiling: below | *measured*, `ceiling/` | decision 19 |
+
+**P11, the ceiling** (*measured*, decision 17's protocol; the null tail gives rotation 1 and its distance, the
+inverse transform still evaluated; build `scratch/ceiling/build_Release`, diff `/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k1_work/scratch/keep/phase1/null_tail.diff`; the rate is
+the sum of the processes' median rates):
+
+| Split | Graph | Null tail | Ratios | Median |
+| --- | --- | --- | --- | --- |
+| `2500_4`, 1 x 30 | 1.751e7, 1.751e7, 1.747e7 | 4.094e7, 4.097e7, 4.117e7 | 2.338, 2.339, 2.356 | **2.339** |
+| `2500_4`, 3 x 10 (judged) | 1.688e7, 1.678e7, 1.682e7 | 5.032e7, 3.822e7, 5.698e7 | 2.981, 2.277, 3.387 | **2.981** |
+| `2500_1`, 6 x 5 (judged) | 1.701e7, 1.692e7, 1.712e7 | 3.995e7, 3.912e7, 3.925e7 | 2.348, 2.312, 2.293 | **2.312** |
+
+With the null tail each part of `2500_4` peaked at 25.1e9 B (75.0e9 B summed at three processes) and the machine's
+free memory fell to 0.07e9 B, which explains that split's spread. A tail that costs nothing removes 0.65 s of the
+1.14 s pass (*derived*: 1.143 s at 1.75e7 pairs/s against 0.488 s at 4.10e7).
+
+**Decision 19: the medians at the judged splits are 2.98 and 2.31, both above 1.30. Phases 2 and 3 run.** H1
+holds: the compiled tail takes about 0.65 s of the 1.14 s pass, far above 0.26 s.
+
+**Frozen:** `POLARFT_TAIL_TG` = 64 (*measured*, P7); compensated sums (*measured*, P4); the kernel applied directly
+(*measured*, P9); `metal::precise::exp` in the source (*measured*, P3).
+
+**Decisions taken under delegation.**
+1. `POLARFT_TAIL_TG` = 64 although the first P7 run favoured 256: the candidates were timed in a fixed order while
+   the GPU warmed; two further runs of the probe (a probe judges nothing) show every candidate within 1 % of 64
+   once warm, so the rule's default holds.
+2. The source uses `metal::precise::exp`, not `exp`: the graph form's `exp` is MLX's precise one (P3), and in the
+   default math mode plain `exp` is 62 units off.
+3. The first ceiling attempt is void: the null build had not been installed, so its runs stopped at the
+   launcher's usage check (status 2) while the graph runs ran. It is kept in `/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k1_work/scratch/keep/phase1/ceiling_attempt1_no_null_exe/`;
+   the whole ceiling was then run once from the start. No row was repeated for its result.
+4. The ceiling's series tables start as copies of Phase 0's, so that the guard predicts from the measured splits
+   of each case.
+5. P9 first crashed in the probe's own code (it read the outputs of the refused shapeless apply); the probe now
+   checks the status. The library returned the status, as its contract says.
+
+**What it means, in short.** Everything the kernel depends on works in MLX 0.32.4 as designed: exact reductions,
+the graph form's classification, `fma` and a precise `exp`, honoured compensation, small and rank-3 outputs. In
+isolation the fused tail is about four times faster than the compiled one on a canonical tile, and a tail that
+costs nothing would make the judged splits 2.3 to 3.0 times faster: the 30 % rule is reachable, so the kernel is
+written.
+
+### Phase 2, the kernel on the small fixture (2026-11-25, 07:40 to 08:05, M5 Ultra)
+
+**Files changed** (all in the file table): new `src/test/mlxf_toy_polarft_workspace_tail.f90` (the source in
+pieces, the two kernels' specs, `polarft_workspace_new_tail`, `polarft_workspace_metal_tail`) and
+`src/test/mlxf_toy_polarft_tail_tester.f90` (suite `polarft_tail`); `mlxf_toy_polarft_workspace.f90` (the form,
+the kernel components and the constants array, the types `tail_inputs` and `tail_outputs` moved up from the
+scoring submodule, the two interfaces), `_lifecycle.f90` (one comparison: the fused tail's objects or the
+compiled function; their release), `_score.f90` (`apply_tail` takes the block's `rows` and makes one comparison),
+`mlxf_toy_polarft_calc.f90` and `_core.f90` (`set_tail_form`, the member `tail`, reset by `kill`),
+`_memo.f90` (the form into the tile spec), `mlxf_test_defs.f90` (`POLARFT_TAILS`, `POLARFT_TAIL_TG`, the three
+tolerances, `polarft_tile_spec%tail`), `mlxf_test_registry.f90` (the row `polarft_tail`),
+`mlxf_toy_polarft_calc_tester.f90` and `mlxf_toy_eul_prob_tab_tester.f90` (every GPU check once more with the
+fused form; the calculator's tester also the forms' agreement), `scripts/toy_mirror.txt` (the line of
+`set_tail_form`). No row was added to the table; `test.inf` and `test/CMakeLists.txt` needed no change.
+
+**The calibration and the freeze** (*measured*, GPU, fixture seed 1, both halves, 96 pairs; identical in Debug
+and Release): the fused rows against the compiled ones 1.1908073483292497e-07 (one unit), the distances where the
+rotations agree 6.24e-08, drawn rotations differing **0**, validity off 0, draws off 0
+(`/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k1_work/scratch/keep/phase2w/kernels_dbg.log`). Frozen before any run of seeds 2 and 3 with the fused form, in
+`src/test/mlxf_test_defs.f90` (sha1 `73a4a1452d9dba3becdf3cb3d79bcb803d0289c8`):
+- `POLARFT_TAIL_ROW_TOL` = max(2 x 1.1908e-07, 2^-23) = **2.3816146966584994e-07** (*measured* then *derived*);
+- `POLARFT_TAIL_ROT_FIX` = max(2 x 0, 1) = **1** (*derived*);
+- `POLARFT_TAIL_ROT_BLK`: written as -1 here, frozen in Phase 3 from the block's seed 1.
+
+| Exit item | Result | Evidence |
+| --- | --- | --- |
+| Decision 10 with the fused form (fixture, seed 2, GPU) | row error 2.358e-07 (bound 4.794e-07), minimising rotation differs in 0 of 96 (bound 1), every entry of the right validity, every draw in its interval, every entry's distance its row's; also the one-state, representatives and full-tile cases and the rebuild | `/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k1_work/scratch/keep/phase2/build_*.log`, `/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k1_work/scratch/keep/phase2w/counts_*/polarft_calc_gpu.log` |
+| Decision 11 on seeds 2 and 3 | seed 2: rows 1.192e-07, distances 1.142e-07, rotations differing 0 of 96; seed 3: 1.190e-07, 6.13e-08, 0 of 96; each form's draws hold on its own rows; same validity | same |
+| Decision 12 on the fixture | `polarft_tail`: three fills of one calculator, a calculator made again, outer batches of 4 with one slot and with two, the rows variant: every entry bit for bit; the rows variant against the entries-only kernel with the keyed variates and with u = 1.5 (fallback): bit for bit. The calculator's schedule identity (three repeats, outer 6 against 4 and 2, two slots) passes with the fused form. P7: every threadgroup the same bits | `/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k1_work/scratch/keep/phase2w/counts_*/polarft_tail_gpu.log` |
+| `polarft_calc` 99 and `eul_prob_tab` 35 with the fused form, Debug and Release | GPU: 7 shared checks + 92 per form (graph 92, fused 92) + 36 of the forms' agreement = 227; `eul_prob_tab` 35 per form (70 on the GPU). CPU unchanged: 107 and 35 | `/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k1_work/scratch/keep/phase2w/counts_{Debug,Release}.txt` |
+| `polarft_tail` | 6 checks on the CPU device (the refusal: "refused: the fused tail (metal) runs on the GPU only", no current bins, back to `graph` it scores as a calculator that never had the fused form, bit for bit; a form outside `POLARFT_TAILS` refused), 49 on the GPU (identity, repeatability, eight small tile plans of P5 with the draw on own rows and the rotations within `POLARFT_TAIL_ROT_FIX` of the compiled form's, objects: default bins hold 4 live handles and no kernel, fused bins 6, the rows variant +1 once, release back to the start, 100 cycles of making and releasing the fused bins leave no live handle) | same |
+| `unit_kernels` | 1,063 before, **1,281** now (*measured*: +92 and +36 in `polarft_calc`, +35 in `eul_prob_tab`, +55 `polarft_tail`); every other area at its count of section 2 | same |
+| Decision 13 with the form `graph` | all 25 lines of Phase 0 (accuracy both devices, time and profile on the GPU, time on the CPU device) identical | `/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k1_work/scratch/keep/phase2/digests_graph/`, `digests_graph_compare.txt` |
+| The ten plants of decision 14 | each fails with the named assertion and the restored file has its checksum again (table below) | `/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k1_work/scratch/keep/phase2/plants/` |
+| Builds | Debug and Release from scratch with `MLXF_WERROR=ON`: 0 warnings, fast gate 9 of 9; `scripts/check_tree.sh` passes (rule `mirror` with the new line); both formatters on the 12 touched files leave them as they are. Release clean build 15 s (16 s before) | `/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k1_work/scratch/keep/phase2/build_{Debug,Release}.log`, `check_tree.log` |
+
+**The plants** (each a temporary edit, the suite run on a Debug tree, then the file restored; sha1 before and after
+equal in every case; `plantN.log`, `plantN.diff`):
+
+| # | Plant | Fails |
+| --- | --- | --- |
+| 1 | `+ 1` dropped from the first sweep's distance | "the rows' error is within twice the CPU calibration's e_cpu", validity, draws, seed 3's row tolerance (27 of 227) |
+| 2 | the rotation written 0-based | the 1-based conventions: "a row without a valid rotation gives (invalid, 1)", "u = 0 draws the first rotation of positive weight", the fallback to the first minimising rotation, the draws (14) |
+| 3 | the variate read at the transposed position | "u W lies in the drawn rotation's cumulative interval ...", the forms' rotation bound and own-row draws on seeds 2 and 3 (10) |
+| 4 | the cutoff comparison removed | "a rotation whose weight argument reaches the cutoff (82 >= 80) has no weight" (1) |
+| 5 | the invalid marker not applied in the first sweep | "every entry is valid or invalid as in the ring oracle" (actual 995), minimising rotation, draws (23) |
+| 6 | the temperature ignored | "the drawn rotations differ in at most POLARFT_TAIL_ROT_FIX pairs" (seeds 2, 3), own-row draws, the cutoff test (11) |
+| 7 | the rows variant's fallback statement set to rotation 1 | "the rows variant gives the entries-only kernel's entries, bit for bit (u = 1.5)" (2 of 49) |
+| 8 | one bit flipped in a repeat's copy | "three fills of one calculator give the same entries, bit for bit" (1) |
+| 9 | the default form set to `metal` (the member and its reset in `kill`) | "by default the reference bins of both parities hold their tiles and the compiled tail, and no kernel" (expected 4, actual 6); `suite=time` digest `C65F8ECED8D9B855` instead of `3457E99553A08BFD` |
+| 10 | the ledger line of `set_tail_form` removed | `check_rules: ... mirror: polarft_calc%set_tail_form of mlxf_toy_polarft_calc has no line in scripts/toy_mirror.txt` |
+
+**Decisions taken under delegation.**
+1. The forms' agreement on the dense fixture (seed 1 printed, seeds 2 and 3 judged) is in the calculator's tester,
+   run after its GPU checks with the fused form; the suite `polarft_tail` uses its own seeded data. Reason: the
+   fixture and its ring oracle are private procedures of the calculator's tester, a tester exports only its entry,
+   and a second copy of the fixture would be a defect. The fused pass's own 92 checks are printed per pass
+   ("92 checks of the device"), so its count stays readable.
+2. Each tester runs its device checks through `run_device_tests(dev, form)`; a test takes the form as a second
+   dummy and puts it on the fixture record, whose `feed_calc` sets it. Reason: no module state in a tester
+   (rule `state`), and the tests keep their bodies.
+3. The driver's tester's live-count check ("the driver holds no array of its own") allows the two rows variants
+   the fused form's workspaces keep after the first fill with rows (decision 7 builds them there and keeps them
+   with the tiles); with the compiled form it is unchanged.
+4. A refused fused form is refused in `polarft_workspace%new` at the place where the compiled tail is built (after
+   the upload of the tiles, which are then dropped), so the preparation makes one comparison of the form.
+5. `polarft_workspace_new_tail` and `polarft_workspace_metal_tail` are module procedures with interfaces in the
+   parent, not type-bound procedures, so the ledger gains one line only (`set_tail_form`).
+6. Plant 2 is caught by the 1-based rotation conventions of the draw (the (invalid, 1) rule and the first-rotation
+   draws); `test_convention` checks the rows' minimum, which the plant does not touch.
+7. Two first passes of the plants are void and kept apart (`plants/first_pass_unlogged_builds/`,
+   `second_pass_stale/`): the plant tree's `make` compares whole seconds, so an edit made in the second of the
+   previous build was not rebuilt and some plants ran another plant's binary. The script now waits 1.2 s around
+   every edit and logs every build; all ten plants were run again from the start.
+
+**What it means, in short.** The fused tail computes the compiled one's rows to one unit and draws the same
+rotations on all 288 fixture pairs of seeds 1 to 3; it holds the oracle's frozen bounds, is repeatable bit for
+bit, and refuses the CPU device with a reason. With the default form nothing of it is built, and the graph form's
+25 digests did not move.
+
+### Phase 3, the bench and the verdict (2026-11-25, 08:05 to 08:50, M5 Ultra): stopped at the verdict, a ruling is needed
+
+**Files changed:** `src/test/mlxf_bench_polar_table.f90` (`tail=` in `accuracy`, `time` and `profile`, set on the
+calculator before the reference bins; the formulation column `B+metal` for the fused form; the estimate counts one
+row-sized array per tile for it; `suite=accuracy tail=metal` runs on the GPU only and adds the forms' agreement on
+the block: seed 1 printed, seed 2 judged), `src/test/mlxf_test_defs.f90` (`POLARFT_TAIL_ROT_BLK`).
+
+**Accuracy before any timed row** (*measured*, Release, `device=gpu tail=metal`, at 16 by 250 and at 64 by 250,
+identical; `/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k1_work/scratch/keep/phase3/accuracy_calibration/`, `accuracy_judged/`):
+- the calibration, block seed 1: rows 6.5133e-08, distances 6.4989e-08, drawn rotations differing **1** of 64,000,
+  validity and draws 0. Frozen before the judged run: `POLARFT_TAIL_ROT_BLK` = max(2 x 1, 5) = **5**; the row
+  constant stays (the block's 6.51e-08 is below the fixture's 1.19e-07). `mlxf_test_defs.f90` sha1
+  `2571d9086b5ce0f17774e47d53ee4b4471cfd20e`;
+- the judged block, seed 2: against the oracle row error 6.163e-07 (bound 1.4505e-06), 0 of 64,000 minimising
+  rotations differing (bound 5), validity and draws hold; against the compiled form rows 6.518e-08, distances
+  6.518e-08, 2 of 64,000 drawn rotations differing (bound 5); the schedule identity (three repeats, outer batches,
+  teams, two slots) holds. 98 assertions, the graph form's 76 among them;
+- planted at this size (`/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k1_work/scratch/keep/phase3/plants/`): plant 1 fails the rows' bound, the forms' row tolerance and
+  `POLARFT_TAIL_ROT_BLK`; plant 6 fails `POLARFT_TAIL_ROT_BLK` and the draws; plant 8 fails "three repeats give
+  identical entries". Each file restored to its checksum.
+
+**Decision 13 again:** all 25 digest lines of Phase 0 identical with the Phase 3 builds
+(`/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k1_work/scratch/keep/phase3/digests_graph_compare.txt`, `digests_graph_final_compare.txt`). Builds: Debug and Release from scratch,
+0 warnings, gate 9 of 9, `scripts/check_tree.sh` passes (`/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k1_work/scratch/keep/phase3/../phase3w2/`).
+
+**Profile** (*measured*, `2500_4`, 64 by 250, with a barrier after every stage; `/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k1_work/scratch/keep/phase3/profile/`): graph 1.959 and
+1.960 s, stages 0.011/0.016, 0.543/0.553, 0.423/0.421, **0.942/0.945**, 0.003; metal 1.370 and 1.372 s, stages 0.011,
+0.483/0.484, 0.430/0.426, **0.421/0.426**, 0.003. The fused tail's stage is 0.45 of the compiled one's (H2 holds
+in the driver too); digests `3457E99553A08BFD` and `C65F8ECED8D9B855`.
+
+**The timed rows** (*measured*, decisions 15 to 17: `run_parts.sh` with `RUN_PARTS_LOAD=4`, the forms interleaved,
+graph first, every row status `ok` at its first attempt; the rate is the sum of the processes' median rates;
+`/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k1_work/scratch/keep/phase3/timing/run_parts_2500_{4,1}.tsv`, `verdict_table.txt`, `ratios.txt`):
+
+| Split | Graph median rates | Fused median rates | Ratios | Median | At or above 1.30 |
+| --- | --- | --- | --- | --- | --- |
+| `2500_4`, 1 x 30 | 1.767e7, 1.763e7 | 3.180e7, 3.188e7 | 1.799, 1.808 | 1.804 | 2 of 2 |
+| `2500_4`, 3 x 10 (**judged**) | 2.381e7, 2.484e7, 2.428e7, 1.969e7, 1.727e7 | 2.967e7, 3.045e7, 2.986e7, 3.012e7, 3.038e7 | 1.246, 1.226, 1.230, 1.530, 1.759 | **1.246** | **2 of 5** |
+| `2500_4`, 6 x 5 | not run (guard: 157.3e9 B predicted, once per form) | | | | |
+| `2500_1`, 1 x 30 | 1.785e7, 1.787e7 | 2.957e7, 2.953e7 | 1.656, 1.653 | 1.655 | 2 of 2 |
+| `2500_1`, 3 x 10 | 1.726e7, 1.683e7 | 2.898e7, 2.913e7 | 1.679, 1.730 | 1.705 | 2 of 2 |
+| `2500_1`, 6 x 5 (**judged**) | 1.830e7, 1.748e7, 1.731e7, 1.733e7, 1.741e7 | 2.996e7, 3.046e7, 3.048e7, 3.004e7, 3.038e7 | 1.637, 1.742, 1.761, 1.733, 1.745 | **1.742** | **5 of 5** |
+
+| Split, form | Pass time, s | Go to last exit, s | Summed footprint, B (largest part) | Summed MLX peak, B | Lowest free, B |
+| --- | --- | --- | --- | --- | --- |
+| `2500_4` 1, graph / fused | 1.133 / 0.628 | 12.79, 12.81 / 7.84, 7.87 | 20.81e9 / 27.25e9 | 10.26e9 / 16.71e9 | 52.2e9 / 45.8e9 |
+| `2500_4` 3, graph / fused | 0.840 (see below) / 0.664 | 13.47 to 13.65 / 15.72, 12.88, 8.63, 8.58, 8.62 | 60.32e9 (20.11e9) / 78.97e9 to 79.29e9 (26.43e9) | 29.71e9 / 48.88e9 | 12.4e9 to 19.5e9 / 0.07e9 to 0.91e9 |
+| `2500_1` 1, graph / fused | 0.280 / 0.169 | 10.84, 10.85 / 6.82, 6.84 | 8.33e9 / 14.29e9 | 4.81e9 / 10.79e9 | 71.7e9 / 65.5e9 |
+| `2500_1` 3, graph / fused | 0.293 / 0.172 | 11.40, 11.42 / 7.02, 7.03 | 23.70e9 / 41.19e9 | 13.67e9 / 31.24e9 | 56.3e9 / 37.6e9 |
+| `2500_1` 6, graph / fused | 0.287 / 0.165 | 11.53 to 11.55 / 6.98 to 7.05 | 45.91e9 / 56.54e9 (9.43e9) | 26.15e9 / 37.10e9 | 31.6e9 / 21.2e9 |
+
+Every digest of a form is equal across its runs, per part: the graph form's are Phase 0's; the fused form's are
+`C65F8ECED8D9B855` (`2500_4`, one process), `34BBD65AE23203EC`, `6CF6DEE670DC243B`, `9C32AC826157933B` (three
+parts), `D8FCFBC0F5B54449` (`2500_1`, one), `746743FD562476AF`, `D3961EB3718F3E06`, `D850E2864A45F40B` (three),
+`15BA6DB8F0F31469`, `F9085BCB4FFD1CEF`, `BEEC195C1C8F8ADF`, `66424F246C1BB3A0`, `65AFA458BFCBD4B2`,
+`FBCB2EDC4D435CE7` (six).
+
+**Decision 18 by its letter.** At `2500_1` at six processes the rule is met (median 1.742, 5 of 5). At `2500_4` at
+three it is not: median 1.246, below the 1.25 to 1.35 band that would add five pairs, and 2 of 5 at or above 1.30.
+By the letter the outcome is **deleted**.
+
+**The diagnosis (section 7: a failing acceptance is diagnosed first): the judged split's graph rows are not a
+steady-state rate, so the protocol could not resolve the ratio there.**
+- The graph form's summed median rate at three processes was 2.38e7, 2.48e7, 2.43e7, 1.97e7 and 1.73e7. Three
+  processes share one GPU, whose rate with one process is 1.77e7 (*measured*, the same session); Phase 0's seven
+  graph rows of this split measured 1.672e7 to 1.698e7 (the control: largest distance 0.0069). Rates up to 41 %
+  above one GPU's cannot be a shared steady state.
+- The mechanism: the parts desynchronised. In Phase 0 the three parts exited within 0.35 s of each other; in
+  Phase 3's graph rows one part exited 2 to 3.3 s after the others (`timing/g_2500_4_n3_*_a1/part_*/end_time`).
+  A part that runs its passes while another is idle, or alone after the others finished, has a median pass far
+  below the shared one (0.43 to 0.64 s against 1.18 s in Phase 0), so the sum of medians counts the same GPU time
+  more than once. Decision 15 assumed the median leaves such passes out; with 9 passes and a lag of two to three
+  passes it does not.
+- What the graph form actually took did not change: the time from go to the last exit was 13.47 to 13.65 s, as in
+  Phase 0 (13.46 to 13.59 s). The fused rows did not desynchronise in the same way (their summed medians,
+  2.97e7 to 3.05e7, are 0.93 to 0.96 of the fused form's one-process 3.18e7).
+- The machine's state had changed since Phase 0: free memory during the graph rows 12.4e9 to 19.5e9 B against
+  0.47e9 B in Phase 0 (at one process 52.2e9 B free against Phase 0's 40.0e9 B: the machine's other load had
+  shrunk; 3.2e9 B of swap in use after the fused rows). One further graph-only row at three processes, taken after the verdict for
+  the diagnosis only and not counted (`/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k1_work/scratch/keep/phase3/diagnosis/dg_2500_4_n3_1_a1`), desynchronised again: one part exited
+  5.4 s before the others, summed median 2.90e7, go to last exit 13.54 s. So the effect is the machine's present
+  state under the median rule, not the interleaving with the fused form.
+- Reported, not deciding: against Phase 0's frozen graph rate of this split (1.691e7) the five fused rows give
+  1.75 to 1.80; on the time from go to the last exit, pairs 3 to 5 give 1.56 to 1.58, pair 2 1.05, pair 1 0.87
+  (that fused row ran with 0.07e9 B free: see H3).
+
+**H3 is refuted.** The fused form raised a process's MLX peak from 10.26e9 to 16.71e9 B (`2500_4`) and from
+4.81e9 to 10.79e9 B (`2500_1`), not lowered it: a cheaper tail lets the host queue more tiles ahead of the device,
+each holding its products and rows. Three fused parts of `2500_4` hold 79e9 B, 0.77 of the machine (the guard let
+them run at a prediction of 81.8e9 B, just under its 82.5e9 B), and drove free memory to 0.07e9 to 0.91e9 B.
+The roadmap's conditions: total rate over one process's, fused, 0.93 to 0.96 at `2500_4` 3 and 0.98 to 1.03 at
+`2500_1` 3 and 6 (the first condition is not met); summed footprint above 51.5e9 B: met by the fused form at
+`2500_4` 3 (79.0e9) and `2500_1` 6 (56.5e9), by the graph form at `2500_4` 3 only.
+
+**The stop, and the ruling needed.** The plan's rule is mechanical, and by it the kernel goes. The run does not
+carry out decision 20's deletion, because the deciding ratio rests on rows that the plan's own premise (decision
+15) excludes, and because the deletion cannot be undone by a ruling while the code is kept until one. Nothing was
+repeated to pass, and no row was dropped. The maintainer rules one of:
+1. **delete by the letter** (decision 20, then Phase 4's record of a negative result);
+2. (recommended) **re-take the judged split `2500_4` at three processes once, five pairs, with a validity test
+   frozen before it** (for example: a row counts only if its parts exit within one median pass of each other, and
+   a row that fails is repeated, as a discarded row is), keeping the other split's verdict; or
+3. judge that split on the time from go to the last exit, which the plan reports and does not judge.
+
+**Decisions taken under delegation.**
+1. The forms' agreement on the block lives in the accuracy suite with `tail=metal`, which runs on the GPU only
+   (a usage stop otherwise): the compiled form is the CPU path, and decision 10 judges the fused form on the GPU.
+2. `tail=` is read by `arg_config`, so every suite that reads it sets it the same way, and a value other than
+   `graph` or `metal` stops.
+3. The 2500_4 six-process split was called once per form and recorded as not run (157.3e9 B predicted from the
+   fused one-process row, which the guard takes as the largest part).
+4. One diagnostic graph row was taken after the verdict, labelled and kept apart, to tell the machine's state
+   from the interleaving. It judges nothing.
+5. Stopped before decision 20 (above).
+
+**What it means, in short.** The fused tail is accurate (the oracle's bounds, the compiled form within one unit
+and 2 rotations in 64,000) and repeatable, and wherever the rows are steady it is 1.65 to 1.80 times faster: at one
+process, at three processes of `2500_1` and at the judged six (5 of 5 above 1.30). At the other judged split the
+graph rows overstate the compiled form's rate because the parts drifted apart, and the median ratio fell to
+1.246. The kernel also raises each process's peak by about 6e9 B. Whether it is kept is the maintainer's ruling.
+
+### Phase 4, the record (2026-11-25, 08:55 to 09:00)
+
+Phase 4 is replaced by the stop of Phase 3. Done: the report
+[`mlxf_kernel_k1_report.md`](../completed/mlxf_kernel_k1_report.md) in the order of the how-to's section 8 with
+its commit message; this note's banner. Not done, pending the ruling: decision 20's removals or the record of a
+kept form, and the documents of Phase 4's step 2 (kernel families, roadmap, test policy, plans index, history,
+binding policy section 12, Apple questions); the report lists what each would say. The working tree holds only
+paths of the file table (`git status`: 13 modified and 2 new under `src/test` and `scripts` beyond the base's 44
+lines, and the report). `scripts/check_tree.sh` passes; Debug and Release were last built from scratch at the end
+of Phase 3, 0 warnings, gate 9 of 9.
+
+### Ruling R1 and the re-take (2026-11-25, 08:52 to 09:20, M5 Ultra): stopped, the protocol cannot resolve the split
+
+**R1** (`spec/rulings.md` of the run, the session under the maintainer's go; stands as recommended, open to the
+review): option 2 of the stop. Reason, as ruled: the deciding graph rows of `2500_4` at three processes summed to
+up to 1.41 times one GPU's rate, which decision 15's premise excludes, so the letter would decide on a quantity
+the plan did not mean to measure; the rule, the 30 % and every floor are unchanged, and a deletion stays possible
+after the re-take. Frozen before the first re-taken row: a row of that split counts only if its parts' exit
+spread (latest `end_time` minus earliest) is at most the median of its parts' median passes; an invalid row is
+discarded and repeated, at most 3 attempts; five new pairs, graph first, decision 17's protocol, the judged
+Release executable (`scratch/build_phase3w2_Release`, not rebuilt); decision 18 unchanged on the new five;
+`2500_1` at six keeps its verdict; no valid attempt in three is a stop.
+
+**The old rows under test 1** (reported, not counted; `/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k1_work/scratch/keep/phase3/old_rows_validity.txt`): Phase 3's five graph rows
+all invalid (spreads 3.34, 2.18, 2.08, 2.00, 1.64 s against median passes 0.97 to 1.02 s); its fused rows valid
+in 3 of 5 (0.35, 1.42, 0.48, 0.66, 0.53 s against 0.60 to 0.65 s). Phase 0's seven graph rows of the split all
+valid (spreads 0.09 to 0.41 s against 1.18 to 1.20 s).
+
+**The re-take** (`/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k1_work/scratch/keep/phase3/retake/`, `retake.log`, `retake2.log`):
+- Row g1 (graph, pair 1): attempt 1 spread 5.789 s against a median pass of 0.792 s, invalid; attempt 2 5.828
+  against 0.788, invalid; attempt 3 5.094 against 0.803, invalid. **No valid attempt in three: stop (R1, item 5).**
+  In each attempt one part exited 7.7 to 8.4 s after go and the other two at 13.5 s: the GPU served one graph
+  process ahead of the others for most of the run. The time from go to the last exit was 13.56, 13.55, 13.50 s,
+  Phase 0's value.
+- A defect of the run's script, found when the verdict was read: the first pass of the re-take tested the
+  validity on the launcher's output file instead of the row's directory, got an empty answer and took it as
+  valid, so it ran all ten rows without repeating any. Those rows were taken out of the protocol's order
+  (after an invalid row g1) and are set aside, not counted, in `/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k1_work/scratch/keep/phase3/retake/void_unchecked_rows_2_to_5/`;
+  checked afterwards, all ten are invalid under test 1 (graph spreads 5.28 to 5.79 s against 0.78 to 0.79 s;
+  fused 1.19 to 2.08 s against 0.46 to 0.74 s; `void_rows_validity.txt`). The script was corrected (it tests the
+  directory and accepts only an explicit "valid") and the re-take continued with row g1's attempts 2 and 3.
+
+**What it means.** In the machine's present state the compiled form's three processes do not share the GPU
+evenly, and the fused form's not quite either, so no per-process median gives a shared rate at this split; the
+protocol cannot resolve the 30 % here (as Phase 0's control stop). The verdict is open: `2500_1` at six is
+met; `2500_4` at three is unresolved. Decision 20 and Phase 4 were not carried out; the code stays in the
+working tree, the default form `graph`. **H3 stands either way:** the fused form raises a process's MLX peak by
+about 6e9 B. A ruling is needed: delete; keep on `2500_1` alone; or a measure of the shared split that does not
+rest on per-process passes (the time from go to the last exit, or one process scoring the three parts' work in
+turn), frozen before its rows.
+
+### Ruling R2 and Phase 4 (2026-11-25)
+
+**R2** (the maintainer, on the stop of the re-take): "The fused form is fine. Memory can be increased. WE can buy machines with more memory to run more parts. I am not locked into this little testing machine", and "We can essentially control memory usage in SIMPLE by dialing down the number of parts". Before it, on the measure: "the whole cryo-EM reference
+matching problem is embarrassingly parallel so any gains we can maintain with many parts is linear speedup".
+**The fused form is kept** under decision 20: it stays selectable (`set_tail_form`, `tail=metal`), the default
+stays `graph`, K4 may build on it. The rows of `2500_4` at three processes stay unresolved by the per-process
+protocol; the time from go to the last exit (1.52 to 1.59) and the met split (`2500_1` at six, 1.742) carry the
+ruling. H3's +6e9 B per process is reported, not judged: SIMPLE trades memory against the number of parts.
+
+**Phase 4, done:** step 1, nothing removed; step 2, the kernel-families note (section 3: the submodule `_tail`,
+the peak with the fused tail, the form among the differences, A1 delivered; section 8: K1's row with the
+result), the roadmap (the rank 2 row; under decision 15, what K1 measured and how a rate of several parts is
+read), the test policy (the sub-suite `polarft_tail`, the keys `tail=` and `passes=`), the plans index, the
+history (the result in decision 20's form), the binding policy's section 12 (the shapeless refusal, the math
+mode, a rank-3 output in a probe) and Apple question 21 (the safe mode measured); step 3, the report's addendum;
+step 4, the banner. The plan stays in `planned/` while K2 and K4 cite it, and moves to `completed/` with the
+batch's last commit, its links updated in the same change.

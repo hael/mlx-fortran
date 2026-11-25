@@ -13,6 +13,7 @@ use mlxf_test_defs,        only: POLAR_MAP_CAP_L2, POLAR_MAP_CAP_LOG, POLAR_MAP_
 use mlxf_toy_polarft_calc, only: polarft_calc
 use mlxf_oracle_polar,     only: polar_full_ring
 use mlxf_test_utils,       only: assert_true, assert_int, device_name, bits_equal, test_devices
+use mlxf_test_reduce,      only: nan_maxval
 implicit none
 private
 public :: run_all_polar_shiftmap_tests, run_all_polar_shiftmap_accuracy_tests
@@ -667,7 +668,7 @@ contains
                     lor = oracle_map(fx, pids(b), CANDS(c, 1))
                     rel = sqrt(sum((real(res%maps(:, :, :, c, b), real64) - lor)**2)) / sqrt(sum(lor**2))
                     worst_rel = max(worst_rel, rel)
-                    worst_abs = max(worst_abs, maxval(abs(real(res%maps(:, :, :, c, b), real64) - lor)))
+                    worst_abs = max(worst_abs, nan_maxval(abs(real(res%maps(:, :, :, c, b), real64) - lor)))
                     sm    = summarize(fx, lor, [TEMP_T, TEMP_PHYS], 0._real64)
                     bound = real(TEMP_T, real64) * POLAR_MAP_CAP_L2 * sqrt(sum(lor**2))
                     if( sm%margin > 2._real64 * bound )then
@@ -735,7 +736,7 @@ contains
         spread = 0._real64
         do b = 1, size(pids)
             do c = 1, NREF
-                dmax = maxval(abs(real(rows(:, c, b), real64)))
+                dmax = nan_maxval(abs(real(rows(:, c, b), real64)))
                 do ir = 1, fx%nrot
                     worst  = max(worst, abs(real(res%maps(1, ir, 1, c, b), real64) - &
                         &real(rows(ir, c, b), real64)) / dmax)

@@ -3,12 +3,12 @@
 ! resident tiles, and the blocks queued against them, each scored into one entry (distance, rotation) per pair
 ! with the rotation drawn from the pair's posterior on the device. The calculator owns the host memos and hands
 ! them in; a block that does not match the tiles is refused before anything is queued. Written against mlxf as
-! a user writes; lifecycle, scoring and the shift maps are submodules.
+! a user writes; lifecycle, scoring, the fused tail and the shift maps are submodules.
 module mlxf_toy_polarft_workspace
 use, intrinsic :: iso_fortran_env, only: int64, real32, real64
-use mlxf,           only: mlx_array, mlx_function
-use mlxf_test_defs, only: NSHIFTMAPS, polarft_tile_spec, polarft_block_spec, polarft_map_spec, polarft_map_block, &
-                          polar_map_results
+use mlxf,           only: mlx_array, mlx_function, mlx_metal_kernel
+use mlxf_test_defs, only: NSHIFTMAPS, POLARFT_TAILS, polarft_tile_spec, polarft_block_spec, polarft_map_spec, &
+                          polarft_map_block, polar_map_results
 implicit none
 
 public :: polarft_workspace
@@ -62,9 +62,29 @@ type :: polarft_workspace_map
     type(mlx_function)        :: map_evidence
 end type polarft_workspace_map
 
-! the workspace of one parity: refs holds the reference tiles (4nk, 2rt, pftsz+1, ntiles) real: a tile G of every
+! the inputs of a tile's tail: the inverse transform's rows (nrots, rt, bt), 1/(2 wsq) and inverse
+! temperatures (1, 1, bt), variates (rt, bt)
+type :: tail_inputs
+    type(mlx_array) :: raw
+    type(mlx_array) :: iw
+    type(mlx_array) :: temps
+    type(mlx_array) :: u
+end type tail_inputs
+
+! a tile's distances (nrots, rt, bt) and its entries (rt, bt)
+type :: tail_outputs
+    type(mlx_array) :: rows
+    type(mlx_array) :: dists
+    type(mlx_array) :: irots
+end type tail_outputs
+
+! the device route of one parity's references: sections the projected banks (pftsz nk, nrefs) until memoize_refs,
+! memo_ref and memo_ref2 their memos (pftsz+1, nk, nrefs) until the tiles are made from them; their flags and the
+! sections' shape. The workspace of one parity: refs holds the reference tiles (4nk, 2rt, pftsz+1, ntiles) real: a tile G of every
 ! bin, rows 1..nk ft_ref2 and rows nk+1..2nk conj(ft_ref), packed as [[Re G, Im G], [-Im G, Re G]], so that a
-! tile's complex sums of every bin are one real product; tail the compiled distances and draw; stage_s the
+! tile's complex sums of every bin are one real product; tail_form the form of the tail (POLARFT_TAILS): tail the
+! compiled distances and draw, or tail_kernel the fused one, tail_kernel_rows its rows variant (built on the
+! first block that asks for rows, l_tail_rows) and tail_par the constants they read; stage_s the
 ! profiled stages' seconds: particle terms, products, inverse transform, distances and draw, concatenation;
 ! rows_host the full rows of the last block collected with them; maps the shift maps, and mstage_s their
 ! profiled seconds: construction, mode, width, copy-out
@@ -78,16 +98,34 @@ type :: polarft_workspace
     integer                       :: bt         = 0
     integer                       :: nrefs      = 0
     integer                       :: ntiles     = 0
+    integer                       :: tail_form  = POLARFT_TAILS%graph
+    logical                       :: l_tail_rows = .false.
     real(real64)                  :: stage_s(5) = 0._real64
     real(real64)                  :: mstage_s(4) = 0._real64
     type(polarft_workspace_map)   :: maps(NSHIFTMAPS)
     real(real32),     allocatable :: rows_host(:,:,:)
     type(mlx_array)               :: refs
     type(mlx_function)            :: tail
+    type(mlx_metal_kernel)        :: tail_kernel
+    type(mlx_metal_kernel)        :: tail_kernel_rows
+    type(mlx_array)               :: tail_par
     type(polarft_workspace_slot)  :: slots(POLARFT_NSLOTS)
+    logical                       :: l_sections = .false.
+    logical                       :: l_memos    = .false.
+    integer                       :: sec_npts   = 0
+    integer                       :: sec_nrefs  = 0
+    type(mlx_array)               :: sections
+    type(mlx_array)               :: memo_ref
+    type(mlx_array)               :: memo_ref2
     character(len=:), allocatable :: msg
   contains
     procedure :: new           => polarft_workspace_new
+    procedure :: set_sections
+    procedure :: memoize_sections
+    procedure :: new_from_memos
+    procedure :: get_section
+    procedure :: has_sections
+    procedure :: has_memos
     procedure :: kill          => polarft_workspace_kill
     procedure :: submit        => polarft_workspace_submit
     procedure :: collect       => polarft_workspace_collect
@@ -114,6 +152,48 @@ interface
         integer,                  intent(out)   :: status
     end subroutine polarft_workspace_new
 
+    ! the device route: the bank of projected sections (pftsz nk, nspace) of the references iref_from .. of a parity
+    ! of nrefs references, kept on the device until memoize_sections; earlier memos are dropped
+    module subroutine set_sections( self, bank, iref_from, nrefs, status )
+        class(polarft_workspace), intent(inout) :: self
+        type(mlx_array),          intent(in)    :: bank
+        integer,                  intent(in)    :: iref_from, nrefs
+        integer,                  intent(out)   :: status
+    end subroutine set_sections
+
+    ! the device route's memos of the sections, as memoize_refs makes them on the host: the first pftsz+1 bins of
+    ! the full ring's transform [z; conj z], and the conjugated transform of the squared modulus; evaluated, and
+    ! the sections released
+    module subroutine memoize_sections( self, pftsz, nk, status )
+        class(polarft_workspace), intent(inout) :: self
+        integer,                  intent(in)    :: pftsz, nk
+        integer,                  intent(out)   :: status
+    end subroutine memoize_sections
+
+    ! the resident tiles of the device memos under the tile plan of spec, made on the device as new makes them on
+    ! the host, with the tail of spec's form; the memos are released
+    module subroutine new_from_memos( self, spec, status )
+        class(polarft_workspace), intent(inout) :: self
+        type(polarft_tile_spec),  intent(in)    :: spec
+        integer,                  intent(out)   :: status
+    end subroutine new_from_memos
+
+    ! the device route: the projected section of reference iref, copied to the host (pftsz, nk)
+    module subroutine get_section( self, iref, pft, status )
+        class(polarft_workspace), intent(inout) :: self
+        integer,                  intent(in)    :: iref
+        complex(real32),          intent(out)   :: pft(:,:)
+        integer,                  intent(out)   :: status
+    end subroutine get_section
+
+    pure module logical function has_sections( self )
+        class(polarft_workspace), intent(in) :: self
+    end function has_sections
+
+    pure module logical function has_memos( self )
+        class(polarft_workspace), intent(in) :: self
+    end function has_memos
+
     ! idempotent teardown: tiles, pending slots and the record of the preparation
     module subroutine polarft_workspace_kill( self )
         class(polarft_workspace), intent(inout) :: self
@@ -136,6 +216,23 @@ interface
         type(mlx_array), allocatable, intent(out) :: outputs(:)
         integer,                      intent(out) :: status
     end subroutine polar_tail_callback
+
+    ! the fused tail of the tile plan spec: its constants and its kernel, on the GPU only (a refusal sets msg);
+    ! the form becomes metal
+    module subroutine polarft_workspace_new_tail( self, spec, status )
+        class(polarft_workspace), intent(inout) :: self
+        type(polarft_tile_spec),  intent(in)    :: spec
+        integer,                  intent(out)   :: status
+    end subroutine polarft_workspace_new_tail
+
+    ! a tile's tail through the fused kernel; with rows through its rows variant, which also returns every distance
+    module subroutine polarft_workspace_metal_tail( self, tin, rows, tout, status )
+        class(polarft_workspace), intent(inout) :: self
+        type(tail_inputs),        intent(in)    :: tin
+        logical,                  intent(in)    :: rows
+        type(tail_outputs),       intent(out)   :: tout
+        integer,                  intent(out)   :: status
+    end subroutine polarft_workspace_metal_tail
 
     ! the profiled stages' accumulated seconds (see stage_s)
     pure module function stage_seconds( self ) result(t)

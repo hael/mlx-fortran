@@ -829,16 +829,25 @@ contains
         type(mlx_array),         intent(in)    :: a
         type(mlxf_strided_spec), intent(in)    :: option
         character(len=*),        intent(in)    :: proc
-        type(mlxc_array)  :: ha
-        type(mlxc_array)  :: res
-        type(mlxc_stream) :: s
-        integer(c_int)    :: ierr
-        integer           :: n
+        type(mlxc_array)   :: ha
+        type(mlxc_array)   :: res
+        type(mlxc_stream)  :: s
+        integer(c_int)     :: ierr
+        integer            :: n
+        integer(c_int64_t) :: lo, hi, na
         call mlxf_require_device(proc)
         ha = mlxf_handle(a, proc)
         n = size(option%shape)
         if( size(option%strides) /= n ) call mlxf_fail(proc, 'one stride per dimension of the shape')
         if( any(option%shape < 0) .or. option%offset < 0 ) call mlxf_fail(proc, 'negative extent or offset')
+        ! MLX reads whatever the strides address: every element a non-empty view reaches must be one of a's
+        if( all(option%shape > 0) )then
+            if( .not. strided_reach(option%shape, option%strides, option%offset, lo, hi) )then
+                call mlxf_fail(proc, 'the elements the view reaches lie beyond the 64-bit range')
+            endif
+            na = a%size()
+            if( lo < 0 .or. hi >= na ) call mlxf_fail(proc, 'the view reaches elements outside a')
+        endif
         res = mlxc_array_new()
         s = mlxf_default_stream(proc)
         ierr = f(res, ha, int(option%shape(n:1:-1), c_int), int(n, c_size_t), int(option%strides(n:1:-1), c_int64_t), int(n, c_size_t), int(option%offset, c_size_t), s)
@@ -847,6 +856,36 @@ contains
         call mlxf_check(ierr, proc)
         call adopt(r, res, proc)
     end subroutine mlxf_strided_op
+
+    ! the lowest and highest element order, from 0, that a view of positive extents reaches through its
+    ! strides from offset; false when a product or a sum would leave the 64-bit range
+    logical function strided_reach( shape, strides, offset, lo, hi )
+        integer,            intent(in)  :: shape(:)
+        integer(c_int64_t), intent(in)  :: strides(:), offset
+        integer(c_int64_t), intent(out) :: lo, hi
+        integer(c_int64_t) :: span, step
+        integer            :: i
+        lo = offset
+        hi = offset
+        strided_reach = .false.
+        do i = 1, size(shape)
+            span = int(shape(i) - 1, c_int64_t)
+            step = strides(i)
+            if( step < -huge(step) ) return
+            if( span > 0 )then
+                if( abs(step) > huge(step) / span ) return
+            endif
+            step = span * step
+            if( step > 0 )then
+                if( hi > huge(hi) - step ) return
+                hi = hi + step
+            else
+                if( lo < -huge(lo) - step ) return
+                lo = lo + step
+            endif
+        end do
+        strided_reach = .true.
+    end function strided_reach
 
     ! r = f(a) over the Fortran dimensions option%dims as option%dtype, checked first, for every
     ! int f(mlx_array* res, const mlx_array a, const int* axes, size_t axes_num, bool inverted, mlx_dtype dtype,

@@ -27,7 +27,7 @@ if(MLXF_REQUIRE_GPU)
 endif()
 install(TARGETS mlxf_test_exec RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
-set(MLXF_TEST_RUNS_DIR "${CMAKE_BINARY_DIR}/test_runs")
+set(MLXF_TEST_RUNS_DIR "${PROJECT_BINARY_DIR}/test_runs")
 
 # mlxf_add_test(<name> <label> <timeout> COMMAND <args...>): runs in its own directory under test_runs/
 # on one OpenMP thread, with MLX's float32 matrix products in full precision (MLX_ENABLE_TF32=0: on GPUs
@@ -60,7 +60,8 @@ endfunction()
 #   own keeps a kernel that fails to compile, which the suite provokes on purpose, apart from the other areas.
 #   Alone it takes 0.1 s in Release; beside the gate's other entries, which share the GPU, 0.6 s.
 # kernels: test-only models of SIMPLE's pipelines (the polar table's scoring
-#   workspace and its shift maps) on seeded or analytic fixtures against double-precision oracles, on both
+#   workspace and its shift maps, the polar reprojection) on seeded or analytic fixtures against double-precision
+#   oracles, on both
 #   devices; its own process keeps the workspace's lifecycle checks (live count and active memory back to warm
 #   values) apart from other areas. Above 0.5 s in Release: the oracles' direct sums over every rotation and
 #   cell, and the GPU's first compilation of its kernels.
@@ -75,8 +76,8 @@ endforeach()
 #   evaluation list, mlx_live_count, mlx_last_error) and on a live private copy released in a region; a
 #   invalid 1D/2D FFT normalizations; a Metal kernel built from a spec without outputs and an empty kernel
 #   applied; segments of the wrong shape; a factorisation of a rank-1 array, a triangle that is neither 'L' nor
-#   'U' and a convolution spec with a list of the wrong length; a separate entry because every member ends its
-#   process.
+#   'U' and a convolution spec with a list of the wrong length; a strided view reaching past its input; matmul of
+#   two integer arrays; a separate entry because every member ends its process.
 mlxf_add_test(object_contracts fast 600 COMMAND $<TARGET_FILE:mlxf_test_exec> expect_aborts object_contracts)
 
 # ---- the budget ----------------------------------------------------------------------------------

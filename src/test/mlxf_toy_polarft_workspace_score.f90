@@ -1,15 +1,16 @@
 !@descr: the polar workspace's scoring: block validation, the per-tile graph, the draw, copy-out
 ! Per particle tile and reference tile, every angular bin's complex sums of the particle terms (bt, 2nk) and the
 ! tile (2nk, rt) are one real product of packed (Re, Im) parts, batched over the bins; the inverse real FFT
-! gives the rows, and the compiled tail (the distances and the posterior draw) picks each pair's rotation on
-! the device. Tiles are always full (padded), so a pair's entry depends on its tile position only, never on the
-! outer batch or slot.
+! gives the rows, and the tail (the distances and the posterior draw: compiled, or the fused kernel) picks each
+! pair's rotation on the device. Tiles are always full (padded), so a pair's entry depends on its tile position
+! only, never on the outer batch or slot.
 submodule (mlxf_toy_polarft_workspace) mlxf_toy_polarft_workspace_score
 use, intrinsic :: iso_fortran_env, only: int64
 use mlxf,           only: mlx_from, mlx_to, mlx_eval, mlx_async_eval, mlx_slice, mlx_permute, mlx_concatenate, reshape, &
                           matmul, mlx_irfft, merge, minval, minloc, sum, max, exp, real, aimag, cmplx, mlx_cumsum, &
                           mlx_take_along_dim
-use mlxf_test_defs, only: POLAR_DIST_MAX, POLAR_DIST_INVALID, POLAR_DIST_VALID, POLAR_ARG_CUTOFF, POLAR_DRAW_FLOOR
+use mlxf_test_defs, only: POLAR_DIST_MAX, POLAR_DIST_INVALID, POLAR_DIST_VALID, POLAR_ARG_CUTOFF, POLAR_DRAW_FLOOR, &
+                          POLARFT_TAILS
 implicit none
 
 ! the inputs of one tile's sums: particle terms (bt, 2nk, pftsz+1) complex, or packed (bt, 4nk, pftsz+1) real;
@@ -18,22 +19,6 @@ type :: tile_inputs
     type(mlx_array) :: pt
     type(mlx_array) :: g
 end type tile_inputs
-
-! the inputs of a tile's tail: the inverse transform's rows (nrots, rt, bt), 1/(2 wsq) and inverse
-! temperatures (1, 1, bt), variates (rt, bt)
-type :: tail_inputs
-    type(mlx_array) :: raw
-    type(mlx_array) :: iw
-    type(mlx_array) :: temps
-    type(mlx_array) :: u
-end type tail_inputs
-
-! a tile's distances (nrots, rt, bt) and its entries (rt, bt)
-type :: tail_outputs
-    type(mlx_array) :: rows
-    type(mlx_array) :: dists
-    type(mlx_array) :: irots
-end type tail_outputs
 
 contains
 
@@ -115,7 +100,7 @@ contains
                 tin%raw = inverse_transform(self, prod)
                 if( blk%profile ) call stage_done(self, 3, t0, [tin%raw])
                 t0 = clock_s()
-                call apply_tail(self, tin, tout, status)
+                call apply_tail(self, tin, blk%rows, tout, status)
                 if( status /= 0 ) return
                 if( blk%profile ) call stage_done(self, 4, t0, [tout%dists, tout%irots])
                 dcol(t) = tout%dists
@@ -203,13 +188,19 @@ contains
         raw = mlx_irfft(c, 1, n=self%nrots)
     end function inverse_transform
 
-    ! the tail of a tile through the compiled function
-    subroutine apply_tail( self, tin, tout, status )
+    ! the tail of a tile through the workspace's form: the fused kernel (the rows only when asked for), or the
+    ! compiled function
+    subroutine apply_tail( self, tin, rows, tout, status )
         class(polarft_workspace), intent(inout) :: self
         type(tail_inputs),        intent(in)    :: tin
+        logical,                  intent(in)    :: rows
         type(tail_outputs),       intent(out)   :: tout
         integer,                  intent(out)   :: status
         type(mlx_array), allocatable :: outs(:)
+        if( self%tail_form == POLARFT_TAILS%metal )then
+            call polarft_workspace_metal_tail(self, tin, rows, tout, status)
+            return
+        endif
         call self%tail%apply([tin%raw, tin%iw, tin%temps, tin%u], outs, status)
         if( status /= 0 )then
             self%msg = 'polarft_workspace%submit: the compiled distances and draw failed'

@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.25 FATAL_ERROR)
 
 # Helper modules first; pick a GNU toolchain before project() unless the user set compilers.
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
 include(AutoDetectGCC)
 
 # ------------------------------------------------------------------------------
@@ -39,10 +39,12 @@ set(MLXF_MLXC_PINNED_VERSION 0.8.0)
 # Install layout and default build type
 # ------------------------------------------------------------------------------
 include(GNUInstallDirs)
-if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
-    set(CMAKE_INSTALL_PREFIX "${CMAKE_BINARY_DIR}" CACHE PATH "Installation prefix" FORCE)
+# Paths are the library's own (PROJECT_*), never CMAKE_SOURCE_DIR or CMAKE_BINARY_DIR, so that a parent project
+# can add_subdirectory() it (rule cmakeroot); the defaults below are set only when it is the top-level project.
+if(PROJECT_IS_TOP_LEVEL AND CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+    set(CMAKE_INSTALL_PREFIX "${PROJECT_BINARY_DIR}" CACHE PATH "Installation prefix" FORCE)
 endif()
-if(NOT CMAKE_BUILD_TYPE)
+if(PROJECT_IS_TOP_LEVEL AND NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
     set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS Debug Release RelWithDebInfo MinSizeRel)
 endif()
@@ -61,7 +63,7 @@ include(Dependencies)
 
 # Build facts the library reports at run time (mlxf_version)
 configure_file(
-    "${CMAKE_SOURCE_DIR}/cmake/mlxf_build_info.inc.in"
+    "${PROJECT_SOURCE_DIR}/cmake/mlxf_build_info.inc.in"
     "${MLXF_GEN_DIR}/mlxf_build_info.inc"
     @ONLY)
 
@@ -102,7 +104,7 @@ if(BUILD_TESTS)
     # `make check` is the fast gate by hand: the same gate every compile_*.sh runs between build and
     # install unless given --exclude-tests (scripts/run_fast_gate.sh).
     add_custom_target(check
-        COMMAND "${CMAKE_SOURCE_DIR}/scripts/run_fast_gate.sh" "${CMAKE_BINARY_DIR}"
+        COMMAND "${PROJECT_SOURCE_DIR}/scripts/run_fast_gate.sh" "${PROJECT_BINARY_DIR}"
         USES_TERMINAL)
 endif()
 

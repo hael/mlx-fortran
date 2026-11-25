@@ -7,6 +7,7 @@
 module mlxf_oracle_dft
 use, intrinsic :: iso_fortran_env, only: real64
 use, intrinsic :: ieee_arithmetic, only: ieee_is_finite, ieee_value, ieee_positive_inf
+use mlxf_test_reduce, only: nan_maxval
 implicit none
 
 public :: oracle_dft_1d, oracle_idft_1d, oracle_dft_3d, oracle_idft_3d, oracle_dft_selfcheck, oracle_flat, &
@@ -268,7 +269,7 @@ contains
         real(real64) :: e
         ! maxval may pass over a NaN, so every value is tested first
         if( oracle_all_finite(a) .and. oracle_all_finite(ref) )then
-            e = oracle_finite_or_inf(maxval(abs(a - ref)) / maxval(abs(ref)))
+            e = oracle_finite_or_inf(nan_maxval(abs(a - ref)) / nan_maxval(abs(ref)))
         else
             e = ieee_value(e, ieee_positive_inf)
         endif

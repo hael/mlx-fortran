@@ -112,7 +112,8 @@ integer, parameter :: NSHIFTMAPS      = 3
 ! the members of SIMPLE's parameters object that the polar toy reads, under SIMPLE's names: the polar section's
 ! half ring, the box whose pixels the shifts are in, the host team, the tempering factor of the shift maps, and
 ! what sets up the two coarse maps: the shift prior's width and the window's radius (Angstrom and pixels) and
-! the sampling distance
+! the sampling distance; for the reprojection, the directions and states of the reference bank and the cropped
+! box the projected volumes have
 type :: parameters
     integer      :: pftsz       = 0
     integer      :: box         = 0
@@ -121,7 +122,76 @@ type :: parameters
     real(real32) :: shift_sigma = 0._real32
     real(real32) :: smpd        = 1._real32
     real(real32) :: trs         = 0._real32
+    integer      :: nspace      = 0
+    integer      :: nstates     = 1
+    integer      :: box_crop    = 0
 end type parameters
+
+! SIMPLE's Kaiser-Bessel window of the oversampled gather and scatter (simple_defs: the half-width KBWINSZ, the
+! oversampling KBALPHA, which is the padding factor OSMPL_PAD_FAC) and its batch of inserted planes
+! (MAXIMGBATCHSZ), restated
+real(real32), parameter :: KBWINSZ       = 1.5_real32
+integer,      parameter :: OSMPL_PAD_FAC = 2
+real(real32), parameter :: KBALPHA       = real(OSMPL_PAD_FAC, real32)
+integer,      parameter :: MAXIMGBATCHSZ = 500
+
+! the forms of the polar projection's gather: the graph of library operations, the reference, the CPU path and the
+! default; and the fused Metal kernel, GPU only
+type :: projector_forms
+    integer :: graph = 1
+    integer :: fused = 2
+end type projector_forms
+type(projector_forms), parameter :: PROJ_FORMS = projector_forms()
+! a projection's directions per tile and the fused kernel's threads per threadgroup, by default: family A's
+! reference tile, and the group the bench's sweep measured fastest (its canonical tiles: 64 directions for the
+! graph form, all 2,500 for the fused one)
+integer, parameter :: PROJ_TILE_DEFAULT = POLAR_CANON_RT
+integer, parameter :: PROJ_TG_DEFAULT   = 64
+! a sample is near a tie when a coordinate, in double precision from the single-precision inputs, lies this close
+! to a half-integer: the stencil's base may round apart there, and the sample is counted, not judged
+real(real64), parameter :: PROJ_TIE_MARGIN = 1.e-4_real64
+! the projection's fixtures against the oracle: a sample's |toy - oracle| over the sum of |w f| of its 27 terms,
+! the largest over the judged samples of the phantom (its edge and boundary queries included) and the seeded cube,
+! calibrated on seed 1 on both devices and frozen (the GPU's edge queries, where the phantom's spectrum is
+! smallest beside the transform's rounding); the gate is POLAR_ROW_FACTOR times it
+real(real64), parameter :: PROJ_FIXTURE_ERR = 1.502975125e-06_real64
+! the chain's dense rows against the oracle chain, per route: a pair's largest distance error over the largest |d|
+! of its oracle row (family A's measure), calibrated on seed 1 on both devices and both forms and frozen (the GPU's
+! graph form on both routes); the gate is POLAR_ROW_FACTOR times it
+real(real64), parameter :: PROJ_CHAIN_ERR_HOST   = 3.750339276e-07_real64
+real(real64), parameter :: PROJ_CHAIN_ERR_DEVICE = 4.168030557e-07_real64
+! the bench's accuracy (16 directions of the spiral at box 160 padded to 320, against the oracle on the device's
+! own padded transform): a sample's |toy - oracle| over the sum of |w f| of its 27 terms, the largest over the
+! samples that are not near a tie; calibrated on seed 1 on both devices and both forms and frozen (the GPU's graph
+! form: the float32 coordinates near 124 carry it); the gate is POLAR_ROW_FACTOR times it
+real(real64), parameter :: PROJ_BENCH_ERR = 1.451613272e-05_real64
+! the protected-update probe: the atomic insertion's numerator and density against the gridding oracle, a voxel's
+! error over the sum of |terms| of its deposits (a probe's bound, guessed: the scientific examples' cap)
+real(real64), parameter :: PROBE_ERR_CAP = 1.e-5_real64
+! the device bytes one benchmark process may plan for before anything is allocated
+real(real64), parameter :: PROJ_BUDGET_B = 8.e9_real64
+
+! one projection for a projector's workspace: the polar geometry (pftsz, nk shells up to kto), the directions to
+! project and those the caller holds (nspace, noris), the shape of the caller's bank of sections, the padded polar
+! points hk (2, pftsz nk; point fastest within a shell) and the directions' rotation rows rot (2, 3, nspace)
+type :: fproject_spec
+    integer                   :: pftsz         = 0
+    integer                   :: nk            = 0
+    integer                   :: kto           = 0
+    integer                   :: nspace        = 0
+    integer                   :: noris         = 0
+    integer                   :: refs_shape(3) = 0
+    real(real32), allocatable :: hk(:,:)
+    real(real32), allocatable :: rot(:,:,:)
+end type fproject_spec
+
+! the routes of the projected references into the polar calculator: through the host's sections and memos, the
+! reference, or resident on the device from the bank to the tiles
+type :: polarft_routes
+    integer :: host   = 1
+    integer :: device = 2
+end type polarft_routes
+type(polarft_routes), parameter :: POLARFT_REF_ROUTES = polarft_routes()
 
 ! a shift map's grid for a workspace: which map, the box (pixels the shifts are in), the absolute shell numbers
 ! kfrom (the references' first shell) and kstop (the band's last), the radii rho (pixels, ascending), nalpha
@@ -158,13 +228,30 @@ type :: polarft_map_block
     real(real32), allocatable :: width_cutoff(:,:)
 end type polarft_map_block
 
-! the tile plan a workspace's reference tiles are prepared under: the polar geometry (pftsz, nk shells) and the
-! references and particles per tile, every tile padded to them
+! the forms of the dense score's tail (the distances and the posterior draw of a tile): the compiled graph, the
+! reference, the CPU path and the default; and the fused Metal kernel, GPU only
+type :: polarft_tail_forms
+    integer :: graph = 1
+    integer :: metal = 2
+end type polarft_tail_forms
+type(polarft_tail_forms), parameter :: POLARFT_TAILS = polarft_tail_forms()
+! the fused tail's threads per threadgroup (one pair each), measured on a canonical tile and frozen
+integer, parameter :: POLARFT_TAIL_TG = 64
+! the fused tail against the compiled one on the same rows, calibrated on seed 1 on the GPU and frozen: the rows'
+! largest difference relative to the compiled row's largest valid |d|, max(2 x seed 1's, 2^-23); the pairs whose
+! drawn rotation differs, max(2 x seed 1's count, the house floor) on the fixture (floor 1) and the block (5)
+real(real64), parameter :: POLARFT_TAIL_ROW_TOL = 2.3816146966584994e-07_real64
+integer,      parameter :: POLARFT_TAIL_ROT_FIX = 1
+integer,      parameter :: POLARFT_TAIL_ROT_BLK = 5
+
+! the tile plan a workspace's reference tiles are prepared under: the polar geometry (pftsz, nk shells), the
+! references and particles per tile, every tile padded to them, and the form of the tail
 type :: polarft_tile_spec
     integer :: pftsz = 0
     integer :: nk    = 0
     integer :: rt    = 0
     integer :: bt    = 0
+    integer :: tail  = POLARFT_TAILS%graph
 end type polarft_tile_spec
 
 ! one block for a workspace: the slot it is queued in, the batch slots of its particles in the calculator's
@@ -383,5 +470,8 @@ type(elem_tolerance), parameter :: CONV_TOLERANCES(7) = [&
     &elem_tolerance('mlx_conv_transpose1d', ELEM_FLOOR32, ELEM_FLOOR32), &
     &elem_tolerance('mlx_conv_transpose2d', ELEM_FLOOR32, ELEM_FLOOR32), &
     &elem_tolerance('mlx_conv_transpose3d', ELEM_FLOOR32, ELEM_FLOOR32)]
+
+! the reconstruction's PCG benchmark: its native boxes n, each solved on the padded lattice of m = 2 n
+integer, parameter :: RECON_PCG_BENCH_N(2) = [160, 256]
 
 end module mlxf_test_defs

@@ -13,9 +13,12 @@ use mlxf_oracle_projection, only: oracle_proj_stencil, oracle_proj_matrix, oracl
 use mlxf_oracle_pcg,        only: oracle_pcg_cholesky
 use mlxf_oracle_gridding,   only: oracle_grid_plane, oracle_grid_envelope, oracle_grid_reciprocal, &
                                   oracle_grid_half_inverse
+use mlxf_test_reduce,       only: nan_maxval
 implicit none
 
 public :: oracle_recon_lattice, oracle_recon_problem, oracle_recon_selfcheck
+public :: oracle_recon_dense_matrices, oracle_recon_support_index, oracle_recon_symmetric_eigenvalues, &
+          oracle_recon_reference_spectrum
 private
 
 real(real64),    parameter :: PI    = acos(-1._real64)
@@ -78,6 +81,24 @@ character(len=LABEL_LEN), parameter :: CHECK_NAMES(NCHECK) = [character(len=LABE
 real(real64),    parameter :: CHECK_LIMITS(NCHECK) = [0._real64, TOL_MATRIX, TOL_MATRIX, 0._real64, TOL_MATRIX, &
     0._real64, TOL_MATRIX, TOL_MATRIX, TOL_MATRIX, TOL_MATRIX, 0._real64, TOL_MATRIX, TOL_MATRIX, TOL_MATRIX, &
     TOL_MATRIX, 0._real64, TOL_SOLVE, TOL_MATRIX, 0._real64, 0._real64, TOL_MATRIX]
+
+! the dense matrices of the operator and the preconditioner, the support's unknowns, a symmetric matrix's
+! eigenvalues and the preconditioner's spectrum typed apart, exported under the module's prefix
+interface oracle_recon_dense_matrices
+    module procedure dense_matrices
+end interface oracle_recon_dense_matrices
+
+interface oracle_recon_support_index
+    module procedure support_index
+end interface oracle_recon_support_index
+
+interface oracle_recon_symmetric_eigenvalues
+    module procedure symmetric_eigenvalues
+end interface oracle_recon_symmetric_eigenvalues
+
+interface oracle_recon_reference_spectrum
+    module procedure reference_spectrum
+end interface oracle_recon_reference_spectrum
 
 ! the accumulators of the lattice insertion on the periodic m-grid, a signed index q stored at 1 + modulo(q, m)
 type :: oracle_recon_lattice
@@ -280,7 +301,7 @@ contains
         allocate(hist(0))
         bnorm = sqrt(sum(b * b))
         if( bnorm <= 0._real64 ) return
-        if( maxval(abs(x)) > 0._real64 )then
+        if( nan_maxval(abs(x)) > 0._real64 )then
             call self%apply(x, q)
             r = b - q
         else
@@ -779,7 +800,7 @@ contains
                     j2     = 1 + modulo(1 - i2, m)
                     j3     = 1 + modulo(1 - i3, m)
                     err(5) = max(err(5), abs(pd(i1, i2, i3) - pd(i1, j2, j3)) / maxval(pd), &
-                                 abs(pk(i1, i2, i3) - conjg(pk(i1, j2, j3))) / maxval(abs(pk)))
+                                 abs(pk(i1, i2, i3) - conjg(pk(i1, j2, j3))) / nan_maxval(abs(pk)))
                 end do
             end do
         end do
@@ -950,7 +971,7 @@ contains
             end do
             drec = real(oracle_dft_3d(cmplx(psf, 0._real64, real64)))
             if( count(drec > 0.5_real64) /= KEPT_FULL(ibox) ) nk = nk + 1
-            err(1) = max(err(1), oracle_finite_or_inf(maxval(abs(drec - anint(drec)))))
+            err(1) = max(err(1), oracle_finite_or_inf(nan_maxval(abs(drec - anint(drec)))))
             call prob%kill()
             call lat%kill()
             deallocate(dens, khat, psf, drec, got, kref)

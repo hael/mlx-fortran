@@ -30,9 +30,11 @@ One test executable, `mlxf_test_exec`, built by every compile script unless it i
 changes only with an owner decision or a plan that names the new entry, recorded in `doc/history/`.
 
 The current process budget is **9**: areas `core`, `array`, `ops`, `linalg`, `fft`, `compile`, `fast`,
-`kernels`, plus the `object_contracts` guard group (nineteen members, including invalid FFT normalizations, dtypes
+`kernels`, plus the `object_contracts` guard group (twenty-one members, including invalid FFT normalizations, dtypes
 outside `MLX_DTYPES`, a Metal kernel spec without outputs, an empty kernel applied, segments of the wrong shape, a
-factorisation of a rank-1 array, an unknown triangle and a convolution spec with a list of the wrong length). The `fast` area (the parity
+factorisation of a rank-1 array, an unknown triangle, a convolution spec with a list of the wrong length, a strided
+view reaching past its input and `matmul` of two integer arrays). Error reductions in test code go through
+`nan_maxval` (`src/test/mlxf_test_reduce.f90`, rule `nanmax`), which turns any NaN into +infinity. The `fast` area (the parity
 plan's decision 21) runs custom Metal kernels on the GPU against exact Fortran references and checks their
 refusal on the CPU device; it provokes a Metal compilation failure on purpose, which is why it has a process of
 its own. The compile suite also
@@ -52,6 +54,18 @@ first GPU run: the maps, the mode where its margin is clear, the zero radius, th
 directions, the Nyquist ring, the width and the log evidence against the host's moments, candidate order and
 tiles, refusals and rebuilds, and 100 prepare-score-invalidate cycles. The shift-map suite also checks
 requested-output profiling, changed weights/grid/band, strict width cutoffs and exact teardown.
+Its sub-suite `polarft_tail` checks the fused tail of the dense score (a custom Metal kernel, the form `metal`):
+the refusal on the CPU device, identity and repeatability, small tile plans against the compiled tail within
+frozen bounds, and the kernel objects' lifecycle; `polarft_calc` and `eul_prob_tab` run their GPU checks with
+both forms. Its sub-suite `oracle_projection` asserts the self-checks of the projection's host oracles (the
+direct transforms' 12, the projection's 32). Its sub-suite `projector` checks the toy projector's polar gather
+(the graph form on both devices, the fused Metal kernel on the GPU) on the oracle's phantom, a seeded cube and the
+edge and boundary queries against the double-precision projection oracle, within `PROJ_FIXTURE_ERR` (calibrated on
+seed 1 on both devices, frozen, then seeds 2 and 3), with its controls (a constant spectrum, the identity against
+the oracle's own polar coordinates, a plane wave's pattern, Hermitian pairs), repeatability, 100 lifecycle cycles
+and the fused form's refusals. Its sub-suite `projector_chain` takes two projected volumes through family A on both
+routes (host and device) and both forms to the dense rows, against an oracle chain within `PROJ_CHAIN_ERR_HOST`
+and `PROJ_CHAIN_ERR_DEVICE`, with the refusals of the device route and three runs bit for bit.
 `unit_kernels suite=polar_shiftmap_accuracy` is named-only: a direct-residual sample at the production
 window/screen geometry, on both devices. It uses the same frozen caps, has assertions, and is outside the
 fast CTest process budget.
@@ -64,7 +78,16 @@ measures asserts nothing. A mode that judges, such as `bench_polar_table suite=a
 64,000-pair block against its DFT-matrix oracle, at SIMPLE's sizes), uses the assertions of `mlxf_test_utils`
 and fails the process like a test. Its bounds are calibrated on the CPU device and frozen in
 `src/test/mlxf_test_defs.f90` before its first GPU run. `bench_polar_table suite=shiftmap` measures the shift
-maps on SIMPLE's grid (read from a key = value file of SIMPLE's rows) with SIMPLE's column names. Timed runs
+maps on SIMPLE's grid (read from a key = value file of SIMPLE's rows) with SIMPLE's column names.
+`bench_projector` times the reprojection of one state at SIMPLE's bench (`suite=time`: the canonical driver to the
+evaluated banks; `suite=chain`: on to the reference bins on `route=host|device` and a dense score) and judges 16
+directions against the oracle on the device's own transform (`suite=accuracy`, `PROJ_BENCH_ERR`); unlike the polar
+bench, a key a suite does not read stops it. `bench_insert_probe suite=probe` measures an atomic gridding insertion
+against the gridding oracle (the protected-update probe of the roadmap's decision 14). `scripts/run_parts.sh`
+starts any of them (`RUN_PARTS_BENCH`, `RUN_PARTS_SUITE`, `RUN_PARTS_UNIT`).
+`tail=graph` or `tail=metal` selects the tail's form in `accuracy`, `time` and `profile`; `suite=time` reads
+`passes=` (default 3) and writes the passes and their median; `scripts/run_parts.sh` sums its parts' median
+rates. Timed runs
 follow the plan's rules: Release, an idle machine with the load recorded, best of 3 after a warm-up, two
 invocations, and the precision mode in every row. `suite=shiftmap` refuses `nthr=`: the maps run on the
 device with one submitting thread. A key a suite does not read is ignored, so the keys of the removed

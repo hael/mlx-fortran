@@ -1,6 +1,6 @@
 # K8, family D: the PCG solve of the reconstruction as a toy `reconstructor_pcg` (run `mlxf_kernel_k8`, on the M5 Ultra)
 
-Status, 2026-11-25: planned and ruled (the maintainer's go); run in the session on the M5 Ultra, in order K1, K8, K2. Run `mlxf_kernel_k8` on the M5 Ultra (arun host `local`), one run at a time on
+Status, 2026-11-25: planned and ruled (the maintainer's go); run in the session on the M5 Ultra, in order K1, K8, K2. **Run `mlxf_kernel_k8` stopped in Phase 0 (2026-11-25, 09:48): decision 10's F2 fails at 4N, 8N and 16N planes (section 7); a ruling is asked at the end of Phase 0's Progress. Ruled (R1, Progress): F2 reported, not gated; the solver judged at 2 and 5 iterations, as SIMPLE runs it; resumes at Phase 1 after K2.** Run `mlxf_kernel_k8` on the M5 Ultra (arun host `local`), one run at a time on
 it. Base: the commit that holds this plan (the run pins its hash in Phase 0 and records it); the plan was
 checked against the working tree of 2026-11-25 on `1e0ae97`, the maintainer's uncommitted work included.
 SIMPLE is read at `d354efee2` with `git -C ~/src/SIMPLE show d354efee2:<path>`, never its working tree, and
@@ -688,3 +688,158 @@ the other kernel runs: this run starts from a commit that holds every earlier ru
 
 (one entry per phase, written by the run: date, machine, base, files changed, each exit item and how it was
 met, log paths, decisions taken under delegation, and what it means, in short)
+
+### Phase 0, the base, the oracle's reach and the fixtures' conditioning: stopped at decision 10 (2026-11-25, 09:16 to 09:48 EST, M5 Ultra, in the session)
+
+**Stopped by section 7: "the fixture fails decision 10 at 16N planes".** F2 fails at 4N, 8N and 16N on every seed,
+and more planes cannot make it pass: the preconditioner of 9.4 is zero beyond `nint(|q|) = N` by design, and the
+support's vectors that live there (about 32 of 251 at N = 8) get preconditioned eigenvalues near 1e-4 against a
+median of 39. F1, F3, the ties and the oracle's other numbers are in hand. No solver code exists. The ruling
+needed is at the end of this entry.
+
+**Machine and base.** M5 Ultra (30 cores, 103,079,215,104 B), GNU Fortran 16.2.0, CMake 4.5.1, MLX 0.32.4
+(mlx-c 0.8.0, Homebrew). Base: `6a4d5f9c063d03bedcaa979d7670082693a5055b` plus the maintainer's uncommitted
+working tree (60 lines of `git status --porcelain`), copied to the run's `repo`. SIMPLE read at `d354efee2`
+(`git show`). The rulings file is empty: no `BENCH/PCG_ASSEMBLE_BENCH.txt` is named, so decision 21's gap stands.
+Load before the first step 1.58 (one-minute), the machine otherwise idle. Logs below are under `/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k8_work/scratch/keep`.
+
+**Files changed:** `src/test/mlxf_oracle_recon_pcg.f90` (four generic interfaces and one `public` line, nothing
+else: `keep/mlxf_oracle_recon_pcg.base.f90` is the base copy), `src/test/mlxf_oracle_recon_fixture.f90` (new),
+`src/test/mlxf_bench_recon_pcg.f90` (new, `suite=transform` only), `src/test/mlxf_test_defs.f90`
+(`RECON_PCG_BENCH_N`), `src/test/mlxf_test_registry.f90` (`BENCHES` gains `recon_pcg`, its `case`),
+`doc/collaboration/apple_questions.md` (question 25), this entry.
+
+| Exit item | Result | Evidence |
+| --- | --- | --- |
+| Base builds | Debug and Release from scratch with `MLXF_WERROR=ON`: 0 warnings, fast gate 9 of 9 | `p0_{debug,release}.{build,gate}.log` |
+| Base counts (*measured*, both builds) | `unit_fast` 94, `unit_fft` 194, `unit_linalg` 632, `unit_ops` **2,462**, `unit_array` **193**, `unit_compile` 63, `unit_core` 81 (Debug) and 82 (Release), `unit_kernels` **1,281**; GPU devices 1. Section 5's 2,402, 179 and 1,063 are older trees': the base holds the maintainer's later work and K1's suites. These are the counts later phases keep | `p0_counts.log` |
+| Premises at `d354efee2` (step 2) | every bullet of "What the check found" re-read and confirmed: `apply_normal` masks in and out, `install_support` `window > 0`, `khat_lim = padf Rnat + ceiling(sqrt(3) (iwinsz + 0.5))` = N + 3 (`KBWINSZ` 1.5, `OSMPL_PAD_FAC` 2), `dot_real_volume` in double, the engine's defaults and order, `maxits_pcg=2`, `rtol=0.`, `FINAL_PCG_MAXITS_FLOOR = 5`, `PCG_LAMBDA = 1.0e-3`, `solve_with_cold_restart(job%x, job%l_nonzero, params%maxits_pcg, params%rtol, ...)`, `set_window_sphere(params%msk_crop)`. Nothing changed | `git show` copies in `scratch/simple_*.f90` (reading only) |
+| `suite=transform` at 320³ and 512³ (step 3) | see the table below; shape, round trip and three evaluations' bits hold on both devices; no stop | `p0_transform/` |
+| The oracle's 21 checks (step 4) | 21 of 21 at `-O0 -g -fcheck=all` and `-O2`, the digits of the oracles' report (`solve rtol` 2.2119e-3 and 2.2121e-3 against 5.5473e-2) | `p0_oracle_selfcheck_O{0,2}.log` |
+| The generator against the lattice (step 4) | largest relative difference **0** (bit equal) on the packed numerator and density, seeds 1 to 3, at N = 8 (4N, 8N, 16N planes) and N = 32 (4N); limit 1e-12 | `p0_decision10_n{8,32}_p*.log` |
+| Decision 10 at N = 8 (step 5) | **F2 fails at 4N, 8N and 16N**: stop | below |
+| The oracle's cost (step 6) | below | `p0_oracle_timing.log` |
+| Both builds at the exit | Debug and Release from scratch with `MLXF_WERROR=ON`: 0 warnings, fast gate 9 of 9 (11.2 s and 10.7 s), `scripts/check_tree.sh` passing, both formatters run on the five Fortran files touched (0 rewritten); every count as at the base except `unit_core` 80 in Debug (81 at the base: inside section 5's 80 to 82); `suite=transform n=8` passes on both devices on the exit build | `p0exit_{debug,release}.*` |
+
+**`suite=transform`** (*measured*, Release, `MLX_ENABLE_TF32=0`, load 1.55 to 1.60; one warm-up, three
+evaluations; the forward real transform of the n-cube zero-padded to m, its inverse, the crop):
+
+| n (m) | Device | Spectrum (Fortran's view) | Round trip / max | Best of 3 | Spread | Bits of 3 | MLX peak | Cache after |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 160 (320) | CPU | 161 x 320 x 320 | 4.77e-7 | 0.2821 s | 0.0016 s | equal | 4.10e8 B | 1.47e8 B |
+| 256 (512) | CPU | 257 x 512 x 512 | 5.96e-7 | 1.2297 s | 0.0009 s | equal | 1.68e9 B | 6.04e8 B |
+| 160 (320) | GPU | 161 x 320 x 320 | 2.50e-6 | 0.0057 s | 0.0054 s | equal | 1.47e9 B | 1.20e9 B |
+| 256 (512) | GPU | 257 x 512 x 512 | 1.91e-6 | 0.0127 s | 0.0040 s | equal | 5.99e9 B | 4.92e9 B |
+
+The process's footprint over the four rows: 7.61e9 B peak, 3.12e9 B maximum resident (`/usr/bin/time -l`). The
+GPU's peak for one transform pair at 512 already passes decision 20's hypothesis for the whole solve (at most
+4.3e9 B): MLX's working memory inside a GPU transform is about 3.5 times the arrays the graph names (question 25 of
+`doc/collaboration/apple_questions.md`). The GPU's round trip at 320 is 21 float32 epsilons of the largest value
+(4 on the CPU).
+
+**Decision 10** (*measured*, N = 8, M = 16, mask radius 2.5, 251 unknowns; system R: relative ridge 0.05; the
+oracle given B and D rounded once to float32):
+
+| Planes | Seed | F1 zeros in `nint(|q|) <= N` | cond(H_s) | cond(Lᵀ H L) | F2 | F3 | Rule E: K, reason, `step/xtol` at K; least before K | Least tie |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 4N = 32 | 1 | 27 of 1,359, 1.99 % | 122.0 | 1.30e6 | fails | holds | 16, xtol, 0.921; **1.041** | 1.9e-2 |
+| 4N | 2 | 18, 1.32 % | 122.0 | 1.34e6 | fails | holds | 14, xtol, 0.844; 1.291 | 3.2e-2 |
+| 4N | 3 | 20, 1.47 % | 121.6 | 1.32e6 | fails | holds | 16, xtol, 0.854; 1.198 | 2.9e-3 |
+| 8N = 64 | 1, 2, 3 | 0.15, 0.29, 0.22 % | 122.1, 122.0, 122.3 | 1.20e6, 1.27e6, 1.24e6 | fails | holds | 15, 11, 15, xtol; 0.841, **0.980**, 0.897; 1.151, 1.399, 1.081 | 4.5e-2 or more |
+| 16N = 128 | 1, 2, 3 | 0.07, 0, 0 % | 122.3, 121.9, 122.3 | 1.30e6, 1.33e6, 1.29e6 | fails | holds | 15, 14, 14, xtol; 0.817, **0.961**, 0.841; **1.002**, **1.050**, 1.138 | 5.0e-2 or more |
+
+Bold: a margin under 5 % (decision 10). Under rule R4 the oracle reaches `rtol` at 127, 105 and 110 iterations
+(4N), with the reported residual equal to the true one. **System P** (ridge 1e-3, recorded): cond(H_s) 5.6e5 to
+7.6e5, and on seed 1 at 4N **the support block is indefinite** (least eigenvalue -3.45e-5): the kernel spectrum's
+small negative bins are not lifted by an absolute ridge of 1e-3; at 8N and 16N its least eigenvalue is 1.0e-3 to
+1.1e-3. F2 and F5 run their two and five iterations; residuals 2.27e-2, 2.05e-2, 2.11e-2 after 2 and 6.9e-3 to
+7.6e-3 after 5 (4N).
+
+**N = 32** (4N = 128 planes, mask radius 8, matrix-free, `p0_decision10_n32_p4.log`): F1 0.71 to 0.77 %; least
+tie 1.3e-4; rule E stops on `xtol` at 33, 40 and 40 iterations (residual 1.30e-3, 1.10e-3, 1.12e-3); **rule R4
+does not reach `rtol` in 200 iterations** (2.45e-4 to 2.47e-4, reason `maxits`); F2 and F5 as at N = 8
+(2.66e-2 to 2.68e-2, 7.55e-3 to 7.76e-3).
+
+**Why F2 fails** (`p0_f2diag.log`, a scratch driver, double precision, the support block of system R):
+
+| | Seed 1, 4N | Seed 2, 4N | Seed 3, 4N | Seed 1, 16N |
+| --- | --- | --- | --- | --- |
+| CG without a preconditioner: iterations to 1e-4, 1e-8 | 22, 51 | 21, 51 | 21, 50 | 19, 51 |
+| CG with 9.4's preconditioner: iterations to 1e-4, 1e-8 | 127, 596 | 104, 589 | 110, 599 | 91, 533 |
+| Preconditioned eigenvalues: least, median, largest | 8.2e-5, 39.1, 106 | 7.6e-5, 39.2, 101 | 8.2e-5, 39.3, 109 | 6.8e-5, 34.8, 88 |
+| Eigenvalues below 1e-2 of the median; their vectors' energy at `nint(|q|) > N` | 32; 98.6 % | 32; 98.7 % | 33; 98.5 % | 31; 98.9 % |
+| The condition number without them | 253 | 239 | 271 | 220 |
+
+The preconditioner sets `pi = 0` beyond `nint(|q|) = N` (SIMPLE's `finalize_density_accum`: "A singular (PSD)
+preconditioner keeps the Krylov space out of them"), but a vector of the spherical support cannot be band-limited:
+the mask, the crop and the envelope leave its support block nonsingular (least eigenvalue 5e-5 of 10, far above
+decision 10's 1e-10 cut), so about 13 % of the directions get eigenvalues near 1e-4. Even without them the
+preconditioned number (220 to 271) is twice the plain one (122). More planes change nothing (16N: 91 iterations
+against 19). **On this fixture SIMPLE's preconditioner makes conjugate gradients five to six times slower to 1e-4
+and about twelve times slower to 1e-8.** Two independent measures agree (the eigenvalues; the iteration counts).
+
+**The oracle's cost** (*measured*, `-O2`, wall clock, one each): `oracle_dft_3d` 33.4 s at M = 320 and 364.7 s at M =
+512; at N = 160 the fixture (640 planes) 4.9 s, the oracle's `new` 66.3 s (two transforms), one `apply` 66.4 s. Predicted
+`suite=accuracy` (decision 11's 11 transforms): about 6 min at N = 160 (11 x 33.4 s) and 67 min at N = 256 (11 x 365 s), plus the host loops (*derived* from the single timings; under section 7's 4 hours).
+
+**Frozen (would be, at P = 4N):** the fixture as written (4N planes, the generator bit equal to the lattice);
+admitted seeds for rule E's margins: 2 and 3 (seed 1, the calibration seed, "stop iteration reported, not
+gated": 1.041 before K); the oracle's counts above. **Not frozen:** P itself, which decision 10 moves to 8N and 16N
+on F2's failure and which no P satisfies.
+
+**Decisions taken under delegation.**
+1. The four exports are generic interfaces of the module's own procedures under `oracle_recon_` names: no call
+   site, no statement of arithmetic changed (renaming would have rewritten five call sites).
+2. The fixture's variates: three for a global rotation (z-y-z angles, the second through `acos` so the rotation
+   is uniform), then three per plane (the in-plane angle, the two shifts), all from `seeded_uniform` in [-1, 1];
+   the sample's convention is the oracle plane's (`t exp(+i phi) F / n³`), the noise variance 1, the phantom's
+   centres and widths in units of n/6; the generator keeps only the packed half (half the memory); the fixture's
+   plane is a private record so that no procedure passes five dummies.
+3. F2's `L` from LAPACK's `dsyev` (Accelerate) on the support block of 9.4's matrix, in a scratch driver only;
+   the condition numbers from the oracle's Jacobi eigenvalues; the margins' step quantity from fixed-iteration
+   solves `set_rules(0, 0, k)` (decision 11's rule).
+4. Steps 3, 4 and 6 were completed after the stop was found: they do not depend on the fixture's acceptance and
+   inform the ruling. No code of Phase 1 was written.
+5. `suite=transform` asserts the spectrum's shape and the round trip within 64 float32 epsilons
+   (`ELEM_CEILING`), a convention test; times are recorded. `mlxf_test_defs.f90` gets only the constant code
+   reads (`RECON_PCG_BENCH_N`); the fixtures' other constants wait for the code that reads them.
+6. The run's own copies of the polar benchmark's argument helpers are in the new benchmark: that file is outside
+   this plan (section 4), so they could not be shared.
+
+**Ruling needed** (one of):
+1. **Recommended:** F2 becomes reported, not gated (it measures SIMPLE's preconditioner, not the fixture's
+   coverage, and no fixture passes it); P stays 4N (F1 holds on every seed, rule E's margins admit seeds 2 and 3);
+   the run resumes at Phase 1 from this state. The finding goes to the report as a question for SIMPLE.
+2. F2 is redefined before the resume (for example: the preconditioned condition number without the eigenvalues
+   below 1e-2 of the median, whose vectors lie beyond `nint(|q|) = N`, against twice the plain one), frozen now.
+   On the numbers above that form would pass (220 to 271 against 2 x 122 = 244) on seeds 1 and 2 at 4N and fail
+   on seed 3 (271): it is not recommended without a margin of its own.
+3. K8 waits until the preconditioner of 9.4 is reviewed in SIMPLE (the toy would reproduce a preconditioner
+   that slows the solve).
+
+**What it means, in short:** the transforms K8 needs work at 320³ and 512³ on both devices (12.7 ms per padded
+pair at 512 on the GPU, 1.23 s on the CPU), but one pair peaks at 6.0e9 B of MLX memory on the GPU. The oracle and
+the new fixture agree to the bit. The fixture is not accepted, because SIMPLE's preconditioner, reproduced by the
+oracle, conditions the full-coverage system worse than no preconditioner; the plan's own rule makes that a stop.
+
+**Not done, plainly:** no solver, operator or tester code; no tolerance calibrated; no plant (Phase 0 has none);
+Phase 6's documents. The report file `completed/mlxf_kernel_k8_report.md` was not written: this session's harness
+refuses report files from the run's agent, so the report went to the maintainer's session as text; this entry is
+the record.
+
+### Ruling R1 (2026-11-25)
+
+The maintainer, on the stop: "My only comment on K8: we never run more than 5 iterations of PCG in SIMPLE,
+ever." The rest stands as recommended, open to the review (the run's `spec/rulings.md`):
+1. **F2 is reported, not gated:** a condition number governs convergence over many iterations, and SIMPLE runs
+   2 (`maxits_pcg`) and at most 5 (`FINAL_PCG_MAXITS_FLOOR`). The fixture is accepted at P = 4N; seeds 2 and 3
+   judged, seed 1 calibrates.
+2. **System P under F2 and F5 judges the solver,** iterate by iterate k = 1 .. 5 against the oracle (gate
+   (a')). Added, reported: at N = 8 and 32 the iterates' error after 2 and 5 iterations against the exact
+   solution, with and without the preconditioner, on both systems.
+3. **System R and rules E, R4 and T stay** as tests of the engine (stopping logic, the true residual float32
+   reaches, decisions 14 to 17), gated as written; no timing verdict rests on them.
+4. **Timing verdicts** (decision 18, the bench's comparisons) are read at 2 and 5 iterations of system P;
+   25, 50 and 200 iterations are reported. W1 and W0 are judged within 10 % of W2's true residual after 2 and
+   5 iterations, 25 and 50 reported.
+5. **Order:** K8 resumes at Phase 1 after run `mlxf_kernel_k2` (one timed run at a time on the M5).

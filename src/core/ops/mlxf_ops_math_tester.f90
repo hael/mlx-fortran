@@ -5,15 +5,16 @@
 module mlxf_ops_math_tester
 use, intrinsic :: iso_fortran_env, only: int32, real32, real64
 use, intrinsic :: ieee_arithmetic, only: ieee_is_nan, ieee_value, ieee_quiet_nan, ieee_positive_inf, ieee_negative_inf
-use mlxf,            only: mlx_array, mlx_from, mlx_to, mlx_set_default_device, mlx_default_device, MLX_DEVICES, &
-                           MLX_DTYPES, abs, sin, cos, tan, sinh, cosh, tanh, log, log10, erf, asin, acos, atan, asinh, &
-                           acosh, atanh, floor, ceiling, aint, mlx_round, mlx_sign, mlx_sigmoid, mlx_square, &
-                           mlx_reciprocal, mlx_rsqrt, mlx_expm1, mlx_log1p, mlx_log2, mlx_erfinv, mlx_degrees, &
-                           mlx_radians, mlx_stop_gradient, mlx_copy, atan2, modulo, min, mlx_logaddexp, &
-                           mlx_floor_divide, mlx_divmod, mlx_clip, mlx_nan_to_num
-use mlxf_test_utils, only: assert_true, assert_int, test_devices, device_name, set_fixed_seed
-use mlxf_test_defs,  only: ELEM_NPOINTS, ELEM_SEED_CALIBRATION, ELEM_SEEDS_JUDGED, ELEM_TOLERANCES, ELEM_CEILING, &
-                           ELEM_GPU_EXPM1, elem_tolerance
+use mlxf,             only: mlx_array, mlx_from, mlx_to, mlx_set_default_device, mlx_default_device, MLX_DEVICES, &
+                            MLX_DTYPES, abs, sin, cos, tan, sinh, cosh, tanh, log, log10, erf, asin, acos, atan, asinh, &
+                            acosh, atanh, floor, ceiling, aint, mlx_round, mlx_sign, mlx_sigmoid, mlx_square, &
+                            mlx_reciprocal, mlx_rsqrt, mlx_expm1, mlx_log1p, mlx_log2, mlx_erfinv, mlx_degrees, &
+                            mlx_radians, mlx_stop_gradient, mlx_copy, atan2, modulo, min, max, mlx_logaddexp, &
+                            mlx_floor_divide, mlx_divmod, mlx_clip, mlx_nan_to_num, mlx_astype
+use mlxf_test_utils,  only: assert_true, assert_int, test_devices, device_name, set_fixed_seed, shaped_error
+use mlxf_test_defs,   only: ELEM_NPOINTS, ELEM_SEED_CALIBRATION, ELEM_SEEDS_JUDGED, ELEM_TOLERANCES, ELEM_CEILING, &
+                            ELEM_GPU_EXPM1, elem_tolerance
+use mlxf_test_reduce, only: nan_maxval
 implicit none
 private
 public :: run_all_ops_math_tests
@@ -78,6 +79,7 @@ contains
             call test_binary_family
             call test_weak_scalars
             call test_math_conventions
+            call test_error_reductions
         end do
         call mlx_set_default_device(original)
     end subroutine run_all_ops_math_tests
@@ -133,7 +135,7 @@ contains
         if( any(ieee_is_nan(y)) )then
             err = huge(1._real64)
         else
-            err = maxval(abs(y-ref)/max(1._real64, abs(ref)))
+            err = nan_maxval(abs(y-ref)/max(1._real64, abs(ref)))
         endif
     end function rel_error
 
@@ -246,7 +248,88 @@ contains
         call check_scalar(r, logaddexp_of_v(x, 1._real64), 'mlx_logaddexp', 'mlx_logaddexp(a, real32)')
         r = mlx_floor_divide(7._real64, a)
         call check_scalar(r, real(floor(7._real64/x), real64), 'mlx_floor_divide', 'mlx_floor_divide(real64, a)')
+        call check_half_scalars(a, x, MLX_DTYPES%float16, 'float16')
+        call check_true_division
+        call check_half_scalars(a, x, MLX_DTYPES%bfloat16, 'bfloat16')
     end subroutine test_weak_scalars
+
+    ! negative controls of the shared error reductions: one NaN among correct elements, at the first, a middle
+    ! and the last position, makes the error +infinity, so no tolerance accepts it; so does an infinity
+    subroutine test_error_reductions
+        real(real32)     :: x(5)
+        real(real64)     :: ref(5), one(5), e
+        type(mlx_array)  :: a
+        integer          :: k, pos(3)
+        character(len=1) :: c
+        write(*,'(a)') 'test_error_reductions'
+        ref = [1._real64, 2._real64, 3._real64, 4._real64, 5._real64]
+        one = 1._real64
+        pos = [1, 3, 5]
+        do k = 1, size(pos)
+            write(c,'(i1)') pos(k)
+            x = real(ref, real32)
+            x(pos(k)) = ieee_value(0._real32, ieee_quiet_nan)
+            a = mlx_from(x)
+            e = shaped_error(a, ref, one)
+            call assert_true(.not. (e <= 1._real64), 'shaped_error with a NaN at element '//c//' fails every tolerance')
+            call assert_true(.not. (nan_maxval(abs(real(x, real64) - ref)) <= 1._real64), &
+                &'nan_maxval with a NaN at element '//c//' fails every tolerance')
+            x(pos(k)) = ieee_value(0._real32, ieee_positive_inf)
+            a = mlx_from(x)
+            e = shaped_error(a, ref, one)
+            call assert_true(.not. (e <= 1._real64), 'shaped_error with an infinity at element '//c//' fails')
+        end do
+        x = real(ref, real32)
+        a = mlx_from(x)
+        e = shaped_error(a, ref, one)
+        call assert_true(e <= tiny(1._real64), 'shaped_error of the exact values is 0')
+        ref(2) = ieee_value(0._real64, ieee_quiet_nan)
+        e = shaped_error(a, ref, one)
+        call assert_true(.not. (e <= 1._real64), 'shaped_error refuses a reference that is not finite')
+    end subroutine test_error_reductions
+
+    ! operator(/) on two integer arrays is MLX's true division into float32, not Fortran's truncation
+    subroutine check_true_division
+        type(mlx_array) :: a, b, r
+        real(real32)    :: y(3)
+        a = mlx_from([7_int32, -7_int32, 6_int32])
+        b = mlx_from([2_int32, 2_int32, 4_int32])
+        r = a/b
+        call assert_int(MLX_DTYPES%float32, r%kind(), 'int32 / int32 is float32 (true division)')
+        call mlx_to(y, r)
+        call assert_true(all(abs(y - [3.5_real32, -3.5_real32, 1.5_real32]) <= 1e-6_real32), &
+            &'int32 / int32 divides exactly, without truncation')
+    end subroutine check_true_division
+
+    ! a scalar on either side of a half-precision array keeps the half kind (no promotion to float32), and
+    ! the values are those of the half array; tol is a few units of the half kind's last place
+    subroutine check_half_scalars( a, x, dtype, label )
+        type(mlx_array),  intent(in) :: a
+        real(real64),     intent(in) :: x(:)
+        integer,          intent(in) :: dtype
+        character(len=*), intent(in) :: label
+        type(mlx_array) :: h, r, r32
+        real(real32)    :: y(size(x))
+        real(real64)    :: tol
+        tol = merge(4._real64*2._real64**(-11), 4._real64*2._real64**(-8), dtype == MLX_DTYPES%float16)
+        h = mlx_astype(a, dtype)
+        r = h + 1._real32
+        call assert_int(dtype, r%kind(), label//' + real32 scalar keeps '//label)
+        r32 = mlx_astype(r, MLX_DTYPES%float32)
+        call mlx_to(y, r32)
+        call assert_true(nan_maxval(abs(real(y, real64) - (x + 1._real64))/max(1._real64, abs(x + 1._real64))) <= tol, &
+            &label//' + real32 scalar has the half values')
+        r = 2._real64*h
+        call assert_int(dtype, r%kind(), 'real64 scalar * '//label//' keeps '//label)
+        r = h/3._real32
+        call assert_int(dtype, r%kind(), label//' / real32 scalar keeps '//label)
+        r = 0.5_real64 - h
+        call assert_int(dtype, r%kind(), 'real64 scalar - '//label//' keeps '//label)
+        r = min(h, 0.5_real32)
+        call assert_int(dtype, r%kind(), 'min('//label//', real32) keeps '//label)
+        r = max(h, 0.1_real32)
+        call assert_int(dtype, r%kind(), 'max('//label//', real32) keeps '//label)
+    end subroutine check_half_scalars
 
     subroutine check_scalar( r, ref, name, label )
         type(mlx_array),  intent(in) :: r

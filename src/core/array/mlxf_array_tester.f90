@@ -464,6 +464,8 @@ contains
         real(real32),     target      :: x(3, 5), empty(0), x8(1, 1, 1, 1, 1, 1, 1, 1)
         real(real32),     pointer     :: p2(:,:), p1(:), p3(:,:,:), p8(:,:,:,:,:,:,:,:)
         real(real32),     allocatable :: col(:,:), row(:,:), big(:,:)
+        real(real64),     allocatable :: keep64(:,:)
+        real(real32),     allocatable :: keep3(:,:,:)
         character(len=:), allocatable :: msg
         type(mlx_array)               :: a, ca, cb
         integer                       :: st
@@ -515,6 +517,34 @@ contains
         msg = mlx_last_error()
         call assert_true(st /= 0 .and. .not. allocated(big) .and. index(msg, 'could not be allocated') > 0, &
             &'mlx_to_alloc to a destination that cannot be allocated returns a status and a message')
+        ! a failed mlx_to_alloc leaves an allocated destination as it was: wrong kind, wrong rank, no memory
+        allocate(keep64(2, 2), source=7._real64)
+        a = mlx_from(x)
+        call mlx_to_alloc(keep64, a, status=st)
+        call assert_true(st /= 0 .and. allocated(keep64), 'mlx_to_alloc of the wrong kind returns a status')
+        if( allocated(keep64) )then
+            call assert_true(all(shape(keep64) == [2, 2]) .and. all(bits_equal(keep64, 7._real64)), &
+                &'mlx_to_alloc of the wrong kind leaves the destination allocated with its values')
+        endif
+        allocate(keep3(2, 1, 2), source=5._real32)
+        call mlx_to_alloc(keep3, a, status=st)
+        call assert_true(st /= 0 .and. allocated(keep3), 'mlx_to_alloc of the wrong rank returns a status')
+        if( allocated(keep3) )then
+            call assert_true(all(shape(keep3) == [2, 1, 2]) .and. all(bits_equal(keep3, 5._real32)), &
+                &'mlx_to_alloc of the wrong rank leaves the destination allocated with its values')
+        endif
+        allocate(big(2, 3), source=3._real32)
+        a = ca + cb
+        call mlx_to_alloc(big, a, status=st)
+        call assert_true(st /= 0 .and. allocated(big), 'mlx_to_alloc that cannot allocate returns a status')
+        if( allocated(big) )then
+            call assert_true(all(shape(big) == [2, 3]) .and. all(bits_equal(big, 3._real32)), &
+                &'mlx_to_alloc that cannot allocate leaves an allocated destination with its values')
+        endif
+        a = mlx_from(x)
+        call mlx_to_alloc(big, a, status=st)
+        call assert_true(st == 0 .and. all(shape(big) == [3, 5]) .and. all(bits_equal(big, x)), &
+            &'mlx_to_alloc replaces an allocated destination when it succeeds')
     end subroutine test_checked_failures
 
     ! int8 and int16 at ranks 0, 2 (3,5) and 3 (3,2,5) through mlx_from, mlx_to and mlx_to_alloc, with the

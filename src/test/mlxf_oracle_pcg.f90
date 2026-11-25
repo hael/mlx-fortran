@@ -6,7 +6,8 @@
 module mlxf_oracle_pcg
 use, intrinsic :: iso_fortran_env, only: real64
 use, intrinsic :: ieee_arithmetic, only: ieee_is_finite, ieee_value, ieee_positive_inf, ieee_quiet_nan
-use mlxf_oracle_dft, only: oracle_dft_3d, oracle_idft_3d, oracle_finite_or_inf
+use mlxf_oracle_dft,  only: oracle_dft_3d, oracle_idft_3d, oracle_finite_or_inf
+use mlxf_test_reduce, only: nan_maxval
 implicit none
 
 public :: oracle_pcg_problem, oracle_pcg_true, oracle_pcg_cholesky, oracle_pcg_selfcheck
@@ -634,7 +635,7 @@ contains
         complex(real64), intent(in) :: g(:,:,:)
         real(real64) :: r
         r = 0._real64
-        if( maxval(abs(g)) > 0._real64 ) r = maxval(abs(aimag(g))) / maxval(abs(g))
+        if( nan_maxval(abs(g)) > 0._real64 ) r = nan_maxval(abs(aimag(g))) / nan_maxval(abs(g))
         if( .not. (all(ieee_is_finite(real(g))) .and. all(ieee_is_finite(aimag(g)))) ) r = ieee_value(r, ieee_positive_inf)
     end function imag_share
 

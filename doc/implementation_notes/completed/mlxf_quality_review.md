@@ -1,6 +1,7 @@
 # Code review against MLX and mlx-c
 
-Reviewed 2026-11-25. **Status: review delivered; five findings open.**
+Reviewed 2026-11-25. **Status: review delivered; all five findings fixed, built and tested on 2026-11-25** (the
+history, 2026-11-25, "An outside review of `c6ea867`"; R5's full install check waits for `pkg-config`).
 The review changed no implementation. This record contains findings and recommended remediation; it is
 not an implementation plan or a claim that the findings have been fixed.
 
@@ -37,11 +38,11 @@ coverage. Planned API omissions and documented compiler restrictions were not co
 
 | ID | Priority | Finding | Status |
 | --- | --- | --- | --- |
-| R1 | P1 | Numerical error checks can accept NaN-corrupted results | Open |
-| R2 | P1 | An interrupted CTest run can pass the build gate | Open |
-| R3 | P2 | Weak real scalars promote float16/bfloat16 arrays to float32 | Open |
-| R4 | P2 | CMake embedding through `add_subdirectory` fails | Open |
-| R5 | P2 | Installation verification rejects equivalent macOS temporary paths | Open |
+| R1 | P1 | Numerical error checks can accept NaN-corrupted results | Fixed: `nan_maxval`, rule `nanmax` |
+| R2 | P1 | An interrupted CTest run can pass the build gate | Fixed: ctest status, complete-run check |
+| R3 | P2 | Weak real scalars promote float16/bfloat16 arrays to float32 | Fixed: half kinds kept |
+| R4 | P2 | CMake embedding through `add_subdirectory` fails | Fixed: project paths, `check_embed.sh` |
+| R5 | P2 | Installation verification rejects equivalent macOS temporary paths | Fixed: both paths resolved |
 
 P1 means fix in the next hardening batch because validation can give false assurance. P2 means a
 reproducible correctness or integration defect that should be scheduled for repair.

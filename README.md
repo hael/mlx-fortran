@@ -4,17 +4,21 @@ A modern Fortran interface to [MLX](https://github.com/ml-explore/mlx), Apple's 
 unified CPU/GPU memory of Apple silicon, built on MLX's C API
 [mlx-c](https://github.com/ml-explore/mlx-c).
 
-**Status: milestone 1 closed; the library is growing toward parity with mlx-c.** The whole of mlx-c 0.8.0 is
-bound at the C level, generated at build time
-and checked against an independent list of its 680 functions. That check is name coverage, not ABI
-verification: an interface is proven against the C library only where a test calls it. On top of it, the Fortran layer has the
+**Status: milestone 1 closed; the library is growing toward parity with mlx-c.** mlx-c 0.8.0 is bound at the
+C level, generated at build time from the headers that are linked: 673 interfaces, and 7 names skipped with a
+reason (variadic functions and structs that are not handles), checked against an independent list of the
+headers' 680 names. That check is name coverage, not ABI verification: an interface is proven against the C
+library only where a test calls it. On top of it, the Fortran layer has the
 `mlx_array` type and its lifetime, data movement, evaluation and errors, plus the first operations: elementwise
 arithmetic and comparisons, shape and indexing operations, reductions and scans, batched `matmul`, 1D and 2D
 FFTs, and graph compilation of Fortran callbacks. That set covers the first SIMPLE-shaped pipeline (scoring
 and shift maps of the polar table), measured on the M2 and M5 Ultra
 ([report](doc/implementation_notes/completed/mlxf_milestone1_report.md)); its test-only model is a miniature of
 SIMPLE's `polarft_calc` with the table driver `eul_prob_tab`
-([report](doc/implementation_notes/completed/mlxf_toy_architecture_report.md)). The API is still growing, so expect
+([report](doc/implementation_notes/completed/mlxf_toy_architecture_report.md)), now with a fused tail of its dense
+score ([K1](doc/implementation_notes/completed/mlxf_kernel_k1_report.md)) and a miniature of SIMPLE's `projector`
+that reprojects the references on the GPU in a graph and a fused form and hands them to the calculator without
+leaving the device ([K2](doc/implementation_notes/completed/mlxf_kernel_k2_report.md)). The API is still growing, so expect
 it to change. The work to come is ranked in the
 [roadmap](doc/implementation_notes/planned/mlxf_roadmap.md).
 See the [implementation-notes index](doc/implementation_notes/README.md) for active work and completed records.
@@ -120,7 +124,7 @@ failure on any skip; its log names the commit, the toolchain, MLX and the device
 | --- | --- |
 | `src/defs/` | `mlxf_defs`: constants and vocabularies more than one module uses |
 | `src/core/` | the Fortran layer, by capability: `runtime/`, `array/`, `ops/`, `linalg/`, `fft/`, `compile/`; `mlxf.f90` is the user module |
-| `src/test/` | test infrastructure, the toys that mirror SIMPLE's classes (`polarft_calc`, `eul_prob_tab`) and their benchmark, built only with tests |
+| `src/test/` | test infrastructure, the toys that mirror SIMPLE's classes (`polarft_calc`, `eul_prob_tab`, `projector`), their oracles and benchmarks, built only with tests |
 | `test/` | `mlxf_test_exec`, the one test executable, and the CTest entries |
 | `scripts/` | the static gate, the formatters, the compile helpers, the dependency build, the C-layer generator |
 | `build/gen/` | generated at build time: the `bind(c)` layer from the mlx-c headers that are linked |

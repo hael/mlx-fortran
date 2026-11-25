@@ -25,6 +25,11 @@ contains
             self%msg = 'polarft_calc%new_shiftmap: refused: no such shift map'
             return
         endif
+        if( self%route == POLARFT_REF_ROUTES%device )then
+            self%msg = 'polarft_calc%new_shiftmap: refused: the maps read the host memos, which the device route does '// &
+                &'not make'
+            return
+        endif
         ! the map's earlier state goes first: a refusal leaves no such map
         self%map_ref_gen(imap) = -1_int64
         if( self%sm_imap == imap ) self%sm_imap = 0

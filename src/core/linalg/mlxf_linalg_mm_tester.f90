@@ -7,11 +7,12 @@
 module mlxf_linalg_mm_tester
 use, intrinsic :: iso_c_binding,   only: c_bool
 use, intrinsic :: iso_fortran_env, only: int32, int64, real32, real64
-use mlxf,            only: mlx_array, mlx_from, mlx_to, mlx_set_default_device, mlx_default_device, MLX_DEVICES, &
-                           MLX_DTYPES, matmul, mlx_astype, mlx_gather_mm, mlx_block_masked_mm, mlx_segmented_mm
-use mlxf_test_utils, only: assert_true, test_devices, device_name, set_fixed_seed, bits_equal, judge_error, &
-                           find_tolerance
-use mlxf_test_defs,  only: ELEM_SEED_CALIBRATION, ELEM_SEEDS_JUDGED, ELEM_CEILING, MM_TOLERANCES, elem_tolerance
+use mlxf,             only: mlx_array, mlx_from, mlx_to, mlx_set_default_device, mlx_default_device, MLX_DEVICES, &
+                            MLX_DTYPES, matmul, mlx_astype, mlx_gather_mm, mlx_block_masked_mm, mlx_segmented_mm
+use mlxf_test_utils,  only: assert_true, test_devices, device_name, set_fixed_seed, bits_equal, judge_error, &
+                            find_tolerance
+use mlxf_test_defs,   only: ELEM_SEED_CALIBRATION, ELEM_SEEDS_JUDGED, ELEM_CEILING, MM_TOLERANCES, elem_tolerance
+use mlxf_test_reduce, only: nan_maxval
 implicit none
 private
 public :: run_all_linalg_mm_tests
@@ -99,7 +100,7 @@ contains
             res%shaped = .false.
             return
         endif
-        res%err = max(res%err, maxval(abs(real(got, real64)-ref)/max(1._real64, bound)))
+        res%err = max(res%err, nan_maxval(abs(real(got, real64)-ref)/max(1._real64, bound)))
         if( any(bound <= 0._real64 .and. abs(got) > 0._real32) ) res%zeroed = .false.
     end subroutine compare
 
@@ -317,7 +318,7 @@ contains
             allocate(got64(size(ref)))
             call mlx_to(got64, r, status=st)
             err64 = huge(1._real64)
-            if( st == 0 ) err64 = maxval(abs(got64-reshape(ref, [size(ref)]))/max(1._real64, reshape(bound, [size(bound)])))
+            if( st == 0 ) err64 = nan_maxval(abs(got64-reshape(ref, [size(ref)]))/max(1._real64, reshape(bound, [size(bound)])))
             deallocate(got64)
             call judge_error(err64, tol%f64, 'mlx_segmented_mm', 'float64', seeds(s))
         end do

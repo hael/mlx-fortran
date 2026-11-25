@@ -214,6 +214,9 @@ layout does 2.9 million pairs per second on 24 cores; the target machine is an M
       `docs/src/dev/custom_metal_kernels.rst` ("Math Mode").
     - Meanwhile: mlx-fortran's `mlx_metal_kernel` builds every kernel in the default safe mode; its spec has
       no member for the mode.
+    - Measured 2026-11-25 (MLX 0.32.4, the probe of the fused polar tail): the safe mode honours a compensated
+      sum (1 and 363 terms of 2^-25 sum to the exact value), `metal::precise::exp` is within one unit of the
+      correctly rounded value and plain `exp` 62 units from it. The relaxed mode's effect is not measured.
 
 22. **`segmented_mm` does not check that the inner extents agree.** Status: open; read 2026-11-24 in MLX
     0.32.4 and at head `5c8989446`, not run.
@@ -254,6 +257,51 @@ layout does 2.9 million pairs per second on 24 cores; the target machine is an M
       `mlx/backend/cpu/hadamard.cpp`.
     - Meanwhile: the binding policy lists both as float32 operations; our tests run them in float32 on both
       devices.
+
+## J. Three-dimensional real transforms
+
+25. **The GPU's working memory of a padded three-dimensional real transform.** Status: open; measured
+    2026-11-25 on MLX 0.32.4, M5 Ultra.
+    - Ask: a forward real transform of a float32 cube of n = 256 zero-padded to 512 (`rfftn` with
+      `s = (512, 512, 512)`), its inverse (`irfftn`, same lengths) and a slice back to 256 raise the peak
+      memory (`get_peak_memory`, reset before) to 5.99e9 B on the GPU and 1.68e9 B on the CPU, where the
+      arrays the graph names come to about 1.7e9 B (the padded cube, the 257 x 512 x 512 complex64 spectrum,
+      the real result). At n = 160 (padded to 320) the GPU peaks at 1.47e9 B, the CPU at 0.41e9 B. Is the
+      GPU's working set of a multi-axis real transform (per-axis passes with transposed copies, we guess) known
+      in advance as a multiple of the output, and can it be bounded? The reconstruction's conjugate-gradient
+      solve we are porting would hold about 1.1e9 B resident at n = 256 (from the arrays' sizes) and applies
+      four such transforms per iteration, so the transform's own working memory decides how many solves fit on
+      one machine.
+    - Where: MLX `mlx/backend/metal/fft.cpp` (the multi-axis plan of `FFT::eval_gpu`).
+    - Meanwhile: the benchmark (`mlxf_test_exec test=bench_recon_pcg suite=transform`) records the peak per
+      size and device; budgets are set from the measured peak, not from the arrays' sizes.
+
+## K. Protected updates in a kernel written through mlx-c
+
+26. **Threadgroup memory and atomic float outputs in a kernel written through mlx-c.** Status: open; measured
+    2026-11-25 on MLX 0.32.4 and mlx-c 0.8.0, M5 Ultra.
+    - Ask: SIMPLE's gridding insertion adds every pixel of a plane, through a 27-point window, to two shared
+      grids; planes overlap at every voxel. Through mlx-c we can write the update with `atomic_outputs`
+      (`atomic_fetch_add_explicit` on `atomic<float>`), and a `threadgroup` array declared in the kernel's body
+      builds and gives correct results (a 64-element group sum), though MLX writes the kernel's signature and the
+      documentation does not mention threadgroup memory. Two questions: (1) is threadgroup memory declared in the
+      body supported for kernels built by `metal_kernel` (and is its size limit the device's), so that a block of
+      the grid can be accumulated in a fixed order and written once; (2) is there a way, short of a sort, to make
+      float atomic additions bit-repeatable (a deterministic mode, or a documented order within a threadgroup)?
+      Measured: the atomic kernel inserting 1,000 planes of 20,336 pixels (2.84e8 deposits, 2,341,350 voxels,
+      two launches of 500 planes) agrees with a double-precision oracle to the floor single-precision coordinates
+      set (1.07e-4 of a voxel's terms where the window's edge weights dominate; the same 1.09e-4 from the
+      coordinates alone in double precision) and varies between runs by at most 9.7e-7 of a voxel's terms, but
+      1,139,762 of 2,341,350 voxels differ in their bits between two runs (43,169 when all planes share one
+      orientation); 0.037 s per launch, against 0.0042 s for the same kernel with plain read-modify-write
+      additions, which lose 59 % (seeded orientations) and 98 % (one orientation) of the density's mass. One
+      million float atomic additions of 0.1 to one element sum to within 3.5e-6 of the exact value, closer than a
+      sequential single-precision sum (9.6e-3).
+    - Where: MLX `docs/src/dev/custom_metal_kernels.rst` (atomic outputs, the gradient example);
+      `mlx/backend/metal/custom_kernel.cpp` (the generated signature); mlx-c `mlx/c/fast.cpp`.
+    - Meanwhile: the probe (`mlxf_test_exec test=bench_insert_probe suite=probe`) records the numbers; the
+      insertion's plan (K6) chooses between the atomic kernel, `mlx_scatter_add` and a sorted, deterministic
+      form on its own repeatability gate.
 
 ## For information (not Apple's to fix)
 
