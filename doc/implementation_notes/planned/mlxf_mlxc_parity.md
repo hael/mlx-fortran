@@ -253,6 +253,22 @@ Decisions 1 to 4 were ruled by Hans on 2026-11-23, each as recommended. None is 
     table. This replaces decision 3's order for these lines. Rule `parity` is unchanged: a phase's lines may
     become public before the phase closes, the count of pending lines only shrinks, and Progress closes a
     phase only when no line names it.
+28. (2026-11-24, recommended; stands unless overturned at the review) **Decision 27's wrappers are one run,
+    Phase 10 of this plan** (run `mlxf_parity_wrappers`, on the M5 Ultra). The number only names the run's
+    phase for the tooling: the 15 ledger lines keep their phases (4, 5 and 7), and rule `parity` reads a
+    closed Phase 10 as closing none of them.
+    - **Base:** the maintainer's commit of the toy refactoring (run `mlxf_toy_arch`), because both runs edit
+      `src/test/mlxf_test_defs.f90` and `src/test/mlxf_test_registry.f90`.
+    - **Starts when the maintainer has released the Phase 3 hold,** with whatever the read changed applied
+      first.
+    - **Order inside the phase:** the Metal kernel, then the FFT lines, then the three matrix products. Each
+      part ends with its area passing on both devices before the next begins, so that a stop leaves whole
+      parts.
+    - **The Metal kernel's tests go beyond Phase 7's one test,** because four deliverables (K1, K2, K5, K6)
+      build on it: every member of `mlx_metal_kernel_spec` is exercised at least once; one kernel has two
+      inputs and two outputs; one takes a template argument; one result is used inside a compiled function;
+      and one kernel with `atomic_outputs` adds colliding integer updates, checked exactly.
+    - **Rulings R1 to R4 hold.** The build and gate bounds are those frozen on the M5 in Phase 2's Progress.
 
 Defaults taken without a question (cheap to veto): the ledger's path and format; the record names
 `mlxf_conv_spec` and `mlx_metal_kernel_spec`; the new type names `mlx_grad_function`, `mlx_imported_function`,
@@ -277,7 +293,7 @@ Defaults taken without a question (cheap to veto): the ledger's path and format;
 | Phase | Kind | Gate |
 | --- | --- | --- |
 | 0 | tests-only and checks (ledger, rule `parity`, probes) | static gate with plants; base builds and gate unchanged |
-| 1 to 8 | additive API | existing suites identical in assertions and passing on both devices; new tests on both devices; ledger `pending` count down by the phase's lines; Debug and Release with `MLXF_WERROR=ON` and zero warnings |
+| 1 to 8, 10 | additive API | existing suites identical in assertions and passing on both devices; new tests on both devices; ledger `pending` count down by the phase's lines; Debug and Release with `MLXF_WERROR=ON` and zero warnings |
 | 9 | documentation and report | static gate |
 
 ## 6. Acceptance
@@ -375,6 +391,28 @@ Decision 17. The Metal kernel test is a kernel that adds 1-based column indices 
 exactly. Exit: no `pending 7` line; `unit_fast` passes on the GPU, and its CPU half where MLX supports the
 CPU.
 
+### Phase 10, the kernels' wrappers ahead of their turn
+
+Decisions 27 and 28. Three parts, in this order:
+1. **The custom Metal kernel** of decision 17: `mlx_metal_kernel_spec` and `type(mlx_metal_kernel)` with
+   `apply`, in the new folder `src/core/fast/` with its tester and the area `unit_fast`. Tests: Phase 7's
+   (1-based column indices added to a float32 array, exact) and decision 28's.
+2. **The FFT lines of Phase 5:** `mlx_fftn`, `mlx_ifftn`, `mlx_rfft2`, `mlx_irfft2`, `mlx_rfftn`,
+   `mlx_irfftn`, `mlx_fftshift`, `mlx_ifftshift`, `mlx_fftfreq`, `mlx_rfftfreq`, in Fortran's dimension order
+   and with Fortran's array element order for the half-size dimension, against a double-precision direct
+   transform. Calibrated by ruling R4.
+3. **The matrix products of Phase 4:** `mlx_gather_mm`, `mlx_block_masked_mm`, `mlx_segmented_mm`, against
+   Fortran's `matmul` on the selected blocks.
+
+The `fast` normalisations and attention of decision 17, the random half of Phase 5 and the rest of Phase 4
+stay pending.
+
+**Exit:** the 15 lines are public and the ledger's pending count is 113; `unit_fast`, `unit_fft` and
+`unit_linalg` pass on both devices (the Metal kernel on the GPU; on the CPU its refusal is tested); the
+existing suites keep their assertions; Debug and Release with `MLXF_WERROR=ON` and no warning; the build and
+gate bounds hold; `scripts/check_tree.sh` passes. Progress lists the new names with their signatures for the
+maintainer's read, as Phase 3's entry did.
+
 ### Phase 8, IO, streams, distributed and the rest
 
 Decisions 14, 15, 18 and 19. Exit: no `pending` line remains in the ledger; `unit_io`, `unit_distributed`
@@ -390,32 +428,32 @@ times against Phase 0. Exit: the report exists; `check_tree.sh` passes.
 
 | File | What | Phases |
 | --- | --- | --- |
-| `scripts/mlxc_parity.txt` | the ledger (new) | 0, 1, 2, 3, 4, 5, 6, 7, 8 |
-| `scripts/check_rules.py` | rule `parity`; `ENTRY_HELPERS` for new helpers | 0, 1, 2, 3, 4, 5, 6, 7, 8 |
+| `scripts/mlxc_parity.txt` | the ledger (new) | 0, 1, 2, 3, 4, 5, 6, 7, 8, 10 |
+| `scripts/check_rules.py` | rule `parity`; `ENTRY_HELPERS` for new helpers | 0, 1, 2, 3, 4, 5, 6, 7, 8, 10 |
 | `scripts/probes/mlx_behaviour_probe.c` (new) | Phase 0's probes of MLX behaviour, re-run on a new MLX release or Mac; Phase 4 adds the linalg functions left unprobed | 0, 4 |
 | `scripts/probes/expm1_gpu_probe.c` (new) | ruling R4: the GPU `expm1` defect's probe, quoted by the Apple entry | 1 |
 | `.github/skills/mlxf-binding/SKILL.md`, `CLAUDE.md`, `doc/architecture_principles.md` | decision 1 | 0 |
-| `src/core/array/mlxf_array.f90`, `mlxf_array_operations.f90` | interfaces and new signature helpers | 1, 2, 3, 4, 5, 6, 7, 8 |
+| `src/core/array/mlxf_array.f90`, `mlxf_array_operations.f90` | interfaces and new signature helpers | 1, 2, 3, 4, 5, 6, 7, 8, 10 |
 | `src/core/array/mlxf_array_transfer.f90`, `mlxf_array_tester.f90` | decision 13 | 3 |
 | `src/core/array/mlxf_array_tester.f90` | the use-block form the static gate checks (one line of the launch edit) | 1 |
 | `src/core/array/mlxf_array_borrow.f90` | decision 13's `mlx_view` and `mlx_alloc` of int8 and int16, which live in the borrowing submodule and not in `mlxf_array_transfer` (row added by the run in Phase 3, before the edit) | 3 |
 | `src/core/ops/*` (existing and new submodules `mlxf_ops_math`, `mlxf_ops_index`, `mlxf_ops_sort`) | operations | 1, 2, 3, 4 |
-| `src/core/linalg/*` | linear algebra, products, convolutions | 4 |
-| `src/core/fft/*` | FFTs | 5 |
+| `src/core/linalg/*` | linear algebra, products, convolutions | 4, 10 |
+| `src/core/fft/*` | FFTs | 5, 10 |
 | `src/core/random/*` (new) | random | 5 |
 | `src/core/transforms/*` (new), `src/core/compile/*` | transforms, compile controls, export | 6 |
-| `src/core/fast/*` (new) | fast, Metal kernels | 7 |
+| `src/core/fast/*` (new) | fast, Metal kernels | 7, 10 |
 | `src/core/io/*`, `src/core/distributed/*` (new), `src/core/runtime/mlxf_stream.f90` (new), `src/core/runtime/mlxf_device.f90`, `mlxf_memory.f90`, `mlxf_libc.f90` | decisions 14, 15, 18, 19 | 8 |
-| `src/core/<dir>/<dir>.inf` | per new or changed folder | 1, 2, 3, 4, 5, 6, 7, 8 |
-| `src/defs/mlxf_defs.f90` | spec records, vocabularies | 1, 2, 3, 4, 5, 6, 7, 8 |
-| `src/core/mlxf.f90` | re-exports | 1, 2, 3, 4, 5, 6, 7, 8 |
-| `src/test/mlxf_test_utils.f90`, `src/test/mlxf_test_defs.f90` (if needed) | assertions for the table-driven testers; frozen tolerances | 1, 2, 3, 4, 5, 6, 7, 8 |
-| `src/test/mlxf_test_registry.f90`, `test/CMakeLists.txt`, `scripts/run_fast_gate.sh` (if needed) | areas, budget | 1, 2, 3, 4, 5, 6, 7, 8 |
-| `doc/policies/binding_contract_policy.md`, `doc/policies/test_environment_policy.md` (if needed) | the contract | 1, 2, 3, 4, 5, 6, 7, 8 |
-| `README.md` | API table | 1, 2, 3, 4, 5, 6, 7, 8 |
-| `doc/collaboration/apple_questions.md` | decision 22 | 0, 1, 2, 3, 4, 5, 6, 7, 8 |
-| `doc/history/2026-11.md`, `doc/history/2026-12.md` | delivered batches | 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 |
-| this plan (Progress), `mlxf_mlxc_parity_report.md` (new) | record | 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 |
+| `src/core/<dir>/<dir>.inf` | per new or changed folder | 1, 2, 3, 4, 5, 6, 7, 8, 10 |
+| `src/defs/mlxf_defs.f90` | spec records, vocabularies | 1, 2, 3, 4, 5, 6, 7, 8, 10 |
+| `src/core/mlxf.f90` | re-exports | 1, 2, 3, 4, 5, 6, 7, 8, 10 |
+| `src/test/mlxf_test_utils.f90`, `src/test/mlxf_test_defs.f90` (if needed) | assertions for the table-driven testers; frozen tolerances | 1, 2, 3, 4, 5, 6, 7, 8, 10 |
+| `src/test/mlxf_test_registry.f90`, `test/CMakeLists.txt`, `scripts/run_fast_gate.sh` (if needed) | areas, budget | 1, 2, 3, 4, 5, 6, 7, 8, 10 |
+| `doc/policies/binding_contract_policy.md`, `doc/policies/test_environment_policy.md` (if needed) | the contract | 1, 2, 3, 4, 5, 6, 7, 8, 10 |
+| `README.md` | API table | 1, 2, 3, 4, 5, 6, 7, 8, 10 |
+| `doc/collaboration/apple_questions.md` | decision 22 | 0, 1, 2, 3, 4, 5, 6, 7, 8, 10 |
+| `doc/history/2026-11.md`, `doc/history/2026-12.md` | delivered batches | 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 |
+| this plan (Progress), `mlxf_mlxc_parity_report.md` (new) | record | 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 |
 
 ## Progress
 

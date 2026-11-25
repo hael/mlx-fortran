@@ -446,6 +446,14 @@ def restyle(text, ends_only=False, case_indent=False):
 
 
 def main(argv):
+    if '--help' in argv or '-h' in argv:
+        print(__doc__)
+        return 0
+    unknown = [a for a in argv if a.startswith('-') and a not in ('--check', '--ends-only', '--case-indent', '--tree')]
+    if unknown:
+        sys.stderr.write('restyle_fortran.py: unknown option %s (see --help); nothing was changed\n'
+                         % ', '.join(unknown))
+        return 2
     check = '--check' in argv
     ends_only = '--ends-only' in argv
     case_indent = '--case-indent' in argv

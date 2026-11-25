@@ -78,6 +78,11 @@ cc:      corr(r) = cross(r) / sqrt(refpow(r) ptclpow(i))              w_k = k
 with `cross(r)` and `refpow(r)` the inverse real transforms over `p` at the `nrots` rotations. The two
 objectives share the contraction and differ in the weights and the finishing formula.
 
+SIMPLE has two correlations (read at `d354efee2`, 2026-11-24). The memoised one (`gen_corrs`) carries no
+shell weight: `w_k = 1`, normalised by the particle's unweighted power. The direct double-precision form and
+the shift map's weight by `k`, as written above. A4's plan says which one its kernel reproduces; the oracle
+has both ([`mlxf_oracles2.md`](mlxf_oracles2.md), section 9.1.4).
+
 **Its three degrees of freedom.**
 - **Which pairs.**
   - Dense: every reference, as large matrix products. This is milestone 1's kernel.
@@ -149,9 +154,15 @@ reference-side variant must also reproduce the Fourier-Bessel oracle's cells.
   - The output, followed by ring transforms, is family A's reference operand. Projected on the GPU, the
     references never leave GPU memory.
 - **B2, the pose objective of continuous refinement.** For one particle at one trial pose, every pixel of
-  the half plane reads 64 voxels through a cubic B-spline window, giving the value and three derivatives. The
-  kernel forms the residual against the CTF-weighted, shifted particle and reduces to the objective, a
-  5-component gradient and a 5 × 5 Gauss-Newton matrix.
+  the half plane reads 27 voxels through a quadratic B-spline window, three taps per axis around the nearest
+  grid point, giving the value and three derivatives. The kernel forms the residual of the CTF-weighted,
+  shifted model against the particle and reduces to the objective, a 5-component gradient and a 5 × 5 matrix.
+  - The five parameters are a rotation-vector increment applied on the right of the current rotation, and
+    two shifts.
+  - The matrix SIMPLE returns is the Gauss-Newton matrix times a clamped regression slope, not the plain
+    Gauss-Newton matrix.
+  - Corrected on 2026-11-24 from a reading of `gather_packed_bspline3_window_grad` and `pose_normal_terms`
+    at `d354efee2`: this note first said 64 voxels and a cubic window.
   - Fused, one threadgroup serves one (particle, pose) and returns 21 numbers.
   - The optimizer runs in lockstep across particles, with its small step solved on the host in double
     precision.
@@ -171,7 +182,7 @@ reference-side variant must also reproduce the Fourier-Bessel oracle's cells.
   matrix at planted poses, and a recovery test: the lockstep optimizer returns planted poses within a frozen
   bound.
 
-**Forms.** Graph: geometry and weights by ordinary operations, a 27- or 64-entry gather (`mlx_take`), a
+**Forms.** Graph: geometry and weights by ordinary operations, a 27-entry gather (`mlx_take`), a
 reduction. Fused: one Metal kernel per family member.
 
 **Library needs.** The custom Metal kernel; `mlx_take` (exists); `mlx_rfftn` for the volume transform at
@@ -183,7 +194,9 @@ bench size (the small fixture can use a host transform).
   - 26.6 GFLOP for 2,500 directions, both halves, pftsz 182, 61 shells, one state;
   - the padded volume is 132 MB as a Hermitian half at box 160;
   - SIMPLE's CPU reaches about 12 ns per sample at the margin (*derived* from a recorded run).
-- **B2:** about 2.1 kflop per pixel, so about 13 Mflop per pose evaluation at 62 shells.
+- **B2:** about 0.5 kflop per pixel, so about 3 Mflop per pose evaluation at 62 shells (about 6,000 pixels
+  of the half plane). This is a rough count for 27 taps, to be redone in K5's plan; it replaces 2.1 kflop and
+  13 Mflop, which assumed 64 taps.
 
 **Open decisions.**
 - Whether B1 writes straight into family A's layout or through an intermediate array.

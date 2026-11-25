@@ -68,7 +68,7 @@ plan, written to `doc/how2s/how2write_agent_plans.md`.
 | 0 | **Close milestone 1's hold** (done in the working tree, 2026-11-24; awaits the maintainer's commit) | [`mlxf_milestone1.md`](../completed/mlxf_milestone1.md), section 9, and its report, section 6 | decision 2 | both plans in `completed/`; the failed experiments gone; the benchmark's arguments fixed; `README.md` status current; gates pass |
 | 0b | **Refactor milestone 1's toy to SIMPLE's architecture**, with the dense-driver baseline before and after (see below) | [`mlxf_toy_architecture.md`](mlxf_toy_architecture.md) | rank 0 committed; decisions 11 and 12 | the polar toy is a miniature `polarft_calc` with its driver; the mirror ledger and rule `mirror` exist; the kernel suites keep their counts; both builds are free of warnings |
 | 1a | **Parity Phases 2 and 3**, then the API hold (delivered 2026-11-24 by run `mlxf_parity`; awaits the maintainer's read) | [`mlxf_mlxc_parity.md`](mlxf_mlxc_parity.md) | rank 0 (its base), decision 4 | no `pending 2` or `pending 3` line; the maintainer has read the API |
-| 1b | **The wrappers the kernels need, ahead of their turn** (see below) | the parity plan, its decision 27 | rank 1a, decision 5 | the named ledger lines are public and their area tests pass on both devices |
+| 1b | **The wrappers the kernels need, ahead of their turn** (see below) | the parity plan, its decisions 27 and 28 (Phase 10; run `mlxf_parity_wrappers`, after rank 0b's commit and the hold's release) | rank 1a, decision 5 | the named ledger lines are public and their area tests pass on both devices |
 | 1c | **Housekeeping** (see below) | this note, then the notes it names | rank 0 | each sub-item closed or handed to a plan |
 | 2 | **The toy kernels**, deliverables K1 to K8 | [`mlxf_kernel_families.md`](mlxf_kernel_families.md), then one plan per deliverable or family | each deliverable's own wrappers (design note, section 8), not the whole of rank 1b; decisions 6 to 9 | each deliverable's exit in the design note |
 | 3 | **The rest of parity** (the rest of Phase 4, the random half of Phase 5, Phase 6, the other `fast` functions, Phases 8 and 9) | the parity plan | rank 1b; runs beside rank 2 on a disjoint file table | no `pending` line; the parity report |
@@ -218,7 +218,8 @@ without a dimension, `mlx_gather` and the `mlx_scatter` family.
       against a stated bound.
     - To rule: are SIMPLE's exact cells required (then the reference-side variant is the kernel), or is
       decision-level agreement accepted?
-14. (2026-11-24, proposed from the review; awaits ruling) **K6's repeatability, and an early probe.**
+14. (2026-11-24, proposed from the review; stands as recommended since the maintainer's go of that day, open to
+    the review) **K6's repeatability, and an early probe.**
     - Bitwise repeatability on one GPU configuration is a gate for the form that is kept (the family rule).
       Reproducing the CPU's summation order is a separate property and is not required unless ruled.
     - Right after K2, one protected update is tried on a collision-heavy fixture: numerator, density,
@@ -226,7 +227,8 @@ without a dimension, `mlx_gather` and the `mlx_scatter` family.
       shared-voxel updates are unprotected, so it does not show the speed of a correct scatter. The probe
       tests the premise of an easy win without moving K6 forward.
     - Recommended: yes.
-15. (2026-11-24, proposed from the review; awaits ruling) **The 30 % rule's denominator.** A second code path
+15. (2026-11-24, proposed from the review; stands as recommended since the maintainer's go of that day, open to
+    the review) **The 30 % rule's denominator.** A second code path
     is kept on the canonical driver's elapsed time at equal work and accuracy, with submission,
     synchronisation and collection included. A stage's own timing explains the result; it does not decide.
     - For K1: the tail took 0.90 of 1.93 s with a barrier after each stage. Taking those as additive, the

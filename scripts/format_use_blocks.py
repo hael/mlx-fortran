@@ -204,6 +204,15 @@ def strip_uses(text):
 
 
 def main(argv):
+    if '--help' in argv or '-h' in argv:
+        print(__doc__)
+        return 0
+    # an option this script does not know stops it: with no file named it would rewrite the tree
+    unknown = [a for a in argv if a.startswith('-') and a != '--check' and not a.startswith('--drop=')]
+    if unknown:
+        sys.stderr.write('format_use_blocks.py: unknown option %s (see --help); nothing was changed\n'
+                         % ', '.join(unknown))
+        return 2
     check = '--check' in argv
     drop = set()
     files = []
