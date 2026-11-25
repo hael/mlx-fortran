@@ -26,6 +26,7 @@ and unfinished work; `completed/` contains delivered records and reviews. A comp
 
 | Record | Delivered scope |
 | --- | --- |
+| [Code quality review](completed/mlxf_quality_review.md) | Reviewed 2026-11-25 at `c6ea867` against local MLX and mlx-c: five reproduced findings remain open; Debug/Release CPU/Metal validation and its limits recorded |
 | [Core design](completed/mlxf_design.md), [report](completed/mlxf_design_report.md) | Core/handle model; original numbered design decisions |
 | [Milestone 1](completed/mlxf_milestone1.md), [M5 run](completed/mlxf_m1_m5.md), [report](completed/mlxf_milestone1_report.md) | Closed 2026-11-24: dense scoring at 4.69 times SIMPLE's 30-thread rate, Fourier-Bessel maps at 0.971 and 0.683 (standalone rates); failed experiments removed |
 | [M2 milestone record](completed/mlxf_milestone1_m2.md), [M2 report](completed/mlxf_milestone1_m2_report.md) | Phases 0–5b, review fixes and Phase 5c implementation/validation; performance exit still open |
