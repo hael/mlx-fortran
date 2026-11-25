@@ -3,6 +3,7 @@
 ! zero) with Kaiser-Bessel weights K(d) = I0(beta sqrt(1 - (d/1.5)**2)) normalised to sum to one, I0 by its power
 ! series. A signed frequency h of an m-grid is stored at 1 + modulo(h, m); the Hermitian half keeps h1 = 0 .. m/2
 ! along dimension 1. The route from a real cube is 8 G DFT(vpad) / m**3, with mlxf_oracle_dft's forward DFT.
+! The edge index is the first dimension's map of a projector that cycles over -m/2 .. m/2, a period of m + 1.
 module mlxf_oracle_projection
 use, intrinsic :: iso_fortran_env, only: real64
 use, intrinsic :: ieee_arithmetic, only: ieee_is_finite, ieee_value, ieee_positive_inf
@@ -13,7 +14,7 @@ public :: oracle_proj_phantom, oracle_proj_rotation, oracle_proj_polar_coords, o
           oracle_proj_queries, oracle_proj_stencil, oracle_proj_padded_field, oracle_proj_matrix, oracle_proj_gather, &
           oracle_proj_scatter, oracle_proj_numerator, oracle_proj_density, oracle_proj_route, oracle_proj_pack, &
           oracle_proj_expand, oracle_proj_fold, oracle_proj_packed_gather, oracle_proj_packed_scatter, &
-          oracle_proj_multiplicity, oracle_proj_selfcheck
+          oracle_proj_multiplicity, oracle_proj_edge_index, oracle_proj_edge_gather, oracle_proj_selfcheck
 private
 
 real(real64),    parameter :: PI    = acos(-1._real64)
@@ -63,18 +64,32 @@ real(real64),    parameter :: TOL_ENTRY     = 1.e-13_real64
 real(real64),    parameter :: TOL_ELEMENT   = 1.e-13_real64
 real(real64),    parameter :: TOL_ADJOINT   = 1.e-12_real64
 complex(real64), parameter :: CONSTANT      = (0.75_real64, -1.25_real64)
-integer,         parameter :: NCHECK    = 26
+! the window pinned from outside KB_BETA: its weights at an integer coordinate as read elsewhere to seven
+! digits, with the limit those digits allow, and pi sqrt(4.2625) typed on its own
+real(real64),    parameter :: W0_READ    = 0.6906488_real64
+real(real64),    parameter :: W1_READ    = 0.1546756_real64
+real(real64),    parameter :: TOL_READ   = 5.e-7_real64
+real(real64),    parameter :: BETA_TYPED = 6.48607653051083_real64
+! coordinates whose first-dimension stencils reach the two columns beyond Nyquist on either side
+integer, parameter :: NEDGE = 4
+real(real64),    parameter :: EDGE_QUERIES(3, NEDGE) = reshape([6.75_real64, 0.25_real64, -6._real64, -6.75_real64, &
+                                                              5.5_real64, 1.25_real64, 7.25_real64, -2.5_real64, &
+                                                              3.75_real64, -7.25_real64, 6._real64, -0.5_real64], &
+                                                             [3, NEDGE])
+integer,         parameter :: NCHECK    = 32
 integer,         parameter :: LABEL_LEN = 24
 character(len=LABEL_LEN), parameter :: CHECK_NAMES(NCHECK) = [character(len=LABEL_LEN) :: &
     'counts', 'margins', 'rotations', 'coordinates', 'stencil bases', 'i0 series', 'boundary weights', &
     'matrix pattern', 'matrix entries', 'gather vs matrix', 'constant field', 'scatter vs matrix', &
     'numerator vs matrix', 'density vs matrix', 'totals', 'adjoint plain', 'adjoint with D', 'packed gather', &
     'packed fold', 'packed adjoint', 'unit point', 'off-centre point', 'friedel mates', 'pack expand', &
-    'multiplicity', 'row duplicates']
+    'multiplicity', 'row duplicates', 'window weights', 'window beta', 'pack expand phantom', 'edge index', &
+    'edge samples', 'edge gather']
 real(real64),    parameter :: CHECK_LIMITS(NCHECK) = [0._real64, 0._real64, TOL_ENTRY, TOL_ENTRY, 0._real64, &
     TOL_TRANSFORM, TOL_ENTRY, 0._real64, TOL_ENTRY, TOL_ELEMENT, TOL_ELEMENT, TOL_ELEMENT, TOL_ELEMENT, &
     TOL_ELEMENT, TOL_ELEMENT, TOL_ADJOINT, TOL_ADJOINT, TOL_ELEMENT, TOL_ELEMENT, TOL_ADJOINT, TOL_TRANSFORM, &
-    TOL_TRANSFORM, TOL_TRANSFORM, 0._real64, TOL_ADJOINT, TOL_ENTRY]
+    TOL_TRANSFORM, TOL_TRANSFORM, 0._real64, TOL_ADJOINT, TOL_ENTRY, TOL_READ, TOL_ENTRY, TOL_TRANSFORM, 0._real64, &
+    0._real64, TOL_ELEMENT]
 
 contains
 
@@ -367,6 +382,37 @@ contains
         mu(m/2+1) = 1._real64
     end function oracle_proj_multiplicity
 
+    ! the first dimension's index as a projector reads it at the grid's edge: h itself on -m/2 .. m/2 and, beyond,
+    ! the cycle of length m + 1, so m/2 + 1 reads -m/2 and -m/2 - 1 reads m/2; stated for |h| <= m/2 + 2
+    elemental function oracle_proj_edge_index( h, m ) result(c)
+        integer, intent(in) :: h, m
+        integer :: c
+        c = modulo(h + m / 2, m + 1) - m / 2
+    end function oracle_proj_edge_index
+
+    ! the gather from a packed half with the edge index on dimension 1 and the periodic one on dimensions 2 and 3:
+    ! a negative edge index reads the conjugate of the Friedel mate
+    pure function oracle_proj_edge_gather( t, p ) result(y)
+        real(real64),    intent(in) :: t(:,:)
+        complex(real64), intent(in) :: p(:,:,:)
+        complex(real64) :: y(size(t, 2))
+        real(real64)    :: w(27)
+        integer         :: h(3, 27), s, n, m, c
+        m = size(p, 2)
+        do s = 1, size(t, 2)
+            call stencil_27(t(:, s), h, w)
+            y(s) = CZERO
+            do n = 1, 27
+                c = oracle_proj_edge_index(h(1, n), m)
+                if( c >= 0 )then
+                    y(s) = y(s) + w(n) * p(1+c, 1+modulo(h(2, n), m), 1+modulo(h(3, n), m))
+                else
+                    y(s) = y(s) + w(n) * conjg(p(1-c, 1+modulo(-h(2, n), m), 1+modulo(-h(3, n), m)))
+                endif
+            end do
+        end do
+    end function oracle_proj_edge_gather
+
     ! the checks against closed forms and the explicit matrix, as named largest errors and their limits; the
     ! operator checks take the largest over the polar set, the Cartesian slice and the boundary queries
     subroutine oracle_proj_selfcheck( labels, errors, limits )
@@ -389,6 +435,13 @@ contains
         call check_duplicates(oracle_proj_polar_coords(), errors(26))
         call check_duplicates(oracle_proj_slice_coords(), errors(26))
         call check_duplicates(oracle_proj_queries(), errors(26))
+        call check_window(errors(27:28))
+        call check_phantom_half(errors(29))
+        call check_edge_index(errors(30:31))
+        call check_edge_gather(oracle_proj_polar_coords(), errors(32))
+        call check_edge_gather(oracle_proj_slice_coords(), errors(32))
+        call check_edge_gather(oracle_proj_queries(), errors(32))
+        call check_edge_gather(EDGE_QUERIES, errors(32))
     end subroutine oracle_proj_selfcheck
 
     ! the window K(d) = I0(beta sqrt(1 - (d/1.5)**2)) inside |d| <= 1.5, zero outside
@@ -756,6 +809,153 @@ contains
             deallocate(g, row)
         end do
     end subroutine check_duplicates
+
+    ! the window from outside its constant: the weights at an integer coordinate against the values read
+    ! elsewhere, and at eighths of a voxel against the closed form with I0 by the trapezoid rule at the typed beta
+    subroutine check_window( err )
+        real(real64), intent(inout) :: err(2)
+        real(real64) :: w(3), wref(3), t
+        integer      :: h(3), j, a, b
+        call oracle_proj_stencil(0._real64, h, w)
+        err(1) = max(err(1), oracle_finite_or_inf(maxval(abs(w - [W1_READ, W0_READ, W1_READ]))))
+        if( .not. all(ieee_is_finite(w)) ) err(1) = ieee_value(err(1), ieee_positive_inf)
+        do j = -12, 12
+            t = real(j, real64) / 8._real64
+            call oracle_proj_stencil(t, h, w)
+            ! the base in integers, half away from zero, and the half-width typed as 3/2
+            b = sign((abs(j) + 4) / 8, j)
+            do a = 1, 3
+                wref(a) = i0_trapezoid(BETA_TYPED * sqrt(max(0._real64, 1._real64 - ((t - real(b + a - 2, real64)) / &
+                                                                                    1.5_real64)**2)))
+            end do
+            err(2) = max(err(2), oracle_finite_or_inf(maxval(abs(w - wref / sum(wref)))))
+            if( .not. all(ieee_is_finite(w)) ) err(2) = ieee_value(err(2), ieee_positive_inf)
+            if( any(h /= b + [-1, 0, 1]) ) err(2) = max(err(2), 1._real64)
+        end do
+    end subroutine check_window
+
+    ! the packed half of the phantom's own padded transform, Hermitian because the phantom is real: its expansion
+    ! against the transform, and its packed gather against the gather of the full field
+    subroutine check_phantom_half( err )
+        real(real64), intent(inout) :: err
+        complex(real64), allocatable :: f(:,:,:), p(:,:,:)
+        allocate(f(MPAD, MPAD, MPAD), p(MPAD/2+1, MPAD, MPAD))
+        f   = oracle_proj_padded_field(oracle_proj_phantom())
+        p   = oracle_proj_pack(f)
+        err = max(err, oracle_rel_error(oracle_flat(oracle_proj_expand(p)), oracle_flat(f)), &
+                  oracle_rel_error(oracle_proj_packed_gather(oracle_proj_polar_coords(), p), &
+                                   oracle_proj_gather(oracle_proj_polar_coords(), f)), &
+                  oracle_rel_error(oracle_proj_packed_gather(oracle_proj_slice_coords(), p), &
+                                   oracle_proj_gather(oracle_proj_slice_coords(), f)), &
+                  oracle_rel_error(oracle_proj_packed_gather(oracle_proj_queries(), p), &
+                                   oracle_proj_gather(oracle_proj_queries(), f)))
+    end subroutine check_phantom_half
+
+    ! the edge index against its table on three grids; then the samples the two maps read differently: none of
+    ! the polar set or the slice, queries 3 and 4, and on a scan of first coordinates in eighths exactly those
+    ! with |t| >= m/2 - 1/2 reach a tap whose voxel differs
+    subroutine check_edge_index( err )
+        real(real64), intent(inout) :: err(2)
+        real(real64) :: t
+        integer      :: m, h, j, nbad, hs(3)
+        real(real64) :: ws(3)
+        nbad = 0
+        do m = 8, 16, 4
+            if( oracle_proj_edge_index(-m / 2 - 2, m) /= m / 2 - 1 ) nbad = nbad + 1
+            if( oracle_proj_edge_index(-m / 2 - 1, m) /= m / 2 ) nbad = nbad + 1
+            if( oracle_proj_edge_index(m / 2 + 1, m) /= -m / 2 ) nbad = nbad + 1
+            if( oracle_proj_edge_index(m / 2 + 2, m) /= -m / 2 + 1 ) nbad = nbad + 1
+            do h = -m / 2, m / 2
+                if( oracle_proj_edge_index(h, m) /= h ) nbad = nbad + 1
+            end do
+        end do
+        err(1) = err(1) + real(nbad, real64)
+        nbad = count(reads_differ(oracle_proj_polar_coords())) + count(reads_differ(oracle_proj_slice_coords())) + &
+               count(reads_differ(oracle_proj_queries()) .neqv. [.false., .false., .true., .true.])
+        do j = -8 * (MPAD / 2 + 1), 8 * (MPAD / 2 + 1)
+            t = real(j, real64) / 8._real64
+            call oracle_proj_stencil(t, hs, ws)
+            if( any(modulo(oracle_proj_edge_index(hs, MPAD) - hs, MPAD) /= 0) .neqv. &
+                (abs(t) >= real(MPAD / 2, real64) - 0.5_real64) ) nbad = nbad + 1
+        end do
+        err(2) = err(2) + real(nbad, real64)
+    end subroutine check_edge_index
+
+    ! the edge gather against a sum over the voxels of the half and of its mates, each axis weighted by voxel
+    ! index: the periodic images on dimensions 2 and 3, the cycle of length m + 1 on dimension 1
+    subroutine check_edge_gather( t, err )
+        real(real64), intent(in)    :: t(:,:)
+        real(real64), intent(inout) :: err
+        complex(real64), allocatable :: p(:,:,:), y(:), ref(:)
+        real(real64),    allocatable :: scale(:)
+        real(real64)                 :: we(-MPAD/2:MPAD/2), w2(MPAD), w3(MPAD)
+        complex(real64)              :: v
+        integer                      :: m, s, a1, i2, i3
+        m = MPAD
+        allocate(p(m/2+1, m, m), y(size(t, 2)), ref(size(t, 2)), scale(size(t, 2)))
+        p = packed_sequence(m, 1)
+        y = oracle_proj_edge_gather(t, p)
+        do s = 1, size(t, 2)
+            we       = edge_weights(t(1, s), m)
+            w2       = axis_weights(t(2, s), m)
+            w3       = axis_weights(t(3, s), m)
+            ref(s)   = CZERO
+            scale(s) = 0._real64
+            do i3 = 1, m
+                do i2 = 1, m
+                    do a1 = -m / 2, m / 2
+                        if( a1 >= 0 )then
+                            v = p(1+a1, i2, i3)
+                        else
+                            v = conjg(p(1-a1, mirror(i2, m), mirror(i3, m)))
+                        endif
+                        ref(s)   = ref(s) + we(a1) * w2(i2) * w3(i3) * v
+                        scale(s) = scale(s) + we(a1) * w2(i2) * w3(i3) * abs(v)
+                    end do
+                end do
+            end do
+        end do
+        err = max(err, elem_error(y, ref, scale))
+    end subroutine check_edge_gather
+
+    ! per sample, whether some tap is read at another address or with another conjugation by the edge index
+    ! than by the periodic one; the addresses of dimensions 2 and 3 follow the conjugation
+    pure function reads_differ( t ) result(d)
+        real(real64), intent(in) :: t(:,:)
+        logical      :: d(size(t, 2))
+        real(real64) :: w(3)
+        integer      :: h(3), s, j, c, i
+        do s = 1, size(t, 2)
+            call oracle_proj_stencil(t(1, s), h, w)
+            d(s) = .false.
+            do j = 1, 3
+                c = oracle_proj_edge_index(h(j), MPAD)
+                i = modulo(h(j), MPAD)
+                if( i <= MPAD / 2 )then
+                    if( c /= i ) d(s) = .true.
+                else
+                    if( c /= -modulo(-h(j), MPAD) ) d(s) = .true.
+                endif
+            end do
+        end do
+    end function reads_differ
+
+    ! the first dimension's weight on each index -m/2 .. m/2 under the cycle of length m + 1: index a collects the
+    ! taps h = a + j (m + 1) with |h - nint(t)| <= 1, weighted by the window at t - h; normalised over the indices
+    pure function edge_weights( t, m ) result(we)
+        real(real64), intent(in) :: t
+        integer,      intent(in) :: m
+        real(real64) :: we(-m/2:m/2)
+        integer      :: a, j, h
+        do a = -m / 2, m / 2
+            we(a) = 0._real64
+            do j = -1, 1
+                h = a + j * (m + 1)
+                if( abs(h - nint(t)) <= 1 ) we(a) = we(a) + kb_window(t - real(h, real64))
+            end do
+        end do
+        we = we / sum(we)
+    end function edge_weights
 
     ! the rotation about z with cosine c and sine s, R(i,j) by rows [[c, -s, 0], [s, c, 0], [0, 0, 1]]
     pure function rot_z( c, s ) result(r)
