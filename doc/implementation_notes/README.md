@@ -21,6 +21,7 @@ and unfinished work; `completed/` contains delivered records and reviews. A comp
 | [M5 preparation follow-up](planned/mlxf_m5_preparation.md) | Actual launch-spec/comparator audit and combined validation after parity Phase 3 |
 | [mlx-c parity](planned/mlxf_mlxc_parity.md), [report of Phases 2–3](completed/mlxf_mlxc_parity_report.md) | Phases 2 and 3 delivered on the M5 Ultra, 2026-11-24 (run `mlxf_parity`): 146 functions public, 128 lines pending; the API hold released by Hans the same day. Next the kernels' wrappers (decisions 27 and 28: Phase 10, run `mlxf_parity_wrappers`, configured; it starts when the toy refactoring lands), then Phases 4–9 |
 | [Scientific examples](planned/mlxf_scientific_examples.md) | Re-scoped by the kernel families: its example 3 and PCG fixtures stay the design basis; the filter bank is deferred; tutorials follow the kernels |
+| [mlx3D lessons](planned/mlxf_mlx3d_lessons.md) | Advisory, 2026-11-25, not ruled: mlx3D's GPU patterns (tiled gather for a scatter, stable 32-bit binning, no host waits, small-K selection in registers) mapped onto K3 to K7; proposes K6's insertion as a pull with no sort and no atomics; five proposed decisions |
 | [Fusing roadmap](planned/mlxf_fusing_note.md) | The M5 profile of the Fourier-Bessel maps (history); its direction is now the roadmap's and family A's |
 
 ## Completed work
