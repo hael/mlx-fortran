@@ -11,9 +11,10 @@
 # then .deps/install, then CMake's default search) and is passed on as MLXC_ROOT. In build_release_gate/ it builds
 # the export in Debug and Release from scratch (MLXF_REQUIRE_GPU=ON, MLXF_WERROR=ON, FORTLS=OFF) and runs the
 # export's own fast gate and consumer check (scripts/check_install.sh, --require-gpu) on each, then its
-# scripts/check_embed.sh. It fails when one of them fails, when any test reports a skip, when no GPU device was
-# opened, and when the builds changed a file of the export or the checkout's .claude/settings.local.json. The log,
-# with the toolchain, mlx-c and the device, is build_release_gate/release_gate_<tag>.log (ignored by git).
+# scripts/check_embed.sh and scripts/check_toy_offstate.sh (the toys' host files without MLX). It fails when one of
+# them fails, when any test reports a skip, when no GPU device was opened, and when the builds changed a file of the
+# export or the checkout's .claude/settings.local.json. The log, with the toolchain, mlx-c and the device, is
+# build_release_gate/release_gate_<tag>.log (ignored by git).
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 source "$ROOT/scripts/mlxf_build_jobs.sh" || exit $?
@@ -169,6 +170,7 @@ if [[ $failed -eq 0 ]]; then
     echo
     echo "==== the library added to a parent project (add_subdirectory)"
     "$SRC/scripts/check_embed.sh" --jobs "$JOBS" || failed=1
+    "$SRC/scripts/check_toy_offstate.sh" --jobs "$JOBS" --exec "$WORK/Release/test/mlxf_test_exec" || failed=1
 fi
 
 echo

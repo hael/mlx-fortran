@@ -1,20 +1,20 @@
 !@descr: the toy table driver (test only): a miniature of SIMPLE's eul_prob_tab that fills the dense table through the polar calculator
 ! The strategy's loop over a range of particles, as SIMPLE's fill_tab_range walks it: the range is cut into
 ! blocks of one half, each block is scored against every reference by the calculator, and its particles'
-! candidate pairs are then read on a shift map. The driver owns what SIMPLE's owns: the particles, their
-! temperatures, the scope of the keyed draws and the batch's rows. It holds no MLX state: every device call
-! goes through the calculator. scripts/toy_mirror.txt lists each procedure as mirrored or as an addition.
+! candidate pairs are then read on a shift map. The fill has two shapes and selects once (the parameters'
+! l_mlx): on the host backend the team scores the blocks from inside a parallel region, one block a thread, as
+! SIMPLE does; on the MLX backend one thread queues the blocks, one or two in flight, from outside any region.
+! The driver owns what SIMPLE's owns: the particles, their temperatures, the scope of the keyed draws and the
+! batch's rows. It holds no MLX state and imports no MLX name: every device call goes through the calculator.
+! scripts/toy_mirror.txt lists each procedure as mirrored or as an addition.
 module mlxf_toy_eul_prob_tab
 use, intrinsic :: iso_fortran_env, only: int64, real32, real64
-use mlxf_test_defs,        only: SHIFTMAP_WINDOW, parameters, polar_map_results
-use mlxf_toy_polarft_calc, only: polarft_calc
+use mlxf_test_defs,        only: SHIFTMAP_WINDOW, PFTC_BLOCK_NB, parameters, polar_map_results
+use mlxf_toy_polarft_calc, only: polarft_calc, keyed_variate
 implicit none
 
 public :: eul_prob_tab
 private
-
-! SIMPLE's block of the dense scorer, the default of the toy's
-integer, parameter :: PFTC_BLOCK_NB = 16
 
 ! SIMPLE's members under SIMPLE's names, for the members the toy has: the particles (pinds), their inverse
 ! temperatures (temps), the batch's rows (batch_dists, batch_irots; batch_rows the full rows when kept). The
@@ -165,6 +165,11 @@ contains
         self%rnd_seed = seed
         self%ref_full = ref_full
         self%l_keys   = .true.
+        ! the host backend's kernel draws inside the calculator, as SIMPLE's does from its scope
+        if( .not. self%params%l_mlx )then
+            call self%pftc%set_draw_keys(seed, ref_full)
+            self%msg = self%pftc%message()
+        endif
     end subroutine set_draw_keys
 
     ! each particle's inverse temperature of the dense draw, in the order of pinds
@@ -256,20 +261,6 @@ contains
         self%l_maps  = maps
     end subroutine set_fill_stages
 
-    ! a deterministic variate in [0,1) keyed by a seed and the pair's indices (a Lehmer generator over the key)
-    pure real(real64) function keyed_variate( seed, iptcl, iref )
-        integer, intent(in) :: seed, iptcl, iref
-        integer(int64), parameter :: M = 2147483647_int64, A = 48271_int64
-        integer(int64)            :: x
-        integer                   :: i
-        x = mod(int(seed, int64) * 1000003_int64 + int(iptcl, int64) * 7919_int64 + int(iref, int64) * 104729_int64, M)
-        if( x == 0_int64 ) x = 1_int64
-        do i = 1, 4
-            x = mod(A * x, M)
-        end do
-        keyed_variate = real(x - 1_int64, real64) / real(M - 1_int64, real64)
-    end function keyed_variate
-
     ! seconds of a monotonic clock
     real(real64) function clock_s()
         integer(int64) :: count, rate
@@ -278,8 +269,9 @@ contains
     end function clock_s
 
     ! the particles i_first..i_last of pinds: cut into blocks of one half, each block scored against every
-    ! reference (its rows kept for the batch), then its particles' candidates read on the shift map. With two
-    ! blocks in flight, a block is queued before the one before it is collected. A refusal (message) ends the fill.
+    ! reference (its rows kept for the batch), then its particles' candidates read on the shift map. On the host
+    ! backend the team scores the blocks in a parallel region; on the MLX backend one thread queues them and, with
+    ! two blocks in flight, queues a block before the one before it is collected. A refusal (message) ends the fill.
     subroutine fill_tab_range( self, i_first, i_last )
         class(eul_prob_tab), intent(inout) :: self
         integer,             intent(in)    :: i_first, i_last
@@ -335,6 +327,11 @@ contains
                 &self%batch_maps%irho(ncand, n), self%batch_maps%ialpha(ncand, n))
         endif
         call cut_blocks
+        ! the backend is selected once
+        if( .not. self%params%l_mlx )then
+            call fill_host
+            return
+        endif
         do ib = 1, nblocks
             if( self%l_dense ) call process_block(blocks(1, ib), blocks(2, ib), slot_of(ib))
             if( len(self%msg) > 0 ) return
@@ -368,6 +365,50 @@ contains
                 end do
             end do
         end subroutine cut_blocks
+
+        ! the host backend's fill, SIMPLE's: every block is scored whole by one thread of the team, with that
+        ! thread's work, writing only its particles' columns; every draw is keyed on the particle and the
+        ! reference, so the thread and the block a pair meets change nothing
+        subroutine fill_host
+            integer, allocatable :: irefs_tab(:)
+            real(real64)         :: t0
+            integer              :: r, kb
+            if( .not. self%l_dense ) return
+            if( self%block_nb > PFTC_BLOCK_NB )then
+                self%msg = 'eul_prob_tab%fill_tab_range: refused: on the host backend a block holds at most '// &
+                    &'PFTC_BLOCK_NB particles (set_fill_options)'
+                return
+            endif
+            ! what a block could not say from inside the region is asked before it
+            call self%pftc%check_block_work(self%params%nthr)
+            self%msg = self%pftc%message()
+            if( len(self%msg) > 0 ) return
+            irefs_tab = [(r, r = 1, self%nrefs)]
+            t0        = clock_s()
+            !$omp parallel do num_threads(self%params%nthr) default(shared) private(kb) schedule(dynamic) proc_bind(close)
+            do kb = 1, nblocks
+                call process_block_host(blocks(1, kb), blocks(2, kb), irefs_tab)
+            end do
+            !$omp end parallel do
+            self%fill_s(2) = self%fill_s(2) + (clock_s() - t0)
+        end subroutine fill_host
+
+        ! one block on the calling thread: its particles and temperatures, the kernel, its rows when kept; no
+        ! allocation
+        subroutine process_block_host( j0, j1, irefs_tab )
+            integer, intent(in) :: j0, j1
+            integer, intent(in) :: irefs_tab(:)
+            real(real32) :: temps_b(PFTC_BLOCK_NB)
+            integer      :: iptcls_b(PFTC_BLOCK_NB), nb, b
+            nb = j1 - j0 + 1
+            do b = 1, nb
+                iptcls_b(b) = self%pinds(self%porder(j0 + b - 1))
+                temps_b(b)  = self%temps(self%porder(j0 + b - 1))
+            end do
+            call self%pftc%score_block_posterior(nb, iptcls_b(1:nb), self%nrefs, irefs_tab, temps_b(1:nb), &
+                &self%batch_dists(:, j0:j1), self%batch_irots(:, j0:j1))
+            if( self%l_rows ) call self%pftc%copy_block_rows(self%batch_rows(:, :, j0:j1))
+        end subroutine process_block_host
 
         ! the slot of block kb: with two in flight they alternate
         pure integer function slot_of( kb )

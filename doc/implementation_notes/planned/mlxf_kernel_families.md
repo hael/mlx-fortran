@@ -33,6 +33,11 @@ of `d354efee2` added.
   as a user does. It mirrors SIMPLE's classes, method names, data conventions and layering
   (`doc/policies/toy_example_policy.md`; section 2a names each family's counterparts). The library gains
   only general operations, and no SIMPLE name enters it.
+- **In the shape of SIMPLE's integration.** A toy class is host files that import no MLX name, a glue submodule
+  `<unit>_mlx` beside each host unit that crosses to the device (stubs in a build without `USE_MLX`), and device
+  modules behind one opaque component (`doc/policies/toy_example_policy.md`, section 8; the ledger
+  `scripts/toy_seam.txt` and rule `seam`). The three toys built so far have it (run `mlxf_toy_seam`, 2026-11-26);
+  each family's section says where its seam runs through the files.
 - **An independent oracle.** Each kernel is judged against plain Fortran in double precision that shares no
   index, weight or layout code with it. Tolerances are frozen in `src/test/mlxf_test_defs.f90` before the run
   they judge. Each gate has a planted violation shown to fail.
@@ -57,7 +62,7 @@ of `d354efee2` added.
 | B1 | `projector` (`image/simple_projector.f90`, `simple_projector_pft_batch.f90`) | `new`, `set_rmat`, `get_cmat`, `pad_fft`, `expand_cmat`, `is_expanded`, `kill_expanded`, `kill`; `fproject_polar_batch_opt` (built: `src/test/mlxf_toy_projector.f90`, `_workspace.f90`, `_pft_batch.f90`, K2) | the reprojection model's `vol_pad2ref_pfts_opt`, which fills `polarft_calc` through `set_ref_pft`, or on the toy's device route through the workspace (built: `src/test/mlxf_toy_polarft_core.f90`) |
 | B2 | `cartft_calc` (`cftc/simple_cartft_calc.f90`) | `new`, `kill`, `set_ref`, `new_ptcls`, the particle setters, `pose_normal_terms`, `shift_normal_terms` | `cartft_pose_opt` (`cftc/simple_cartft_pose_opt.f90`) |
 | C | `reconstructor` (`volume/simple_reconstructor.f90`) | `insert_plane_oversamp`, `compress_exp`, `sampl_dens_correct` | `calc_3Drec` (`strategies/search/simple_matcher_3Drec.f90`) with its batches of prepared planes |
-| D | `reconstructor_pcg` (`volume/simple_reconstructor_pcg.f90`, with the members of `volume/simple_pcg_lattice.f90` it reads) | `new`, `kill`, `set_window_sphere`, `mask_mul`, `set_lambda_relative`, `end_accum`, `apply_normal`, `apply_normal_kernel`, `apply_precond`, `dot_real_volume`, `solve_accum`, `get_effective_lambda`, `get_solve_support` (built: `src/test/mlxf_toy_reconstructor_pcg.f90`) | `pcg_solve` with `pcg_operator` and `pcg_solver_outcome` (`opt/simple_pcg_solver.f90`; built: `src/test/mlxf_toy_pcg_solver.f90`); the master's assembly in `simple_rec3D_pcg_strategy.f90` is the canonical driver |
+| D | `reconstructor_pcg` (`volume/simple_reconstructor_pcg.f90`, with the members of `volume/simple_pcg_lattice.f90` it reads) | `new`, `kill`, `set_window_sphere`, `mask_mul`, `set_lambda_relative`, `end_accum`, `apply_normal`, `apply_normal_kernel`, `apply_precond`, `dot_real_volume`, `solve_accum`, `get_effective_lambda`, `get_solve_support` (built: `src/test/mlxf_toy_reconstructor_pcg.f90` and its glue `_mlx.f90`) | `pcg_solve` with `pcg_operator` and `pcg_solver_outcome` (`opt/simple_pcg_solver.f90`; built: `src/test/mlxf_toy_pcg_solver.f90` for the record, `mlxf_toy_pcg_solver_mlx.f90` for the device engine); the master's assembly in `simple_rec3D_pcg_strategy.f90` is the canonical driver |
 
 For each toy, its plan fixes the seam (which component holds the MLX state, what stays resident, where the
 host waits) and lists the differences from SIMPLE. Family A's toy was refactored to this form by the roadmap's
@@ -134,6 +139,22 @@ tile plan 64 by 250, on the M5 Ultra):
 - **What a part process holds.** 20.81e9 B of peak footprint for all 2,000 particles and 20.11e9 B for a third
   of them (*measured*): the references dominate, and each part holds all of them.
 
+**The seam in files** (run `mlxf_toy_seam`; `scripts/toy_seam.txt`):
+- **Host:** `mlxf_toy_polarft_calc.f90` and its submodules `_core`, `_memo`, `_block`, `_shiftmap`, and the driver
+  `mlxf_toy_eul_prob_tab.f90`. They import no MLX name; `ws(:)` is `class(device_work)`.
+- **Glue:** `mlxf_toy_polarft_core_mlx.f90`, `_memo_mlx.f90`, `_block_mlx.f90`, `_shiftmap_mlx.f90`: fifteen
+  procedures `<name>_mlx`, each the body of one guarded call, with stubs under `#else`.
+- **Device:** `mlxf_toy_polarft_workspace.f90` and its submodules, unchanged but for `extends(device_work)`.
+- **The backend** is `parameters%l_mlx`, read at `new`. On the host backend `score_block_posterior` is a miniature
+  of SIMPLE's block kernel in single precision (the sums per angular bin, each pair's inverse transform as a
+  direct sum, SIMPLE's distances and posterior draw with the host's keyed variate), with per-thread work, and
+  `fill_tab_range` runs the blocks under `!$omp parallel do`; on the MLX backend it submits and collects
+  serially. The host route is a model of control flow, never timed. The shift maps and the device route of the
+  references need the MLX backend.
+- **What the host route is held to** (sub-suite `polarft_host`): the oracle `mlxf_oracle_polar` at the MLX
+  backend's tolerances, the same bytes from a team of 1 and of 4 threads, and both branches of the fill within
+  those tolerances on three seeds. The build without MLX (`test/offstate/`) fills the same table byte for byte.
+
 **Differences from SIMPLE** (read at `d354efee2`; the ledger `scripts/toy_mirror.txt` lists every procedure
 as mirrored or as an addition with its reason):
 - **Dummies dropped:** `new` has no `nmany_refs` and `fftw_measure`; `memoize_refs` no `eulspace`;
@@ -163,6 +184,10 @@ as mirrored or as an addition with its reason):
   reference and the CPU path) or the fused Metal kernel (the GPU only); SIMPLE has one form, on the CPU.
 - **Refusals:** where SIMPLE stops, the toy returns with a reason in `message()` and SIMPLE's invalid values
   in the results. The types have a `final` procedure where the house rule asks for one.
+- **The host route's additions:** `check_block_work` (asked before a team's region, where SIMPLE stops inside
+  it), `copy_block_rows` (the tester's reader of a thread's last block) and the module function `keyed_variate`
+  (SIMPLE's `rnd_keyed`, which the toy does not model). The host kernel takes blocks of at most 16 particles
+  against tiles of 32 references, as SIMPLE's.
 
 **What is new** (the deliverables of section 8):
 - **A1, the fused tail.** One Metal kernel per pair row: the inverse real transform, the finishing formula
@@ -250,10 +275,20 @@ small fixtures, 1.45e-5 at the bench (the float32 coordinates near 124), 4e-7 of
 | Where the host waits | `pad_fft` (the transform), `expand_cmat` (the cube), the projection (the bank; on the host route also its copy to `refs_state`), `memoize_refs` on the device route (the memos), `memoize_ref_bins` |
 | What a part process holds | Peak footprint 4.15e9 B (fused) and 5.21e9 B (graph) for the reprojection; 9.36e9 B (host route) and 12.69e9 B (device route, 11.3e9 B of it MLX's cache) to the reference bins and a dense score (*measured*) |
 
+**The seam in files** (run `mlxf_toy_seam`): `mlxf_toy_projector.f90` and `mlxf_toy_projector_pft_batch.f90` are
+host files, with the glue `mlxf_toy_projector_mlx.f90` (nine procedures) and `mlxf_toy_projector_pft_batch_mlx.f90`
+(two); the device module is `mlxf_toy_projector_workspace.f90`. On the device route the batch projector hands the
+calculator a `projector_bank`, a device type of the workspace's module, as `class(device_work)`; the calculator's
+glue resolves it and refuses another type. There is no host route: `new` with `l_mlx` false is refused with "the
+toy has no host route" (SIMPLE's host projector exists and is not modelled here).
+
 **Differences from SIMPLE (B1)** (read at `d354efee2`; the ledger lists each):
 - **Types.** `projector` does not extend an `image` class: it carries the `image` procedures the reprojection
   calls (`new`, `set_rmat`, `get_cmat`, `pad_fft`, `kill`). `eulspace` is an array of rotation matrices
   `(3, 3, nspace)`, not an `oris` object.
+- **The backend.** `new` takes an optional `params` after SIMPLE's dummies, for `l_mlx` (SIMPLE's classes read
+  their parameters object without a dummy); `set_message` lets the batch projector keep its refusals with the
+  projector's.
 - **Dummies dropped:** `new`'s `wthreads`, `fft_nthreads`, `fft_measure`; `fproject_polar_batch_opt`'s
   `mirr_proj`. `fproject_polar_batch_opt` takes `vol_pad` with `intent(inout)` (its workspace builds kernels and
   adds seconds); `get_polar_coords` and `get_ref_pft` take `self` with `intent(inout)` (refusals); `get_cmat` is
@@ -430,6 +465,24 @@ expected to pay; that is measured before any is written.
 `mlxf_toy_reconstructor_pcg_workspace.f90`) and the engine `pcg_solve` (`mlxf_toy_pcg_solver.f90`): one half's
 assembly from the raw packed accumulators to the shipped map, under SIMPLE's names, with the graph form only.
 
+**The seam in files** (run `mlxf_toy_seam`, 2026-11-26, after rulings R1 and R2 of its Phase 6 stop):
+- **Host:** `mlxf_toy_reconstructor_pcg.f90` (the envelopes, the window and its mask, the density's shell
+  statistics, the options and the stop of the solve, the window at the start and at the exit) and
+  `mlxf_toy_pcg_solver.f90`, which keeps the record `pcg_solver_outcome`.
+- **Glue:** `mlxf_toy_reconstructor_pcg_mlx.f90`: eighteen procedures `<name>_mlx`, the device forms of the
+  operator's five procedures (private there), and the adapter the engine solves through.
+- **Device:** `mlxf_toy_reconstructor_pcg_workspace.f90`, and the engine `mlxf_toy_pcg_solver_mlx.f90`
+  (`pcg_operator`, which extends `device_work`, and `pcg_solve`).
+- **The five operator procedures keep SIMPLE's host arrays.** `mask_mul`, `apply_normal`, `apply_normal_kernel`,
+  `apply_precond` and `dot_real_volume` take and return host volumes with SIMPLE's dummy lists; each is a guarded
+  call whose glue sends the volume to the device, applies the device form and brings the result back. The solve
+  does not go through them: the adapter calls the device forms, so its graph and its bytes are those of K8.
+- **The operator for a caller on the device.** `get_pcg_operator` (an addition) hands the adapter out as
+  `class(device_work)`; the testers and the benchmark resolve it to `pcg_operator` and apply it to device vectors
+  without a host round trip.
+- **No host route:** `new` with `l_mlx` false is refused with "the toy has no host route", and so is each of the
+  five (SIMPLE's host solve exists and is not modelled here).
+
 **The seam, with measured bytes** (*measured* at n = 160 and 256, the GPU, MLX 0.32.4):
 - **Who owns the device state:** `reconstructor_pcg%ws`, made in `new` and released in `kill`; the engine holds `x`,
   `r`, `p`, `hp` and `z` for the length of one `pcg_solve`. After `kill` MLX's active memory is 0.
@@ -449,17 +502,22 @@ assembly from the raw packed accumulators to the shipped map, under SIMPLE's nam
 - One type: the lattice's members (`box`, `boxpd`, `padf`, `pad_off`, `Rnat`, `padsc`, `iwinsz`, `dep1d`, `mask`,
   `window`, `l_mask`) are `reconstructor_pcg`'s, public as `pcg_lattice`'s are; `set_window_sphere` and `mask_mul`
   are bound to it.
-- `new(box, lambda)` drops `smpd` and `fft_nthreads`; `end_accum(l_kernel)` drops `d_raw` and refuses the
-  matrix-free operator; `solve_accum` keeps SIMPLE's eight dummies with `solve_core` folded in.
-- The volumes of `apply_normal`, `apply_normal_kernel`, `apply_precond`, `mask_mul`, `deapod_mul` and `add_ridge` are
-  device arrays and the results unevaluated; `dot_real_volume` returns the n² line sums (the engine adds them in
-  double); the engine's `apply`, `precond` and `dot` take and return device arrays.
+- `new(box, lambda)` drops `smpd` and `fft_nthreads` and takes an optional `params` for the backend;
+  `end_accum(l_kernel)` drops `d_raw` and refuses the matrix-free operator; `solve_accum` keeps SIMPLE's eight
+  dummies with `solve_core` folded in.
+- `mask_mul`, `apply_normal`, `apply_normal_kernel`, `apply_precond` and `dot_real_volume` have SIMPLE's host
+  arrays and dummy lists, and each body is a round trip to the device. `self` is `intent(inout)` in all five, so
+  that a refusal leaves its message (SIMPLE's `mask_mul` and `dot_real_volume` are pure). `dot_real_volume` adds
+  the device's float32 sums of the n² lines in double, where SIMPLE adds the products in double.
+- The engine's `apply`, `precond` and `dot` take and return device arrays, and `dot` returns the n² line sums (the
+  engine adds them in double). The engine is the device half, `mlxf_toy_pcg_solver_mlx`; its operator extends
+  `device_work` and has a `kill`.
 - The operator embeds at the corner of the padded cube through the transform's length (a translation of SIMPLE's
   centre embedding, which the Fourier multiplier does not see).
 - Where SIMPLE stops (`THROW_HARD`), the toy returns with `x` untouched and the reason in `stop_reason` and
   `message`; the engine does not precondition after its last iteration under `maxits`.
 - Additions: `set_raw_accum` (the master's reduction of the parts' files), `copy_spectra` and `copy_volumes`
-  (the testers' readers), `message`, `stage_seconds`, `host_waits`; the workspace's bindings.
+  (the testers' readers), `message`, `stage_seconds`, `host_waits`, `get_pcg_operator`; the workspace's bindings.
 
 **Numbers in hand** (*measured*, Release, the GPU, the canonical driver from `set_raw_accum` to the map on the host,
 best of three, two invocations bit for bit equal; seed 1 of the full-coverage fixture):
@@ -538,5 +596,7 @@ scientific gates.
 
 ## Progress
 
+- 2026-11-26, run `mlxf_toy_seam`: section 2 (the integration shape as a rule for every toy), section 2a's row D,
+  and "The seam in files" with the changed differences in sections 3, 4 and 6.
 - 2026-11-25, run `mlxf_kernel_k2`: section 2a's row B1, section 4 (B1 as built, the seam, the differences, the
   intermediate array closed), section 5 (the probe) and section 8's row K2 updated from K2's report.

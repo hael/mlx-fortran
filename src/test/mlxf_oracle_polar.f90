@@ -9,7 +9,7 @@ use mlxf_test_defs,   only: POLAR_DIST_MAX, POLAR_DIST_INVALID, POLAR_DIST_VALID
                             POLAR_DRAW_TOL, POLAR_VALID_MARGIN, polar_table_refs, polar_table_block, &
                             polar_table_entries, polar_row_check
 use mlxf_test_utils,  only: bits_equal
-use mlxf_test_reduce, only: nan_maxval
+use mlxf_test_reduce, only: nan_maxval, nan_max
 implicit none
 private
 
@@ -149,7 +149,7 @@ contains
                     vo  = dor(m, ir, b) < real(POLAR_DIST_VALID, real64)
                     vd  = dev < real(POLAR_DIST_VALID, real64)
                     if( vo .and. vd )then
-                        e = max(e, abs(dev - dor(m, ir, b)) / dmax)
+                        e = nan_max(e, abs(dev - dor(m, ir, b)) / dmax)
                     else if( vo .neqv. vd )then
                         if( vo )then
                             if( abs(dor(m, ir, b) - POLAR_DIST_MAX) > POLAR_VALID_MARGIN * dmax ) &

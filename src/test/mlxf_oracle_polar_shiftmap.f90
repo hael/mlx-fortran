@@ -9,6 +9,7 @@ use, intrinsic :: iso_fortran_env, only: real64
 use, intrinsic :: ieee_arithmetic, only: ieee_is_nan, ieee_value, ieee_quiet_nan
 use mlxf_oracle_dft,          only: oracle_finite_or_inf
 use mlxf_oracle_polar_objfun, only: oracle_polar_pair, oracle_polar_fixture, oracle_polar_frame
+use mlxf_test_reduce,         only: nan_maxval, nan_max
 implicit none
 
 public :: oracle_shiftmap, oracle_shiftmap_kscreen, oracle_shiftmap_temps, oracle_shiftmap_selfcheck
@@ -556,7 +557,7 @@ contains
                              smooth_size(97)] /= [1, 7, 12, 14, 18, 24, 30, 40, 45, 54, 98]), real64)
         ! a band power of 64 at pftsz 16: 0.6 pi and 2 pi
         call oracle_shiftmap_temps(64._real64, 16, temp, temp_phys)
-        err_temps = max(oracle_finite_or_inf(abs(temp - 1.8849555921538759_real64)), &
+        err_temps = nan_max(oracle_finite_or_inf(abs(temp - 1.8849555921538759_real64)), &
                         oracle_finite_or_inf(abs(temp_phys - 6.2831853071795862_real64)))
     end subroutine check_scalars
 
@@ -568,7 +569,7 @@ contains
         z = [0._real64, 1.178_real64, PI / 2._real64, PI, 1.5_real64 * PI, TWOPI]
         do iz = 1, size(z)
             do m = 0, 20
-                err = max(err, oracle_finite_or_inf(abs(bessel_jn(m, z(iz)) - bessel_integral(m, z(iz)))))
+                err = nan_max(err, oracle_finite_or_inf(abs(bessel_jn(m, z(iz)) - bessel_integral(m, z(iz)))))
             end do
         end do
     end subroutine check_bessel
@@ -596,26 +597,26 @@ contains
             err_nharm = max(err_nharm, 1._real64)
             return
         endif
-        err(2) = max(err(2), oracle_finite_or_inf(abs(map%step() - step)))
+        err(2) = nan_max(err(2), oracle_finite_or_inf(abs(map%step() - step)))
         total  = 0._real64
         nbad   = 0
         do i = 1, nrho
             rho    = real(i - 1, real64) * step
-            err(2) = max(err(2), oracle_finite_or_inf(abs(map%rho(i) - rho)))
+            err(2) = nan_max(err(2), oracle_finite_or_inf(abs(map%rho(i) - rho)))
             if( i == 1 )then
                 area_ref = PI * step**2 / 4._real64 / real(nalpha, real64)
             else
                 area_ref = TWOPI * rho * step / real(nalpha, real64)
             endif
-            err(3) = max(err(3), oracle_finite_or_inf(abs(map%area(i) - area_ref) / area_ref))
+            err(3) = nan_max(err(3), oracle_finite_or_inf(abs(map%area(i) - area_ref) / area_ref))
             total  = total + real(nalpha, real64) * map%area(i)
             if( map%nharm(i) /= NHARM_HAND(i, icase) ) nbad = nbad + 1
         end do
         do i = 1, nalpha
-            err(2) = max(err(2), oracle_finite_or_inf(abs(map%alpha(i) - real(i - 1, real64) * TWOPI / real(nalpha, real64))))
+            err(2) = nan_max(err(2), oracle_finite_or_inf(abs(map%alpha(i) - real(i - 1, real64) * TWOPI / real(nalpha, real64))))
         end do
         area_ref  = PI * (real(nrho - 1, real64) * step + step / 2._real64)**2
-        err(4)    = max(err(4), oracle_finite_or_inf(abs(total - area_ref) / area_ref))
+        err(4)    = nan_max(err(4), oracle_finite_or_inf(abs(total - area_ref) / area_ref))
         err_nharm = max(err_nharm, real(nbad, real64))
         call map%kill()
         call pair%kill()
@@ -646,7 +647,7 @@ contains
             tab    = map%table(.false.)
             tabb   = map%table(.true.)
             g      = band%geometry()
-            err(1) = max(err(1), oracle_finite_or_inf(abs(map%ptclpow() - band%wsq()) / band%wsq()))
+            err(1) = nan_max(err(1), oracle_finite_or_inf(abs(map%ptclpow() - band%wsq()) / band%wsq()))
             lmax   = 0._real64
             ccmax  = 0._real64
             dl     = 0._real64
@@ -659,15 +660,15 @@ contains
                         l      = map%cell(ialpha, irot, irho)
                         cc     = map%cell_cc(ialpha, irot, irho)
                         direct = band%dist(irot, shift)
-                        lmax   = max(lmax, abs(direct))
-                        dl     = max(dl, oracle_finite_or_inf(abs(l - direct)), &
+                        lmax   = nan_max(lmax, abs(direct))
+                        dl     = nan_maxval([dl, oracle_finite_or_inf(abs(l - direct)), &
                                      oracle_finite_or_inf(abs(tab(ialpha, irot, irho) - l)), &
-                                     oracle_finite_or_inf(abs(tabb(ialpha, irot, irho) - map%cell_bessel(ialpha, irot, irho))))
+                                     oracle_finite_or_inf(abs(tabb(ialpha, irot, irho) - map%cell_bessel(ialpha, irot, irho)))])
                         direct = band%cc_weighted(irot, shift)
-                        ccmax  = max(ccmax, abs(direct))
-                        dcc    = max(dcc, oracle_finite_or_inf(abs(cc - direct)))
-                        err(4) = max(err(4), oracle_finite_or_inf(abs(map%cell_bessel(ialpha, irot, irho) - l)))
-                        err(5) = max(err(5), oracle_finite_or_inf(abs(map%cell_cc_bessel(ialpha, irot, irho) - cc)))
+                        ccmax  = nan_max(ccmax, abs(direct))
+                        dcc    = nan_max(dcc, oracle_finite_or_inf(abs(cc - direct)))
+                        err(4) = nan_max(err(4), oracle_finite_or_inf(abs(map%cell_bessel(ialpha, irot, irho) - l)))
+                        err(5) = nan_max(err(5), oracle_finite_or_inf(abs(map%cell_cc_bessel(ialpha, irot, irho) - cc)))
                     end do
                 end do
             end do
@@ -766,8 +767,8 @@ contains
                         cross = cross + w * s
                     end do
                     lref = 1._real64 + (rp - 2._real64 * cross) / pw
-                    lmax = max(lmax, abs(lref))
-                    dl   = max(dl, oracle_finite_or_inf(abs(map%cell_bessel(ialpha, irot, irho) - lref)))
+                    lmax = nan_max(lmax, abs(lref))
+                    dl   = nan_max(dl, oracle_finite_or_inf(abs(map%cell_bessel(ialpha, irot, irho) - lref)))
                 end do
             end do
         end do
@@ -856,9 +857,9 @@ contains
         lmap(1, 1, 2)   = 0._real64
         lmap(10, 25, 2) = log(2._real64)
         sdev   = map%width(lmap, 1._real64, 0._real64)
-        err(1) = max(err(1), oracle_finite_or_inf(abs(sdev - sqrt(32._real64) / 3._real64)))
+        err(1) = nan_max(err(1), oracle_finite_or_inf(abs(sdev - sqrt(32._real64) / 3._real64)))
         sdev   = map%width(lmap, 2._real64, 0._real64)
-        err(1) = max(err(1), oracle_finite_or_inf(abs(sdev - 1.6_real64)))
+        err(1) = nan_max(err(1), oracle_finite_or_inf(abs(sdev - 1.6_real64)))
         ! the cutoff: -1 only when the loss exceeds it
         nbad = 0
         w    = map%width(lmap, 2._real64, 0.3_real64, cutoff=0.2_real64)
@@ -877,7 +878,7 @@ contains
         lmap(1, 1, 3) = 0._real64
         wa     = exp(0.6_real64) / 2._real64
         sdev   = map%width(lmap, 1._real64, 0._real64)
-        err(1) = max(err(1), oracle_finite_or_inf(abs(sdev - 2._real64 * sqrt(wa) / (1._real64 + wa))))
+        err(1) = nan_max(err(1), oracle_finite_or_inf(abs(sdev - 2._real64 * sqrt(wa) / (1._real64 + wa))))
         ! the weight floor, without a prior: all weight on the centre ring and one cell of the last ring (6
         ! pixels out, 24 times the centre's area) at a log weight of -41, which is left out, so the width is
         ! exactly zero; at -39 it is kept and the width is 6 sqrt(w) / (1 + w)
@@ -893,16 +894,16 @@ contains
         lmap          = 1000._real64
         lmap(1, 1, 1) = 0._real64
         lmap(1, 1, 4) = 41._real64 + log(24._real64)
-        err(2) = max(err(2), oracle_finite_or_inf(abs(map%width(lmap, 1._real64, 0._real64))))
+        err(2) = nan_max(err(2), oracle_finite_or_inf(abs(map%width(lmap, 1._real64, 0._real64))))
         lmap(1, 1, 4) = 39._real64 + log(24._real64)
         w      = 6._real64 * sqrt(exp(-39._real64)) / (1._real64 + exp(-39._real64))
-        err(2) = max(err(2), oracle_finite_or_inf(abs(map%width(lmap, 1._real64, 0._real64) - w) / w))
+        err(2) = nan_max(err(2), oracle_finite_or_inf(abs(map%width(lmap, 1._real64, 0._real64) - w) / w))
         ! a log weight of exactly -40 is left out too. At losses near -2**52 a log weight is an integer: the
         ! centre's, 1000 + log(pi / 14), rounds to 999 and the last ring's, 957 + log(24 pi / 14), to 959, above
         ! the common 2**52. Kept, that cell would give a width of 6 exp(-20)
         lmap(1, 1, 1) = -(2._real64**52 + 1000._real64)
         lmap(1, 1, 4) = -(2._real64**52 + 957._real64)
-        err(2) = max(err(2), oracle_finite_or_inf(abs(map%width(lmap, 1._real64, 0._real64))))
+        err(2) = nan_max(err(2), oracle_finite_or_inf(abs(map%width(lmap, 1._real64, 0._real64))))
         call map%kill()
         call pair%kill()
     end subroutine check_width

@@ -8,7 +8,7 @@ module mlxf_oracle_pose
 use, intrinsic :: iso_fortran_env, only: real64
 use, intrinsic :: ieee_arithmetic, only: ieee_is_nan, ieee_value, ieee_quiet_nan
 use mlxf_oracle_dft,  only: oracle_dft_3d, oracle_finite_or_inf
-use mlxf_test_reduce, only: nan_maxval
+use mlxf_test_reduce, only: nan_maxval, nan_max
 implicit none
 
 public :: oracle_pose_problem, oracle_pose_euler, oracle_pose_rotate, oracle_pose_reference, oracle_pose_gather, &
@@ -949,20 +949,20 @@ contains
         do q = -1, 1
             x      = KB_BETA * sqrt(1._real64 - (2._real64 * real(q, real64) / 3._real64)**2)
             wt(q)  = i0_trapezoid(x)
-            err(1) = max(err(1), oracle_finite_or_inf(abs(i0_series(x) - wt(q)) / wt(q)))
+            err(1) = nan_max(err(1), oracle_finite_or_inf(abs(i0_series(x) - wt(q)) / wt(q)))
         end do
         wt     = wt / sum(wt)
         w      = kb_weights()
-        err(2) = max(err(2), oracle_finite_or_inf(abs(w(0) - W0_PRINTED)), oracle_finite_or_inf(abs(w(1) - W1_PRINTED)), &
-                     oracle_finite_or_inf(abs(w(-1) - W1_PRINTED)))
+        err(2) = nan_maxval([err(2), oracle_finite_or_inf(abs(w(0) - W0_PRINTED)), oracle_finite_or_inf(abs(w(1) - W1_PRINTED)), &
+                     oracle_finite_or_inf(abs(w(-1) - W1_PRINTED))])
         n      = PADFAC * FIX_BOX
         c      = n / 2 + 1
-        err(3) = max(err(3), oracle_finite_or_inf(abs(bspline_env(c, n) - 1._real64)), &
+        err(3) = nan_maxval([err(3), oracle_finite_or_inf(abs(bspline_env(c, n) - 1._real64)), &
                      oracle_finite_or_inf(abs(bspline_env(c + n / 4, n) - 0.75_real64)), &
                      oracle_finite_or_inf(abs(bspline_env(c - n / 2, n) - 0.5_real64)), &
                      oracle_finite_or_inf(abs(kb_env(c, n) - 1._real64)), &
                      oracle_finite_or_inf(abs(kb_env(c + n / 4, n) - wt(0))), &
-                     oracle_finite_or_inf(abs(kb_env(c - n / 2, n) - (wt(0) - 2._real64 * wt(1)))))
+                     oracle_finite_or_inf(abs(kb_env(c - n / 2, n) - (wt(0) - 2._real64 * wt(1))))])
     end subroutine check_window
 
     ! the Euler matrix against its product written out and against two quarter-turn cases by hand; its
@@ -1044,8 +1044,8 @@ contains
                 end do
                 ref   = ref / real(FIX_BOX, real64)**3
                 j     = 1 + modulo(q, n)
-                worst = max(worst, oracle_finite_or_inf(abs(f(j(1), j(2), j(3)) - ref)))
-                scale = max(scale, abs(ref))
+                worst = nan_max(worst, oracle_finite_or_inf(abs(f(j(1), j(2), j(3)) - ref)))
+                scale = nan_max(scale, abs(ref))
             end do
             err(1) = max(err(1), oracle_finite_or_inf(worst / scale))
             ! F(-q) is the conjugate of F(q)
@@ -1055,7 +1055,7 @@ contains
                 do i2 = 1, n
                     do i1 = 1, n
                         j     = 1 + modulo(1 - [i1, i2, i3], n)
-                        worst = max(worst, oracle_finite_or_inf(abs(f(i1, i2, i3) - conjg(f(j(1), j(2), j(3))))))
+                        worst = nan_max(worst, oracle_finite_or_inf(abs(f(i1, i2, i3) - conjg(f(j(1), j(2), j(3))))))
                     end do
                 end do
             end do
@@ -1089,8 +1089,8 @@ contains
         do iq = 1, size(LOCS, 2)
             call oracle_pose_gather(f, LOCS(:, iq), v, dv)
             call kernel_gather(f, LOCS(:, iq), vk, dvk)
-            worst = max(worst, [oracle_finite_or_inf(abs(v - vk)), oracle_finite_or_inf(sum(abs(dv - dvk)))])
-            scale = max(scale, [abs(vk), nan_maxval(abs(dvk))])
+            worst = nan_max(worst, [oracle_finite_or_inf(abs(v - vk)), oracle_finite_or_inf(sum(abs(dv - dvk)))])
+            scale = nan_max(scale, [abs(vk), nan_maxval(abs(dvk))])
         end do
         err(1) = max(err(1), oracle_finite_or_inf(maxval(worst / scale)))
         ! at a lattice point the three taps weigh 1/8, 3/4, 1/8, whose transform is the B-spline's envelope: the
@@ -1100,8 +1100,8 @@ contains
         do iq = 1, size(NODES, 2)
             call oracle_pose_gather(f, real(NODES(:, iq), real64), v, dv)
             ref      = lattice_value(vol, NODES(:, iq))
-            worst(1) = max(worst(1), oracle_finite_or_inf(abs(v - ref)))
-            scale(1) = max(scale(1), abs(ref))
+            worst(1) = nan_max(worst(1), oracle_finite_or_inf(abs(v - ref)))
+            scale(1) = nan_max(scale(1), abs(ref))
         end do
         err(2) = max(err(2), oracle_finite_or_inf(worst(1) / scale(1)))
         ! inside a cell the value is a quadratic along an axis, so a central difference of any step is its slope
@@ -1115,8 +1115,8 @@ contains
                 e(a) = 0.0625_real64
                 call oracle_pose_gather(f, loc + e, vp, dvk)
                 call oracle_pose_gather(f, loc - e, vm, dvk)
-                worst(1) = max(worst(1), oracle_finite_or_inf(abs((vp - vm) / 0.125_real64 - dv(a))))
-                scale(1) = max(scale(1), abs(dv(a)))
+                worst(1) = nan_max(worst(1), oracle_finite_or_inf(abs((vp - vm) / 0.125_real64 - dv(a))))
+                scale(1) = nan_max(scale(1), abs(dv(a)))
             end do
         end do
         err(3) = max(err(3), oracle_finite_or_inf(worst(1) / scale(1)))
@@ -1153,8 +1153,8 @@ contains
                               real(FIX_BOX, real64)
                         ref = exp(cmplx(0._real64, arg, real64)) * abs(ctf(h + b2 + 1, k + b2 + 1)) * lattice_value(vol, loc)
                     endif
-                    worst = max(worst, oracle_finite_or_inf(abs(m(h + b2 + 1, k + b2 + 1) - ref)))
-                    scale = max(scale, abs(ref))
+                    worst = nan_max(worst, oracle_finite_or_inf(abs(m(h + b2 + 1, k + b2 + 1) - ref)))
+                    scale = nan_max(scale, abs(ref))
                 end do
             end do
             err = max(err, oracle_finite_or_inf(worst / scale))
@@ -1177,13 +1177,13 @@ contains
         end do
         call prob%new(fixture_volume(), 0, FIX_KTO, 'cc')
         call prob%set_particle(ones, ctf, sigma2)
-        err = max(err, oracle_finite_or_inf(abs(prob%power() - 177._real64) / 177._real64))
+        err = nan_max(err, oracle_finite_or_inf(abs(prob%power() - 177._real64) / 177._real64))
         call prob%new(fixture_volume(), 1, FIX_KTO, 'euclid')
         call prob%set_particle(ones, ctf, sigma2)
-        err = max(err, oracle_finite_or_inf(abs(prob%power() - 12.8125_real64) / 12.8125_real64))
+        err = nan_max(err, oracle_finite_or_inf(abs(prob%power() - 12.8125_real64) / 12.8125_real64))
         call prob%new(fixture_volume(), 0, FIX_KTO, 'euclid')
         call prob%set_particle(ones, ctf, sigma2)
-        err = max(err, oracle_finite_or_inf(abs(prob%power() - 13.8125_real64) / 13.8125_real64))
+        err = nan_max(err, oracle_finite_or_inf(abs(prob%power() - 13.8125_real64) / 13.8125_real64))
         call prob%kill()
     end subroutine check_powers
 
@@ -1229,7 +1229,7 @@ contains
             else
                 ref = num / den
             endif
-            err = max(err, oracle_finite_or_inf(abs(prob%objective(r1, s1) - ref) / abs(ref)))
+            err = nan_max(err, oracle_finite_or_inf(abs(prob%objective(r1, s1) - ref) / abs(ref)))
         end do
         call prob%kill()
     end subroutine check_plane
@@ -1249,8 +1249,8 @@ contains
         call oracle_pose_fixture_pose(.false., r0, s0)
         call oracle_pose_fixture_pose(.true., r1, s1)
         call prob%derivatives(r0, s0, grad, mat1)
-        err(1) = max(err(1), oracle_finite_or_inf(sqrt(abs(prob%objective(r0, s0)))), vector_size(grad), &
-                     oracle_finite_or_inf(abs(prob%scale(r0, s0) - 1._real64)))
+        err(1) = nan_maxval([err(1), oracle_finite_or_inf(sqrt(abs(prob%objective(r0, s0)))), vector_size(grad), &
+                     oracle_finite_or_inf(abs(prob%scale(r0, s0) - 1._real64))])
         err(3) = max(err(3), matrix_difference(prob, r0, s0))
         err(4) = max(err(4), gradient_difference(prob, r1, s1))
         ! multiples of the model: the scale is lambda inside the clamp, 20 above it and 0.05 below it
@@ -1260,10 +1260,10 @@ contains
         do i = 1, 4
             call prob%set_particle(lambda(i) * obs, fixture_ctf(), fixture_sigma2())
             call prob%derivatives(r0, s0, grad, mat)
-            err(2) = max(err(2), oracle_finite_or_inf(abs(prob%objective(r0, s0) - (1._real64 - 1._real64 / lambda(i))**2) / &
+            err(2) = nan_maxval([err(2), oracle_finite_or_inf(abs(prob%objective(r0, s0) - (1._real64 - 1._real64 / lambda(i))**2) / &
                                                       (1._real64 - 1._real64 / lambda(i))**2), &
                          oracle_finite_or_inf(abs(prob%scale(r0, s0) - sc(i)) / sc(i)), &
-                         matrix_error(mat * lambda(i)**2 / sc(i), mat1))
+                         matrix_error(mat * lambda(i)**2 / sc(i), mat1)])
         end do
         ! the model times 1 + shell / 10: the scale is the mean of that factor under the weight (h**2 + k**2)
         ! |model|**2 / sigma2, summed here over the full plane, every pixel of the band once
@@ -1284,7 +1284,7 @@ contains
             end do
         end do
         call prob%set_particle(scaled, fixture_ctf(), sigma2)
-        err(2) = max(err(2), oracle_finite_or_inf(abs(prob%scale(r0, s0) - num / den) / (num / den)))
+        err(2) = nan_max(err(2), oracle_finite_or_inf(abs(prob%scale(r0, s0) - num / den) / (num / den)))
         call prob%kill()
     end subroutine check_euclid
 
@@ -1299,15 +1299,15 @@ contains
         call oracle_pose_fixture_pose(.false., r0, s0)
         call oracle_pose_fixture_pose(.true., r1, s1)
         call prob%derivatives(r0, s0, grad, mat1)
-        err(1) = max(err(1), oracle_finite_or_inf(abs(prob%objective(r0, s0))), vector_size(grad), &
-                     oracle_finite_or_inf(abs(prob%scale(r0, s0) - 1._real64)))
+        err(1) = nan_maxval([err(1), oracle_finite_or_inf(abs(prob%objective(r0, s0))), vector_size(grad), &
+                     oracle_finite_or_inf(abs(prob%scale(r0, s0) - 1._real64))])
         err(3) = max(err(3), matrix_difference(prob, r0, s0))
         err(4) = max(err(4), gradient_difference(prob, r1, s1))
         call prob%set_particle(-prob%model(fixture_ctf(), r0, s0), fixture_ctf(), fixture_sigma2())
         call prob%derivatives(r0, s0, grad, mat)
-        err(2) = max(err(2), oracle_finite_or_inf(abs(prob%objective(r0, s0) - 2._real64)), &
+        err(2) = nan_maxval([err(2), oracle_finite_or_inf(abs(prob%objective(r0, s0) - 2._real64)), &
                      oracle_finite_or_inf(abs(prob%scale(r0, s0) - SCALE_MIN) / SCALE_MIN), &
-                     matrix_error(mat / SCALE_MIN, mat1))
+                     matrix_error(mat / SCALE_MIN, mat1)])
         call prob%kill()
     end subroutine check_cc
 

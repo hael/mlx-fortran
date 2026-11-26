@@ -2226,9 +2226,9 @@ contains
         endif
     end function conv_list
 
-    ! the default stream of the CPU, where MLX runs the factorisations whatever the default device; the caller frees
-    ! it with mlxc_stream_free
-    function cpu_stream( proc ) result(s)
+    ! the default stream of the CPU, where MLX runs what it implements on the CPU only whatever the default
+    ! device; the caller frees it with mlxc_stream_free
+    module function cpu_stream( proc ) result(s)
         character(len=*), intent(in) :: proc
         type(mlxc_stream) :: s
         type(mlxc_device) :: dev

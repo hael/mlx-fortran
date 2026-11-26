@@ -35,7 +35,8 @@ Rules:
              signature C fixes; a bind(c) procedure written for any other reason is a review finding), and a
              procedure of a toy module (mlxf_toy_*) that the mirror ledger lists as mirrored (a binding's
              implementation or a public module procedure): it keeps
-             SIMPLE's dummy list, as a bind(c) procedure keeps C's. An addition obeys the rule
+             SIMPLE's dummy list, as a bind(c) procedure keeps C's, and so does its twin <name>_mlx, the glue
+             procedure its guarded call hands the same list to. An addition obeys the rule
   ctorcall   no array constructor holds a reference to a library function by name: the mlx_* and mlxf_*
              names of src/core/mlxf.f90's public statements (the generics that keep an intrinsic's name,
              real, max, sum, ..., are left to ctorexpr, as plain Fortran uses them in constructors too):
@@ -66,6 +67,9 @@ Rules:
              layer and the intrinsic modules, writes no public statement or
              attribute and no bare private (public by default, as XEMA's defs modules), and lists every name
              it imports in a `private ::` statement, so that an installed .mod re-exports nothing it imports
+  handle     every type that holds an MLX handle (HANDLE_TYPES) is defined once under src/core, with a `final`
+             procedure and a defined assignment (`generic :: assignment(=)`): intrinsic assignment would copy
+             the handle without counting it, and a handle no finalizer releases leaks
   findpkg    no `find_package(... REQUIRED ...)` in the CMake files (CMakeLists.txt, cmake/*.cmake): a missing
              dependency is tested by its _FOUND variable and fails with a FATAL_ERROR that says what was
              searched and how to install it (SIMPLE's and XEMA's policy), never with CMake's own message
@@ -84,12 +88,27 @@ Rules:
              registry's, not the toy's, and need no line). A type, binding or procedure without a line fails; so
              does a line that names
              nothing the code has, a name listed twice, a mirrored line whose toy name differs from SIMPLE's or
-             whose module is not mlxf_toy_<stem> beside simple_<stem>, an addition without a reason, and a
+             whose module is not mlxf_toy_<stem> beside simple_<stem> (mlxf_toy_<stem>_mlx stands beside
+             simple_<stem> too when the seam ledger classes that module as device, and only then: the device
+             half of a miniature whose host half keeps the stem), an addition without a reason, and a
              ledger whose header does not record the SIMPLE commit that was read
+  seam       scripts/toy_seam.txt, the seam ledger (doc/policies/toy_example_policy.md), has one line per
+             mlxf_toy_* file of src/test that is not a tester: its stem and its class, host, glue, device or
+             pending. A file without a line fails, and so does a line without a file or with another class. A
+             host file imports no MLX name (mlxf, a generated mlxf_c_* module or a module the ledger classes as
+             device) and does not name USE_MLX: it compiles without the library. A glue file is a submodule named
+             <unit>_mlx with one #ifdef USE_MLX and its #else: an import of an MLX name stands inside that branch,
+             nowhere else, and a second #ifdef fails. A device file imports no host module of a toy class
+             (mlxf_toy_device_work, the opaque type the workspaces extend, excepted; and a device module
+             <stem>_mlx may import <stem>, its own host half, whose records it fills). The count of pending
+             lines equals SEAM_PENDING (a ratchet: lower it in the same change)
   nanmax     test code (src/test, test/, *_tester.f90) reduces with nan_maxval (src/test/mlxf_test_reduce.f90),
              never maxval(abs(...)): maxval may skip a NaN among finite values, so an error reduced with it
              passes a corrupt element. A reduction along a dimension (dim=) builds a reference array and is
-             left alone
+             left alone. The scalar accumulation `x = max(x, abs(...))` (an assignment whose right side opens
+             with max( and holds an abs() fails the same way: max(acc, NaN) may keep acc. It is written
+             nan_max(x, abs(...)) (two operands) or nan_maxval([...]); NANMAX_LEDGER names the testers of
+             src/core that still accumulate with max
   cmakeroot  the CMake files name the library's own directories (PROJECT_SOURCE_DIR, PROJECT_BINARY_DIR,
              CMAKE_CURRENT_*), never CMAKE_SOURCE_DIR or CMAKE_BINARY_DIR, which name a parent project's when
              mlx-fortran is added with add_subdirectory()
@@ -129,6 +148,8 @@ DEFS = 'src/defs/'
 TEST_DEFS = 'src/test/mlxf_test_defs.f90'
 
 CBIND_LEDGER = {}
+# testers of the library that still accumulate an error with scalar max (rule nanmax); may only shrink
+NANMAX_LEDGER = {}
 LIBC_LEDGER = {}
 PRINT_ALLOWED = ('src/core/runtime/mlxf_error.f90',)
 PRINT_LEDGER = {}
@@ -149,17 +170,19 @@ DEVQUERY_LEDGER = {
 DEFS_EXCEPTIONS = {}
 ENTRY_CALLS = ('mlxf_enter', 'mlxf_guard_thread', 'mlxf_require_device')
 # helpers an entry may call first instead: each must itself open with an entry call
-ENTRY_HELPERS = ('mlxf_unary', 'mlxf_binary', 'mlxf_weak_scalar', 'mlxf_int_op', 'mlxf_dtype_op', 'mlxf_vector_op', 'mlxf_reduce_op', 'mlxf_ternary_op', 'mlxf_take_op', 'mlxf_scan_op', 'mlxf_slice_op', 'mlxf_concat_op', 'mlxf_zeros_op', 'mlxf_range_op', 'mlxf_fft_op', 'mlxf_fftn_op', 'mlxf_freq_op', 'mlxf_close_op', 'mlxf_compare_op', 'mlxf_nan_op', 'mlxf_binary_vector_op', 'mlxf_full_op', 'mlxf_binary_int_op', 'mlxf_reduce_all_op', 'mlxf_reduce_dims_op', 'mlxf_var_all_op', 'mlxf_var_op', 'mlxf_var_dims_op', 'mlxf_int2_op', 'mlxf_int3_op', 'mlxf_trace_op', 'mlxf_scan_all_op', 'mlxf_scan_plain_op', 'mlxf_scan_plain_all_op', 'mlxf_roll_op', 'mlxf_unflatten_op', 'mlxf_vector2_op', 'mlxf_strided_op', 'mlxf_count_op', 'mlxf_window_op', 'mlxf_identity_op', 'mlxf_eye_op', 'mlxf_linspace_op', 'mlxf_linspace_endpoint_op', 'mlxf_list_op', 'mlxf_vector_list_op', 'mlxf_meshgrid_op', 'mlxf_split_op', 'mlxf_split_sections_op', 'mlxf_unstack_op', 'mlxf_unstack_dim_op', 'mlxf_pad_op', 'mlxf_pad_width_op', 'mlxf_gather_op', 'mlxf_gather_single_op', 'mlxf_slice_dynamic_op', 'mlxf_scatter_op', 'mlxf_put_op', 'mlxf_ternary_vector_op', 'mlxf_text_op', 'mlxf_slice_update_op', 'mlxf_unique_op', 'mlxf_gather_mm_op', 'mlxf_masked_mm_op', 'mlxf_cpu_unary', 'mlxf_cpu_binary', 'mlxf_cpu_flag_op', 'mlxf_cpu_compare_op', 'mlxf_cpu_pair_op', 'mlxf_cpu_pair_text_op', 'mlxf_cpu_text_op', 'mlxf_cpu_unstack_op', 'mlxf_cpu_svd_op', 'mlxf_norm_op', 'mlxf_norm_text_op', 'mlxf_binary_axis_op', 'mlxf_optional_float_op', 'mlxf_addmm_op', 'mlxf_einsum_op', 'mlxf_tensordot_op', 'mlxf_conv1d_op', 'mlxf_conv2d_op', 'mlxf_conv3d_op', 'mlxf_conv_general_op', 'mlxf_conv_transpose1d_op', 'mlxf_conv_transpose2d_op', 'mlxf_conv_transpose3d_op')
+ENTRY_HELPERS = ('mlxf_unary', 'mlxf_binary', 'mlxf_weak_scalar', 'mlxf_int_op', 'mlxf_dtype_op', 'mlxf_vector_op', 'mlxf_reduce_op', 'mlxf_ternary_op', 'mlxf_take_op', 'mlxf_scan_op', 'mlxf_slice_op', 'mlxf_concat_op', 'mlxf_zeros_op', 'mlxf_range_op', 'mlxf_fft_op', 'mlxf_fftn_op', 'mlxf_freq_op', 'mlxf_close_op', 'mlxf_compare_op', 'mlxf_nan_op', 'mlxf_binary_vector_op', 'mlxf_full_op', 'mlxf_binary_int_op', 'mlxf_reduce_all_op', 'mlxf_reduce_dims_op', 'mlxf_var_all_op', 'mlxf_var_op', 'mlxf_var_dims_op', 'mlxf_int2_op', 'mlxf_int3_op', 'mlxf_trace_op', 'mlxf_scan_all_op', 'mlxf_scan_plain_op', 'mlxf_scan_plain_all_op', 'mlxf_roll_op', 'mlxf_unflatten_op', 'mlxf_vector2_op', 'mlxf_strided_op', 'mlxf_count_op', 'mlxf_window_op', 'mlxf_identity_op', 'mlxf_eye_op', 'mlxf_linspace_op', 'mlxf_linspace_endpoint_op', 'mlxf_list_op', 'mlxf_vector_list_op', 'mlxf_meshgrid_op', 'mlxf_split_op', 'mlxf_split_sections_op', 'mlxf_unstack_op', 'mlxf_unstack_dim_op', 'mlxf_pad_op', 'mlxf_pad_width_op', 'mlxf_gather_op', 'mlxf_gather_single_op', 'mlxf_slice_dynamic_op', 'mlxf_scatter_op', 'mlxf_put_op', 'mlxf_ternary_vector_op', 'mlxf_text_op', 'mlxf_slice_update_op', 'mlxf_unique_op', 'mlxf_gather_mm_op', 'mlxf_masked_mm_op', 'mlxf_cpu_unary', 'mlxf_cpu_binary', 'mlxf_cpu_flag_op', 'mlxf_cpu_compare_op', 'mlxf_cpu_pair_op', 'mlxf_cpu_pair_text_op', 'mlxf_cpu_text_op', 'mlxf_cpu_unstack_op', 'mlxf_cpu_svd_op', 'mlxf_norm_op', 'mlxf_norm_text_op', 'mlxf_binary_axis_op', 'mlxf_optional_float_op', 'mlxf_addmm_op', 'mlxf_einsum_op', 'mlxf_tensordot_op', 'mlxf_conv1d_op', 'mlxf_conv2d_op', 'mlxf_conv3d_op', 'mlxf_conv_general_op', 'mlxf_conv_transpose1d_op', 'mlxf_conv_transpose2d_op', 'mlxf_conv_transpose3d_op', 'mlxf_pair_op', 'mlxf_random_key_op', 'mlxf_random_shape_op', 'mlxf_random_float_op', 'mlxf_random_int_op', 'mlxf_random_array_op', 'mlxf_random_axis_op', 'mlxf_random_axis_shape_op', 'mlxf_random_axis_int_op', 'mlxf_random_binary_op', 'mlxf_random_broadcast_op', 'mlxf_layer_norm_op', 'mlxf_rms_norm_op', 'mlxf_rope_op', 'mlxf_rope_dynamic_op', 'mlxf_attention_op', 'mlxf_load_op', 'mlxf_group_op', 'mlxf_group_peer_op', 'mlxf_group_recv_op')
 # the lifetime bindings touch shared state only through a live handle: they may open with the one-thread guard
 # conditional on one (between empty handles they run anywhere; nothing they do needs initialisation)
 ENTRY_IF_LIVE = ('assign_array', 'kill_array', 'function_assign', 'function_kill', 'metal_kernel_assign',
-                 'metal_kernel_kill')
+                 'metal_kernel_kill', 'grad_function_assign', 'grad_function_kill', 'exporter_assign', 'exporter_kill',
+                 'imported_assign', 'imported_kill', 'stream_assign', 'stream_kill', 'group_assign', 'group_kill')
 ENTRY_EXEMPT = {
     'mlxf_version_string': 'pure: returns a build constant, touches no state and calls no MLX function',
     'mlxf_build_description': 'pure: returns build constants, touches no state and calls no MLX function',
 }
 USER_MODULE = CORE + 'mlxf.f90'
-HANDLE_TYPES = ('mlx_array', 'mlx_function', 'mlx_metal_kernel')
+HANDLE_TYPES = ('mlx_array', 'mlx_function', 'mlx_metal_kernel', 'mlx_grad_function', 'mlx_function_exporter',
+                'mlx_imported_function', 'mlx_stream', 'mlx_group')
 HANDLE_DECL = re.compile(r'^(type|class)\s*\(\s*(' + '|'.join(HANDLE_TYPES) + r')\s*\)(.*)$', re.I)
 HANDLE_PREFIX = re.compile(r'\b(type|class)\s*\(\s*(' + '|'.join(HANDLE_TYPES) + r')\s*\)', re.I)
 HANDLE_GETTERS = ('shape', 'ndim', 'size', 'kind')
@@ -173,8 +196,18 @@ PARITY_PHASES = range(1, 9)
 # the mlx-c release the ledger lists: the minimum; a newer one's differences are warnings, an older one fails
 PARITY_MLXC_VERSION = '0.8.0'
 # the pending lines of the ledger; may only shrink
-PARITY_PENDING = 76
+PARITY_PENDING = 0
 MIRROR_LEDGER = 'scripts/toy_mirror.txt'
+SEAM_LEDGER = 'scripts/toy_seam.txt'
+SEAM_CLASSES = ('host', 'glue', 'device', 'pending')
+# the pending lines of the seam ledger; may only shrink
+SEAM_PENDING = 0
+# the module of the opaque type: a host module every class may import, a device module included
+SEAM_OPAQUE = 'mlxf_toy_device_work'
+# the suffix of a glue submodule and of its procedures, and the definition its body stands under
+SEAM_SUFFIX = '_mlx'
+SEAM_DEFINE = 'USE_MLX'
+GENERATED_C = re.compile(r'^mlxf_c_\w+$')
 TOY_DIR = 'src/test/'
 TOY_PREFIX = 'mlxf_toy_'
 SIMPLE_PREFIX = 'simple_'
@@ -223,10 +256,11 @@ IFACE_OP = re.compile(r'^\s*interface\s+(operator|assignment)\s*\(', re.I)
 THROW = re.compile(r'\bTHROW_(HARD|WARN)\s*\(')
 TYPED_CTOR = re.compile(r'\[\s*character\s*\(\s*(len\s*=\s*)?[^)]*\)\s*::', re.I)
 LITERAL = re.compile(r"('[^']*')+|(\"[^\"]*\")+")
-STOP = re.compile(r'^\s*(error\s+)?stop\b|\bTHROW_(HARD|WARN)\b', re.I)
+# a stop statement, also as the action of a one-line if: `if( cond ) error stop 3`
+STOP = re.compile(r'(^\s*|\)\s*)(error\s+)?stop\b|\bTHROW_(HARD|WARN)\b', re.I)
 PRINT = re.compile(r'\bwrite\s*\(\s*(unit\s*=\s*)?(\*|6|0|output_unit|error_unit)\s*[,)]|\bprint\s*(\*|[\'"(]|\w+\s*,)', re.I)
 BIND_MLX = re.compile(r'\bbind\s*\(\s*c\s*,\s*name\s*=\s*[\'"]mlx_', re.I)
-LIBC_NAMES = ('strlen', 'memcpy', 'memset', 'posix_memalign', 'malloc', 'free')
+LIBC_NAMES = ('strlen', 'memcpy', 'memset', 'posix_memalign', 'malloc', 'free', 'fopen', 'fclose', 'dup', 'fdopen')
 BIND_LIBC = re.compile(r'\bbind\s*\(\s*c\s*,\s*name\s*=\s*[\'"](' + '|'.join(LIBC_NAMES) + r')[\'"]', re.I)
 USE_MLXF = re.compile(r'^\s*use\s+mlxf\s*(,|$)', re.I)
 PROC_HEAD = re.compile(r'^\s*(?!end\b)(?:(?:pure|impure|elemental|recursive|module)\s+)*'
@@ -465,7 +499,8 @@ def check_arity(rel, lines, out, mirrored=()):
         m = PROC_HEAD.match(stmt)
         if not m or re.search(r'\bbind\s*\(\s*c\b', stmt, re.I):
             continue
-        if m.group(2).lower() in mirrored:
+        name = m.group(2).lower()
+        if name in mirrored or (name.endswith(SEAM_SUFFIX) and name[:-len(SEAM_SUFFIX)] in mirrored):
             continue
         n = len(dummies_of(stmt, m.group(2)))
         if n > MAX_DUMMIES:
@@ -822,6 +857,36 @@ def is_defs(rel):
     return rel.startswith(DEFS) or rel == TEST_DEFS
 
 
+def check_handles(root, files, out):
+    """every handle type has a finalizer and a defined assignment"""
+    found = {}
+    for rel in files:
+        if not rel.startswith(CORE):
+            continue
+        codes = [code_of(l).strip().lower() for l in read(root, rel).split('\n')]
+        name, start, body = None, 0, []
+        for k, c in enumerate(codes, 1):
+            m = re.match(r'^type\s*(?:,[^:]*)?::\s*(\w+)\s*$', c)
+            if m and m.group(1) in HANDLE_TYPES:
+                name, start, body = m.group(1), k, []
+            elif name and re.match(r'^end\s*type\b', c):
+                found.setdefault(name, []).append((rel, start, body))
+                name = None
+            elif name:
+                body.append(c)
+    for name in HANDLE_TYPES:
+        defs = found.get(name, [])
+        if len(defs) != 1:
+            out.append('%s: handle: %s is a handle type (HANDLE_TYPES) defined %d times under src/core, not once'
+                       % (USER_MODULE, name, len(defs)))
+            continue
+        rel, start, body = defs[0]
+        if not any(re.match(r'^final\s*::', c) for c in body):
+            out.append('%s:%d: handle: %s holds an MLX handle and has no final procedure' % (rel, start, name))
+        if not any(re.match(r'^generic\b.*::\s*assignment\s*\(\s*=\s*\)', c) for c in body):
+            out.append('%s:%d: handle: %s holds an MLX handle and has no defined assignment' % (rel, start, name))
+
+
 def check_defs(root, files, out):
     """exported = defs, local = stay; and the form of a defs module"""
     owners, records = {}, {}
@@ -981,11 +1046,13 @@ def cmake_files(root):
 
 
 NANMAX = re.compile(r'(?<![\w%])maxval\s*\(\s*abs\s*\(', re.I)
+# an assignment whose right side opens with max( and holds an abs(: the scalar accumulation of an error
+NANMAX_SCALAR = re.compile(r'=\s*max\s*\(.*(?<![\w%])abs\s*\(', re.I)
 NANMAX_HOME = 'src/test/mlxf_test_reduce.f90'
 TOP_DIRS = re.compile(r'\$\{CMAKE_(SOURCE|BINARY)_DIR\}')
 
 
-def check_nanmax(rel, lines, out):
+def check_nanmax(rel, lines, out, counts):
     if rel == NANMAX_HOME:
         return
     if not (rel.startswith('src/test/') or rel.startswith('test/') or rel.endswith('_tester.f90')):
@@ -994,6 +1061,12 @@ def check_nanmax(rel, lines, out):
         if NANMAX.search(stmt) and not re.search(r'\bdim\s*=', stmt, re.I):
             out.append('%s:%d: nanmax: maxval(abs(...)) may skip a NaN; reduce with nan_maxval '
                        '(mlxf_test_reduce)' % (rel, start))
+        if NANMAX_SCALAR.search(stmt):
+            if rel in NANMAX_LEDGER:
+                counts[rel] = counts.get(rel, 0) + 1
+            else:
+                out.append('%s:%d: nanmax: x = max(x, abs(...)) may keep x when the error is a NaN; accumulate '
+                           'with nan_max or reduce with nan_maxval (mlxf_test_reduce)' % (rel, start))
 
 
 def check_cmakeroot(root, out):
@@ -1147,6 +1220,12 @@ CALLBACKS = {
     'src/core/compile/mlxf_compile.f90': {'invoke_callback': (('res', False), ('input', True), ('payload', True)),
                                           'delete_payload': (('payload', True),)},
     'src/core/array/mlxf_array_borrow.f90': {'release_buffer': (('rec', True),)},
+    'src/core/transforms/mlxf_transforms.f90': {
+        'invoke_vjp': (('res', False), ('primals', True), ('cotangents', True), ('outputs', True), ('payload', True)),
+        'invoke_jvp': (('res', False), ('primals', True), ('tangents', True), ('argnums', False), ('num', True),
+                       ('payload', True)),
+        'delete_vjp_payload': (('payload', True),),
+        'delete_jvp_payload': (('payload', True),)},
 }
 
 
@@ -1439,6 +1518,8 @@ def read_mirror(root, out):
     if not os.path.isfile(os.path.join(root, rel)):
         return None
     entries, has_commit = {}, False
+    # the modules the seam ledger classes as device (rule seam reports the ledger's own defects)
+    device = set(stem for stem, (k, cls) in (read_seam(root, []) or {}).items() if cls == 'device')
     for k, raw in enumerate(read(root, rel).split('\n'), 1):
         line = raw.strip()
         if line.startswith('#'):
@@ -1467,9 +1548,15 @@ def read_mirror(root, out):
         if key[1] != words[3].lower():
             out.append('%s:%d: mirror: %s is listed as mirroring %s: a mirrored name is SIMPLE\'s'
                        % (rel, k, words[1], words[3]))
-        if not (key[0].startswith(TOY_PREFIX) and words[2].lower() == SIMPLE_PREFIX + key[0][len(TOY_PREFIX):]):
+        stem = key[0][len(TOY_PREFIX):] if key[0].startswith(TOY_PREFIX) else None
+        beside = stem is not None and words[2].lower() == SIMPLE_PREFIX + stem
+        if not beside and stem is not None and stem.endswith(SEAM_SUFFIX) and key[0] in device:
+            beside = words[2].lower() == SIMPLE_PREFIX + stem[:-len(SEAM_SUFFIX)]
+        if not beside:
             out.append('%s:%d: mirror: %s is listed beside %s: the module of a mirrored name is %s<stem> beside '
-                       '%s<stem>' % (rel, k, words[0], words[2], TOY_PREFIX, SIMPLE_PREFIX))
+                       '%s<stem> (%s<stem>%s only when %s classes that module as device)'
+                       % (rel, k, words[0], words[2], TOY_PREFIX, SIMPLE_PREFIX, TOY_PREFIX, SEAM_SUFFIX,
+                          SEAM_LEDGER))
     if not has_commit:
         out.append('%s: mirror: the header does not record the SIMPLE commit that was read '
                    '(`# ... SIMPLE commit <hash>`)' % rel)
@@ -1511,6 +1598,121 @@ def check_mirror(root, files, out):
     return exempt
 
 
+USE_ANY = re.compile(r'^\s*use\s*(?:,\s*intrinsic\s*::\s*|\s+)(\w+)', re.I)
+IFDEF = re.compile(r'^\s*#\s*(ifdef|ifndef|if)\b\s*(.*)$')
+PP_ELSE = re.compile(r'^\s*#\s*(else|elif)\b')
+PP_ENDIF = re.compile(r'^\s*#\s*endif\b')
+
+
+def read_seam(root, out):
+    """the seam ledger: {stem: (line number, class)}; None when there is no ledger"""
+    rel = SEAM_LEDGER
+    if not os.path.isfile(os.path.join(root, rel)):
+        return None
+    entries = {}
+    for k, raw in enumerate(read(root, rel).split('\n'), 1):
+        line = raw.strip()
+        if not line or line.startswith('#'):
+            continue
+        words = line.split()
+        if len(words) != 2 or words[1] not in SEAM_CLASSES:
+            out.append('%s:%d: seam: a line is `<file stem> <class>`, the class one of %s'
+                       % (rel, k, ', '.join(SEAM_CLASSES)))
+            continue
+        if words[0] in entries:
+            out.append('%s:%d: seam: %s listed twice' % (rel, k, words[0]))
+            continue
+        entries[words[0]] = (k, words[1])
+    return entries
+
+
+def seam_imports(lines):
+    """(line number, module, inside the USE_MLX branch) of every use statement of a file, and the preprocessor
+    conditionals it opens: [(line number, its condition)]"""
+    uses, opens, branch = [], [], []
+    for k, raw in enumerate(lines, 1):
+        m = IFDEF.match(raw)
+        if m:
+            opens.append((k, m.group(2).strip()))
+            branch.append(m.group(1) == 'ifdef' and m.group(2).strip() == SEAM_DEFINE)
+            continue
+        if PP_ELSE.match(raw):
+            if branch:
+                branch[-1] = False
+            continue
+        if PP_ENDIF.match(raw):
+            if branch:
+                branch.pop()
+            continue
+        m = USE_ANY.match(code_of(raw))
+        if m:
+            uses.append((k, m.group(1).lower(), bool(branch) and all(branch)))
+    return uses, opens
+
+
+def check_seam(root, files, out):
+    toys = {}
+    for rel in files:
+        stem = os.path.basename(rel)[:-len('.f90')]
+        if rel.startswith(TOY_DIR) and stem.startswith(TOY_PREFIX) and not stem.endswith('_tester') \
+                and '_tester_' not in stem:
+            toys[stem] = rel
+    entries = read_seam(root, out)
+    if entries is None:
+        if toys:
+            out.append('%s: seam: the ledger is missing, and %d toy file(s) exist' % (SEAM_LEDGER, len(toys)))
+        return out
+    for stem, rel in sorted(toys.items()):
+        if stem not in entries:
+            out.append('%s: seam: no line in %s (its class: %s)' % (rel, SEAM_LEDGER, ', '.join(SEAM_CLASSES)))
+    for stem, (k, cls) in sorted(entries.items(), key=lambda e: e[1][0]):
+        if stem not in toys:
+            out.append('%s:%d: seam: %s names no toy file of %s' % (SEAM_LEDGER, k, stem, TOY_DIR))
+    device = set(stem for stem, (k, cls) in entries.items() if cls == 'device')
+    host = set(stem for stem, (k, cls) in entries.items() if cls in ('host', 'glue')) - {SEAM_OPAQUE}
+
+    def mlx_name(module):
+        return module == 'mlxf' or bool(GENERATED_C.match(module)) or module in device
+
+    for stem, rel in sorted(toys.items()):
+        cls = entries.get(stem, (0, 'pending'))[1]
+        lines = read(root, rel).split('\n')
+        uses, opens = seam_imports(lines)
+        if cls == 'host':
+            for k, module, inside in uses:
+                if mlx_name(module):
+                    out.append('%s:%d: seam: a host file imports %s: it must compile without the library (the '
+                               'import belongs to its glue submodule)' % (rel, k, module))
+            for k, raw in enumerate(lines, 1):
+                if re.search(r'\b%s\b' % SEAM_DEFINE, raw if raw.lstrip().startswith('#') else code_of(raw)):
+                    out.append('%s:%d: seam: a host file names %s: the definition appears in glue files only'
+                               % (rel, k, SEAM_DEFINE))
+        elif cls == 'glue':
+            first = next((s for s in statements(lines)), '')
+            if not re.match(r'^submodule\s*\(', first, re.I) or not stem.endswith(SEAM_SUFFIX):
+                out.append('%s: seam: a glue file is a submodule of its class named <unit>%s' % (rel, SEAM_SUFFIX))
+            if len(opens) != 1 or opens[0][1] != SEAM_DEFINE:
+                out.append('%s: seam: a glue file has one #ifdef %s, with its stubs under #else (%d conditional(s) '
+                           'found)' % (rel, SEAM_DEFINE, len(opens)))
+            for k, module, inside in uses:
+                if mlx_name(module) and not inside:
+                    out.append('%s:%d: seam: a glue file imports %s outside its #ifdef %s branch'
+                               % (rel, k, module, SEAM_DEFINE))
+        elif cls == 'device':
+            for k, module, inside in uses:
+                if module in host and stem != module + SEAM_SUFFIX:
+                    out.append('%s:%d: seam: a device file imports %s, a host module of a toy class: the device '
+                               'knows nothing of the class that uses it' % (rel, k, module))
+    pending = sum(1 for stem, (k, cls) in entries.items() if cls == 'pending')
+    if pending > SEAM_PENDING:
+        out.append('%s: seam: %d pending lines, SEAM_PENDING allows %d (the count may only shrink)'
+                   % (SEAM_LEDGER, pending, SEAM_PENDING))
+    elif pending < SEAM_PENDING:
+        out.append('%s: seam: %d pending lines, below SEAM_PENDING %d - lower it in scripts/check_rules.py'
+                   % (SEAM_LEDGER, pending, SEAM_PENDING))
+    return out
+
+
 def ledger_check(rule, counts, ledger, out):
     for rel, n in sorted(counts.items()):
         if rel not in ledger:
@@ -1529,7 +1731,7 @@ def main():
     root = ROOT
     files = sources(root)
     out = []
-    cbind, libc, prints, state = {}, {}, {}, {}
+    cbind, libc, prints, state, nanmax = {}, {}, {}, {}, {}
     api = public_names(root)
     tree_functions = set()
     for rel in files:
@@ -1548,7 +1750,7 @@ def main():
         check_arity(rel, lines, out, mirrored.get(toy_module(lines)[0], ()) if rel.startswith(TOY_DIR) else ())
         check_ctorcall(rel, lines, api, out)
         check_ctorexpr(rel, lines, out, tree_functions)
-        check_nanmax(rel, lines, out)
+        check_nanmax(rel, lines, out, nanmax)
         n = sum(1 for r in raws if BIND_MLX.search(r))
         if n:
             cbind[rel] = n
@@ -1569,6 +1771,7 @@ def main():
             state[rel] = len(v)
     check_inf(root, files, out)
     check_defs(root, files, out)
+    check_handles(root, files, out)
     check_entry(root, files, api, out)
     check_findpkg(root, out)
     check_cmakeroot(root, out)
@@ -1577,14 +1780,17 @@ def main():
     check_docex(root, out)
     check_cbsig(root, out)
     check_parity(root, files, api, out)
+    check_seam(root, files, out)
     ledger_check('cbind', cbind, CBIND_LEDGER, out)
     ledger_check('libc', libc, LIBC_LEDGER, out)
     ledger_check('prints', prints, PRINT_LEDGER, out)
     ledger_check('state', state, STATE_LEDGER, out)
+    ledger_check('nanmax', nanmax, NANMAX_LEDGER, out)
     if listing:
         print(__doc__)
         for name, ledger in (('cbind', CBIND_LEDGER), ('libc', LIBC_LEDGER), ('prints', PRINT_LEDGER),
-                             ('state', STATE_LEDGER), ('devquery', DEVQUERY_LEDGER)):
+                             ('state', STATE_LEDGER), ('devquery', DEVQUERY_LEDGER),
+                             ('nanmax', NANMAX_LEDGER)):
             for rel, (n, why) in sorted(ledger.items()):
                 print('ledger %-7s %-50s %3d  %s' % (name, rel, n, why))
     for line in out:

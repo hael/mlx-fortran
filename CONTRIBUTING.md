@@ -12,7 +12,7 @@ were adopted and why. What is checked is checked by a script, so a change that b
 - `./compile_debug.sh` and `./compile_clean.sh` build Debug and Release from scratch, run the fast gate between
   build and install (a failed gate installs nothing); `./recompile.sh` rebuilds incrementally. Pass
   `MLXF_CMAKE_ARGS="-DMLXF_WERROR=ON -DFORTLS=OFF"` to build as the CI does. Zero warnings in both.
-- The fast gate (`scripts/run_fast_gate.sh`): the static gate `scripts/check_tree.sh`, then `ctest -L fast`, nine
+- The fast gate (`scripts/run_fast_gate.sh`): the static gate `scripts/check_tree.sh`, then `ctest -L fast`, thirteen
   entries under 60 s. One area by hand: `build/bin/mlxf_test_exec test=unit_<area> [suite=] [device=cpu|gpu]`.
 - `scripts/check_install.sh BUILD` installs a build and compiles and runs the consumer and the examples of
   `test/consumer/` against it; `scripts/check_embed.sh` adds the library to a parent project.
@@ -28,7 +28,9 @@ were adopted and why. What is checked is checked by a script, so a change that b
   generated layer's boundary, the entry guard, ownership traps of gfortran (`ctorcall`, `ctorexpr`), at most five
   dummy arguments, exported constants in `src/defs`, the parity ledger, NaN-safe error reductions (`nanmax`),
   CMake paths (`cmakeroot`), `-DFORTLS=OFF` downstream (`fortlsoff`), device queries in test code (`devquery`),
-  the documents' examples (`docex`) and the callbacks' passing modes (`cbsig`). `python3 scripts/check_rules.py --list` prints them with their ledgers;
+  the documents' examples (`docex`), the callbacks' passing modes (`cbsig`) and the finalizer and defined
+  assignment of every type that holds a handle (`handle`). `python3 scripts/check_rules.py --list` prints them
+  with their ledgers;
   a ledger may only shrink. A new rule comes with its check and a planted violation shown to fail.
 - `scripts/check_test_registry.py`, `check_descr.py`, `check_guide_imports.py`, `check_submodule_linkage.py`,
   `format_use_blocks.py --check` and `restyle_fortran.py --check --tree` cover the rest. Before handing over, run
@@ -41,7 +43,7 @@ were adopted and why. What is checked is checked by a script, so a change that b
 
 - A test can fail, takes its expected value from outside the code under test, names and derives its tolerances,
   and runs on every device `test_devices` returns. It joins its area as a sub-suite (a `run_suite` row of
-  `src/test/mlxf_test_registry.f90`); a new CTest entry needs a reason and raises the budget of 9. A stop that is
+  `src/test/mlxf_test_registry.f90`); a new CTest entry needs a reason and raises the budget of 13 (the parity plan's ceiling). A stop that is
   the contract is a member of a guard group. The rules: [`doc/policies/test_environment_policy.md`](doc/policies/test_environment_policy.md).
 - A change to the public API follows the parity ledger (`scripts/mlxc_parity.txt`) and the binding contract
   ([`doc/policies/binding_contract_policy.md`](doc/policies/binding_contract_policy.md)), which is the truth on

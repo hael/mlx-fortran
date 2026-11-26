@@ -1,9 +1,9 @@
-!@descr: the C library entry points the library calls (strlen, memcpy, posix_memalign, free) and C-string copies
+!@descr: the C library entry points the library calls (strlen, memcpy, posix_memalign, free, fopen, fclose, dup, fdopen) and C-string copies
 module mlxf_libc
 use, intrinsic :: iso_c_binding, only: c_char, c_int, c_ptr, c_size_t, c_associated, c_f_pointer
 implicit none
 
-public :: c_strlen, c_memcpy, c_posix_memalign, c_free, c_string_copy
+public :: c_strlen, c_memcpy, c_posix_memalign, c_free, c_string_copy, c_fopen, c_fclose, c_dup, c_fdopen
 private
 
 interface
@@ -31,6 +31,31 @@ interface
         import :: c_ptr
         type(c_ptr), value :: p
     end subroutine c_free
+
+    function c_fopen( path, mode ) bind(c, name='fopen') result(f)
+        import :: c_ptr, c_char
+        character(kind=c_char), intent(in) :: path(*), mode(*)
+        type(c_ptr) :: f
+    end function c_fopen
+
+    function c_fclose( f ) bind(c, name='fclose') result(ierr)
+        import :: c_ptr, c_int
+        type(c_ptr), value :: f
+        integer(c_int) :: ierr
+    end function c_fclose
+
+    function c_dup( fd ) bind(c, name='dup') result(copy)
+        import :: c_int
+        integer(c_int), value :: fd
+        integer(c_int) :: copy
+    end function c_dup
+
+    function c_fdopen( fd, mode ) bind(c, name='fdopen') result(f)
+        import :: c_ptr, c_int, c_char
+        integer(c_int),         value      :: fd
+        character(kind=c_char), intent(in) :: mode(*)
+        type(c_ptr) :: f
+    end function c_fdopen
 end interface
 
 contains

@@ -5,12 +5,13 @@
 ! scale of a sum of products' rounding; a permutation of elements is exact.
 module mlxf_linalg_products_tester
 use, intrinsic :: iso_fortran_env, only: real32, real64
-use mlxf,            only: mlx_array, mlx_from, mlx_to, mlx_set_default_device, mlx_default_device, MLX_DEVICES, &
-                           mlx_inner, mlx_outer, mlx_kron, mlx_vecdot, mlx_cross, mlx_tensordot, mlx_einsum, mlx_addmm, &
-                           mlx_hadamard_transform
-use mlxf_test_utils, only: assert_true, test_devices, device_name, bits_equal, judge_error, find_tolerance, &
-                           family_seeds, seeded_uniform, seeded_array, shaped_error
-use mlxf_test_defs,  only: ELEM_CEILING, PRODUCT_TOLERANCES, elem_tolerance
+use mlxf,             only: mlx_array, mlx_from, mlx_to, mlx_set_default_device, mlx_default_device, MLX_DEVICES, &
+                            mlx_inner, mlx_outer, mlx_kron, mlx_vecdot, mlx_cross, mlx_tensordot, mlx_einsum, &
+                            mlx_addmm, mlx_hadamard_transform
+use mlxf_test_utils,  only: assert_true, test_devices, device_name, bits_equal, judge_error, find_tolerance, &
+                            family_seeds, seeded_uniform, seeded_array, shaped_error
+use mlxf_test_defs,   only: ELEM_CEILING, PRODUCT_TOLERANCES, elem_tolerance
+use mlxf_test_reduce, only: nan_max
 implicit none
 private
 public :: run_all_linalg_products_tests
@@ -92,7 +93,7 @@ contains
                 r = mlx_inner(seeded_array(x, wide), seeded_array(y, wide))
                 err = shaped_error(r, ref, bound)
                 r = mlx_inner(seeded_array(u, wide), seeded_array(v, wide))
-                err = max(err, shaped_error(r, sum(u*v), sum(abs(u*v))))
+                err = nan_max(err, shaped_error(r, sum(u*v), sum(abs(u*v))))
                 call judge(err, tol, wide, seeds(s))
             end do
         end do
@@ -160,7 +161,7 @@ contains
                 r = mlx_kron(seeded_array(x, wide), seeded_array(y, wide))
                 err = shaped_error(r, ref, abs(ref))
                 r = mlx_kron(seeded_array(u, wide), seeded_array(z, wide))
-                err = max(err, shaped_error(r, ref2, abs(ref2)))
+                err = nan_max(err, shaped_error(r, ref2, abs(ref2)))
                 call judge(err, tol, wide, seeds(s))
             end do
         end do
@@ -187,9 +188,9 @@ contains
                 r = mlx_vecdot(a, b)
                 err = shaped_error(r, sum(x*y, dim=1), sum(abs(x*y), dim=1))
                 r = mlx_vecdot(a, b, dim=2)
-                err = max(err, shaped_error(r, sum(x*y, dim=2), sum(abs(x*y), dim=2)))
+                err = nan_max(err, shaped_error(r, sum(x*y, dim=2), sum(abs(x*y), dim=2)))
                 r = mlx_vecdot(a, b, dim=3)
-                err = max(err, shaped_error(r, sum(x*y, dim=3), sum(abs(x*y), dim=3)))
+                err = nan_max(err, shaped_error(r, sum(x*y, dim=3), sum(abs(x*y), dim=3)))
                 call judge(err, tol, wide, seeds(s))
             end do
         end do
@@ -311,7 +312,7 @@ contains
                 r = mlx_tensordot(seeded_array(c, wide), seeded_array(b, wide), n=1)
                 err = max(err, shaped_error(r, ref1, bound1))
                 r = mlx_tensordot(seeded_array(c, wide), seeded_array(v, wide), n=0)
-                err = max(err, shaped_error(r, ref0, abs(ref0)))
+                err = nan_max(err, shaped_error(r, ref0, abs(ref0)))
                 r = mlx_tensordot(seeded_array(a, wide), seeded_array(d, wide), [1, 3], [3, 1])
                 err = max(err, shaped_error(r, refd, boundd))
                 r = mlx_tensordot(seeded_array(a, wide), seeded_array(e, wide), [2], [1])
@@ -368,16 +369,16 @@ contains
                 err = max(err, shaped_error(r, transpose(ref), transpose(bound)))
                 b = seeded_array(w, wide)
                 r = mlx_einsum('ij,ij->', [a, b])
-                err = max(err, shaped_error(r, sum(x*w), sum(abs(x*w))))
+                err = nan_max(err, shaped_error(r, sum(x*w), sum(abs(x*w))))
                 r = mlx_einsum('ja,jB', [a, b])
-                err = max(err, shaped_error(r, matmul(transpose(w), x), matmul(transpose(abs(w)), abs(x))))
+                err = nan_max(err, shaped_error(r, matmul(transpose(w), x), matmul(transpose(abs(w)), abs(x))))
                 b = seeded_array(sq, wide)
                 r = mlx_einsum('ii', [b])
                 err = max(err, shaped_error(r, trace, trace_bound))
                 b = seeded_array(u, wide)
                 c = seeded_array(v, wide)
                 r = mlx_einsum('i,ij,j->', [b, a, c])
-                err = max(err, shaped_error(r, dot_product(u, matmul(x, v)), dot_product(abs(u), matmul(abs(x), abs(v)))))
+                err = nan_max(err, shaped_error(r, dot_product(u, matmul(x, v)), dot_product(abs(u), matmul(abs(x), abs(v)))))
                 a = seeded_array(z, wide)
                 b = seeded_array(t, wide)
                 r = mlx_einsum('ij...,jk...->ik...', [a, b])
@@ -460,9 +461,9 @@ contains
                 end do
                 err = max(err, shaped_error(r, ref3, bound3))
                 r = mlx_addmm(seeded_array(z(1, :), wide), seeded_array(x(1, :, 1), wide), b)
-                err = max(err, shaped_error(r, matmul(x(1, :, 1), y(:, :, 1))+z(1, :), matmul(abs(x(1, :, 1)), abs(y(:, :, 1)))+abs(z(1, :))))
+                err = nan_max(err, shaped_error(r, matmul(x(1, :, 1), y(:, :, 1))+z(1, :), matmul(abs(x(1, :, 1)), abs(y(:, :, 1)))+abs(z(1, :))))
                 r = mlx_addmm(seeded_array(zv, wide), a, seeded_array(y(:, 1, 1), wide))
-                err = max(err, shaped_error(r, matmul(x(:, :, 1), y(:, 1, 1))+zv, matmul(abs(x(:, :, 1)), abs(y(:, 1, 1)))+abs(zv)))
+                err = nan_max(err, shaped_error(r, matmul(x(:, :, 1), y(:, 1, 1))+zv, matmul(abs(x(:, :, 1)), abs(y(:, 1, 1)))+abs(zv)))
                 call judge(err, tol, wide, seeds(s))
             end do
         end do
@@ -494,9 +495,9 @@ contains
             r = mlx_hadamard_transform(a)
             err = shaped_error(r, ref, bound)
             r = mlx_hadamard_transform(r)
-            err = max(err, shaped_error(r, x, matmul(abs(h), bound)/sqrt(real(N, real64))))
+            err = nan_max(err, shaped_error(r, x, matmul(abs(h), bound)/sqrt(real(N, real64))))
             r = mlx_hadamard_transform(a, scale=1._real32)
-            err = max(err, shaped_error(r, matmul(h, x), matmul(abs(h), abs(x))))
+            err = nan_max(err, shaped_error(r, matmul(h, x), matmul(abs(h), abs(x))))
             call judge(err, tol, .false., seeds(s))
         end do
     end subroutine test_hadamard_transform

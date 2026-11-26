@@ -12,7 +12,7 @@ use mlxf,             only: mlx_array, mlx_from, mlx_to, mlx_set_default_device,
 use mlxf_test_utils,  only: assert_true, test_devices, device_name, set_fixed_seed, bits_equal, judge_error, &
                             find_tolerance
 use mlxf_test_defs,   only: ELEM_SEED_CALIBRATION, ELEM_SEEDS_JUDGED, ELEM_CEILING, MM_TOLERANCES, elem_tolerance
-use mlxf_test_reduce, only: nan_maxval
+use mlxf_test_reduce, only: nan_maxval, nan_max
 implicit none
 private
 public :: run_all_linalg_mm_tests
@@ -100,7 +100,7 @@ contains
             res%shaped = .false.
             return
         endif
-        res%err = max(res%err, nan_maxval(abs(real(got, real64)-ref)/max(1._real64, bound)))
+        res%err = nan_max(res%err, nan_maxval(abs(real(got, real64)-ref)/max(1._real64, bound)))
         if( any(bound <= 0._real64 .and. abs(got) > 0._real32) ) res%zeroed = .false.
     end subroutine compare
 
@@ -348,7 +348,8 @@ contains
         call assert_true(r%kind() == MLX_DTYPES%float32, 'a product of float32 operands is float32')
         r = mlx_gather_mm(a, b, lhs_indices=mlx_from([4_int32]), rhs_indices=mlx_from([1_int32]))
         call mlx_to(one, r)
-        bound = max(1._real64, matmul(abs(x(:, :, 1, 2)), abs(y(:, :, 1, 1))))
+        bound = matmul(abs(x(:, :, 1, 2)), abs(y(:, :, 1, 1)))
+        bound = max(1._real64, bound)
         call assert_true(all(abs(real(one(:, :, 1), real64)-matmul(x(:, :, 1, 2), y(:, :, 1, 1))) <= tol%f32*bound), 'matrix 4 of a (5, 4, 3, 2) array is a(:, :, 1, 2): array element order over dimensions 3 and 4')
         call assert_true(.not. all(abs(real(one(:, :, 1), real64)-matmul(x(:, :, 2, 2), y(:, :, 1, 1))) <= tol%f32*bound), 'the row-major matrix 4, a(:, :, 2, 2), gives another product')
     end subroutine test_product_conventions

@@ -1040,7 +1040,7 @@ contains
     function logaddexp_of( x, y ) result(z)
         real(real64), intent(in) :: x, y
         real(real64) :: z
-        z = max(x, y)+log(1._real64+exp(-abs(x-y)))
+        z = log(1._real64+exp(-abs(x-y)))+max(x, y)
     end function logaddexp_of
 
     function logaddexp_of_v( x, y ) result(z)

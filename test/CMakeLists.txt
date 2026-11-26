@@ -62,6 +62,10 @@ target_link_libraries(mlxf_test_exec PRIVATE mlxf mlxf_build_flags)
 if(MLXF_REQUIRE_GPU)
     target_compile_definitions(mlxf_test_exec PRIVATE MLXF_REQUIRE_GPU)
 endif()
+# USE_MLX: the glue submodules of the toys (src/test/mlxf_toy_*_mlx.f90) hold their bodies under it and stubs
+# beside them, as SIMPLE holds a device body under USE_OPENMP_OFFLOAD. This executable always has MLX; the project
+# test/offstate compiles the same files without the definition and without the library.
+target_compile_definitions(mlxf_test_exec PRIVATE USE_MLX)
 install(TARGETS mlxf_test_exec RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
 set(MLXF_TEST_RUNS_DIR "${PROJECT_BINARY_DIR}/test_runs")
@@ -92,17 +96,34 @@ endfunction()
 #   the GPU's small evaluations and the first compilation of each of its kernels.
 # compile isolates callback tracing, checked callback failures and shapeless reuse on both devices.
 # Cold CPU/GPU JIT compilation can put it above 0.5 s; cached invocations are much shorter.
+# transforms (a new area the parity plan names): gradients, vector-Jacobian and Jacobian-vector products and custom
+#   rules against closed-form derivatives, on both devices; exported and imported functions; the compilation
+#   controls. A process of its own: it switches compilation off and on for the whole process and writes files
+#   (and deletes them) in its working directory. Above 0.5 s in Release beside the other entries (0.4 s alone): its
+#   leak check runs every transform 300 times on each device.
 # fast (a new area the parity plan names): custom Metal kernels, which MLX compiles from source text at their
 #   first evaluation; on the GPU they are checked exactly, on the CPU device their refusal is. A process of its
 #   own keeps a kernel that fails to compile, which the suite provokes on purpose, apart from the other areas.
-#   Alone it takes 0.1 s in Release; beside the gate's other entries, which share the GPU, 0.6 s.
+#   Alone it takes 0.1 s in Release; beside the gate's other entries, which share the GPU, 0.6 s. Its sub-suite
+#   fast_layers checks the fused layers (normalisations, rotary embeddings, attention, cross entropy) against
+#   real64 loops on both devices.
+# random (a new area the parity plan names): keys and samplers, each judged by the mean and the variance of 2^20
+#   values against its distribution's, on both devices and three seeds; a process of its own keeps MLX's global
+#   key, which the suite seeds, apart from the other areas. Above 0.5 s in Release (0.7 s alone): the moments are
+#   computed on the host in real64 from some 80 samples of 2^20 values.
+# io (a new area the parity plan names): arrays written to .npy, safetensors and GGUF files and read back, the
+#   .npy files also as bytes; a process of its own, since it writes files (and deletes them) in its working
+#   directory.
+# distributed (a new area the parity plan names): the group of one process the gate gets, its collectives and its
+#   refusals; a process of its own, since MLX's backends are initialised once per process. Its sub-suite
+#   distributed_ring, for two processes on MLX's ring backend, runs by name only.
 # kernels: test-only models of SIMPLE's pipelines (the polar table's scoring
 #   workspace and its shift maps, the polar reprojection) on seeded or analytic fixtures against double-precision
 #   oracles, on both
 #   devices; its own process keeps the workspace's lifecycle checks (live count and active memory back to warm
 #   values) apart from other areas. Above 0.5 s in Release: the oracles' direct sums over every rotation and
 #   cell, and the GPU's first compilation of its kernels.
-set(MLXF_TEST_AREAS core array ops linalg fft compile fast kernels)
+set(MLXF_TEST_AREAS core array ops linalg fft compile transforms fast random io distributed kernels)
 foreach(_area IN LISTS MLXF_TEST_AREAS)
     mlxf_add_test(unit_${_area} fast 600 COMMAND $<TARGET_FILE:mlxf_test_exec> test=unit_${_area})
 endforeach()
@@ -114,11 +135,15 @@ endforeach()
 #   invalid 1D/2D FFT normalizations; a Metal kernel built from a spec without outputs and an empty kernel
 #   applied; segments of the wrong shape; a factorisation of a rank-1 array, a triangle that is neither 'L' nor
 #   'U' and a convolution spec with a list of the wrong length; a strided view reaching past its input; matmul of
-#   two integer arrays; a separate entry because every member ends its process.
+#   two integer arrays; a categorical draw given num_samples and shape together and a normal draw whose array mean
+#   does not broadcast to its shape; a gradient with respect to position 0 and a compile mode outside its
+#   vocabulary; a causal attention given a mask, a rotary
+#   embedding given one offset for two batches, a normalisation given an empty weight, the fused attention
+#   kernel demanded on the CPU device and a message sent to rank 0; a separate entry because every member ends its process.
 mlxf_add_test(object_contracts fast 600 COMMAND $<TARGET_FILE:mlxf_test_exec> expect_aborts object_contracts)
 
 # ---- the budget ----------------------------------------------------------------------------------
-set(MLXF_CTEST_BUDGET 9)
+set(MLXF_CTEST_BUDGET 13)
 get_property(_mlxf_tests DIRECTORY PROPERTY TESTS)
 list(LENGTH _mlxf_tests _mlxf_ntests)
 if(NOT _mlxf_ntests EQUAL MLXF_CTEST_BUDGET)

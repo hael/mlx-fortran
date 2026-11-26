@@ -9,8 +9,8 @@ use mlxf_c_types,  only: mlxc_device, mlxc_device_info, mlxc_stream, MLXC_CPU, M
 use mlxf_c_device, only: mlxc_device_new, mlxc_device_new_type, mlxc_device_free, mlxc_get_default_device, &
                          mlxc_set_default_device, mlxc_device_get_type, mlxc_device_count, mlxc_device_info_new, &
                          mlxc_device_info_get, mlxc_device_info_free, mlxc_device_info_get_size, &
-                         mlxc_device_info_get_string, mlxc_device_info_has_key
-use mlxf_c_metal,  only: mlxc_metal_is_available
+                         mlxc_device_info_get_string, mlxc_device_info_has_key, mlxc_device_is_available
+use mlxf_c_metal,  only: mlxc_metal_is_available, mlxc_metal_start_capture, mlxc_metal_stop_capture
 use mlxf_c_stream, only: mlxc_stream_new, mlxc_get_default_stream, mlxc_stream_free, mlxc_synchronize
 use mlxf_libc,     only: c_string_copy
 use mlxf_error,    only: mlxf_check, mlxf_fail, mlxf_report, mlxf_install_error_handler, mlxf_guard_thread
@@ -18,6 +18,7 @@ implicit none
 
 public :: mlx_metal_is_available, mlx_device_count, mlx_default_device, mlx_set_default_device, mlx_device_info_size
 public :: mlx_device_info_string, mlxf_enter, mlxf_require_device, mlxf_default_stream, mlxf_synchronize_device
+public :: mlx_device_is_available, mlx_metal_start_capture, mlx_metal_stop_capture
 private
 
 integer, parameter :: NOT_INITIALISED = 0, WITH_DEVICE = 1, WITHOUT_DEVICE = 2
@@ -73,6 +74,39 @@ contains
         call mlxf_check(mlxc_device_count(n, int(device_type, c_int)), 'mlx_device_count')
         mlx_device_count = int(n)
     end function mlx_device_count
+
+    ! whether MLX can use the first device of a type (MLX_DEVICES%cpu or %gpu) in this session
+    logical function mlx_device_is_available( device_type )
+        integer, intent(in) :: device_type
+        type(mlxc_device) :: dev
+        logical(c_bool)   :: available
+        integer(c_int)    :: ierr
+        call mlxf_enter('mlx_device_is_available')
+        mlx_device_is_available = .false.
+        if( .not. known_device(device_type, 'mlx_device_is_available') ) return
+        dev = mlxc_device_new_type(int(device_type, c_int), 0_c_int)
+        available = .false.
+        ierr = mlxc_device_is_available(available, dev)
+        call mlxf_check(mlxc_device_free(dev), 'mlx_device_is_available')
+        call mlxf_check(ierr, 'mlx_device_is_available')
+        mlx_device_is_available = logical(available)
+    end function mlx_device_is_available
+
+    ! starts a Metal capture of the GPU's work into the trace file path (for Xcode); Metal refuses it unless the
+    ! process was started with MTL_CAPTURE_ENABLED=1, and the refusal is a status
+    subroutine mlx_metal_start_capture( path, status )
+        character(len=*),  intent(in)  :: path
+        integer, optional, intent(out) :: status
+        call mlxf_enter('mlx_metal_start_capture')
+        call mlxf_check(mlxc_metal_start_capture(trim(path)//c_null_char), 'mlx_metal_start_capture', status)
+    end subroutine mlx_metal_start_capture
+
+    ! ends the Metal capture
+    subroutine mlx_metal_stop_capture( status )
+        integer, optional, intent(out) :: status
+        call mlxf_enter('mlx_metal_stop_capture')
+        call mlxf_check(mlxc_metal_stop_capture(), 'mlx_metal_stop_capture', status)
+    end subroutine mlx_metal_stop_capture
 
     ! the type of MLX's default device: MLX_DEVICES%cpu or %gpu
     integer function mlx_default_device()

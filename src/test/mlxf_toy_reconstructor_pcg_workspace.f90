@@ -6,10 +6,11 @@
 ! see. The raw accumulators are held from set_raw_accum until finish evaluates what they made and releases them.
 module mlxf_toy_reconstructor_pcg_workspace
 use, intrinsic :: iso_fortran_env, only: real32, real64
-use mlxf,           only: mlx_array, mlx_from, mlx_to, mlx_view, mlx_eval, mlx_rfftn, mlx_irfftn, mlx_fftshift, &
-                          mlx_slice, mlx_take, mlx_zeros_like, mlx_ones_like, mlx_arange, mlx_round, mlx_astype, &
-                          MLX_FFT_NORMS, MLX_DTYPES, reshape, real, cmplx, sqrt, abs, max, merge, sum
-use mlxf_test_defs, only: PCG_ENVELOPE_FLOOR
+use mlxf,                 only: mlx_array, mlx_from, mlx_to, mlx_view, mlx_eval, mlx_rfftn, mlx_irfftn, mlx_fftshift, &
+                                mlx_slice, mlx_take, mlx_zeros_like, mlx_ones_like, mlx_arange, mlx_round, mlx_astype, &
+                                MLX_FFT_NORMS, MLX_DTYPES, reshape, real, cmplx, sqrt, abs, max, merge, sum
+use mlxf_test_defs,       only: PCG_ENVELOPE_FLOOR
+use mlxf_toy_device_work, only: device_work
 implicit none
 
 public :: reconstructor_pcg_workspace
@@ -17,8 +18,9 @@ private
 
 ! the device state of one half: n the native box, m the padded one, lambda the ridge; the raw packed accumulators bacc and dacc until
 ! finish; khat and pre the kernel's and the preconditioner's spectra; env and invenv the envelope and its guarded
-! reciprocal, mask the binary support (none: no support), b_rhs the right-hand side; msg the last refusal
-type :: reconstructor_pcg_workspace
+! reciprocal, mask the binary support (none: no support), b_rhs the right-hand side; msg the last refusal. It
+! extends device_work, the opaque type the reconstructor holds it as
+type, extends(device_work) :: reconstructor_pcg_workspace
     private
     integer                       :: n         = 0
     integer                       :: m         = 0

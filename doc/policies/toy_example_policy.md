@@ -80,7 +80,9 @@ points of section 7 the same day.
 - Rule `mirror` of `scripts/check_rules.py` fails when:
   - a public type, type-bound procedure or public module procedure of a `mlxf_toy_*` module is missing from the
     ledger;
-  - a line names a SIMPLE counterpart but the toy's name differs from it;
+  - a line names a SIMPLE counterpart but the toy's name differs from it, or its module is not
+    `mlxf_toy_<stem>` beside `simple_<stem>` (`mlxf_toy_<stem>_mlx` stands beside `simple_<stem>` too when the
+    seam ledger classes that module as device, and only then: section 8);
   - an `addition` line has no reason.
 - The rule and the ledger enter with the first refactoring under this policy, in the same change, with a
   planted violation shown to fail.
@@ -119,3 +121,59 @@ procedures (`fproject_polar_batch_opt`, `vol_pad2ref_pfts_opt`) brought public p
   `arity` reads the ledger for the exemption; that change enters with rule `mirror` (section 4).
 - **A driver per strategy, under the strategy's name** (`eul_prob_tab` with `fill_tab_range` for the dense
   table), trimmed like the calculators.
+
+## 8. The integration shape (Hans, 2026-11-25: "implement the toy examples in mlx-fortran in the same way so that we can model safely over here and make the integration easier downstream")
+
+A toy class has the file layout SIMPLE's class will have once it can run on MLX, so that the integration is a
+transcription. SIMPLE's precedent is its block kernel and `USE_OPENMP_OFFLOAD` (read at `d354efee2`). Run
+`mlxf_toy_seam` brought the three toys to this shape (2026-11-26).
+
+1. **Three classes of toy file.** `scripts/toy_seam.txt` gives every `mlxf_toy_*` file that is not a tester its
+   class, and rule `seam` of `scripts/check_rules.py` holds the ledger to the files.
+
+   | Class | What it is | What it may import |
+   | --- | --- | --- |
+   | host | a parent module, a host submodule, a driver | no MLX name: not `mlxf`, not a generated module, not a device module. It compiles without the library |
+   | glue | a submodule of the class named `<host unit>_mlx` | `mlxf` and device modules, inside its one `#ifdef USE_MLX` branch only |
+   | device | a module (with its submodules) that holds MLX state and kernels: a workspace, the device PCG engine | no host module of a toy class, except `mlxf_toy_device_work` and, for a device module `<stem>_mlx`, its own host half `<stem>` |
+
+2. **One opaque component.** `mlxf_toy_device_work` declares `type, abstract :: device_work` with one deferred
+   binding, `kill`. A class holds its device state as `class(device_work), allocatable` (the calculator's `ws(:)`
+   is an array of two). The workspaces extend the type.
+   - A holder calls `kill` on every element before it deallocates. The release of MLX handles never rests on
+     the finalization of a polymorphic component.
+   - What one class hands another on the device crosses as `class(device_work)` too: the projector's bank of
+     sections (`projector_bank`), the reconstructor's operator (`get_pcg_operator`). The receiver resolves the
+     dynamic type with `select type`; a wrong type is a refusal with a message.
+3. **The glue's form.**
+   - A glue procedure is a module procedure named `<host procedure>_mlx`, private to the class, declared in the
+     parent in one interface block headed "MLX".
+   - The host procedure's whole knowledge of the device is a guarded call, `if( self%l_mlx ) call
+     <name>_mlx(self, ...)`. No dummy of such an interface has an MLX type.
+   - A glue file holds its body under `#ifdef USE_MLX` and, under `#else`, stubs that set the status and the
+     message "built without MLX". `USE_MLX` is set on `mlxf_test_exec`, always; it appears in glue files only,
+     once per file.
+   - The twin `<name>_mlx` of a mirrored procedure may keep SIMPLE's dummy list (rule `arity`).
+4. **The backend is chosen at `new`,** from the member `l_mlx` of the toy's `parameters` record (an addition:
+   the name of SIMPLE's parameter is the maintainer's). It defaults to true. No environment variable is read.
+   - The polar calculator has a host route: `score_block_posterior` is a miniature of SIMPLE's block kernel in
+     single precision, and `fill_tab_range` selects once between the host branch (the blocks under
+     `!$omp parallel do`, as SIMPLE's) and the MLX branch (serial submission and collection). The host route is
+     a model of control flow: it is never timed and no speed is claimed for it.
+   - The projector and the reconstructor have no host route: with `l_mlx` false their `new` is refused with
+     "the toy has no host route". The reconstructor's five operator procedures (`mask_mul`, `apply_normal`,
+     `apply_normal_kernel`, `apply_precond`, `dot_real_volume`) keep SIMPLE's host arrays: each sends its
+     volume to the device, applies the device form and brings the result back.
+5. **A device engine beside a host module.** Where SIMPLE's module would gain a device engine beside its host
+   one, the toy has two modules: `mlxf_toy_pcg_solver` keeps the host record (`pcg_solver_outcome`), and the
+   device module `mlxf_toy_pcg_solver_mlx` has the operator and `pcg_solve` on device vectors. Both stand
+   beside `simple_pcg_solver` in the mirror ledger.
+6. **The build without MLX is proved by the compiler.** `test/offstate/` is a CMake project of its own: the
+   host and glue files the seam ledger names, compiled without `USE_MLX`, with no path to the library's modules
+   and no link to it. `scripts/check_toy_offstate.sh` builds it in Debug and Release and runs its program,
+   which fills the polar host route's table and asks every class for the MLX backend (each refuses with the
+   stub's message). With `--exec` the table equals, byte for byte, the one `mlxf_test_exec` writes on the host
+   backend. `scripts/release_gate.sh` runs the check; it is not a CTest entry.
+7. **A new toy class enters in this shape.** The change that adds it gives its files their lines in both
+   ledgers, adds its cycles and refusals to sub-suite `seam`, and has the off-state program ask it for the MLX
+   backend. A `pending` line is not available to new code: `SEAM_PENDING` is 0.

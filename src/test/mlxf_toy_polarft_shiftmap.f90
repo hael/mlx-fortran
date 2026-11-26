@@ -2,10 +2,11 @@
 ! A map is a polar grid of shifts (radii and directions) over the shells kfromto(1)..kstop; the workspaces of
 ! both parities hold its resident data. gen_shiftmap takes the pairs of a block, every particle's candidates in
 ! turn, and shiftmap_mode reads their modes: the calculator checks what SIMPLE's checks (the memos are current,
-! one half, known particles and references), gathers the block's host inputs and hands them to the parity's
-! workspace, which builds the maps and reduces them on the device.
+! one half, known particles and references), gathers the block's host inputs and hands them through the glue to
+! the parity's workspace, which builds the maps and reduces them on the device. The maps run on the MLX backend
+! only.
 submodule (mlxf_toy_polarft_calc) mlxf_toy_polarft_shiftmap
-use mlxf_test_defs, only: SHIFTMAP_SCREEN, SHIFTMAP_WINDOW, polarft_map_spec, polarft_map_block, polar_map_results
+use mlxf_test_defs, only: SHIFTMAP_SCREEN, SHIFTMAP_WINDOW
 implicit none
 
 contains
@@ -16,13 +17,16 @@ contains
         real(real64),        intent(in)    :: rho(:)
         integer,             intent(in)    :: nalpha, kstop
         type(polarft_map_spec) :: spec
-        integer                :: ieo, st
         if( .not. self%existence )then
             self%msg = 'polarft_calc%new_shiftmap: refused: no calculator (new)'
             return
         endif
         if( imap < 1 .or. imap > NSHIFTMAPS )then
             self%msg = 'polarft_calc%new_shiftmap: refused: no such shift map'
+            return
+        endif
+        if( .not. self%l_mlx )then
+            self%msg = 'polarft_calc%new_shiftmap: refused: the toy''s shift maps run on the MLX backend only'
             return
         endif
         if( self%route == POLARFT_REF_ROUTES%device )then
@@ -33,9 +37,7 @@ contains
         ! the map's earlier state goes first: a refusal leaves no such map
         self%map_ref_gen(imap) = -1_int64
         if( self%sm_imap == imap ) self%sm_imap = 0
-        do ieo = 1, N_REF_PARITIES
-            call self%ws(ieo)%kill_map(imap)
-        end do
+        call kill_shiftmap_mlx(self, imap)
         if( kstop <= self%kfromto(1) .or. kstop > self%kfromto(2) )then
             self%msg = 'polarft_calc%new_shiftmap: refused: the map''s last shell must lie in the band'
         else if( self%ldim(1) < 2 )then
@@ -54,15 +56,8 @@ contains
         spec%kstop  = kstop
         spec%nalpha = nalpha
         spec%rho    = rho
-        do ieo = 1, N_REF_PARITIES
-            spec%weights = self%sigma2_wk8(self%kfromto(1):kstop, ieo)
-            call self%ws(ieo)%prepare_maps(spec, self%ft_ref(:, :, :, ieo), self%ft_ref2(:, :, :, ieo), st)
-            if( st /= 0 )then
-                self%msg = self%ws(ieo)%message()
-                call self%ws(REF_EVEN)%kill_map(imap)
-                return
-            endif
-        end do
+        call new_shiftmap_mlx(self, spec)
+        if( len(self%msg) > 0 ) return
         self%map_ref_gen(imap) = self%ref_gen
         self%map_wk_gen(imap)  = self%wk_gen
         self%map_kstop(imap)   = kstop
@@ -143,16 +138,12 @@ contains
 
     module subroutine kill_shiftmap( self )
         class(polarft_calc), intent(inout) :: self
-        integer :: ieo
         self%msg         = ''
         self%map_ref_gen = -1_int64
         self%map_wk_gen  = -1_int64
         self%map_kstop   = 0
         self%sm_imap     = 0
-        if( .not. allocated(self%ws) ) return
-        do ieo = 1, size(self%ws)
-            call self%ws(ieo)%kill_maps()
-        end do
+        if( self%l_mlx ) call kill_shiftmap_mlx(self, 0)
     end subroutine kill_shiftmap
 
     module subroutine gen_shiftmap( self, imap, iref, iptcl )
@@ -309,8 +300,7 @@ contains
         do b = 1, nb
             mblk%ptclpow(b) = wsqsum_band(self, self%sm_islots(b), self%sm_ieo, self%map_kstop(imap))
         end do
-        call self%ws(self%sm_ieo)%score_maps(mblk, self%ft_ctf2, self%ft_ptcl_ctf, res)
-        self%msg = self%ws(self%sm_ieo)%message()
+        if( self%l_mlx ) call shiftmap_mode_mlx(self, mblk, res)
         if( len(self%msg) > 0 ) return
         irot   = reshape(res%irot, [np])
         irho   = reshape(res%irho, [np])
@@ -353,7 +343,7 @@ contains
         class(polarft_calc), intent(in) :: self
         integer,             intent(in) :: imap
         shiftmap_order = 0
-        if( allocated(self%ws) ) shiftmap_order = self%ws(REF_EVEN)%map_order(imap)
+        if( self%l_mlx ) shiftmap_order = shiftmap_order_mlx(self, imap)
     end function shiftmap_order
 
     pure module function shiftmap_term_counts( self, imap ) result(counts)
@@ -361,18 +351,14 @@ contains
         integer,             intent(in) :: imap
         integer(int64) :: counts(2)
         counts = 0_int64
-        if( allocated(self%ws) ) counts = self%ws(REF_EVEN)%map_term_counts(imap)
+        if( self%l_mlx ) counts = shiftmap_term_counts_mlx(self, imap)
     end function shiftmap_term_counts
 
     pure module function shiftmap_seconds( self ) result(t)
         class(polarft_calc), intent(in) :: self
         real(real64) :: t(4)
-        integer      :: ieo
         t = 0._real64
-        if( .not. allocated(self%ws) ) return
-        do ieo = 1, size(self%ws)
-            t = t + self%ws(ieo)%map_seconds()
-        end do
+        if( self%l_mlx ) t = shiftmap_seconds_mlx(self)
     end function shiftmap_seconds
 
 end submodule mlxf_toy_polarft_shiftmap

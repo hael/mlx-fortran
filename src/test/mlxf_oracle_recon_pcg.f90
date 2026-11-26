@@ -13,7 +13,7 @@ use mlxf_oracle_projection, only: oracle_proj_stencil, oracle_proj_matrix, oracl
 use mlxf_oracle_pcg,        only: oracle_pcg_cholesky
 use mlxf_oracle_gridding,   only: oracle_grid_plane, oracle_grid_envelope, oracle_grid_reciprocal, &
                                   oracle_grid_half_inverse
-use mlxf_test_reduce,       only: nan_maxval
+use mlxf_test_reduce,       only: nan_maxval, nan_max
 implicit none
 
 public :: oracle_recon_lattice, oracle_recon_problem, oracle_recon_selfcheck
@@ -799,8 +799,8 @@ contains
                 do i2 = 1, m
                     j2     = 1 + modulo(1 - i2, m)
                     j3     = 1 + modulo(1 - i3, m)
-                    err(5) = max(err(5), abs(pd(i1, i2, i3) - pd(i1, j2, j3)) / maxval(pd), &
-                                 abs(pk(i1, i2, i3) - conjg(pk(i1, j2, j3))) / nan_maxval(abs(pk)))
+                    err(5) = nan_maxval([err(5), abs(pd(i1, i2, i3) - pd(i1, j2, j3)) / maxval(pd), &
+                                 abs(pk(i1, i2, i3) - conjg(pk(i1, j2, j3))) / nan_maxval(abs(pk))])
                 end do
             end do
         end do
@@ -904,11 +904,11 @@ contains
                 end do
             end do
             if( cnt /= IN_RIDGE(ibox) ) nr = nr + 1
-            err(2) = max(err(2), oracle_finite_or_inf(abs(prob%ridge() - 64._real64 * 0.05_real64 * total / real(cnt, real64)) / &
+            err(2) = nan_max(err(2), oracle_finite_or_inf(abs(prob%ridge() - 64._real64 * 0.05_real64 * total / real(cnt, real64)) / &
                                                       prob%ridge()))
             ! a ridge given is kept as it is
             call prob%new(dens, MSKRAD(ibox), 0.375_real64, .false.)
-            err(2) = max(err(2), abs(prob%ridge() - 0.375_real64))
+            err(2) = nan_max(err(2), abs(prob%ridge() - 0.375_real64))
             ! at n = 4 no voxel lies beyond the cut; at n = 8 the density is raised by one so that the cut
             ! decides, and the reference is taken at every third index
             if( ibox == 2 ) dens = dens + 1._real64
@@ -971,7 +971,7 @@ contains
             end do
             drec = real(oracle_dft_3d(cmplx(psf, 0._real64, real64)))
             if( count(drec > 0.5_real64) /= KEPT_FULL(ibox) ) nk = nk + 1
-            err(1) = max(err(1), oracle_finite_or_inf(nan_maxval(abs(drec - anint(drec)))))
+            err(1) = nan_max(err(1), oracle_finite_or_inf(nan_maxval(abs(drec - anint(drec)))))
             call prob%kill()
             call lat%kill()
             deallocate(dens, khat, psf, drec, got, kref)
@@ -1067,8 +1067,8 @@ contains
             call prob%new(dens, MSKRAD(ibox), 1._real64, .false.)
             pre = prob%spectrum()
             if( count(.not. (abs(pre) <= 0._real64)) /= 2 ) nbad = nbad + 1
-            err = max(err, oracle_finite_or_inf(abs(pre(3, 1, 1) - 1._real64 / 2.02_real64)), &
-                      oracle_finite_or_inf(abs(pre(m-1, 1, 1) - 1._real64 / 2.02_real64)))
+            err = nan_maxval([err, oracle_finite_or_inf(abs(pre(3, 1, 1) - 1._real64 / 2.02_real64)), &
+                      oracle_finite_or_inf(abs(pre(m-1, 1, 1) - 1._real64 / 2.02_real64))])
             call prob%kill()
             call lat%kill()
             deallocate(dens, pre)
@@ -1137,8 +1137,8 @@ contains
                 ! w0**3 / 2, and b = P 2 Re[a exp(2 pi i (2 x1 - 2 x2) / m)]
                 acc     = single%numerator()
                 den     = single%density()
-                err(2)  = max(err(2), oracle_finite_or_inf(abs(acc(3, m-1, 1) - w(2)**3 * a) / abs(a)), &
-                              oracle_finite_or_inf(abs(den(3, m-1, 1) - 0.5_real64 * w(2)**3)))
+                err(2)  = nan_maxval([err(2), oracle_finite_or_inf(abs(acc(3, m-1, 1) - w(2)**3 * a) / abs(a)), &
+                              oracle_finite_or_inf(abs(den(3, m-1, 1) - 0.5_real64 * w(2)**3))])
                 u = 0
                 do i3 = 1, n
                     do i2 = 1, n
@@ -1235,8 +1235,8 @@ contains
         res    = norm2(b - matmul(hd, x)) / norm2(b)
         if( info(2) /= REASON_RTOL ) nbad = nbad + 1
         if( size(hist) == info(1) + 1 .and. info(1) > 0 )then
-            err(3) = max(err(3), oracle_finite_or_inf(abs(hist(size(hist)) - res)), &
-                         oracle_finite_or_inf(max(res - RTOL_RECON, 0._real64)), oracle_finite_or_inf(abs(hist(1) - 1._real64)))
+            err(3) = nan_maxval([err(3), oracle_finite_or_inf(abs(hist(size(hist)) - res)), &
+                         oracle_finite_or_inf(max(res - RTOL_RECON, 0._real64)), oracle_finite_or_inf(abs(hist(1) - 1._real64))])
         else
             nbad = nbad + 1
         endif
@@ -1271,13 +1271,13 @@ contains
         v = fixed_vector(nn, 2)
         call prob%apply(u, hu)
         call prob%apply(v, hv)
-        err(10) = max(err(10), oracle_finite_or_inf(abs(sum(u * hv) - sum(hu * v)) / (norm2(u) * norm2(hv))))
+        err(10) = nan_max(err(10), oracle_finite_or_inf(abs(sum(u * hv) - sum(hu * v)) / (norm2(u) * norm2(hv))))
         nbad    = count(abs(hu) > 0._real64 .and. .not. (p > 0._real64))
         call prob%apply((1._real64 - p) * u, hv)
         nbad    = nbad + count(abs(hv) > 0._real64)
         call prob%precond(p * u, hu)
         call prob%precond(p * v, hv)
-        err(13) = max(err(13), oracle_finite_or_inf(abs(sum(p * u * hv) - sum(hu * p * v)) / (norm2(u) * norm2(hv))))
+        err(13) = nan_max(err(13), oracle_finite_or_inf(abs(sum(p * u * hv) - sum(hu * p * v)) / (norm2(u) * norm2(hv))))
         nbad    = nbad + count(abs(hu) > 0._real64 .and. .not. (p > 0._real64))
         err(11) = err(11) + real(nbad, real64)
         ! the residual it reports is the true one, the history holds the start and one entry per iteration,
@@ -1290,7 +1290,7 @@ contains
         if( size(hist) == info(1) + 1 .and. info(1) > 0 )then
             call prob%apply(x, hu)
             res     = norm2(b - hu) / norm2(b)
-            err(18) = max(err(18), oracle_finite_or_inf(abs(hist(size(hist)) - res)))
+            err(18) = nan_max(err(18), oracle_finite_or_inf(abs(hist(size(hist)) - res)))
         else
             nbad = nbad + 1
         endif
@@ -1448,7 +1448,7 @@ contains
             ! compared in absolute terms: the residuals are fractions of |b|, and a fused multiply-add in one of
             ! the two evaluations moves a small residual by more than 1e-12 of itself
             if( size(hist) == info(1) + 1 .and. info(1) > 0 )then
-                err = max(err, oracle_finite_or_inf(abs(hist(size(hist)) - ref)))
+                err = nan_max(err, oracle_finite_or_inf(abs(hist(size(hist)) - ref)))
             else
                 nbad = nbad + 1
             endif

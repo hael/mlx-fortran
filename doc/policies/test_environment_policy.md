@@ -38,15 +38,41 @@ field offsets and field sizes of the 36 structs and the values of the 23 enumera
 It calls no MLX function and runs in every session. A struct or enumerator that mlx-c adds fails it until the C
 tables of `src/test/mlxf_abi_probe.c` list it.
 
-The current process budget is **9**: areas `core`, `array`, `ops`, `linalg`, `fft`, `compile`, `fast`,
-`kernels`, plus the `object_contracts` guard group (twenty-one members, including invalid FFT normalizations, dtypes
+The current process budget is **13**, the most the parity plan's decision 21 allows: areas `core`, `array`, `ops`,
+`linalg`, `fft`, `compile`, `transforms`, `fast`, `random`, `io`, `distributed`, `kernels`, plus the `object_contracts`
+guard group (thirty members, including invalid FFT normalizations, dtypes
 outside `MLX_DTYPES`, a Metal kernel spec without outputs, an empty kernel applied, segments of the wrong shape, a
 factorisation of a rank-1 array, an unknown triangle, a convolution spec with a list of the wrong length, a strided
-view reaching past its input and `matmul` of two integer arrays). Error reductions in test code go through
+view reaching past its input, `matmul` of two integer arrays, a categorical draw given `num_samples` and `shape`
+together, a normal draw whose array mean does not broadcast to its shape, a gradient with respect to position 0, a
+compile mode outside `MLX_COMPILE_MODES`, a causal attention given a mask, a rotary embedding given one offset for two
+batches, a normalisation given an empty weight, the fused attention kernel demanded on the CPU device and a message sent to
+rank 0). Error reductions in test code go through
 `nan_maxval` (`src/test/mlxf_test_reduce.f90`, rule `nanmax`), which turns any NaN into +infinity. The `fast` area (the parity
 plan's decision 21) runs custom Metal kernels on the GPU against exact Fortran references and checks their
 refusal on the CPU device; it provokes a Metal compilation failure on purpose, which is why it has a process of
-its own. The compile suite also
+its own. Its sub-suite `fast_layers` checks `mlx_layer_norm`, `mlx_rms_norm`, `mlx_rope`,
+`mlx_scaled_dot_product_attention` and `mlx_cross_entropy` against real64 loops over Fortran subscripts within
+`FAST_TOLERANCES` (calibrated on seed 1 on both devices, frozen, then seeds 2 and 3), on both devices. The `random` area (the parity plan's decision 21) judges every sampler by the mean and the variance of 2^20
+values against its distribution's, within `RANDOM_SIGMAS` standard errors, on both devices and on keys of three seeds,
+and checks keys, shapes, dtypes, categories and permutations exactly; it seeds MLX's global key, which is why it has a
+process of its own. The `io` area (decision 21) writes every transfer kind at ranks 0 to 4 to `.npy` files, reads
+each file as bytes (the NumPy header parsed in Fortran: the kind, the shape reversed, the data equal to the host
+array's bytes), reads it back as an array and writes it again byte for byte; it checks safetensors and GGUF round
+trips with names and metadata, the refusals through `status`, `nbytes`, `itemsize` and `mlx_buffer_size`, and the
+text of a graph; it writes files in its working directory and deletes them, which is why it has a process of its
+own. The `distributed` area (decision 21) checks the group of one process the gate gets: its size and one-based
+rank, the five collectives returning their operand, and the refusals of messages, of a split and of a strict start
+through `status`; MLX initialises its backends once per process, hence a process of its own. `unit_distributed
+suite=distributed_ring` is named-only: two processes started on MLX's ring backend (the parity plan's Progress has
+the command and the host file); the gate never runs it. `unit_core`'s sub-suite `stream` checks streams (a stream
+of one's own as a device's default, waiting for it), device availability, the memory and wired limits and the
+refusal of a Metal capture. The `transforms` area (decision 21) checks `mlx_value_and_grad`, `mlx_vjp` and `mlx_jvp` on a
+polynomial, `exp(a x)` and a chain of two matrix products against closed-form derivatives within `GRAD_TOLERANCES`
+(calibrated on seed 1 on both devices, frozen, then seeds 2 and 3), and exactly: positions among the inputs, custom
+rules, a checkpoint, `mlx_stop_gradient`, `mlx_depends`, the gradient function's lifecycle and its failures through
+`status`; its sub-suite `export` writes functions to files in its working directory, reads them back and deletes
+them, and switches compilation off and on, which is why the area has a process of its own. The compile suite also
 checks empty local handles in a two-thread OpenMP region; no live MLX work is submitted there. The operation areas compare both devices with independent Fortran
 references; `array` also runs 10,000 evaluated iterations per new operation family and checks exact
 active memory, live handles and stale releases. The compile area checks byte identity for exactly
@@ -75,7 +101,7 @@ the oracle's own polar coordinates, a plane wave's pattern, Hermitian pairs), re
 and the fused form's refusals. Its sub-suite `projector_chain` takes two projected volumes through family A on both
 routes (host and device) and both forms to the dense rows, against an oracle chain within `PROJ_CHAIN_ERR_HOST`
 and `PROJ_CHAIN_ERR_DEVICE`, with the refusals of the device route and three runs bit for bit.
-Its sub-suite `pcg_solver` checks the toy PCG engine (`mlxf_toy_pcg_solver`) on both devices: every stop, count
+Its sub-suite `pcg_solver` checks the toy PCG engine (`mlxf_toy_pcg_solver_mlx`, its record in `mlxf_toy_pcg_solver`) on both devices: every stop, count
 and reason on small diagonal systems whose iterates are known in rationals (`rtol`, `xtol` and their order, the step
 test's epsilon, `maxits`, fixed iterations, indefinite products at iterations 1 and 2, the refusals, a used and a
 rejected start, the recomputation's 24, 26, 31 and 52 applications), and the stencil problem of
@@ -85,12 +111,25 @@ against `mlxf_oracle_recon_pcg` on both devices, within `RECON_PCG_TOLERANCES` (
 devices, frozen, then seeds 2 and 3): the mask, window, envelopes, kernel and preconditioner spectra, ridge and
 right-hand side; the operator and the preconditioner against their explicit matrices; the iterates of SIMPLE's
 production (2 and 5 iterations, absolute ridge) and of the engine's rules up to their stop; start and ship; three
-assemblies bit for bit; 100 lifecycle cycles. Rule T (200 iterations past the engine's rules) is reported, not gated.
+assemblies bit for bit; 100 lifecycle cycles; each of the operator's five procedures on host volumes against its
+device form brought to the host, byte for byte, and its refusal on the host backend. Rule T (200 iterations past the
+engine's rules) is reported, not gated.
 `unit_kernels suite=reconstructor_pcg_n32` is named-only: the same at n = 32 against the oracle's matrix-free
 products (the iterates at 1, 2 and 5 and the stop iteration and test judged, the stop iterate reported).
 `unit_kernels suite=polar_shiftmap_accuracy` is named-only: a direct-residual sample at the production
 window/screen geometry, on both devices. It uses the same frozen caps, has assertions, and is outside the
 fast CTest process budget.
+Its sub-suite `seam` checks the shape the toys share (toy example policy, section 8), on both devices: the opaque
+device state's lifecycle on a test double (a scalar and an array `class(device_work)` component, a wrong dynamic
+type refused), and of the calculator, the projector and the reconstructor 1,000 cycles of `new` and `kill` that
+leave the live handles and the active memory as they were, the host backend making no device object, and what the
+host backend cannot do refused with its message. Its sub-suite `polarft_host` checks the polar calculator's host
+route (`l_mlx` false): the distances and the drawn rotations against `mlxf_oracle_polar` at the MLX backend's
+tolerances, the same bytes from a team of 1 and of 4 threads, the fill's two branches within those tolerances on
+seeds 1, 2 and 3, and the refusals; it writes the table as lines `polarft_host ...` in hexadecimal.
+`scripts/check_toy_offstate.sh` builds `test/offstate/` (the toys' host files and glue stubs without `USE_MLX`
+and without the library) in Debug and Release, runs its program and, with `--exec`, holds its table to the lines
+of `unit_kernels suite=polarft_host` byte for byte; the release gate runs it, and it is not a CTest entry.
 Constants several test modules share live in `src/test/mlxf_test_defs.f90`, a defs module (rule `defs`).
 
 **Benchmarks** are `mlxf_test_exec test=bench_<x> suite=<mode> [key=value ...]`, listed in the registry's
@@ -137,6 +176,10 @@ by the owner; running either accuracy suite is correctness validation, not a thr
   before the test is used as a gate. A tolerance widened until a test passed is a finding.
 - It asserts conventions: memory order, index base, dimension numbering, FFT sign and normalisation.
 - Storage identity is compared with `bits_equal` (transfer-based), never `==` on reals.
+- An error is reduced with `nan_maxval` or `nan_max` (`src/test/mlxf_test_reduce.f90`, rule `nanmax`), never
+  `maxval(abs(...))` or `x = max(x, abs(...))`, which may skip a NaN; a history is finite before it is compared.
+- Two samples of the active memory are compared only after `mlx_synchronize()`: the device releases a buffer
+  when the work that used it completes, so a sample taken while the stream is busy counts buffers in flight.
 - Its random draws come from fixed seeds.
 - Four kinds, never mixed: identity (bytes equal), correctness (against an independent value),
   robustness (a distribution over seeds), performance (timings, never pass/fail).

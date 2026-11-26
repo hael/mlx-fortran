@@ -7,11 +7,12 @@ module mlxf_array
 use, intrinsic :: iso_c_binding,   only: c_bool, c_int, c_ptr, c_size_t, c_double, c_char, c_int64_t, &
                                          c_float_kind => c_float
 use, intrinsic :: iso_fortran_env, only: int8, int16, int32, int64, real32, real64
-use mlxf_c_types, only: mlxc_array, mlxc_stream, mlxc_vector_array, mlxc_optional_dtype, mlxc_optional_float
+use mlxf_c_types, only: mlxc_array, mlxc_stream, mlxc_vector_array, mlxc_optional_dtype, mlxc_optional_float, &
+                        mlxc_distributed_group, mlxc_map_string_to_array, mlxc_io_gguf
 use mlxf_defs,    only: mlxf_slice_spec, mlxf_fft_spec, mlxf_range_spec, mlxf_close_spec, mlxf_nan_spec, &
                         mlxf_shape_spec, mlxf_reduce_spec, mlxf_scan_spec, mlxf_pad_spec, mlxf_strided_spec, &
                         mlxf_count_spec, mlxf_linspace_spec, mlxf_index_spec, mlxf_fftn_spec, mlx_conv_spec, &
-                        mlxf_norm_spec
+                        mlxf_norm_spec, mlxf_random_spec, mlx_rope_spec, mlx_attention_spec, mlxf_group_spec
 implicit none
 
 public :: mlx_array, mlx_from, mlx_to, mlx_to_alloc, mlx_item, mlx_view, mlx_alloc, mlx_eval, mlx_async_eval
@@ -97,7 +98,31 @@ public :: mlxf_int_op, mlxf_dtype_op, &
     &mlxf_conv_general_op, &
     &mlxf_conv_transpose1d_op, &
     &mlxf_conv_transpose2d_op, &
-    &mlxf_conv_transpose3d_op
+    &mlxf_conv_transpose3d_op, &
+    &mlxf_pair_op, &
+    &mlxf_random_key_op, &
+    &mlxf_random_shape_op, &
+    &mlxf_random_float_op, &
+    &mlxf_random_int_op, &
+    &mlxf_random_array_op, &
+    &mlxf_random_axis_op, &
+    &mlxf_random_axis_shape_op, &
+    &mlxf_random_axis_int_op, &
+    &mlxf_random_binary_op, &
+    &mlxf_random_broadcast_op, &
+    &mlxf_layer_norm_op, &
+    &mlxf_rms_norm_op, &
+    &mlxf_rope_op, &
+    &mlxf_rope_dynamic_op, &
+    &mlxf_attention_op, &
+    &mlxf_load_op, &
+    &mlxf_map_arrays, &
+    &mlxf_gguf_arrays, &
+    &mlxf_cpu_stream, &
+    &mlxf_group_op, &
+    &mlxf_group_peer_op, &
+    &mlxf_group_recv_op, &
+    &mlx_buffer_size
 public :: mlxf_vector_import, mlxf_vector_export, mlxf_check_dtype, mlxf_axes_of, mlxf_zero_based, mlxf_one_based
 public :: mlxf_weak_scalar
 public :: mlx_synchronize, mlx_is_live, exp, mlxf_handle, mlxf_unary, mlxf_binary, mlxc_unary_op, mlxc_binary_op
@@ -117,6 +142,8 @@ type :: mlx_array
     procedure                     :: ndim  => array_ndim
     procedure                     :: size  => array_size
     procedure                     :: kind  => array_kind
+    procedure                     :: nbytes => array_nbytes
+    procedure                     :: itemsize => array_itemsize
     procedure                     :: kill  => kill_array
     procedure, private            :: add_aa
     procedure, private            :: add_as
@@ -1495,6 +1522,11 @@ interface mlx_async_eval
     end subroutine async_eval_list
 end interface mlx_async_eval
 
+! waiting for queued work: on every device (here), or on one stream (the stream module's specific)
+interface mlx_synchronize
+    procedure synchronize_all
+end interface mlx_synchronize
+
 ! the procedures the type binds, the helpers the submodules share, and mlx_synchronize
 interface
     module impure elemental subroutine assign_array( lhs, rhs )
@@ -1554,9 +1586,23 @@ interface
         integer(c_int), intent(in) :: dtype
     end function itemsize
 
-    module subroutine mlx_synchronize( status )
+    module subroutine synchronize_all( status )
         integer, optional, intent(out) :: status
-    end subroutine mlx_synchronize
+    end subroutine synchronize_all
+
+    module integer(int64) function array_nbytes( self )
+        class(mlx_array), intent(in) :: self
+    end function array_nbytes
+
+    module integer function array_itemsize( self )
+        class(mlx_array), intent(in) :: self
+    end function array_itemsize
+
+    module function mlx_buffer_size( arrays, status ) result(n)
+        type(mlx_array),   intent(in)  :: arrays(:)
+        integer, optional, intent(out) :: status
+        integer(int64) :: n
+    end function mlx_buffer_size
 
     module subroutine mlxf_unary( r, f, a, proc )
         type(mlx_array),  intent(inout) :: r
@@ -2479,6 +2525,409 @@ interface
         character(len=*), intent(in) :: proc
         type(mlxc_vector_array) :: v
     end function vector_of
+end interface
+
+abstract interface
+    ! int f(mlx_array* res, uint64_t seed)
+    function mlxc_random_key_op( res, seed ) bind(c)
+        import
+        type(mlxc_array),   intent(inout) :: res
+        integer(c_int64_t), value         :: seed
+        integer(c_int) :: mlxc_random_key_op
+    end function mlxc_random_key_op
+    ! int f(mlx_array* res, const int* shape, size_t shape_num, int number, const mlx_array key, const mlx_stream s)
+    function mlxc_random_shape_op( res, shape, shape_num, number, key, s ) bind(c)
+        import
+        type(mlxc_array),  intent(inout) :: res
+        integer(c_int),    intent(in)    :: shape(*)
+        integer(c_size_t), value         :: shape_num
+        integer(c_int),    value         :: number
+        type(mlxc_array),  value         :: key
+        type(mlxc_stream), value         :: s
+        integer(c_int) :: mlxc_random_shape_op
+    end function mlxc_random_shape_op
+    ! int f(mlx_array* res, const int* shape, size_t shape_num, mlx_dtype dtype, float loc, float scale,
+    ! const mlx_array key, const mlx_stream s)
+    function mlxc_random_float_op( res, shape, shape_num, dtype, loc, scale, key, s ) bind(c)
+        import
+        type(mlxc_array),   intent(inout) :: res
+        integer(c_int),     intent(in)    :: shape(*)
+        integer(c_size_t),  value         :: shape_num
+        integer(c_int),     value         :: dtype
+        real(c_float_kind), value         :: loc
+        real(c_float_kind), value         :: scale
+        type(mlxc_array),   value         :: key
+        type(mlxc_stream),  value         :: s
+        integer(c_int) :: mlxc_random_float_op
+    end function mlxc_random_float_op
+    ! int f(mlx_array* res, int x, const mlx_array key, const mlx_stream s)
+    function mlxc_random_int_op( res, x, key, s ) bind(c)
+        import
+        type(mlxc_array),  intent(inout) :: res
+        integer(c_int),    value         :: x
+        type(mlxc_array),  value         :: key
+        type(mlxc_stream), value         :: s
+        integer(c_int) :: mlxc_random_int_op
+    end function mlxc_random_int_op
+    ! int f(mlx_array* res, const mlx_array p, const int* shape, size_t shape_num, const mlx_array key,
+    ! const mlx_stream s)
+    function mlxc_random_array_op( res, p, shape, shape_num, key, s ) bind(c)
+        import
+        type(mlxc_array),  intent(inout) :: res
+        type(mlxc_array),  value         :: p
+        integer(c_int),    intent(in)    :: shape(*)
+        integer(c_size_t), value         :: shape_num
+        type(mlxc_array),  value         :: key
+        type(mlxc_stream), value         :: s
+        integer(c_int) :: mlxc_random_array_op
+    end function mlxc_random_array_op
+    ! int f(mlx_array* res, const mlx_array x, int axis, const mlx_array key, const mlx_stream s)
+    function mlxc_random_axis_op( res, x, axis, key, s ) bind(c)
+        import
+        type(mlxc_array),  intent(inout) :: res
+        type(mlxc_array),  value         :: x
+        integer(c_int),    value         :: axis
+        type(mlxc_array),  value         :: key
+        type(mlxc_stream), value         :: s
+        integer(c_int) :: mlxc_random_axis_op
+    end function mlxc_random_axis_op
+    ! int f(mlx_array* res, const mlx_array logits, int axis, const int* shape, size_t shape_num,
+    ! const mlx_array key, const mlx_stream s)
+    function mlxc_random_axis_shape_op( res, logits, axis, shape, shape_num, key, s ) bind(c)
+        import
+        type(mlxc_array),  intent(inout) :: res
+        type(mlxc_array),  value         :: logits
+        integer(c_int),    value         :: axis
+        integer(c_int),    intent(in)    :: shape(*)
+        integer(c_size_t), value         :: shape_num
+        type(mlxc_array),  value         :: key
+        type(mlxc_stream), value         :: s
+        integer(c_int) :: mlxc_random_axis_shape_op
+    end function mlxc_random_axis_shape_op
+    ! int f(mlx_array* res, const mlx_array logits, int axis, int num_samples, const mlx_array key,
+    ! const mlx_stream s)
+    function mlxc_random_axis_int_op( res, logits, axis, num_samples, key, s ) bind(c)
+        import
+        type(mlxc_array),  intent(inout) :: res
+        type(mlxc_array),  value         :: logits
+        integer(c_int),    value         :: axis
+        integer(c_int),    value         :: num_samples
+        type(mlxc_array),  value         :: key
+        type(mlxc_stream), value         :: s
+        integer(c_int) :: mlxc_random_axis_int_op
+    end function mlxc_random_axis_int_op
+    ! int f(mlx_array* res, const mlx_array a, const mlx_array b, const int* shape, size_t shape_num,
+    ! mlx_dtype dtype, const mlx_array key, const mlx_stream s)
+    function mlxc_random_binary_op( res, a, b, shape, shape_num, dtype, key, s ) bind(c)
+        import
+        type(mlxc_array),  intent(inout) :: res
+        type(mlxc_array),  value         :: a
+        type(mlxc_array),  value         :: b
+        integer(c_int),    intent(in)    :: shape(*)
+        integer(c_size_t), value         :: shape_num
+        integer(c_int),    value         :: dtype
+        type(mlxc_array),  value         :: key
+        type(mlxc_stream), value         :: s
+        integer(c_int) :: mlxc_random_binary_op
+    end function mlxc_random_binary_op
+    ! int f(mlx_array* res, const int* shape, size_t shape_num, mlx_dtype dtype, const mlx_array loc,
+    ! const mlx_array scale, const mlx_array key, const mlx_stream s)
+    function mlxc_random_broadcast_op( res, shape, shape_num, dtype, loc, scale, key, s ) bind(c)
+        import
+        type(mlxc_array),  intent(inout) :: res
+        integer(c_int),    intent(in)    :: shape(*)
+        integer(c_size_t), value         :: shape_num
+        integer(c_int),    value         :: dtype
+        type(mlxc_array),  value         :: loc
+        type(mlxc_array),  value         :: scale
+        type(mlxc_array),  value         :: key
+        type(mlxc_stream), value         :: s
+        integer(c_int) :: mlxc_random_broadcast_op
+    end function mlxc_random_broadcast_op
+end interface
+
+interface
+    module function cpu_stream( proc ) result(s)
+        character(len=*), intent(in) :: proc
+        type(mlxc_stream) :: s
+    end function cpu_stream
+    module function optional_handle( a, proc ) result(h)
+        type(mlx_array),  intent(in) :: a
+        character(len=*), intent(in) :: proc
+        type(mlxc_array) :: h
+    end function optional_handle
+    module subroutine mlxf_pair_op( r, f, a, proc )
+        type(mlx_array),  intent(inout) :: r(2)
+        procedure(mlxc_pair_op)         :: f
+        type(mlx_array),  intent(in)    :: a
+        character(len=*), intent(in)    :: proc
+    end subroutine mlxf_pair_op
+    module subroutine mlxf_random_key_op( r, f, seed, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_random_key_op)   :: f
+        integer(int64),   intent(in)    :: seed
+        character(len=*), intent(in)    :: proc
+    end subroutine mlxf_random_key_op
+    module subroutine mlxf_random_shape_op( r, f, a, option, proc )
+        type(mlx_array),        intent(inout) :: r
+        procedure(mlxc_random_shape_op)       :: f
+        type(mlx_array),        intent(in)    :: a(1)
+        type(mlxf_random_spec), intent(in)    :: option
+        character(len=*),       intent(in)    :: proc
+    end subroutine mlxf_random_shape_op
+    module subroutine mlxf_random_float_op( r, f, a, option, proc )
+        type(mlx_array),        intent(inout) :: r
+        procedure(mlxc_random_float_op)       :: f
+        type(mlx_array),        intent(in)    :: a(1)
+        type(mlxf_random_spec), intent(in)    :: option
+        character(len=*),       intent(in)    :: proc
+    end subroutine mlxf_random_float_op
+    module subroutine mlxf_random_int_op( r, f, a, option, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_random_int_op)   :: f
+        type(mlx_array),  intent(in)    :: a(1)
+        integer,          intent(in)    :: option
+        character(len=*), intent(in)    :: proc
+    end subroutine mlxf_random_int_op
+    module subroutine mlxf_random_array_op( r, f, a, option, proc )
+        type(mlx_array),        intent(inout) :: r
+        procedure(mlxc_random_array_op)       :: f
+        type(mlx_array),        intent(in)    :: a(2)
+        type(mlxf_random_spec), intent(in)    :: option
+        character(len=*),       intent(in)    :: proc
+    end subroutine mlxf_random_array_op
+    module subroutine mlxf_random_axis_op( r, f, a, option, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_random_axis_op)  :: f
+        type(mlx_array),  intent(in)    :: a(2)
+        integer,          intent(in)    :: option
+        character(len=*), intent(in)    :: proc
+    end subroutine mlxf_random_axis_op
+    module subroutine mlxf_random_axis_shape_op( r, f, a, option, proc )
+        type(mlx_array),        intent(inout) :: r
+        procedure(mlxc_random_axis_shape_op)  :: f
+        type(mlx_array),        intent(in)    :: a(2)
+        type(mlxf_random_spec), intent(in)    :: option
+        character(len=*),       intent(in)    :: proc
+    end subroutine mlxf_random_axis_shape_op
+    module subroutine mlxf_random_axis_int_op( r, f, a, option, proc )
+        type(mlx_array),        intent(inout) :: r
+        procedure(mlxc_random_axis_int_op)    :: f
+        type(mlx_array),        intent(in)    :: a(2)
+        type(mlxf_random_spec), intent(in)    :: option
+        character(len=*),       intent(in)    :: proc
+    end subroutine mlxf_random_axis_int_op
+    module subroutine mlxf_random_binary_op( r, f, a, option, proc )
+        type(mlx_array),        intent(inout) :: r
+        procedure(mlxc_random_binary_op)      :: f
+        type(mlx_array),        intent(in)    :: a(3)
+        type(mlxf_random_spec), intent(in)    :: option
+        character(len=*),       intent(in)    :: proc
+    end subroutine mlxf_random_binary_op
+    module subroutine mlxf_random_broadcast_op( r, f, a, option, proc )
+        type(mlx_array),        intent(inout) :: r
+        procedure(mlxc_random_broadcast_op)   :: f
+        type(mlx_array),        intent(in)    :: a(3)
+        type(mlxf_random_spec), intent(in)    :: option
+        character(len=*),       intent(in)    :: proc
+    end subroutine mlxf_random_broadcast_op
+end interface
+
+abstract interface
+    ! int f(mlx_array* res, const mlx_array x, const mlx_array weight, const mlx_array bias, float eps,
+    ! const mlx_stream s)
+    function mlxc_layer_norm_op( res, x, weight, bias, eps, s ) bind(c)
+        import
+        type(mlxc_array),   intent(inout) :: res
+        type(mlxc_array),   value         :: x
+        type(mlxc_array),   value         :: weight
+        type(mlxc_array),   value         :: bias
+        real(c_float_kind), value         :: eps
+        type(mlxc_stream),  value         :: s
+        integer(c_int) :: mlxc_layer_norm_op
+    end function mlxc_layer_norm_op
+    ! int f(mlx_array* res, const mlx_array x, const mlx_array weight, float eps, const mlx_stream s)
+    function mlxc_rms_norm_op( res, x, weight, eps, s ) bind(c)
+        import
+        type(mlxc_array),   intent(inout) :: res
+        type(mlxc_array),   value         :: x
+        type(mlxc_array),   value         :: weight
+        real(c_float_kind), value         :: eps
+        type(mlxc_stream),  value         :: s
+        integer(c_int) :: mlxc_rms_norm_op
+    end function mlxc_rms_norm_op
+    ! int f(mlx_array* res, const mlx_array x, int dims, bool traditional, mlx_optional_float base, float scale,
+    ! int offset, const mlx_array freqs, const mlx_stream s)
+    function mlxc_rope_op( res, x, dims, traditional, base, scale, offset, freqs, s ) bind(c)
+        import
+        type(mlxc_array),          intent(inout) :: res
+        type(mlxc_array),          value         :: x
+        integer(c_int),            value         :: dims
+        logical(c_bool),           value         :: traditional
+        type(mlxc_optional_float), value         :: base
+        real(c_float_kind),        value         :: scale
+        integer(c_int),            value         :: offset
+        type(mlxc_array),          value         :: freqs
+        type(mlxc_stream),         value         :: s
+        integer(c_int) :: mlxc_rope_op
+    end function mlxc_rope_op
+    ! int f(mlx_array* res, const mlx_array x, int dims, bool traditional, mlx_optional_float base, float scale,
+    ! const mlx_array offset, const mlx_array freqs, const mlx_stream s)
+    function mlxc_rope_dynamic_op( res, x, dims, traditional, base, scale, offset, freqs, s ) bind(c)
+        import
+        type(mlxc_array),          intent(inout) :: res
+        type(mlxc_array),          value         :: x
+        integer(c_int),            value         :: dims
+        logical(c_bool),           value         :: traditional
+        type(mlxc_optional_float), value         :: base
+        real(c_float_kind),        value         :: scale
+        type(mlxc_array),          value         :: offset
+        type(mlxc_array),          value         :: freqs
+        type(mlxc_stream),         value         :: s
+        integer(c_int) :: mlxc_rope_dynamic_op
+    end function mlxc_rope_dynamic_op
+    ! int f(mlx_array* res, const mlx_array queries, const mlx_array keys, const mlx_array values, float scale,
+    ! const char* mask_mode, const mlx_array mask_arr, const mlx_array sinks, bool force_fused, const mlx_stream s)
+    function mlxc_attention_op( res, queries, keys, values, scale, mask_mode, mask_arr, sinks, force_fused, s ) bind(c)
+        import
+        type(mlxc_array),       intent(inout) :: res
+        type(mlxc_array),       value         :: queries
+        type(mlxc_array),       value         :: keys
+        type(mlxc_array),       value         :: values
+        real(c_float_kind),     value         :: scale
+        character(kind=c_char), intent(in)    :: mask_mode(*)
+        type(mlxc_array),       value         :: mask_arr
+        type(mlxc_array),       value         :: sinks
+        logical(c_bool),        value         :: force_fused
+        type(mlxc_stream),      value         :: s
+        integer(c_int) :: mlxc_attention_op
+    end function mlxc_attention_op
+end interface
+
+interface
+    module subroutine mlxf_layer_norm_op( r, f, a, option, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_layer_norm_op)   :: f
+        type(mlx_array),  intent(in)    :: a(3)
+        real(real32),     intent(in)    :: option
+        character(len=*), intent(in)    :: proc
+    end subroutine mlxf_layer_norm_op
+    module subroutine mlxf_rms_norm_op( r, f, a, option, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_rms_norm_op)     :: f
+        type(mlx_array),  intent(in)    :: a(2)
+        real(real32),     intent(in)    :: option
+        character(len=*), intent(in)    :: proc
+    end subroutine mlxf_rms_norm_op
+    module subroutine mlxf_rope_op( r, f, a, option, proc )
+        type(mlx_array),     intent(inout) :: r
+        procedure(mlxc_rope_op)            :: f
+        type(mlx_array),     intent(in)    :: a(2)
+        type(mlx_rope_spec), intent(in)    :: option
+        character(len=*),    intent(in)    :: proc
+    end subroutine mlxf_rope_op
+    module subroutine mlxf_rope_dynamic_op( r, f, a, option, proc )
+        type(mlx_array),     intent(inout) :: r
+        procedure(mlxc_rope_dynamic_op)    :: f
+        type(mlx_array),     intent(in)    :: a(3)
+        type(mlx_rope_spec), intent(in)    :: option
+        character(len=*),    intent(in)    :: proc
+    end subroutine mlxf_rope_dynamic_op
+    module subroutine mlxf_attention_op( r, f, a, option, proc )
+        type(mlx_array),          intent(inout) :: r
+        procedure(mlxc_attention_op)            :: f
+        type(mlx_array),          intent(in)    :: a(4)
+        type(mlx_attention_spec), intent(in)    :: option
+        character(len=*),         intent(in)    :: proc
+    end subroutine mlxf_attention_op
+end interface
+
+abstract interface
+    ! int f(mlx_array* res, const char* file, const mlx_stream s)
+    function mlxc_load_op( res, file, s ) bind(c)
+        import
+        type(mlxc_array),       intent(inout) :: res
+        character(kind=c_char), intent(in)    :: file(*)
+        type(mlxc_stream),      value         :: s
+        integer(c_int) :: mlxc_load_op
+    end function mlxc_load_op
+    ! int f(mlx_array* res, const mlx_array x, const mlx_distributed_group group, const mlx_stream s)
+    function mlxc_group_op( res, x, group, s ) bind(c)
+        import
+        type(mlxc_array),             intent(inout) :: res
+        type(mlxc_array),             value         :: x
+        type(mlxc_distributed_group), value         :: group
+        type(mlxc_stream),            value         :: s
+        integer(c_int) :: mlxc_group_op
+    end function mlxc_group_op
+    ! int f(mlx_array* res, const mlx_array x, int peer, const mlx_distributed_group group, const mlx_stream s)
+    function mlxc_group_peer_op( res, x, peer, group, s ) bind(c)
+        import
+        type(mlxc_array),             intent(inout) :: res
+        type(mlxc_array),             value         :: x
+        integer(c_int),               value         :: peer
+        type(mlxc_distributed_group), value         :: group
+        type(mlxc_stream),            value         :: s
+        integer(c_int) :: mlxc_group_peer_op
+    end function mlxc_group_peer_op
+    ! int f(mlx_array* res, const int* shape, size_t shape_num, mlx_dtype dtype, int src,
+    ! const mlx_distributed_group group, const mlx_stream s)
+    function mlxc_group_recv_op( res, shape, shape_num, dtype, src, group, s ) bind(c)
+        import
+        type(mlxc_array),             intent(inout) :: res
+        integer(c_int),               intent(in)    :: shape(*)
+        integer(c_size_t),            value         :: shape_num
+        integer(c_int),               value         :: dtype
+        integer(c_int),               value         :: src
+        type(mlxc_distributed_group), value         :: group
+        type(mlxc_stream),            value         :: s
+        integer(c_int) :: mlxc_group_recv_op
+    end function mlxc_group_recv_op
+end interface
+
+interface
+    module function mlxf_cpu_stream( proc ) result(s)
+        character(len=*), intent(in) :: proc
+        type(mlxc_stream) :: s
+    end function mlxf_cpu_stream
+    module subroutine mlxf_load_op( r, f, file, proc, status )
+        type(mlx_array),   intent(inout) :: r
+        procedure(mlxc_load_op)          :: f
+        character(len=*),  intent(in)    :: file, proc
+        integer, optional, intent(out)   :: status
+    end subroutine mlxf_load_op
+    module subroutine mlxf_map_arrays( names, arrays, m, status )
+        character(len=:),               allocatable, intent(out) :: names(:)
+        type(mlx_array),                allocatable, intent(out) :: arrays(:)
+        type(mlxc_map_string_to_array), intent(in)               :: m
+        integer,                        intent(out)              :: status
+    end subroutine mlxf_map_arrays
+    module subroutine mlxf_gguf_arrays( names, arrays, g, status )
+        character(len=:),   allocatable, intent(out) :: names(:)
+        type(mlx_array),    allocatable, intent(out) :: arrays(:)
+        type(mlxc_io_gguf), intent(in)               :: g
+        integer,            intent(out)              :: status
+    end subroutine mlxf_gguf_arrays
+    module subroutine mlxf_group_op( r, f, a, option, status )
+        type(mlx_array),       intent(inout) :: r
+        procedure(mlxc_group_op)             :: f
+        type(mlx_array),       intent(in)    :: a
+        type(mlxf_group_spec), intent(in)    :: option
+        integer, optional,     intent(out)   :: status
+    end subroutine mlxf_group_op
+    module subroutine mlxf_group_peer_op( r, f, a, option, status )
+        type(mlx_array),       intent(inout) :: r
+        procedure(mlxc_group_peer_op)        :: f
+        type(mlx_array),       intent(in)    :: a
+        type(mlxf_group_spec), intent(in)    :: option
+        integer, optional,     intent(out)   :: status
+    end subroutine mlxf_group_peer_op
+    module subroutine mlxf_group_recv_op( r, f, option, status )
+        type(mlx_array),       intent(inout) :: r
+        procedure(mlxc_group_recv_op)        :: f
+        type(mlxf_group_spec), intent(in)    :: option
+        integer, optional,     intent(out)   :: status
+    end subroutine mlxf_group_recv_op
 end interface
 
 interface

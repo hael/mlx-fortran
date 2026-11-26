@@ -12,6 +12,7 @@ use mlxf_toy_polarft_calc, only: polarft_calc
 use mlxf_toy_eul_prob_tab, only: eul_prob_tab
 use mlxf_oracle_polar,     only: polar_full_ring, polar_keyed_u
 use mlxf_test_utils,       only: assert_true, assert_int, device_name, bits_equal, test_devices, tests_run
+use mlxf_test_reduce,      only: nan_max
 implicit none
 private
 public :: run_all_eul_prob_tab_tests
@@ -414,7 +415,7 @@ contains
         do j = 1, NPTCL
             do c = 1, NCAND
                 lo    = oracle_cell(fx, order(j), cands(c, order(j)), [res%irot(c, j), res%irho(c, j), res%ialpha(c, j)])
-                worst = max(worst, abs(real(res%loss(c, j), real64) - lo) / max(1._real64, abs(lo)))
+                worst = nan_max(worst, abs(real(res%loss(c, j), real64) - lo) / max(1._real64, abs(lo)))
             end do
         end do
         write(*,'(a,es10.3)') '    coarse maps: largest returned loss error at the returned cell ', worst

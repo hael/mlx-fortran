@@ -30,6 +30,24 @@ Release builds were made from that fixed snapshot. Earlier builds begun before t
 the evidence below. The owner worktree was clean; all probes and modified diagnostic executables stayed
 under `/private/tmp`. Only this report, the notes index and the history entry are repository edits.
 
+## Status of the findings (2026-11-26, run `mlxf_toy_seam`, Phase 1)
+
+Each fix came with its regression test, shown to fail without the fix; the record is the Progress of
+[`mlxf_toy_seam.md`](../planned/mlxf_toy_seam.md).
+
+- **F1: fixed.** `history_errors` returns +infinity when a history is missing, short or not finite, and reduces with
+  `nan_maxval`; `mlxf_test_reduce` gained the scalar `nan_max`; rule `nanmax` now also fails on
+  `x = max(x, abs(...))`, and the 112 statements it found under `src/test` are converted. Thirty more are in five
+  testers under `src/core`, held by the rule's ledger and left for a change that may edit `src/core`. The review's
+  mutation now fails `reconstructor_pcg` (20 of 172 checks) and `pcg_solver` (2 of 86).
+- **F2: fixed by refusal.** `set_ref_route` refuses a change once a reference is memoized (until `kill` and
+  `new`); six cases (both directions, after the projection, `memoize_refs` and `memoize_ref_bins`) are refused and
+  leave the rows bit for bit as they were.
+- **F3: fixed.** The padded box is in the fused gather's cache key; one workspace taken from an 8-cube to a 16-cube
+  equals a fresh one bit for bit and agrees with the graph form within the fixtures' gate.
+- **F4: fixed.** `test_lifecycle` synchronizes before both samples; the Release fast gate with `ctest --parallel 4`
+  passed 20 times of 20 (the base failed once in 20 at this assertion).
+
 ## Findings
 
 | ID | Priority | Finding | Impact |

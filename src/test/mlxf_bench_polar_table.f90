@@ -22,7 +22,7 @@ use mlxf_toy_eul_prob_tab, only: eul_prob_tab
 use mlxf_oracle_polar,     only: polar_dft_matrix, polar_keyed_u, polar_compare_rows, polar_draws_off, &
                                  polar_report_draws, polar_memo_rows
 use mlxf_test_utils,       only: assert_true, assert_int, test_devices, device_name, set_fixed_seed, bits_equal
-use mlxf_test_reduce,      only: nan_maxval
+use mlxf_test_reduce,      only: nan_maxval, nan_max
 implicit none
 private
 
@@ -1029,7 +1029,7 @@ contains
                     if( bits_equal(eg%dists(ir, b), em%dists(ir, b)) ) cycle
                     dmax = nan_maxval(pack(abs(real(eg%rows(:, ir, b), real64)), eg%rows(:, ir, b) < POLAR_DIST_VALID))
                     if( dmax > 0._real64 )then
-                        chk%err_dists = max(chk%err_dists, abs(real(em%dists(ir, b), real64) - &
+                        chk%err_dists = nan_max(chk%err_dists, abs(real(em%dists(ir, b), real64) - &
                             &real(eg%dists(ir, b), real64)) / dmax)
                     else
                         chk%valid_off = chk%valid_off + 1

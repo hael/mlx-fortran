@@ -202,8 +202,9 @@ written, the skill `mlxf-modern-fortran`.
   refused through `status`, and nothing is converted. The vocabularies (`MLX_DEVICES`, `MLX_DTYPES`) and `MLXF_HARD_ERROR_STATUS` are declared in
   `mlxf_defs` and reach users through `mlxf`. complex(real64) has no specific. Nothing converts silently except the scalar rule below.
 - On the CPU device MLX computes some float64 operations in float32 (at MLX v0.32.4: `exp`, `sin`, `cos`,
-  `erf`, `mlx_erfinv`, `mlx_sigmoid`, `mlx_logaddexp`, `mlx_logsumexp`, `mlx_logcumsumexp`, `mlx_softmax` and
-  every FFT); tests hold them to float32 tolerances.
+  `erf`, `mlx_erfinv`, `mlx_sigmoid`, `mlx_logaddexp`, `mlx_logsumexp`, `mlx_logcumsumexp`, `mlx_softmax`, every
+  FFT, and the fused layers of section 15, whose float64 results have float32 accuracy); tests hold them to
+  float32 tolerances.
 - On the GPU, MLX v0.32.4's float32 `expm1` loses accuracy as its argument grows: an error relative to
   `max(1, |expm1(x)|)` of about 20 float32 epsilons at x = 0.5 and 168 at x = 10, against below 1 on the CPU
   (`doc/collaboration/apple_questions.md`, question 20; `scripts/probes/expm1_gpu_probe.c`). `mlx_expm1` is
@@ -229,8 +230,10 @@ written, the skill `mlxf-modern-fortran`.
 - **Checked procedures** take an optional `integer, intent(out) :: status` and leave the message in
   `mlx_last_error()`: `mlx_eval`, `mlx_async_eval`, `mlx_synchronize`, `mlx_to`, `mlx_to_alloc`, `mlx_view`,
   `mlx_alloc`, `mlx_set_default_device`, `mlx_set_memory_limit`, `mlx_device_info_size`,
-  `mlx_device_info_string`, and the `apply` of `mlx_function` and of `mlx_metal_kernel`. Without `status` they
-  stop. A failure the
+  `mlx_device_info_string`, the `apply` of `mlx_function`, of `mlx_metal_kernel`, of `mlx_grad_function`, of
+  `mlx_function_exporter` and of `mlx_imported_function`, `mlx_export_function`, the binding `new` of the last
+  two, the file procedures of section 17, `mlx_buffer_size`, `mlx_set_wired_limit`, the Metal capture, and the
+  distributed procedures of section 18. Without `status` they stop. A failure the
   library finds itself is reported the same way (`mlxf_report`). **`mlx_to_alloc` changes its destination only
   on success:** it checks the kind and the rank before touching it, fills a new allocation (made with
   `stat=`), and moves it into the destination when the copy succeeds. On any failure that returns a status
@@ -257,9 +260,11 @@ written, the skill `mlxf-modern-fortran`.
   (headless, sandboxed, virtual), where a Metal build of MLX cannot allocate on either device and the first
   operation that would allocate stops saying so; and a CPU-only MLX (`MLX_BUILD_METAL=OFF`), which has no GPU and
   allocates on the CPU device (heap memory; no maximum buffer length, no Metal kernels). The default device is
-  MLX's (the GPU when present); `mlx_set_default_device(MLX_DEVICES%cpu)` or `(MLX_DEVICES%gpu)` changes it. Explicit streams are not offered.
+  MLX's (the GPU when present); `mlx_set_default_device(MLX_DEVICES%cpu)` or `(MLX_DEVICES%gpu)` changes it. Operations take no stream argument;
+  a stream of one's own is made the default of its device (section 16).
   One choice of stream is the library's own: the factorisations, inverses, determinants, eigenvalues and
-  solvers of section 10, which MLX implements on the CPU only, always run on the CPU's default stream.
+  solvers of section 10 and the multivariate normal draw of section 13, which MLX implements on the CPU only,
+  always run on the CPU's default stream, and so does what is read from a file (section 17).
 - **One submitting thread.** Graphs are built and evaluated from one thread. Every public procedure opens
   with the entry (`mlxf_enter`: the one-thread guard, then initialisation on the first call), before it looks
   at an operand, so the guard runs on every path: an empty list of arrays, `mlx_live_count` and
@@ -284,8 +289,11 @@ written, the skill `mlxf-modern-fortran`.
   waits for the work queued on every device; `mlx_to`, `mlx_to_alloc` and `mlx_view` evaluate. The overlap
   pattern, from one thread: queue block n+1 with `mlx_async_eval`, copy out block n, let the CPU consume it.
 - Memory controls: `mlx_active_memory()`, `mlx_peak_memory()`, `mlx_reset_peak_memory()`,
-  `mlx_cache_memory()`, `mlx_clear_cache()`, `mlx_set_memory_limit(bytes[, previous, status])`,
-  `mlx_set_cache_limit(bytes[, previous])`; device facts through `mlx_device_info_size` and
+  `mlx_cache_memory()`, `mlx_clear_cache()`, `mlx_memory_limit()`, `mlx_set_memory_limit(bytes[, previous, status])`,
+  `mlx_set_cache_limit(bytes[, previous])`, `mlx_set_wired_limit(bytes[, previous, status])` (the bytes the GPU
+  may keep wired; 0, the default, holds none; a limit above what the system allows is refused with a status);
+  `a%nbytes()` (int64) and `a%itemsize()` are the bytes of an array's elements and of one of them, and
+  `mlx_buffer_size(arrays[, status])` the bytes of the buffers the arrays hold, after evaluating them; device facts through `mlx_device_info_size` and
   `mlx_device_info_string` (`max_buffer_length`, `memory_size`, `architecture`, ...).
 
 ## 9. Coming with later phases (the contract they keep)
@@ -662,7 +670,8 @@ end subroutine callback
   its finalizer. `doc/compiler_issues/gfortran_finalize_allocatable_array_result.f90` reproduces that
   independently of MLX and includes the passing explicit-output control. The owner approved this callback
   interface on 2026-11-22.
-  No `grad`, `vjp` or `vmap` is wrapped.
+  Gradients, vector-Jacobian and Jacobian-vector products are section 14; `vmap` is not wrapped (mlx-c 0.8.0
+  exposes it only as `detail_`).
 
 ## 12. Custom Metal kernels
 
@@ -765,3 +774,306 @@ graph form of the same computation stays as the CPU path and as the reference.
   order: an insertion of 2.84e8 such deposits gives different bits in up to 49 % of its 2.3e6 elements from run to
   run (`bench_insert_probe`). A `threadgroup` array declared in the body, with `threadgroup_barrier`, builds and
   gives correct results, though MLX's documentation does not name it (question 26 of the Apple questions).
+
+## 13. Random numbers
+
+MLX's generator is counter-based (Threefry): a sample is a function of a key and of the sample's shape, and
+nothing else. A key is a uint32 array of two elements. Every sampler takes an optional `key`; given one, it is
+deterministic, on either device and in every build. Without one it takes MLX's global key, which
+`call mlx_random_seed(seed)` sets and which every draw without a key advances; MLX keeps one global key per
+thread, and the library has one submitting thread.
+
+- **Keys.** `mlx_random_key(seed)` is the key of a seed, a default or a 64-bit integer: a default integer is
+  extended to 64 bits with its sign, and MLX reads the 64 bits as an unsigned integer, element 1 of the key being
+  the high 32 bits and element 2 the low ones (the key of 42 is (0, 42), of -1 (2**32 - 1, 2**32 - 1)). The first
+  draw after `mlx_random_seed(seed)` uses the second key of the split of that seed's key.
+  `call mlx_random_split(key, first, second)` gives two new keys; `call mlx_random_split(key, num, keys)` gives
+  `num` of them as one (2, num) array, key i being `keys(:, i)`, and `call mlx_unstack(keys, parts)` turns it
+  into a list of keys. The results are `intent(out)`: `call mlx_random_split(key, key, sub)` passes one variable
+  twice, which Fortran forbids, and stops on an emptied key; split into two other variables and assign. A key
+  that is given must be a live array: an empty or stale one stops, and MLX stops on a key of another dtype or
+  shape.
+- **Shapes.** Every sampler of independent values takes the sample's Fortran shape first. A sample of Fortran
+  shape (n1, ..., nr) is MLX's sample of shape [nr, ..., n1] for the same key, read in array element order; with
+  MLX 0.32.4 a (4, 3) and a (12) sample of one key hold the same twelve values in that order. An empty shape,
+  `[integer ::]`, gives a rank-0 sample. Array parameters broadcast to the shape with leading Fortran dimensions
+  aligned, as operands do: a (2, 1) mean gives the two rows of a (2, n) sample their own means.
+- **The samplers.**
+  - `mlx_random_bits(shape[, width, key])`: unsigned integers of `width` bytes, 4 (uint32) by default, 2 (uint16)
+    or 1 (uint8); another width stops.
+  - `mlx_random_uniform(shape[, low, high, dtype, key])`: `low + (high - low) u` with `u` uniform in [0, 1); the
+    bounds are arrays, 0 and 1 by default (`mlx_from(-1.)` makes a rank-0 one). The sample lies in [low, high)
+    up to the rounding of that expression: with bounds far from zero (10 and 12) an element can round to `high`.
+  - `mlx_random_normal(shape[, loc, scale, dtype, key])` with real32 `loc` and `scale` (0 and 1), and
+    `mlx_random_normal(shape, loc[, scale, dtype, key])` with arrays: `loc` is the mean, `scale` the standard
+    deviation. MLX 0.32.4 does not hold these two arrays to `shape` (it returns the broadcast of the three; later
+    versions refuse), so the wrapper stops when the result has another shape (the guard `guard_normal_shape`).
+  - `mlx_random_laplace(shape[, loc, scale, dtype, key])`: real32 `loc` and `scale`; the variance is 2 scale**2.
+  - `mlx_random_gumbel(shape[, dtype, key])`: the standard Gumbel distribution.
+  - `mlx_random_truncated_normal(shape, lower, upper[, dtype, key])`: the standard normal distribution kept
+    inside [lower, upper], arrays.
+  - `mlx_random_randint(shape, low, high[, dtype, key])`: integers from `low` to `high - 1`, arrays; int32 by
+    default. These are values, not positions: `high` is excluded, as in MLX.
+  - `mlx_random_bernoulli(shape, p[, key])`: booleans, true with probability `p`, a real array.
+  - `mlx_random_multivariate_normal(mean, cov[, shape, dtype, key])`: vectors along dimension 1. `mean` is
+    (n, ...) and `cov` (n, n, ...), a symmetric matrix in dimensions 1 and 2; `shape` is the shape of the batch of
+    vectors (none by default), and the result is (n, shape) broadcast with the batch dimensions of `mean` and
+    `cov`. float32 only. MLX takes the root of `cov` by a singular value decomposition, which it implements on
+    the CPU only, so the draw runs on the CPU's default stream whatever the default device (section 7); without
+    a key, MLX 0.32.4 splits its global key on the default device first, and evaluates the graph across the two.
+  - `mlx_random_categorical(logits[, dim, num_samples, shape, key])`: categories drawn with the unnormalised
+    log-probabilities that `logits` holds along `dim` (dimension 1 by default, MLX's last axis). The result is
+    **one-based int32**: category c is element c of `logits` along `dim`. Without `num_samples` and `shape`, one
+    draw per distribution, with `logits`' other dimensions; with `num_samples`, that many per distribution along
+    a new first dimension, (num_samples, ...); with `shape`, a sample of that Fortran shape, to which `logits`'
+    other dimensions broadcast with leading dimensions aligned ([4, 5] for four distributions drawn five times:
+    the distributions lie along dimension 1). `num_samples` and `shape` together stop (the guard
+    `guard_categorical_forms`).
+  - `mlx_random_permutation(n[, key])`: a permutation of 1 to n, **one-based int32**.
+    `mlx_random_permutation(x[, dim, key])`: `x` with its slices along `dim` in a random order, along the last
+    dimension by default (MLX's first axis), so the columns of a matrix are permuted whole.
+- **Dtypes** (MLX 0.32.4). The real samplers draw float32 by default and take the 16-bit floats. float64 is
+  refused by `mlx_random_uniform`, `mlx_random_gumbel` and `mlx_random_truncated_normal` on either device (a
+  stop: "[uniform] Unsupported type" on the CPU device, "float64 is not supported on the GPU" there); `mlx_random_normal` and `mlx_random_laplace` give float64 on the CPU
+  device, the float32 draw widened. `mlx_random_randint` takes the integer dtypes and bool. The unsigned results
+  of `mlx_random_bits` and a key are device-only dtypes (section 5): convert with `mlx_astype` to copy them out.
+- **Devices.** With one key the CPU and the GPU gave the same sample to the last bit for the uniform, the normal
+  and the Laplace distribution, and to one or two units in the last place for the Gumbel and the truncated
+  normal; the library promises determinism per device, not identity between devices.
+- The tests (`unit_random`): the mean and the variance of a large sample of every sampler (2^20 values; 2^19 a
+  row with array parameters, 2^18 vectors of the multivariate normal) against the distribution's own, each within 5 standard errors of its estimator (`sqrt(var/n)` and `sqrt((m4 - var**2)/n)`, m4 the fourth
+  central moment), on both devices and on keys of three seeds; the means and covariances of the multivariate
+  normal and the frequencies of the categories likewise; exactly: the two words of a key, the shapes, the dtypes,
+  the bytes of a repeated draw, the categories of logits with one overwhelming entry in each layout, a
+  permutation holding 1 to n once, slices permuted whole, the draws of every sampler without a key repeated after the same seed. The tests do not
+  compare with Python. Not tested: complex64 samples of the normal, which MLX accepts.
+
+## 14. Function transforms, functions in files, compilation controls
+
+A transform takes an `mlx_function` (section 11) and differentiates the graph its callback builds; the callback
+rules of section 11 hold unchanged. **Positions among a function's inputs are one-based.** A derivative has the
+Fortran shape of what it is a derivative with respect to.
+
+- **Values and gradients.** `g = mlx_value_and_grad(f[, argnums])` (or `call g%new(f[, argnums])`) is a
+  `type(mlx_grad_function)`, a counted handle like `mlx_function`. `call g%apply(inputs, values, grads[, status])`
+  returns every output of `f` in `values` and, in `grads`, the gradients of the **first** output, which must be a
+  scalar (rank 0), with respect to the inputs at the positions `argnums` (the first input by default), **in the
+  order of `argnums`** (MLX returns them in the order of the inputs; the wrapper puts them back). The other
+  outputs are carried along without a gradient. A position below 1 stops when the function is made (the guard
+  `guard_grad_argnums`); a position beyond the inputs, a repeated one, a first output that is not a scalar and a
+  failing callback are found at the application and return through `status`, with both lists unallocated and MLX
+  usable.
+- **Products.** `call mlx_vjp(f, primals, cotangents, outputs, vjps)`: the outputs of `f` on `primals` and the
+  products of the transposed Jacobian with the cotangents (one per output, of its shape): one array per input.
+  `call mlx_jvp(f, primals, tangents, outputs, jvps)`: the products of the Jacobian with the tangents (one per
+  input): one array per output. These two take no `status` (five dummies): a failure, the callback's included,
+  stops, after the C call has returned. MLX pairs the cotangents with the outputs that are not results of
+  `mlx_stop_gradient`, in order. Both may be called from inside a callback, for a derivative of a derivative.
+- **Custom rules.** `g = mlx_custom_vjp(f, vjp)` is `f` with its vector-Jacobian product replaced by the checked
+  subroutine `vjp(primals, cotangents, outputs, vjps, status)`, which allocates and fills `vjps`, one array per
+  input. `g = mlx_custom_function(f[, vjp][, jvp])` also takes
+  `jvp(primals, tangents, argnums, jvps, status)`, where `argnums` are the one-based positions of the inputs the
+  tangents belong to and `jvps` has one array per output; an absent rule stays MLX's own. The values of `g` are
+  `f`'s. A vjp rule that does not return one array per input is refused with a status; a jvp rule must not
+  return more arrays than `f` has outputs, which MLX 0.32.4 does not check, and a function given a rule or a
+  checkpoint must return at least one output (question 29 of the Apple questions). A custom jvp does not spare
+  `f`'s own operations their Jacobian-vector products: MLX still differentiates the graph under it, so what MLX
+  cannot differentiate forward still fails; a custom vjp does spare them. A rule may be anything, the true derivative or not: the tests use rules that are not, so that their use
+  shows. The custom `vmap` of mlx-c is not offered. `g = mlx_checkpoint(f)` is `f` with the intermediate arrays
+  of its gradient recomputed when the gradient is taken instead of kept. The three return an `mlx_function`,
+  which shares `f`'s callback and its trace count, as a compiled function does, and may be built and applied
+  inside a callback. **Inside a callback only `apply(..., status=)` is a checked call:** `mlx_value_and_grad`,
+  `mlx_vjp`, `mlx_jvp`, `mlx_custom_vjp`, `mlx_custom_function` and `mlx_checkpoint` stop on a failure, as an
+  operator does, and there the stop is under MLX's C++ frames (section 11).
+- **Operations.** `mlx_stop_gradient(a)` holds `a` constant in every derivative. `call mlx_depends(inputs,
+  dependencies, outputs)` returns the inputs as arrays whose evaluation also evaluates the dependencies; an
+  empty list of inputs stops.
+- **Functions in files.** `call mlx_export_function(file, f, inputs[, shapeless, status])` writes the graph `f`
+  builds on the example `inputs`, in MLX's own format (`.mlxfn` by convention); `shapeless` lets the graph serve
+  other extents of the same ranks and dtypes. `e = mlx_function_exporter(file, f[, shapeless])` (or
+  `call e%new(file, f[, shapeless, status])`) writes one trace per `call e%apply(inputs[, status])`, for
+  several signatures in one file; each trace is on disk when its `apply` returns. Opening an exporter
+  truncates the file, a second trace of a signature already written is refused, and after a failed application
+  every copy of the exporter refuses another (MLX 0.32.4 would read the failed trace's entry unchecked: question
+  29), so a failed export leaves an incomplete file: write to a new name and rename.
+  `g = mlx_imported_function(file)` (or `call g%new(file[, status])`) reads a file, and
+  `call g%apply(inputs, outputs[, status])` applies it; inputs that match no trace return a status. The file
+  holds MLX's shapes, the Fortran shapes reversed, and a function read back takes and returns the same Fortran
+  shapes. The keyword-argument forms of mlx-c are not offered (Fortran has no keyword dictionaries). An exported
+  function is the graph, not the callback: the Fortran procedure is not needed to apply it, and an import in
+  another program needs only the file. The file records the device of each operation (read in MLX 0.32.4's
+  `export.cpp`, not tested across devices): a function exported with the GPU as the default device runs on the
+  GPU where it is imported. MLX 0.32.4 does not serialize custom rules or checkpoints (read, not tested), so a
+  function from `mlx_custom_vjp`, `mlx_custom_function` or `mlx_checkpoint` is not exported.
+- **Compilation controls** are process-wide: `call mlx_disable_compile()` makes every function compiled from
+  then on run its callback at each call (it stays so after compilation is enabled again; a function compiled
+  before is not affected), `call mlx_enable_compile()` restores MLX's default, and
+  `call mlx_set_compile_mode(mode)` takes a member of `MLX_COMPILE_MODES` (`%disabled`, `%no_simplify`,
+  `%no_fuse`, `%enabled`); another value stops (the guard `guard_compile_mode`). `%no_simplify` and `%no_fuse`
+  each switch one stage off and leave the other on; MLX reads them at a function's first trace.
+- **Lifetime.** `mlx_grad_function`, `mlx_function_exporter` and `mlx_imported_function` are counted handles:
+  assignment shares, `kill` is idempotent, finalization releases, each is one object in `mlx_live_count()`, an
+  empty one may be copied and killed anywhere and a live one only from the submitting thread; the unsupported
+  forms of section 3 apply. A gradient function keeps what it needs of `f`, which may be killed first.
+- **Devices and kinds.** A transform runs where the callback's operations run. float64 derivatives exist on the
+  CPU device; a derivative through an operation MLX computes in float32 there (section 5) has float32 accuracy.
+- The tests (`unit_transforms`): `mlx_value_and_grad`, `mlx_vjp` and `mlx_jvp` of a polynomial, of `exp(a x)` and
+  of `matmul(a, matmul(b, v))` against closed-form derivatives written out in real64, by the largest error
+  relative to `max(1,` a sum of magnitudes that bounds the derivative, or the derivative's own magnitude`)`, at 4
+  epsilons of the result kind on both devices (float64
+  on the CPU device for the polynomial and the chain); exactly: the order and positions of gradients, every
+  output in `values`, custom rules that are not the derivative and that show the lists and positions they
+  receive, a custom rule built inside a callback, a checkpoint by its second run of the callback,
+  `mlx_stop_gradient`, `mlx_depends`, a derivative of a derivative, the gradient function's lifecycle, the
+  failures through `status`, and the active memory and the live handles after 300 rounds of every transform; in the sub-suite `export`, a function written, read back and applied, bit for bit on exact
+  arithmetic, one trace and two, shapeless and not, the refusals through `status` (a missing file, a directory
+  that does not exist, a shape without a trace, a failing callback, an exporter after a failed trace), and the
+  compilation controls by how often the callback runs. Not tested: that `mlx_depends` evaluates its
+  dependencies, the three tracing modes against each other, an export on one device imported on the other.
+
+## 15. Fused layers
+
+MLX's `fast` functions other than the custom kernels of section 12 compute what a network layer computes, as one
+fused node on the GPU where MLX has a kernel for it and as an ordinary graph of several nodes otherwise (on the
+CPU device always). They act along MLX's last axes, which are Fortran's first dimensions: **features lie along
+dimension 1 and, where there is a sequence, positions along dimension 2**; the further dimensions are batches.
+
+- `mlx_layer_norm(x[, weight, bias, eps])`: `(x - mean)/sqrt(variance + eps)` along dimension 1, the variance
+  divided by the extent, then times `weight` and plus `bias` when given, rank-1 arrays of that extent.
+  `mlx_rms_norm(x[, weight, eps])`: `x/sqrt(mean(x**2) + eps)` along dimension 1, then times `weight`. `eps` is
+  real32, 1e-5 when absent (mlx-c has no default; this is the usual one).
+- `mlx_cross_entropy(logits, targets)`: for `logits` (classes, ...) and integer `targets` (...) holding
+  **one-based** classes, `log(sum(exp(logits))) - logits(target)` for each distribution along dimension 1, with
+  `targets`' shape, float32 whatever the logits' kind; no mean is taken. A class is shifted in the graph and not
+  checked against the extent, as every index.
+- `mlx_rope(x[, spec, offset, freqs])`: the rotary position embedding of `x` (features, positions, ...), rank 3
+  or more. Pair p of the first `spec%features` elements of dimension 1 (even; all of them by default) is
+  rotated by the angle `(t - 1 + offset)*scale/frequency(p)` for position t along dimension 2, with
+  `frequency(p) = base**((p - 1)/pairs)`: a pair (x1, x2) becomes (x1 cos - x2 sin, x1 sin + x2 cos). The pairs are elements (p, p + pairs), or the neighbours (2p - 1, 2p)
+  with `spec%traditional`; elements beyond `features` are left alone. `type(mlx_rope_spec)`: `features` (0: all),
+  `traditional` (false), `base` (10000), `scale` (1), `offset` (0). The offset is a count of positions before the
+  first, not a position: position 1 has angle 0 with offset 0. `offset=`, an integer array of rank 0, or of rank
+  1 with one value per element of the last dimension, replaces `spec%offset`; another rank-1 extent stops (the
+  guard `guard_rope_offset`: MLX 0.32.4's GPU kernel reads one value per batch from any rank-1 offset, also from
+  one of a single element; question 30 of the Apple questions). `freqs=`, one per pair, replaces the base: they
+  are what the angle is **divided** by, as `frequency(p)` above, not multipliers.
+- `mlx_scaled_dot_product_attention(queries, keys, values[, spec, mask])`: for `queries` (d, lq, heads, batch),
+  `keys` (d, lk, heads, batch) and `values` (dv, lk, heads, batch), all of rank 4, the result (dv, lq, heads,
+  batch) is `r(:, i, h, b) = sum over j of softmax_j(scale*dot(q(:, i, h, b), k(:, j, h, b)))*v(:, j, h, b)`.
+  `type(mlx_attention_spec)`: `scale` (an allocatable real32: not set is `1/sqrt(d)`, and any value that is set
+  is used, zero and negative included), `causal` (false: with it query i attends the keys `j <= i + lk - lq`; a
+  query with no such key, when lq > lk, gets the mean of the values), `force_fused` (false: with it MLX's fused
+  kernel is demanded, and the call stops where there is none: on the CPU device always (the guard
+  `guard_fused_on_cpu`), and on the GPU unless d is one MLX has a kernel for, 64 for one). A boolean `mask(j, i, ...)` keeps key j for query i; a real or
+  integer one is added to the scores and must be of a kind that promotes to the operands' (a float64 mask with
+  float32 operands stops). It broadcasts to (lk, lq, heads, batch) with leading dimensions aligned, so a (lk, lq)
+  mask serves every head and batch and a (lk, lq, heads) one every batch. A mask with `causal` stops (the guard
+  `guard_attention_mask`). The keys and the values may have fewer heads than the queries, a divisor of their
+  number (MLX's grouped form; not tested). mlx-c's `sinks` argument is not offered.
+- **Not offered:** `mlx_fast_gated_delta_update` (the plan's decision 17): MLX's header gives its seven arrays
+  no shapes (its Python docstring gives some, which disagree with the code: question 30); they come in five
+  layouts with time along MLX's second axis, which is not this section's dimension 2, a recurrence over time
+  and two results. That was judged more than a paragraph here.
+- **Devices and kinds.** Each runs on both devices (`force_fused` excepted). With float64 operands on the CPU
+  device the results are float64 with float32 accuracy (measured with MLX 0.32.4: 1.2 to 2 float32 epsilons for
+  the normalisations and the rotary embedding, 1e-8 for the attention; section 5); the cross entropy is float32.
+  An optional array that is given must be live: an empty one stops (the guard `guard_optional_empty`).
+- The tests (`fast_layers` of `unit_fast`): each layer against real64 loops over Fortran subscripts on seeded
+  operands, by the largest error relative to `max(1, |reference|)`, at 4 float32 epsilons on both devices and
+  for float64 operands on the CPU: the normalisations with and without weight and bias and with both values of
+  eps; the cross entropy with int32 and int64 classes, the first and the last included; the rotary embedding in
+  every option, with an integer offset, an array of offsets per batch and a rank-0 one, given frequencies with
+  and without an array of offsets, one position, and ranks 3 to 5; the attention with the default, a given and a
+  negative scale, causal, with a boolean mask for every head and one per head and with a real mask, and MLX's
+  fused kernel demanded on the GPU for 64 features.
+
+## 16. Streams, device availability and Metal capture
+
+- A stream is a device's queue of work. `type(mlx_stream)` is a counted handle on one (assignment shares, `kill`
+  is idempotent, finalization releases; MLX keeps the stream itself). `mlx_new_stream(device_type)` makes a new
+  stream on `MLX_DEVICES%cpu` or `%gpu`; `mlx_default_stream(device_type)` is the device type's default stream
+  **as it is now**, on the calling thread. **Operations take no stream argument:** they run on the default stream
+  of the default device. `call mlx_set_default_stream(stream)` makes a stream the default of its device, for the
+  operations built from then on; to put the first default back, take it with `mlx_default_stream(device_type)`
+  into a variable **before** setting another, and set it again afterwards. Neither constructor takes a status: on
+  an MLX that cannot use a device type, a stream on it stops, so ask `mlx_device_is_available` first.
+  Thread-local and thread-unsafe streams are not offered (one submitting thread).
+- `mlx_synchronize` is a generic: `call mlx_synchronize([status])` waits for the work queued on the **current
+  default stream** of every device type that has a device (the default device's first), and
+  `call mlx_synchronize(stream[, status])` for one stream's. Work queued on a stream that is no longer a default,
+  or never was, is waited for through its handle.
+- `mlx_device_is_available(device_type)` says whether MLX has the backend of a device type and that backend has a
+  device (the CPU always; the GPU on an MLX built with Metal, on a Mac whose session has a Metal device).
+- `call mlx_metal_start_capture(path[, status])` and `call mlx_metal_stop_capture([status])` record the GPU's
+  work in a trace for Xcode. Metal grants a capture only to a process started with `MTL_CAPTURE_ENABLED=1`;
+  otherwise the start is refused with a status ("Capture layer is not inserted"). The gate tests the refusal; a
+  capture opened in Xcode is checked by hand.
+
+## 17. Arrays in files, and the text of a graph
+
+- **On disk the bytes are MLX's.** A Fortran (m, n) array is, to a NumPy reader, the C-order (n, m) array over
+  the same bytes: element (i, j) of the Fortran array is element [j-1, i-1] there, as in ordinary C
+  interoperability. Read back through this library it is (m, n) again.
+- `call mlx_save(file, a[, status])` writes `a`, evaluated, in NumPy's `.npy` format 1.0; MLX adds `.npy` to a
+  name that does not end with it. `a = mlx_load(file[, status])` reads one, the name given whole. The header
+  holds the shape reversed and `'fortran_order': False`; a view that is column-contiguous (a transpose) is
+  written without a copy with `'fortran_order': True` under its own reversed shape, which NumPy and `mlx_load`
+  read as the same array, and where the order means nothing (ranks 0 and 1, and any array with at most one
+  extent above 1) MLX also writes `True`.
+- **A load is lazy.** `mlx_load`, `mlx_load_safetensors` and `mlx_load_gguf` read the header and return arrays
+  whose data are read when they are evaluated: the file must stay as it is until then (`call mlx_eval(a)` before
+  it is rewritten or deleted).
+- `call mlx_save_safetensors(file, names, arrays[, metadata, status])` writes arrays under names (a character
+  array; trailing blanks are not written) with optional metadata, pairs of strings `metadata(1, i)` and
+  `metadata(2, i)`. A name given twice is refused before anything is written (MLX would keep one of the two
+  arrays without a word). `call mlx_load_safetensors(file, names, arrays[, metadata, status])` returns the arrays
+  and their names **sorted by name** (MLX keeps them in a hash table) and the metadata sorted by the first string.
+  `call mlx_save_gguf(file, names, arrays[, status])` and `call mlx_load_gguf(file, names, arrays[, status])` do
+  the same for GGUF, without metadata (typed maps with no Fortran counterpart).
+- **Kinds** (MLX 0.32.4). `.npy` takes every dtype, float64 on the CPU device. safetensors takes every dtype but
+  float64 ("received invalid dtype", a status). GGUF takes int8, int16, int32, float16 and float32; another is a
+  status. **A save MLX refuses for its kind has already opened the file:** a file of that name is lost (empty
+  for safetensors, a bare header for GGUF), so check the kinds before saving over a file worth keeping.
+- **Devices.** MLX reads files on the CPU only (a load built on the GPU's stream fails its evaluation), so what
+  is read is built on the CPU's default stream whatever the default device, and is used from there by
+  operations on either device (unified memory, no copy).
+- **Errors.** Every procedure here is checked: a file that is missing, that cannot be written or that holds
+  something else, an empty array, names that do not pair with the arrays or a name given twice return a status,
+  with the lists unallocated or the array empty, and MLX usable.
+- `call mlx_print_graph(arrays[, file, status])` writes the graph that computes the arrays as text, one line an
+  operation, to a file or to the standard output; `call mlx_export_to_dot(file, arrays[, status])` writes it in
+  Graphviz's dot language. Both show MLX's shapes, the Fortran shapes reversed.
+- The tests (`unit_io`): each of the eight transfer kinds at ranks 0 to 4 saved, the file read as bytes with its
+  header parsed in Fortran (kind, reversed shape, data equal to the host array's bytes in array element order),
+  loaded with its kind and Fortran shape, and written again to the same bytes; a host matrix's own bytes under
+  its reversed shape; a transposed view; safetensors and GGUF round trips with kinds, shapes and values, and
+  metadata found in the file's own text; eight names given in no order, each back with its own array; twenty
+  round trips through the three formats that leave the active memory where it was; the refusals; the sizes; the
+  two graph texts. No Python is involved.
+
+## 18. Distributed computing
+
+- `g = mlx_distributed_init([backend, strict, status])` returns `type(mlx_group)`, a counted handle on the group
+  of the processes this one was launched with, through `backend`: `'any'` (the default), `'ring'`, `'jaccl'`,
+  `'mpi'` or `'nccl'`. A process that no backend launched gets a group of one, or, with `strict=.true.`, a
+  status. `mlx_distributed_is_available([backend])` says whether MLX has the backend.
+- **Ranks are one-based:** `g%rank()` runs from 1 to `g%size()`, and the `dst` and `src` of a message are such
+  ranks (a rank below 1 stops: the guard `guard_send_rank`). `g%split(color[, key, status])` is the sub-group of
+  the processes that give the same color, ordered by key (absent or negative: by the rank each has here). MLX's
+  ring and jaccl backends refuse a split (MPI splits), as does a group of one: a status.
+- The collectives are nodes of the graph, evaluated like any array; `group` is optional, MLX's default group
+  when absent: `mlx_all_sum(x[, group, status])`, `mlx_all_max`, `mlx_all_min` (elementwise over the members),
+  `mlx_all_gather(x[, group, status])` (the members' arrays joined along the **last** dimension, MLX's first
+  axis, in the order of the ranks), `mlx_sum_scatter(x[, group, status])` (the sum, of which each member keeps
+  its share along the last dimension, whose extent the group size must divide). Messages:
+  `mlx_send(x, dst[, group, status])` (the result is `x`, sent when it is evaluated),
+  `mlx_recv(shape, dtype, src[, group, status])` with a Fortran shape, `mlx_recv_like(x, src[, group, status])`.
+- **Devices.** MLX exchanges on the CPU only (its distributed operations have no GPU implementation), so the
+  nodes are built on the CPU's default stream whatever the default device, and their results are used from there
+  by operations on either device.
+- With `status`, what MLX refuses when the node is built returns a status and an empty array; what fails in the
+  exchange fails the evaluation (section 6). On a group of one the collectives return their operand and a
+  message is refused ("Cannot send to a singleton group"), as is a split.
+- The gate (`unit_distributed`) tests the group of one. Two processes on one Mac through MLX's ring backend are
+  the named-only sub-suite `distributed_ring`, run by hand (the command and the host file are in the parity
+  plan's Progress); nothing of it is gated.

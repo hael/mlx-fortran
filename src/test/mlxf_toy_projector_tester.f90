@@ -7,14 +7,15 @@
 ! tie of the stencil's rounding are counted on the host (the fast fixtures have none) and not judged.
 module mlxf_toy_projector_tester
 use, intrinsic :: iso_fortran_env, only: int64, real32, real64
-use mlxf,                         only: mlx_set_default_device, mlx_default_device, mlx_live_count, mlx_active_memory, &
-                                        mlx_synchronize, MLX_DEVICES
+use mlxf,                         only: mlx_array, mlx_to, mlx_set_default_device, mlx_default_device, mlx_live_count, &
+                                        mlx_active_memory, mlx_synchronize, MLX_DEVICES
 use mlxf_test_defs,               only: OSMPL_PAD_FAC, PROJ_FORMS, PROJ_TIE_MARGIN, PROJ_FIXTURE_ERR, POLAR_ROW_FACTOR, &
                                         ELEM_SEED_CALIBRATION, ELEM_SEEDS_JUDGED, POLARFT_REF_ROUTES, &
                                         PROJ_CHAIN_ERR_HOST, PROJ_CHAIN_ERR_DEVICE, POLAR_DIST_MAX, POLAR_DIST_INVALID, &
-                                        parameters, polar_table_entries, polar_row_check
+                                        parameters, polar_table_entries, polar_row_check, fproject_spec
 use mlxf_toy_polarft_calc,        only: polarft_calc, vol_pad2ref_pfts_opt
 use mlxf_toy_projector,           only: projector
+use mlxf_toy_projector_workspace, only: projector_workspace
 use mlxf_toy_projector_pft_batch, only: fproject_polar_batch_opt
 use mlxf_oracle_projection,       only: oracle_proj_phantom, oracle_proj_rotation, oracle_proj_route, &
                                         oracle_proj_stencil, oracle_proj_polar_coords, oracle_proj_padded_field, &
@@ -84,12 +85,22 @@ type :: chain_fixture
 end type chain_fixture
 
 ! one run of the chain: the route of the references, the gather's form, and the rows of each half against all
-! six references (rotations, references, particles of the half)
+! six references (rotations, references, particles of the half); switch_at the stage after which the run asks for
+! the other route (0: never; SWITCH_STAGES), and whether that was refused
 type :: chain_run
-    integer                   :: route = POLARFT_REF_ROUTES%host
-    integer                   :: form  = PROJ_FORMS%graph
+    integer                   :: route     = POLARFT_REF_ROUTES%host
+    integer                   :: form      = PROJ_FORMS%graph
+    integer                   :: switch_at = 0
+    logical                   :: l_refused = .false.
     real(real32), allocatable :: rows(:,:,:,:)
 end type chain_run
+
+! the stages after which a run may ask for the other route: the projection, memoize_refs, memoize_ref_bins
+integer,          parameter :: AFTER_PROJECTION = 1
+integer,          parameter :: AFTER_MEMOS      = 2
+integer,          parameter :: AFTER_BINS       = 3
+character(len=*), parameter :: SWITCH_STAGES(3) = [character(len=24) :: 'the projection', 'memoize_refs', &
+    &'memoize_ref_bins']
 
 contains
 
@@ -112,6 +123,7 @@ contains
                 call test_repeatability(PROJ_FORMS%fused)
                 call test_lifecycle(PROJ_FORMS%fused)
                 call test_forms_agree()
+                call test_workspace_resize()
             endif
             call test_fused_refusals(devs(i))
         end do
@@ -655,6 +667,73 @@ contains
         end do
     end subroutine test_forms_agree
 
+    ! one fused workspace taken from a padded 8-cube to a padded 16-cube: its second projection equals a fresh
+    ! fused workspace's bit for bit, and both agree with the graph form within the fixtures' gate. The volume is
+    ! one unit voxel at (2, 1, 1), whose scaled transform has the modulus 1/M**3 everywhere, so the scale of a
+    ! sample (the summed magnitudes of its 27 terms, times the factor) is OSMPL_PAD_FAC**3 / M**3
+    subroutine test_workspace_resize
+        type(projector_workspace) :: reused, fresh, graph
+        type(fproject_spec)       :: spec
+        complex(real32)           :: a8(2), ar(2), af(2), ag(2)
+        real(real64)              :: scale, err, gate
+        logical                   :: ok(4)
+        character(len=160)        :: line
+        write(*,'(a)') 'test_workspace_resize'
+        spec%pftsz      = 2
+        spec%nk         = 1
+        spec%kto        = 2
+        spec%nspace     = 1
+        spec%noris      = 1
+        spec%refs_shape = [2, 1, 1]
+        spec%hk         = reshape([1._real32, 0._real32, 0._real32, 1._real32], [2, 2])
+        spec%rot        = reshape([1._real32, 0._real32, 0._real32, 1._real32, 0._real32, 0._real32], [2, 3, 1])
+        call reused%set_form(PROJ_FORMS%fused)
+        call fresh%set_form(PROJ_FORMS%fused)
+        call unit_voxel_samples(reused, 8, spec, a8, ok(1))
+        call unit_voxel_samples(reused, 16, spec, ar, ok(2))
+        call unit_voxel_samples(fresh, 16, spec, af, ok(3))
+        call unit_voxel_samples(graph, 16, spec, ag, ok(4))
+        call reused%kill()
+        call fresh%kill()
+        call graph%kill()
+        call assert_true(all(ok), 'workspace resize: the four projections ran without a refusal')
+        if( .not. all(ok) ) return
+        call assert_true(all(bits_equal(ar, af)), 'workspace resize: a fused workspace reused at another padded '// &
+            &'size equals a fresh one bit for bit')
+        gate  = POLAR_ROW_FACTOR * PROJ_FIXTURE_ERR
+        scale = real(OSMPL_PAD_FAC**3, real64) / 16._real64**3
+        err   = nan_maxval(abs(cmplx(ar, kind=real64) - cmplx(ag, kind=real64))) / scale
+        write(line,'(a,es12.5,a,es10.3)') '    workspace resize: reused fused against graph ', err, ' gate ', gate
+        write(*,'(a)') trim(line)
+        call assert_true(err <= gate, 'workspace resize: the reused fused workspace agrees with the graph form')
+        err   = nan_maxval(abs(cmplx(af, kind=real64) - cmplx(ag, kind=real64))) / scale
+        call assert_true(err <= gate, 'workspace resize: the fresh fused workspace agrees with the graph form')
+    end subroutine test_workspace_resize
+
+    ! the samples of spec from a workspace given the padded m-cube that holds one unit voxel at (2, 1, 1)
+    subroutine unit_voxel_samples( ws, m, spec, a, ok )
+        type(projector_workspace), intent(inout) :: ws
+        integer,                   intent(in)    :: m
+        type(fproject_spec),       intent(in)    :: spec
+        complex(real32),           intent(out)   :: a(:)
+        logical,                   intent(out)   :: ok
+        type(mlx_array)           :: bank
+        real(real32), allocatable :: rpad(:,:,:)
+        integer                   :: st
+        a  = cmplx(0._real32, 0._real32, real32)
+        ok = .false.
+        allocate(rpad(m, m, m), source=0._real32)
+        rpad(2, 1, 1) = 1._real32
+        call ws%transform(rpad, st)
+        if( st /= 0 ) return
+        call ws%expand(st)
+        if( st /= 0 ) return
+        call ws%project(spec, bank, st)
+        if( st /= 0 ) return
+        call mlx_to(a, bank, status=st)
+        ok = st == 0
+    end subroutine unit_voxel_samples
+
     ! the fused form refused on the CPU device, a threadgroup above 1,024 refused, both through message(); the
     ! projector then projects in the graph form, and on the GPU a fused projection is followed by a graph one on
     ! the same expanded projector
@@ -735,6 +814,7 @@ contains
             call test_chain_rows(PROJ_FORMS%graph)
             if( devs(i) == MLX_DEVICES%gpu ) call test_chain_rows(PROJ_FORMS%fused)
             call test_chain_refusals()
+            call test_chain_route_switch()
         end do
         call mlx_set_default_device(original)
     end subroutine run_all_projector_chain_tests
@@ -911,11 +991,14 @@ contains
         nbad = 0
         call chain_calc(pftc, run%route)
         call chain_reproject(pftc, fx, run%form, nbad)
+        if( run%switch_at == AFTER_PROJECTION ) call chain_switch(pftc, run)
         call pftc%memoize_refs()
         if( len(pftc%message()) > 0 ) nbad = nbad + 1
+        if( run%switch_at == AFTER_MEMOS ) call chain_switch(pftc, run)
         call chain_particles(pftc, fx, nbad)
         call pftc%memoize_ref_bins()
         if( len(pftc%message()) > 0 ) nbad = nbad + 1
+        if( run%switch_at == AFTER_BINS ) call chain_switch(pftc, run)
         allocate(run%rows(CH_NROTS, CH_NSPACE, CH_NPTCLS / 2, 2))
         do h = 1, 2
             pids = [(i, i = h, CH_NPTCLS, 2)]
@@ -936,6 +1019,15 @@ contains
         end do
         call pftc%kill()
     end subroutine chain_once
+
+    ! the run asks for the other route; whether the calculator refused is kept with the run
+    subroutine chain_switch( pftc, run )
+        type(polarft_calc), intent(inout) :: pftc
+        type(chain_run),    intent(inout) :: run
+        call pftc%set_ref_route(merge(POLARFT_REF_ROUTES%device, POLARFT_REF_ROUTES%host, &
+            &run%route == POLARFT_REF_ROUTES%host))
+        run%l_refused = index(pftc%message(), 'refused') > 0
+    end subroutine chain_switch
 
     function route_name( route ) result(name)
         integer, intent(in) :: route
@@ -1013,6 +1105,33 @@ contains
                 &': three runs give the same rows, bit for bit')
         end do
     end subroutine test_chain_rows
+
+    ! a change of route asked for after the projection, after memoize_refs and after memoize_ref_bins, from either
+    ! route: each is refused and changes nothing, so that the run's rows are those of a run that never asked, bit
+    ! for bit (and with them within the chain's gate)
+    subroutine test_chain_route_switch
+        type(chain_fixture) :: fx
+        type(chain_run)     :: plain, run
+        integer             :: ir, stage, nbad
+        write(*,'(a)') 'test_chain_route_switch'
+        fx = chain_fixture_of(ELEM_SEED_CALIBRATION)
+        do ir = 1, 2
+            plain%route = merge(POLARFT_REF_ROUTES%host, POLARFT_REF_ROUTES%device, ir == 1)
+            if( allocated(plain%rows) ) deallocate(plain%rows)
+            call chain_once(fx, plain, nbad)
+            do stage = AFTER_PROJECTION, AFTER_BINS
+                run%route     = plain%route
+                run%switch_at = stage
+                run%l_refused = .false.
+                if( allocated(run%rows) ) deallocate(run%rows)
+                call chain_once(fx, run, nbad)
+                call assert_true(run%l_refused, 'a change from the '//route_name(run%route)//' route after '// &
+                    &trim(SWITCH_STAGES(stage))//' is refused')
+                call assert_true(nbad == 0 .and. all(bits_equal(run%rows, plain%rows)), 'a refused change from the '// &
+                    &route_name(run%route)//' route after '//trim(SWITCH_STAGES(stage))//' leaves the rows as they were')
+            end do
+        end do
+    end subroutine test_chain_route_switch
 
     ! on either route a block scored before memoize_ref_bins is refused; on the device route the shift maps and a
     ! change of route while the sections wait are refused

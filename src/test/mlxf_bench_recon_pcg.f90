@@ -15,11 +15,13 @@ use mlxf_test_defs,             only: RECON_PCG_BENCH_N, RECON_PCG_BENCH_MSKRAD,
                                       RECON_PCG_LAMBDA_REL, RECON_PCG_TOLERANCES, PCG_LAMBDA, PCG_RESID_REPLACE, &
                                       ELEM_CEILING, pcg_solver_options
 use mlxf_toy_reconstructor_pcg, only: reconstructor_pcg
-use mlxf_toy_pcg_solver,        only: pcg_operator, pcg_solver_outcome, pcg_solve
+use mlxf_toy_device_work,       only: device_work
+use mlxf_toy_pcg_solver,        only: pcg_solver_outcome
+use mlxf_toy_pcg_solver_mlx,    only: pcg_operator, pcg_solve
 use mlxf_oracle_recon_fixture,  only: oracle_recon_fixture_accum
 use mlxf_oracle_recon_pcg,      only: oracle_recon_problem
 use mlxf_test_utils,            only: assert_true, test_devices, device_name, bits_equal, seeded_uniform
-use mlxf_test_reduce,           only: nan_maxval
+use mlxf_test_reduce,           only: nan_maxval, nan_max
 implicit none
 private
 
@@ -76,16 +78,6 @@ type :: bench_row
     real           :: load0  = -1.
     real           :: load1  = -1.
 end type bench_row
-
-! the engine's client over the toy's public procedures: rules the toy's solve_accum does not offer, and the probe
-type, extends(pcg_operator) :: bench_operator
-    type(reconstructor_pcg), pointer :: rec => null()
-  contains
-    procedure :: size    => bench_size
-    procedure :: apply   => bench_apply
-    procedure :: precond => bench_precond
-    procedure :: dot     => bench_dot
-end type bench_operator
 
 interface
     integer(c_int) function getloadavg( loadavg, nelem ) bind(c, name='getloadavg')
@@ -352,31 +344,55 @@ contains
         call rec%end_accum(.true.)
     end subroutine bench_assemble
 
-    integer function bench_size( self ) result(n)
-        class(bench_operator), intent(in) :: self
-        n = self%rec%box**3
-    end function bench_size
+    ! the device forms of the toy's operator, for the rules its solve_accum does not offer and the probe: the
+    ! reconstructor hands its operator out as the opaque device state, which is the engine's pcg_operator. H x on
+    ! the device (P H P with a support), unevaluated
+    function device_apply( rec, x ) result(y)
+        type(reconstructor_pcg), target, intent(inout) :: rec
+        type(mlx_array),                 intent(in)    :: x
+        type(mlx_array)                 :: y
+        class(device_work), allocatable :: op
+        call rec%get_pcg_operator(op)
+        if( .not. allocated(op) ) return
+        select type( op )
+            class is( pcg_operator )
+                call op%apply(x, y)
+        end select
+        call op%kill()
+        deallocate(op)
+    end function device_apply
 
-    subroutine bench_apply( self, x, y )
-        class(bench_operator), intent(inout) :: self
-        type(mlx_array),       intent(in)    :: x
-        type(mlx_array),       intent(out)   :: y
-        y = self%rec%apply_normal(x)
-    end subroutine bench_apply
+    ! the preconditioner's product on the device, unevaluated
+    function device_precond( rec, r ) result(z)
+        type(reconstructor_pcg), target, intent(inout) :: rec
+        type(mlx_array),                 intent(in)    :: r
+        type(mlx_array)                 :: z
+        class(device_work), allocatable :: op
+        call rec%get_pcg_operator(op)
+        if( .not. allocated(op) ) return
+        select type( op )
+            class is( pcg_operator )
+                call op%precond(r, z)
+        end select
+        call op%kill()
+        deallocate(op)
+    end function device_precond
 
-    subroutine bench_precond( self, r, z )
-        class(bench_operator), intent(inout) :: self
-        type(mlx_array),       intent(in)    :: r
-        type(mlx_array),       intent(out)   :: z
-        z = self%rec%apply_precond(r)
-    end subroutine bench_precond
-
-    function bench_dot( self, a, b ) result(d)
-        class(bench_operator), intent(in) :: self
-        type(mlx_array),       intent(in) :: a, b
-        type(mlx_array) :: d
-        d = self%rec%dot_real_volume(a, b)
-    end function bench_dot
+    ! the device half of a . b: the partial sums of the lines, unevaluated
+    function device_dot( rec, a, b ) result(d)
+        type(reconstructor_pcg), target, intent(inout) :: rec
+        type(mlx_array),                 intent(in)    :: a, b
+        type(mlx_array)                 :: d
+        class(device_work), allocatable :: op
+        call rec%get_pcg_operator(op)
+        if( .not. allocated(op) ) return
+        select type( op )
+            class is( pcg_operator )
+                d = op%dot(a, b)
+        end select
+        call op%kill()
+        deallocate(op)
+    end function device_dot
 
     ! the engine's options of a rule: F2 and F5 SIMPLE's production (exactly 2 and 5), F25 and F50 fixed
     ! iterations, E the engine's rules, R4 rtol 1e-4 with no step test and at most 200
@@ -401,7 +417,7 @@ contains
     end function rule_options
 
     ! the solve of a rule from zero into x: SIMPLE's solve_accum (the shipped map), or for R4, whose step test
-    ! solve_accum does not let a caller turn off, the engine on the toy's public procedures (the unshipped solution)
+    ! solve_accum does not let a caller turn off, the engine on the toy's operator (the unshipped solution)
     subroutine solve_rule( rec, rule, x, oc )
         type(reconstructor_pcg), target, intent(inout) :: rec
         character(len=*),                intent(in)    :: rule
@@ -417,22 +433,29 @@ contains
         endif
     end subroutine solve_rule
 
-    ! the engine from zero on the toy's public procedures under options o: the unshipped solution u in x
+    ! the engine from zero on the toy's operator under options o: the unshipped solution u in x
     subroutine engine_solution( rec, o, x, oc )
         type(reconstructor_pcg), target, intent(inout) :: rec
         type(pcg_solver_options),        intent(in)    :: o
         real(real32),                    intent(inout) :: x(:,:,:)
         type(pcg_solver_outcome),        intent(out)   :: oc
-        type(bench_operator)      :: op
-        type(mlx_array)           :: bd, xd
-        real(real32), allocatable :: b(:,:,:), e(:,:,:), ie(:,:,:)
+        class(device_work), allocatable :: op
+        type(mlx_array)                 :: bd, xd
+        real(real32),       allocatable :: b(:,:,:), e(:,:,:), ie(:,:,:)
         allocate(b, e, ie, mold=x)
         call rec%copy_volumes(b, e, ie)
-        op%rec => rec
         bd = mlx_from(b)
         x  = 0._real32
         xd = mlx_from(x)
-        call pcg_solve(op, bd, xd, o, oc)
+        call rec%get_pcg_operator(op)
+        if( allocated(op) )then
+            select type( op )
+                class is( pcg_operator )
+                    call pcg_solve(op, bd, xd, o, oc)
+            end select
+            call op%kill()
+            deallocate(op)
+        endif
         call mlx_to(x, xd)
     end subroutine engine_solution
 
@@ -445,7 +468,7 @@ contains
         allocate(b, e, ie, h, mold=u)
         call rec%copy_volumes(b, e, ie)
         ud = mlx_from(u)
-        hu = rec%apply_normal(ud)
+        hu = device_apply(rec, ud)
         call mlx_to(h, hu)
         r = norm2(real(b, real64) - real(h, real64)) / norm2(real(b, real64))
     end function device_true_residual
@@ -699,13 +722,13 @@ contains
                 t0 = clock_s()
                 select case( piece )
                     case( 1 )
-                        y = rec%apply_normal(v)
+                        y = device_apply(rec, v)
                         call mlx_eval(y)
                     case( 2 )
-                        y = rec%apply_precond(v)
+                        y = device_precond(rec, v)
                         call mlx_eval(y)
                     case( 3 )
-                        y = rec%dot_real_volume(v, v)
+                        y = device_dot(rec, v, v)
                         call mlx_to(part, y)
                     case default
                         y = transform_pair(v, n)
@@ -855,7 +878,7 @@ contains
         b     = mlx_from(bh)
         x     = mlx_from(0._real32 * bh)
         r     = b
-        z     = rec%apply_precond(r)
+        z     = device_precond(rec, r)
         p     = z
         es    = 0._real64
         drift = 0._real64
@@ -863,22 +886,22 @@ contains
         bnorm = sqrt(dot_s4(b, b))
         rho   = dot_checked(rec, r, z, es)
         do it = 1, 50
-            hp    = rec%apply_normal(p)
+            hp    = device_apply(rec, p)
             phpv  = dot_checked(rec, p, hp, es)
             alpha = rho / phpv
             x     = x + real(alpha, real32) * p
             r     = r - real(alpha, real32) * hp
             if( modulo(it, replace) == 0 )then
-                hp = rec%apply_normal(x)
+                hp = device_apply(rec, x)
                 r  = b - hp
             endif
             dv(1) = dot_checked(rec, r, r, es)
             dv(2) = dot_checked(rec, x, x, es)
             dv(3) = dot_checked(rec, p, p, es)
-            z     = rec%apply_precond(r)
+            z     = device_precond(rec, r)
             dv(4) = dot_checked(rec, r, z, es)
             if( modulo(it, 5) == 0 )then
-                tr = b - rec%apply_normal(x)
+                tr = b - device_apply(rec, x)
                 kd        = kd + 1
                 drift(kd) = abs(sqrt(dot_s4(r, r)) - sqrt(dot_s4(tr, tr))) / bnorm
             endif
@@ -897,7 +920,7 @@ contains
         real(real32), allocatable :: part(:)
         real(real32)              :: v1
         real(real64)              :: v4
-        d  = rec%dot_real_volume(a, b)
+        d  = device_dot(rec, a, b)
         s1 = sum(a * b)
         call mlx_eval([d, s1])
         allocate(part(d%size()))
@@ -905,8 +928,8 @@ contains
         call mlx_item(s1, v1)
         v  = sum(real(part, real64))
         v4 = dot_s4(a, b)
-        es(1) = max(es(1), abs(real(v1, real64) - v4) / abs(v4))
-        es(2) = max(es(2), abs(v - v4) / abs(v4))
+        es(1) = nan_max(es(1), abs(real(v1, real64) - v4) / abs(v4))
+        es(2) = nan_max(es(2), abs(v - v4) / abs(v4))
     end function dot_checked
 
     ! S4: the host's double sum of the products over views of the evaluated vectors (no copy)

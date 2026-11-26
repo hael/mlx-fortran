@@ -5,14 +5,16 @@ use, intrinsic :: iso_c_binding,   only: c_ptr, c_int, c_bool, c_intptr_t, c_nul
 use, intrinsic :: iso_fortran_env, only: int64
 use mlxf_c_types,   only: mlxc_closure, mlxc_vector_array
 use mlxf_c_closure, only: mlxc_closure_new, mlxc_closure_new_func_payload, mlxc_closure_free, mlxc_closure_apply
-use mlxf_c_compile, only: mlxc_compile
+use mlxf_c_compile, only: mlxc_compile, mlxc_enable_compile, mlxc_disable_compile, mlxc_set_compile_mode
 use mlxf_c_vector,  only: mlxc_vector_array_new, mlxc_vector_array_free
+use mlxf_defs,      only: MLX_COMPILE_MODES
 use mlxf_array,     only: mlx_array, mlxf_vector_import, mlxf_vector_export
 use mlxf_device,    only: mlxf_enter, mlxf_require_device
 use mlxf_error,     only: mlxf_check, mlxf_fail, mlxf_report, mlxf_guard_thread
 use mlxf_registry,  only: registry_add, registry_retain, registry_release, registry_is_live
 implicit none
-public :: mlx_function, mlx_compile
+public :: mlx_function, mlx_compile, mlx_enable_compile, mlx_disable_compile, mlx_set_compile_mode
+public :: mlxf_function_handle, mlxf_function_adopt
 private
 abstract interface
     subroutine array_callback( inputs, outputs, status )
@@ -92,6 +94,48 @@ contains
         g%serial = registry_add(closure_key(g%h))
         g%payload => f%payload
     end function mlx_compile
+
+    ! compilation on, for the functions compiled from now on (MLX's default)
+    subroutine mlx_enable_compile()
+        call mlxf_enter('mlx_enable_compile')
+        call mlxf_check(mlxc_enable_compile(), 'mlx_enable_compile')
+    end subroutine mlx_enable_compile
+
+    ! compilation off: a function compiled from now on runs its callback at every call, and stays so
+    subroutine mlx_disable_compile()
+        call mlxf_enter('mlx_disable_compile')
+        call mlxf_check(mlxc_disable_compile(), 'mlx_disable_compile')
+    end subroutine mlx_disable_compile
+
+    ! what compilation does: a member of MLX_COMPILE_MODES (another value stops)
+    subroutine mlx_set_compile_mode( mode )
+        integer, intent(in) :: mode
+        call mlxf_enter('mlx_set_compile_mode')
+        if( all(mode /= [MLX_COMPILE_MODES%disabled, MLX_COMPILE_MODES%no_simplify, MLX_COMPILE_MODES%no_fuse, &
+            &MLX_COMPILE_MODES%enabled]) ) call mlxf_fail('mlx_set_compile_mode', 'the mode must be a member of MLX_COMPILE_MODES')
+        call mlxf_check(mlxc_set_compile_mode(int(mode, c_int)), 'mlx_set_compile_mode')
+    end subroutine mlx_set_compile_mode
+
+    ! the closure of a live function, for the library's transforms (an empty or stale function stops)
+    function mlxf_function_handle( f, proc ) result(h)
+        class(mlx_function), intent(in) :: f
+        character(len=*),    intent(in) :: proc
+        type(mlxc_closure) :: h
+        call require_function(f, proc)
+        h = f%h
+    end function mlxf_function_handle
+
+    ! makes g the counted owner of the closure h, which MLX derived from f: g shares f's callback payload, as a
+    ! compiled function does
+    subroutine mlxf_function_adopt( g, h, f )
+        type(mlx_function), intent(inout) :: g
+        type(mlxc_closure), intent(in)    :: h
+        type(mlx_function), intent(in)    :: f
+        call function_release(g)
+        g%h = h
+        g%serial = registry_add(closure_key(h))
+        g%payload => f%payload
+    end subroutine mlxf_function_adopt
 
     ! the callback or its compiled graph on inputs; with status, a failure returns with outputs unallocated
     ! and MLX usable. Recursive: a callback may apply another function

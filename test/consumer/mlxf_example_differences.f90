@@ -8,11 +8,12 @@ use, intrinsic :: iso_c_binding,   only: c_bool
 use, intrinsic :: ieee_arithmetic, only: ieee_is_nan, ieee_value, ieee_positive_inf
 use mlxf, only: mlx_array, mlx_from, mlx_to_alloc, mlx_astype, mlx_floor_divide, mlx_mean, mlx_round, mlx_take, &
                 mlx_set_default_device, mlx_default_device, mlx_device_count, mlx_metal_is_available, MLX_DEVICES, &
-                MLX_DTYPES, matmul, transpose, real, cmplx, sum, count, all, maxloc, modulo, exp
+                MLX_DTYPES, matmul, transpose, real, cmplx, sum, count, all, maxloc, modulo, exp, mlx_random_key, &
+                mlx_random_uniform, mlx_random_seed
 implicit none
-type(mlx_array)              :: a, b, c, f, z
+type(mlx_array)              :: a, b, c, f, z, key
 integer(int32),  allocatable :: i1(:)
-real(real32),    allocatable :: r1(:), r2(:,:), r3(:,:,:)
+real(real32),    allocatable :: r1(:), r2(:,:), r3(:,:,:), u1(:), u2(:), u3(:)
 real(real64),    allocatable :: d1(:)
 complex(real32), allocatable :: z1(:)
 logical(c_bool), allocatable :: l1(:)
@@ -140,6 +141,20 @@ end do
 c = matmul(transpose(mlx_from(x3)), mlx_from(y3))
 call mlx_to_alloc(r3, c)
 call row(19, all(shape(r3) == [2, 2, 2]) .and. all(abs(r3 - want3) <= 0.))
+
+! D20: a random sample is a function of its key and its shape; without a key the global key is used and advanced
+key = mlx_random_key(42)
+c = mlx_random_uniform([8], key=key)
+call mlx_to_alloc(u1, c)
+c = mlx_random_uniform([8], key=key)
+call mlx_to_alloc(u2, c)
+call mlx_random_seed(42)
+c = mlx_random_uniform([8])
+call mlx_to_alloc(r1, c)
+c = mlx_random_uniform([8])
+call mlx_to_alloc(u3, c)
+call row(20, c%kind() == MLX_DTYPES%float32 .and. all(abs(u1 - u2) <= 0.) .and. any(abs(r1 - u3) > 0.) &
+    &.and. all(u1 >= 0.) .and. all(u1 < 1.))
 
 if( nfailed > 0 ) error stop 1
 write(*,'(a)') 'mlxf_example_differences: every row holds, on the '// &

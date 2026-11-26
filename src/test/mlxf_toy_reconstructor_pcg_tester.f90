@@ -8,17 +8,17 @@
 module mlxf_toy_reconstructor_pcg_tester
 use, intrinsic :: iso_fortran_env, only: int64, real32, real64
 use mlxf,                       only: mlx_array, mlx_from, mlx_to, mlx_eval, mlx_set_default_device, mlx_live_count, &
-                                      mlx_active_memory, mlx_default_device
+                                      mlx_active_memory, mlx_default_device, mlx_synchronize
 use mlxf_test_defs,             only: RECON_PCG_N_SMALL, RECON_PCG_N_NAMED, RECON_PCG_MSKRAD_SMALL, &
                                       RECON_PCG_MSKRAD_NAMED, RECON_PCG_PLANES_PER_N, RECON_PCG_LAMBDA_REL, &
-                                      RECON_PCG_TOLERANCES
+                                      RECON_PCG_TOLERANCES, parameters
 use mlxf_toy_reconstructor_pcg, only: reconstructor_pcg
 use mlxf_oracle_recon_fixture,  only: oracle_recon_fixture_accum
 use mlxf_oracle_recon_pcg,      only: oracle_recon_problem, oracle_recon_dense_matrices, &
                                       oracle_recon_reference_spectrum
 use mlxf_oracle_gridding,       only: oracle_grid_envelope, oracle_grid_reciprocal
 use mlxf_test_utils,            only: assert_true, device_name, test_devices, family_seeds, seeded_uniform, bits_equal
-use mlxf_test_reduce,           only: nan_maxval
+use mlxf_test_reduce,           only: nan_maxval, nan_max
 implicit none
 private
 public :: run_all_reconstructor_pcg_tests, run_all_reconstructor_pcg_n32_tests
@@ -45,8 +45,8 @@ type :: recon_fixture
 end type recon_fixture
 
 interface
-    ! the solve's gates on the small fixture (one device, one seed) and on the named-only one, and the
-    ! repeatability of the assembly under rule E (one device)
+    ! the solve's gates on the small fixture (one device, one seed) and on the named-only one, the
+    ! repeatability of the assembly under rule E (one device) and the history comparator's negative controls
     module subroutine test_solve_small( fx )
         type(recon_fixture), intent(in) :: fx
     end subroutine test_solve_small
@@ -56,6 +56,9 @@ interface
     module subroutine test_repeatability( fx )
         type(recon_fixture), intent(in) :: fx
     end subroutine test_repeatability
+    module subroutine test_history_controls( fx )
+        type(recon_fixture), intent(in) :: fx
+    end subroutine test_history_controls
     module function tol( name ) result(t)
         character(len=*), intent(in) :: name
         real(real64) :: t
@@ -85,6 +88,24 @@ interface
     module function device_name_now() result(name)
         character(len=:), allocatable :: name
     end function device_name_now
+    ! the device forms of the operator, by the operator the reconstructor hands out (get_pcg_operator): the
+    ! product H x (P H P with a support), the preconditioner's product and the device half of the inner product
+    ! (the partial sums of the lines), each on device vectors and unevaluated
+    module function device_apply( rec, x ) result(y)
+        type(reconstructor_pcg), target, intent(inout) :: rec
+        type(mlx_array),                 intent(in)    :: x
+        type(mlx_array) :: y
+    end function device_apply
+    module function device_precond( rec, r ) result(z)
+        type(reconstructor_pcg), target, intent(inout) :: rec
+        type(mlx_array),                 intent(in)    :: r
+        type(mlx_array) :: z
+    end function device_precond
+    module function device_dot( rec, a, b ) result(d)
+        type(reconstructor_pcg), target, intent(inout) :: rec
+        type(mlx_array),                 intent(in)    :: a, b
+        type(mlx_array) :: d
+    end function device_dot
 end interface
 
 contains
@@ -108,6 +129,8 @@ contains
             call mlx_set_default_device(devs(id))
             call test_lifecycle(fx)
             call test_repeatability(fx)
+            call test_history_controls(fx)
+            call test_host_forms(fx)
         end do
     end subroutine run_all_reconstructor_pcg_tests
 
@@ -231,9 +254,9 @@ contains
                 v(modulo(j0 + j - 2, n) + 1, modulo((j0 + j - 2) / n, n) + 1, (j0 + j - 2) / n**2 + 1) = 1._real32
                 e = mlx_from(v)
                 if( which == 'operator' )then
-                    outs(j) = rec%apply_normal(e)
+                    outs(j) = device_apply(rec, e)
                 else
-                    outs(j) = rec%apply_precond(e)
+                    outs(j) = device_precond(rec, e)
                 endif
             end do
             call mlx_eval(outs(1:nb))
@@ -283,7 +306,7 @@ contains
                 end do
             end do
         end do
-        err = max(nan_maxval(abs(real(env, real64) - eref)), nan_maxval(abs(real(invenv, real64) - &
+        err = nan_max(nan_maxval(abs(real(env, real64) - eref)), nan_maxval(abs(real(invenv, real64) - &
                   oracle_grid_reciprocal(eref))))
         call report('envelope', fx, err, tol('envelope'))
         call assert_true(err <= tol('envelope'), 'O1: the envelope and its reciprocal match the oracle''s')
@@ -372,8 +395,8 @@ contains
         v  = fixed_volume(n, 2)
         ud = mlx_from(u)
         vd = mlx_from(v)
-        hu = rec%apply_normal(ud)
-        hv = rec%apply_normal(vd)
+        hu = device_apply(rec, ud)
+        hv = device_apply(rec, vd)
         call mlx_to(hu_h, hu)
         call mlx_to(hv_h, hv)
         a = sum(real(u, real64) * real(hv_h, real64))
@@ -383,7 +406,7 @@ contains
     end function symmetry_defect
 
     ! 100 cycles of new, end_accum, one application and kill leave the live handles and the active memory as they
-    ! were
+    ! were. The device releases a buffer when the work that used it completes: each sample waits for the stream.
     subroutine test_lifecycle( fx )
         type(recon_fixture), intent(in) :: fx
         type(reconstructor_pcg) :: rec
@@ -394,19 +417,21 @@ contains
         write(*,'(a,a)') 'test_lifecycle ', device_name_now()
         call assemble(fx, rec)
         v  = mlx_from(fixed_volume(fx%n, 3))
-        hv = rec%apply_normal(v)
+        hv = device_apply(rec, v)
         call mlx_to(y, hv)
         call rec%kill()
         call hv%kill()
+        call mlx_synchronize()
         live0 = mlx_live_count()
         mem0  = mlx_active_memory()
         do k = 1, NCYCLES
             call assemble(fx, rec)
-            hv = rec%apply_normal(v)
+            hv = device_apply(rec, v)
             call mlx_to(y, hv)
             call rec%kill()
             call hv%kill()
         end do
+        call mlx_synchronize()
         live1 = mlx_live_count()
         mem1  = mlx_active_memory()
         call assert_true(live1 == live0, 'reconstructor_pcg: 100 cycles of new, end_accum, apply and kill leave '//&
@@ -414,6 +439,101 @@ contains
         call assert_true(mem1 == mem0, 'reconstructor_pcg: 100 cycles of new, end_accum, apply and kill leave '//&
             'the active memory as it was')
     end subroutine test_lifecycle
+
+    ! the five procedures of the operator on host volumes (SIMPLE's dummy lists) against the device forms the engine
+    ! solves with, brought to the host: byte for byte, since a host form is its device form between two copies.
+    ! apply_normal_kernel, taken with the support set, is held to the operator once the support is cleared, where
+    ! the operator is the kernel's product alone, and differs from the masked operator's; mask_mul is held to the
+    ! preconditioner's product before end_accum, which is P r. On the host backend, where the toy makes no
+    ! reconstructor, each of the five is refused with its message
+    subroutine test_host_forms( fx )
+        type(recon_fixture), intent(in) :: fx
+        type(reconstructor_pcg)       :: rec
+        type(mlx_array)               :: ud, vd, yd
+        real(real32)                  :: u(fx%n, fx%n, fx%n), v(fx%n, fx%n, fx%n), ref(fx%n, fx%n, fx%n)
+        real(real32)                  :: part(fx%n * fx%n)
+        real(real32),     allocatable :: y(:,:,:), hk(:,:,:)
+        real(real64)                  :: d, dref
+        character(len=:), allocatable :: dev
+        dev = ' ('//device_name_now()//')'
+        write(*,'(a,a)') 'test_host_forms ', device_name_now()
+        u  = fixed_volume(fx%n, 7)
+        v  = fixed_volume(fx%n, 8)
+        ud = mlx_from(u)
+        vd = mlx_from(v)
+        call assemble(fx, rec)
+        y  = rec%apply_normal(u)
+        yd = device_apply(rec, ud)
+        call mlx_to(ref, yd)
+        call assert_true(same_volume(y, ref) .and. .not. same_volume(y, u), 'reconstructor_pcg%apply_normal of a host '//&
+            'volume is the device form''s product brought to the host, byte for byte'//dev)
+        hk  = rec%apply_normal_kernel(u)
+        ref = kernel_reference(rec, ud)
+        call assert_true(same_volume(hk, ref) .and. .not. same_volume(hk, y), &
+            'reconstructor_pcg%apply_normal_kernel of a host volume is the device form''s product (the operator '//&
+            'once the support is cleared), byte for byte, and not the masked operator''s'//dev)
+        call rec%kill()
+        call assemble(fx, rec)
+        y  = rec%apply_precond(u)
+        yd = device_precond(rec, ud)
+        call mlx_to(ref, yd)
+        call assert_true(same_volume(y, ref) .and. .not. same_volume(y, u), 'reconstructor_pcg%apply_precond of a '//&
+            'host volume is the device form''s product brought to the host, byte for byte'//dev)
+        d  = rec%dot_real_volume(u, v)
+        yd = device_dot(rec, ud, vd)
+        call mlx_to(part, yd)
+        dref = sum(real(part, real64))
+        call assert_true(bits_equal(d, dref) .and. abs(dref) > 0._real64, 'reconstructor_pcg%dot_real_volume of host '//&
+            'volumes is the device form''s line sums added in double, byte for byte'//dev)
+        call rec%kill()
+        call rec%new(fx%n)
+        call rec%set_window_sphere(real(fx%mskrad, real32))
+        y  = u
+        call rec%mask_mul(y)
+        yd = device_precond(rec, ud)
+        call mlx_to(ref, yd)
+        call assert_true(same_volume(y, ref) .and. .not. same_volume(y, u), 'reconstructor_pcg%mask_mul of a host '//&
+            'volume is the device form''s P v (the preconditioner before end_accum), byte for byte'//dev)
+        call rec%kill()
+        call rec%new(fx%n, params=parameters(l_mlx=.false.))
+        y = rec%apply_normal(u)
+        call assert_true(size(y) == 0 .and. index(rec%message(), 'apply_normal: refused: the toy has no host route') > 0, &
+            'reconstructor_pcg%apply_normal is refused on the host backend: '//rec%message()//dev)
+        y = rec%apply_normal_kernel(u)
+        call assert_true(size(y) == 0 .and. index(rec%message(), 'apply_normal_kernel: refused: the toy has no host '//&
+            'route') > 0, 'reconstructor_pcg%apply_normal_kernel is refused on the host backend: '//rec%message()//dev)
+        y = rec%apply_precond(u)
+        call assert_true(size(y) == 0 .and. index(rec%message(), 'apply_precond: refused: the toy has no host route') > 0, &
+            'reconstructor_pcg%apply_precond is refused on the host backend: '//rec%message()//dev)
+        d = rec%dot_real_volume(u, v)
+        call assert_true(bits_equal(d, 0._real64) .and. index(rec%message(), 'dot_real_volume: refused: the toy has no '//&
+            'host route') > 0, 'reconstructor_pcg%dot_real_volume is refused on the host backend: '//rec%message()//dev)
+        y = u
+        call rec%mask_mul(y)
+        call assert_true(same_volume(y, u) .and. index(rec%message(), 'mask_mul: refused: the toy has no host route') > 0, &
+            'reconstructor_pcg%mask_mul is refused on the host backend, the volume as it came: '//rec%message()//dev)
+        call rec%kill()
+    end subroutine test_host_forms
+
+    ! the kernel's product H u of a finalised reconstructor by the device form the engine solves with: the support
+    ! is cleared (a non-positive radius), which leaves the operator as the kernel's product alone
+    function kernel_reference( rec, ud ) result(ref)
+        type(reconstructor_pcg), intent(inout) :: rec
+        type(mlx_array),         intent(in)    :: ud
+        real(real32)    :: ref(rec%box, rec%box, rec%box)
+        type(mlx_array) :: yd
+        call rec%set_window_sphere(0._real32)
+        yd = device_apply(rec, ud)
+        call mlx_to(ref, yd)
+    end function kernel_reference
+
+    ! whether a host volume has the shape and the bytes of another
+    pure logical function same_volume( y, ref )
+        real(real32), intent(in) :: y(:,:,:), ref(:,:,:)
+        same_volume = .false.
+        if( any(shape(y) /= shape(ref)) ) return
+        same_volume = all(bits_equal(y, ref))
+    end function same_volume
 
     ! ---- the named-only fixture ----------------------------------------------------------------------------
 
@@ -458,8 +578,8 @@ contains
         epc = 0._real64
         do k = 1, NVEC_N32
             vd = mlx_from(fixed_volume(n, k))
-            hv = rec%apply_normal(vd)
-            zv = rec%apply_precond(vd)
+            hv = device_apply(rec, vd)
+            zv = device_precond(rec, vd)
             call mlx_to(y, hv)
             call prob%apply(real(reshape(fixed_volume(n, k), [n**3]), real64), ref)
             eop = max(eop, rel2(real(reshape(y, [n**3]), real64), ref))

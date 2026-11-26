@@ -1,10 +1,12 @@
-!@descr: custom Metal kernels: a kernel's source and launch configuration behind a counted handle, applied to arrays on the GPU
+!@descr: MLX's fast module: fused layers along dimension 1, and custom Metal kernels behind a counted handle, applied on the GPU
+! The fused layers (normalisations, rotary embeddings, attention, cross entropy) act along MLX's last axes:
+! features along Fortran dimension 1, a sequence along dimension 2. The rest of this header is the kernels'.
 ! The source is the body of a Metal function. MLX writes the function's signature from the buffer names, the
 ! inputs' dtypes and the outputs' dtypes at each application, and compiles it when a result is evaluated. The
 ! source sees MLX's buffers, row-major and 0-based: it is the one place where a user writes MLX's layout.
 module mlxf_fast
 use, intrinsic :: iso_c_binding,   only: c_int, c_bool, c_size_t, c_intptr_t, c_null_ptr, c_null_char, c_associated
-use, intrinsic :: iso_fortran_env, only: int64
+use, intrinsic :: iso_fortran_env, only: int64, real32
 use mlxf_c_types,  only: mlxc_fast_metal_kernel, mlxc_fast_metal_kernel_config, mlxc_vector_array, mlxc_vector_string, &
                          mlxc_stream
 use mlxf_c_fast,   only: mlxc_fast_metal_kernel_new, mlxc_fast_metal_kernel_free, mlxc_fast_metal_kernel_apply, &
@@ -14,18 +16,25 @@ use mlxf_c_fast,   only: mlxc_fast_metal_kernel_new, mlxc_fast_metal_kernel_free
                          mlxc_fast_metal_kernel_config_set_verbose, &
                          mlxc_fast_metal_kernel_config_add_template_arg_dtype, &
                          mlxc_fast_metal_kernel_config_add_template_arg_int, &
-                         mlxc_fast_metal_kernel_config_add_template_arg_bool
+                         mlxc_fast_metal_kernel_config_add_template_arg_bool, mlxc_fast_layer_norm, mlxc_fast_rms_norm, &
+                         mlxc_fast_rope, mlxc_fast_rope_dynamic, mlxc_fast_scaled_dot_product_attention, &
+                         mlxc_fast_cross_entropy
 use mlxf_c_stream, only: mlxc_stream_free
 use mlxf_c_vector, only: mlxc_vector_array_new, mlxc_vector_array_free, mlxc_vector_string_new, &
                          mlxc_vector_string_append_value, mlxc_vector_string_free
-use mlxf_defs,     only: mlx_metal_kernel_spec, MLX_DTYPES
-use mlxf_array,    only: mlx_array, mlx_is_live, mlxf_vector_import, mlxf_vector_export, mlxf_check_dtype
+use mlxf_defs,     only: mlx_metal_kernel_spec, MLX_DTYPES, mlx_rope_spec, mlx_attention_spec
+use mlxf_array,    only: mlx_array, mlx_is_live, mlxf_vector_import, mlxf_vector_export, mlxf_check_dtype, &
+                         mlxf_layer_norm_op, mlxf_rms_norm_op, mlxf_rope_op, mlxf_rope_dynamic_op, mlxf_attention_op, &
+                         mlxf_binary, mlxf_zero_based
 use mlxf_device,   only: mlxf_enter, mlxf_require_device, mlxf_default_stream
 use mlxf_error,    only: mlxf_check, mlxf_fail, mlxf_report, mlxf_guard_thread
 use mlxf_registry, only: registry_add, registry_retain, registry_release, registry_is_live
 implicit none
-public :: mlx_metal_kernel
+public :: mlx_metal_kernel, mlx_layer_norm, mlx_rms_norm, mlx_rope, mlx_scaled_dot_product_attention, mlx_cross_entropy
 private
+
+! the eps of the normalisations when none is given
+real(real32), parameter :: NORM_EPS = 1.e-5_real32
 
 type :: mlx_metal_kernel
     private
@@ -46,6 +55,129 @@ interface mlx_metal_kernel
 end interface mlx_metal_kernel
 
 contains
+
+    ! x normalised along dimension 1: (x - mean)/sqrt(variance + eps), the mean and the variance (divided by the
+    ! extent) taken over dimension 1, then times weight and plus bias, rank-1 arrays of that extent, when given
+    function mlx_layer_norm( x, weight, bias, eps ) result(r)
+        type(mlx_array), intent(in)           :: x
+        type(mlx_array), optional, intent(in) :: weight, bias
+        real(real32),    optional, intent(in) :: eps
+        type(mlx_array) :: r, a(3)
+        real(real32)    :: e
+        call mlxf_require_device('mlx_layer_norm')
+        e = NORM_EPS
+        if( present(eps) ) e = eps
+        a(1) = x
+        call take_optional(a(2), 'mlx_layer_norm', weight)
+        call take_optional(a(3), 'mlx_layer_norm', bias)
+        call mlxf_layer_norm_op(r, mlxc_fast_layer_norm, a, e, 'mlx_layer_norm')
+    end function mlx_layer_norm
+
+    ! x divided by its root mean square along dimension 1, sqrt(mean(x**2) + eps), then times weight, a rank-1
+    ! array of that extent, when given
+    function mlx_rms_norm( x, weight, eps ) result(r)
+        type(mlx_array), intent(in)           :: x
+        type(mlx_array), optional, intent(in) :: weight
+        real(real32),    optional, intent(in) :: eps
+        type(mlx_array) :: r, a(2)
+        real(real32)    :: e
+        call mlxf_require_device('mlx_rms_norm')
+        e = NORM_EPS
+        if( present(eps) ) e = eps
+        a(1) = x
+        call take_optional(a(2), 'mlx_rms_norm', weight)
+        call mlxf_rms_norm_op(r, mlxc_fast_rms_norm, a, e, 'mlx_rms_norm')
+    end function mlx_rms_norm
+
+    ! the rotary position embedding of x (features, positions, ...): a pair (x1, x2) of elements along dimension 1
+    ! becomes (x1 cos - x2 sin, x1 sin + x2 cos) of the angle (position - 1 + offset) scale / divisor(pair), the
+    ! position counted along dimension 2. offset, an integer array (rank 0, or rank 1 with one value per element
+    ! of the last dimension), replaces spec%offset; freqs, one divisor per pair, replaces those of the base
+    function mlx_rope( x, spec, offset, freqs ) result(r)
+        type(mlx_array),     intent(in)           :: x
+        type(mlx_rope_spec), optional, intent(in) :: spec
+        type(mlx_array),     optional, intent(in) :: offset, freqs
+        type(mlx_array)      :: r, a(3)
+        type(mlx_rope_spec)  :: options
+        integer, allocatable :: shape(:)
+        call mlxf_require_device('mlx_rope')
+        if( present(spec) ) options = spec
+        shape = x%shape()
+        if( size(shape) < 3 ) call mlxf_fail('mlx_rope', 'the array needs features, positions and at least one more dimension')
+        if( options%features == 0 ) options%features = shape(1)
+        a(1) = x
+        if( present(offset) )then
+            call check_offsets(offset, shape(size(shape)))
+            a(2) = offset
+            call take_optional(a(3), 'mlx_rope', freqs)
+            call mlxf_rope_dynamic_op(r, mlxc_fast_rope_dynamic, a, options, 'mlx_rope')
+        else
+            call take_optional(a(2), 'mlx_rope', freqs)
+            call mlxf_rope_op(r, mlxc_fast_rope, a(1:2), options, 'mlx_rope')
+        endif
+    end function mlx_rope
+
+    ! attention: for queries (d, lq, heads, batch), keys (d, lk, heads, batch) and values (dv, lk, heads, batch),
+    ! r(:, i, h, b) is the sum over the keys j of softmax_j(scale * dot(q(:, i), k(:, j))) * v(:, j). A boolean
+    ! mask(j, i, ...) keeps key j for query i, a real one is added to the scores; it broadcasts to (lk, lq, heads,
+    ! batch)
+    function mlx_scaled_dot_product_attention( queries, keys, values, spec, mask ) result(r)
+        type(mlx_array),          intent(in)           :: queries, keys, values
+        type(mlx_attention_spec), optional, intent(in) :: spec
+        type(mlx_array),          optional, intent(in) :: mask
+        type(mlx_array)          :: r, a(4)
+        type(mlx_attention_spec) :: options
+        integer, allocatable     :: shape(:)
+        call mlxf_require_device('mlx_scaled_dot_product_attention')
+        if( present(spec) )then
+            options%causal = spec%causal
+            options%force_fused = spec%force_fused
+            if( allocated(spec%scale) ) options%scale = spec%scale
+        endif
+        if( options%causal .and. present(mask) ) &
+            &call mlxf_fail('mlx_scaled_dot_product_attention', 'a causal attention takes no mask')
+        shape = queries%shape()
+        if( size(shape) /= 4 ) call mlxf_fail('mlx_scaled_dot_product_attention', 'queries, keys and values are rank 4')
+        if( .not. allocated(options%scale) ) options%scale = 1._real32/sqrt(real(shape(1), real32))
+        a(1) = queries
+        a(2) = keys
+        a(3) = values
+        call take_optional(a(4), 'mlx_scaled_dot_product_attention', mask)
+        call mlxf_attention_op(r, mlxc_fast_scaled_dot_product_attention, a, options, 'mlx_scaled_dot_product_attention')
+    end function mlx_scaled_dot_product_attention
+
+    ! the cross entropy of logits (classes, ...) against targets (...), one-based integer classes: for each
+    ! distribution along dimension 1, log(sum(exp(logits))) - logits(target), float32
+    function mlx_cross_entropy( logits, targets ) result(r)
+        type(mlx_array), intent(in) :: logits, targets
+        type(mlx_array) :: r, classes
+        call mlxf_require_device('mlx_cross_entropy')
+        call mlxf_zero_based(classes, targets, 'mlx_cross_entropy')
+        call mlxf_binary(r, mlxc_fast_cross_entropy, logits, classes, 'mlx_cross_entropy')
+    end function mlx_cross_entropy
+
+    ! an array of offsets is rank 0, or rank 1 with one value per batch: MLX's GPU kernel reads one value per batch
+    ! from any rank-1 array, also from one that holds a single value
+    subroutine check_offsets( offset, nbatch )
+        type(mlx_array), intent(in) :: offset
+        integer,         intent(in) :: nbatch
+        integer, allocatable :: shape(:)
+        shape = offset%shape()
+        if( size(shape) == 0 ) return
+        if( size(shape) > 1 ) call mlxf_fail('mlx_rope', 'offset has rank 0 or 1')
+        if( shape(1) /= nbatch ) call mlxf_fail('mlx_rope', 'a rank-1 offset has one value per element of the last dimension')
+    end subroutine check_offsets
+
+    ! an optional array as an operand: a counted copy, or k left empty, which the helpers pass to MLX as absent;
+    ! one that is given must be live
+    subroutine take_optional( k, proc, a )
+        type(mlx_array),  intent(inout)        :: k
+        character(len=*), intent(in)           :: proc
+        type(mlx_array),  optional, intent(in) :: a
+        if( .not. present(a) ) return
+        if( .not. mlx_is_live(a) ) call mlxf_fail(proc, 'an optional array that is given is empty or stale')
+        k = a
+    end subroutine take_optional
 
     ! the kernel a spec describes
     function metal_kernel_from_spec( spec ) result(k)

@@ -332,6 +332,66 @@ layout does 2.9 million pairs per second on 24 cores; the target machine is an M
       count); its CI builds MLX v0.32.4 and mlx-c v0.8.0 without Metal (`scripts/build_mlx_deps.sh --cpu-only`,
       cached) and runs the device tests on the CPU there.
 
+## M. Transforms and exported functions
+
+29. **A `FunctionExporter` whose trace failed is read unchecked at its next application; custom rules and empty
+    lists.** Status: open; read 2026-11-26 in MLX v0.32.4 (and, for the first item, at head `5c8989446`); the first
+    item reproduced with MLX 0.32.4: a second application after a failed one ends in a segmentation fault.
+    - Ask: (a) `FunctionExporter::export_function` inserts an empty entry in its table before it traces the
+      function and does not remove it when the trace throws (a closure that returns an error, for one); the next
+      application with the same number of inputs runs `match()` on that entry and reads `fun.inputs[i]` of an
+      empty vector. Could the entry be removed on failure, or the exporter refuse further use? (b)
+      `CustomTransforms::vjp` appends the cotangents to what the custom rule returned and indexes the result by
+      argument with no check of the rule's count, so a rule that returns fewer arrays than inputs is given a
+      cotangent as its product, or reads past the end; a custom jvp that returns more arrays than outputs is
+      held by an `assert` only. Could both be checked and thrown? (c) In 0.32.4 `depends` of an empty list of
+      inputs and the application of a `custom_function` or `checkpoint` whose function returns no output read
+      element 0 of an empty vector; the head scans for a stream instead, so we take these two as fixed.
+    - Where: MLX `mlx/export.cpp` (`FunctionExporter::export_function`, `FunctionTable::emplace` and `match`);
+      `mlx/primitives.cpp` (`CustomTransforms::vjp`), `mlx/transforms.cpp` (the jvp of a custom function, its
+      `assert`; `custom_function`, `checkpoint`); `mlx/ops.cpp` (`depends`).
+    - Meanwhile: every copy of an `mlx_function_exporter` refuses another application after a failed one, with a
+      status; the trampoline of a custom vjp refuses a rule that does not return one array per input;
+      `mlx_depends` stops on an empty list of inputs; the binding policy says that a custom jvp returns at most
+      one array per output and that a function given custom rules or a checkpoint returns at least one output.
+
+30. **RoPE on the GPU reads one offset per batch from a rank-1 offset of a single element; the docstring of
+    `gated_delta_update`.** Status: open; the first measured 2026-11-26 with MLX 0.32.4 on an M5 Ultra (and read at
+    head `5c8989446`, unchanged), the second read.
+    - Ask: (a) `fast::rope` accepts an offset array of rank 1 whose size is 1 for an input of several batches, as
+      it accepts a rank-0 one. The CPU fallback broadcasts it. The Metal kernel takes `offset.strides()[0]` as the
+      stride whenever the offset has a dimension and reads `offset[batch_idx * offset_stride]`, so batches 2 and
+      up read past the one element: on a (4, 3, 5) Fortran array (MLX `[5, 3, 4]`) the first batch agrees with the
+      rank-0 offset and the other four differ by 0.6 to 0.8. Could the kernel take a stride of 0 for a size of 1,
+      or `rope` refuse the shape? (b) The Python docstring of `mx.fast.gated_delta_update` gives the state as
+      `[B, T, Hk, Dv]`; the code makes and returns `[B, Hv, Dv, Dk]`. Which is meant? The C++ header gives no
+      shapes.
+    - Where: MLX `mlx/fast.cpp` (`rope`: the check of `offset`), `mlx/backend/metal/rope.cpp` (`offset_stride`),
+      `mlx/backend/metal/kernels/rope.metal`; `python/src/fast.cpp` and `mlx/fast.cpp` (`gated_delta_update`).
+    - Meanwhile: `mlx_rope` stops on a rank-1 offset whose extent is not the number of batches (the guard
+      `guard_rope_offset`); `mlx_fast_gated_delta_update` is not offered (the parity plan's decision 17).
+
+## N. Files and distributed operations through mlx-c
+
+31. **A save refused for its dtype has already emptied the file; loads and distributed operations take a stream
+    they cannot use; the end code of mlx-c's map iterators.** Status: open; (a) and (b) measured 2026-11-26 with
+    MLX 0.32.4 and mlx-c 0.8.0 on an M5 Ultra, the distributed half of (b) and (c) read.
+    - Ask: (a) `save_safetensors` of a float64 array and `save_gguf` of an int64 array throw ("received invalid
+      dtype", "dtype int64 is not supported") after the file was opened for writing: a file of that name is left
+      empty (safetensors) or as a header of 24 bytes (GGUF), and what it held is lost. Could the dtypes be
+      checked before the file is opened? (b) `mlx_load`, `mlx_load_safetensors` and `mlx_load_gguf` take a stream;
+      given the GPU's default stream they return, and the array fails when it is evaluated ("[Load::eval_gpu]
+      Not implemented"). `mlx_distributed_all_sum` and its siblings take one too, and their primitives throw
+      "has no GPU implementation" in `eval_gpu`. Could mlx-c choose the CPU's stream for these, or the headers
+      say that only a CPU stream is valid? (c) `mlx_map_string_to_array_iterator_next` and
+      `mlx_map_string_to_string_iterator_next` return 2 when no pair is left and 1 on failure; no header says
+      so. Could the convention be documented?
+    - Where: MLX `mlx/io/safetensors.cpp`, `mlx/io/gguf.cpp`, `mlx/io/load.cpp`,
+      `mlx/backend/metal/distributed.cpp`; mlx-c `mlx/c/io.h`, `mlx/c/distributed.h`, `mlx/c/map.cpp`.
+    - Meanwhile: the binding policy tells the user to check the kinds before saving over a file worth keeping;
+      the library builds loads and distributed nodes on the CPU's default stream whatever the default device;
+      the iterators' end code is the constant `MLXF_MAP_END`.
+
 ## For information (not Apple's to fix)
 
 - gfortran mis-finalizes derived types in four patterns (allocatable components with defined assignment,

@@ -15,7 +15,7 @@ use mlxf,             only: mlx_array, mlx_from, mlx_to, mlx_set_default_device,
 use mlxf_test_utils,  only: assert_true, test_devices, device_name, judge_error, find_tolerance, family_seeds, &
                             seeded_uniform, seeded_array, shaped_error
 use mlxf_test_defs,   only: ELEM_CEILING, MATRIX_TOLERANCES, LINALG_RESIDUAL_FACTOR, elem_tolerance
-use mlxf_test_reduce, only: nan_maxval
+use mlxf_test_reduce, only: nan_maxval, nan_max
 implicit none
 private
 public :: run_all_linalg_matrix_tests
@@ -465,10 +465,10 @@ contains
                 err_log = shaped_error(lad, log(abs(ref3)), abs(log(abs(ref3))))
                 a = seeded_array(a5, wide)
                 r = mlx_det(a)
-                err = max(err, shaped_error(r, ref5, abs(ref5)))
+                err = nan_max(err, shaped_error(r, ref5, abs(ref5)))
                 call mlx_slogdet(a, sgn, lad)
                 if( shaped_error(sgn, sign(1._real64, ref5), abs(ref5)) > 0._real64 ) signed = .false.
-                err_log = max(err_log, shaped_error(lad, log(abs(ref5)), abs(log(abs(ref5)))))
+                err_log = nan_max(err_log, shaped_error(lad, log(abs(ref5)), abs(log(abs(ref5)))))
                 call judge(err, tol_det, wide, seeds(s))
                 call judge(err_log, tol_log, wide, seeds(s))
                 call assert_true(signed, 'mlx_slogdet returns exactly 1 or -1 as the sign, opposite for two exchanged rows')
@@ -725,7 +725,7 @@ contains
         end do
         measured(1) = max(measured(1), fro(ain-back)/fro(ain))
         measured(2) = max(measured(2), fro(matmul(transpose(uv), uv)-identity(m)), fro(matmul(vv, transpose(vv))-identity(k)))
-        measured(3) = max(measured(3), nan_maxval(abs(sv-sig(kk:1:-1)))/fro(ain), nan_maxval(abs(only-sig(kk:1:-1)))/fro(ain))
+        measured(3) = nan_maxval([measured(3), nan_maxval(abs(sv-sig(kk:1:-1)))/fro(ain), nan_maxval(abs(only-sig(kk:1:-1)))/fro(ain)])
     end subroutine svd_case
 
     ! a = u diag(s) vt for a tall and a wide matrix, with the singular values alone agreeing
@@ -831,7 +831,7 @@ contains
                     if( any(wv(2:) < wv(:N-1)) ) exact = .false.
                     measured(1) = max(measured(1), fro(matmul(xin, vv)-vv*spread(wv, 1, N))/fro(xin))
                     measured(2) = max(measured(2), fro(matmul(transpose(vv), vv)-identity(N)))
-                    measured(3) = max(measured(3), nan_maxval(abs(wv-lam))/fro(xin), nan_maxval(abs(only-lam))/fro(xin))
+                    measured(3) = nan_maxval([measured(3), nan_maxval(abs(wv-lam))/fro(xin), nan_maxval(abs(only-lam))/fro(xin)])
                 end do
                 call judge_residual(measured(1), N, wide, 'mlx_eigh a v = v w', seeds(s))
                 call judge_residual(measured(2), N, wide, 'mlx_eigh orthonormal eigenvectors', seeds(s))
@@ -876,7 +876,7 @@ contains
         integer      :: i
         d = 0._real64
         do i = 1, size(want)
-            d = max(d, minval(abs(got-want(i))), minval(abs(want-got(i))))
+            d = nan_maxval([d, minval(abs(got-want(i))), minval(abs(want-got(i)))])
         end do
     end function spectra_apart
 
@@ -1038,17 +1038,17 @@ contains
                 r = mlx_norm(a, 1._real64, dim=2)
                 errp = shaped_error(r, sum(abs(x), dim=2), sum(abs(x), dim=2))
                 r = mlx_norm(a, 3._real64, dim=1, keepdims=.true.)
-                errp = max(errp, shaped_error(r, reshape(sum(abs(x)**3, dim=1)**(1._real64/3._real64), [1, 3, 2]), &
+                errp = nan_max(errp, shaped_error(r, reshape(sum(abs(x)**3, dim=1)**(1._real64/3._real64), [1, 3, 2]), &
                     &reshape(sum(abs(x)**3, dim=1)**(1._real64/3._real64), [1, 3, 2])))
                 r = mlx_norm(a, inf, dims=[3])
-                errp = max(errp, shaped_error(r, maxval(abs(x), dim=3), maxval(abs(x), dim=3)))
+                errp = nan_max(errp, shaped_error(r, maxval(abs(x), dim=3), maxval(abs(x), dim=3)))
                 r = mlx_norm(a, -inf, dim=3)
-                errp = max(errp, shaped_error(r, minval(abs(x), dim=3), minval(abs(x), dim=3)))
+                errp = nan_max(errp, shaped_error(r, minval(abs(x), dim=3), minval(abs(x), dim=3)))
                 a = seeded_array(v, wide)
                 r = mlx_norm(a, 1._real64)
-                errp = max(errp, shaped_error(r, sum(abs(v)), sum(abs(v))))
+                errp = nan_max(errp, shaped_error(r, sum(abs(v)), sum(abs(v))))
                 r = mlx_norm(a, 0._real64)
-                errp = max(errp, shaped_error(r, real(count(abs(v) > 0._real64), real64), 1._real64))
+                errp = nan_max(errp, shaped_error(r, real(count(abs(v) > 0._real64), real64), 1._real64))
                 call judge(errp, tolp, wide, seeds(s))
             end do
         end do
@@ -1091,9 +1091,9 @@ contains
                 r = mlx_norm(a, 1._real64, dims=[2, 1])
                 errp = max(errp, shaped_error(r, rows(1), rows(1)))
                 r = mlx_norm(a, -1._real64)
-                errp = max(errp, shaped_error(r, minval(sum(abs(xin(:, :, 1)), dim=1)), cols(1)))
+                errp = nan_max(errp, shaped_error(r, minval(sum(abs(xin(:, :, 1)), dim=1)), cols(1)))
                 r = mlx_norm(a, -inf, keepdims=.true.)
-                errp = max(errp, shaped_error(r, reshape([minval(sum(abs(xin(:, :, 1)), dim=2))], [1, 1]), reshape(rows(1:1), [1, 1])))
+                errp = nan_max(errp, shaped_error(r, reshape([minval(sum(abs(xin(:, :, 1)), dim=2))], [1, 1]), reshape(rows(1:1), [1, 1])))
                 r = mlx_norm_matrix(a, 'fro')
                 errm = shaped_error(r, fros(1), fros(1))
                 a = seeded_array(x, wide)

@@ -17,7 +17,7 @@ use mlxf_oracle_polar,     only: polar_full_ring, polar_dft_matrix, polar_dft_bi
                                  polar_row_weights, polar_compare_rows, polar_draws_off, polar_report_draws
 use mlxf_test_utils,       only: assert_true, assert_false, assert_int, device_name, set_fixed_seed, bits_equal, &
                                  test_devices, tests_run
-use mlxf_test_reduce,      only: nan_maxval
+use mlxf_test_reduce,      only: nan_maxval, nan_max
 implicit none
 private
 public :: run_all_polarft_calc_tests
@@ -324,7 +324,7 @@ contains
                     acc = acc + real(fx%w(k, half), real64) * abs(xx(m) - cc(m) * rr(mm))**2
                 end do
             end do
-            worst = max(worst, abs(acc / (2._real64 * fx%wsq(pid)) - d(rot, 2, 1)))
+            worst = nan_max(worst, abs(acc / (2._real64 * fx%wsq(pid)) - d(rot, 2, 1)))
         end do
         call assert_true(worst <= 1.e-12_real64 * nan_maxval(abs(d(:, 2, 1))), 'the ring oracle''s expanded sums '//&
             &'equal the squared distance of particle and rotated reference over twice the weighted square sum')
@@ -359,7 +359,7 @@ contains
             do k = 1, NK
                 pow = pow + real(fx%w(k, h), real64) * sum(abs(cmplx(fx%bring(:, k, i), kind=real64))**2)
             end do
-            worst_pow = max(worst_pow, abs(pow - fx%wsq(i)) / fx%wsq(i))
+            worst_pow = nan_max(worst_pow, abs(pow - fx%wsq(i)) / fx%wsq(i))
             db = oracle_rows(fx, h, [src], [i])
             dp = oracle_rows(fo, h, [src], [i])
             if( minloc(db(:, 1, 1), dim=1) == shift + 1 ) nmin = nmin + 1
@@ -1008,7 +1008,7 @@ contains
                     if( bits_equal(eg%dists(ir, b), em%dists(ir, b)) ) cycle
                     dmax = nan_maxval(pack(abs(real(eg%rows(:, ir, b), real64)), eg%rows(:, ir, b) < POLAR_DIST_VALID))
                     if( dmax > 0._real64 )then
-                        chk%err_dists = max(chk%err_dists, abs(real(em%dists(ir, b), real64) - &
+                        chk%err_dists = nan_max(chk%err_dists, abs(real(em%dists(ir, b), real64) - &
                             &real(eg%dists(ir, b), real64)) / dmax)
                     else
                         chk%valid_off = chk%valid_off + 1

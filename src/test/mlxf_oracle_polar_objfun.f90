@@ -7,7 +7,8 @@
 module mlxf_oracle_polar_objfun
 use, intrinsic :: iso_fortran_env, only: real64
 use, intrinsic :: ieee_arithmetic, only: ieee_is_nan, ieee_value, ieee_quiet_nan, ieee_positive_inf
-use mlxf_oracle_dft, only: oracle_dft_1d, oracle_idft_1d, oracle_rel_error, oracle_finite_or_inf
+use mlxf_oracle_dft,  only: oracle_dft_1d, oracle_idft_1d, oracle_rel_error, oracle_finite_or_inf
+use mlxf_test_reduce, only: nan_maxval, nan_max
 implicit none
 
 public :: oracle_polar_pair, oracle_polar_fixture, oracle_polar_score, oracle_polar_valid, oracle_polar_clamp, &
@@ -577,8 +578,8 @@ contains
             kappa      = TWOPI * real(sz(2) + i - 1, real64) / real(sz(4), real64)
             at_zero    = exp(cmplx(0._real64, -kappa * PLANT_SHIFT(2), real64))
             at_quarter = exp(cmplx(0._real64, kappa * PLANT_SHIFT(1), real64))
-            err(2)     = max(err(2), oracle_finite_or_inf(abs(a(1, i) - at_zero)), &
-                             oracle_finite_or_inf(abs(a(np/2+1, i) - at_quarter)))
+            err(2)     = nan_maxval([err(2), oracle_finite_or_inf(abs(a(1, i) - at_zero)), &
+                             oracle_finite_or_inf(abs(a(np/2+1, i) - at_quarter))])
         end do
         ! a reference that is z at sample 3 and zero elsewhere, rotated without a shift: the sample it lands on
         ! and whether it arrives conjugated, for six rotations
@@ -619,8 +620,8 @@ contains
             call plant(pair, sz, iref, fixture_ring(sz, REF_PTS(:, :, iref), 0, zero))
             err(1) = max(err(1), table_error(pair%rotated(1, zero), fixture_ring(sz, REF_PTS(:, :, iref), 0, zero)))
             err(2) = max(err(2), root_loss(pair%dist(1, zero)))
-            err(3) = max(err(3), oracle_finite_or_inf(abs(1._real64 - pair%cc(1, zero))), &
-                         oracle_finite_or_inf(abs(1._real64 - pair%cc_weighted(1, zero))))
+            err(3) = nan_maxval([err(3), oracle_finite_or_inf(abs(1._real64 - pair%cc(1, zero))), &
+                         oracle_finite_or_inf(abs(1._real64 - pair%cc_weighted(1, zero)))])
             ! a rotated copy: zero loss at the planted rotation, which is the best of every objective
             nbad = 0
             do t = 1, 2
@@ -633,8 +634,8 @@ contains
                     ccs(irot)   = pair%cc(irot, zero)
                 end do
                 err(4) = max(err(4), root_loss(dists(n + 1)))
-                err(3) = max(err(3), oracle_finite_or_inf(abs(1._real64 - ccs(n + 1))), &
-                             oracle_finite_or_inf(abs(1._real64 - pair%cc_weighted(n + 1, zero))))
+                err(3) = nan_maxval([err(3), oracle_finite_or_inf(abs(1._real64 - ccs(n + 1))), &
+                             oracle_finite_or_inf(abs(1._real64 - pair%cc_weighted(n + 1, zero)))])
                 if( oracle_polar_best_dist(dists) /= n + 1 ) nbad = nbad + 1
                 if( oracle_polar_best_score(oracle_polar_score(dists)) /= n + 1 ) nbad = nbad + 1
                 if( oracle_polar_best_score(ccs) /= n + 1 ) nbad = nbad + 1
@@ -644,17 +645,17 @@ contains
             call plant(pair, sz, iref, fixture_ring(sz, REF_PTS(:, :, iref), 0, PLANT_SHIFT))
             err(1) = max(err(1), table_error(pair%rotated(1, PLANT_SHIFT), &
                                              fixture_ring(sz, REF_PTS(:, :, iref), 0, PLANT_SHIFT)))
-            err(6) = max(err(6), root_loss(pair%dist(1, PLANT_SHIFT)), &
+            err(6) = nan_maxval([err(6), root_loss(pair%dist(1, PLANT_SHIFT)), &
                          oracle_finite_or_inf(abs(1._real64 - pair%cc(1, PLANT_SHIFT))), &
-                         oracle_finite_or_inf(abs(1._real64 - pair%cc_weighted(1, PLANT_SHIFT))))
+                         oracle_finite_or_inf(abs(1._real64 - pair%cc_weighted(1, PLANT_SHIFT)))])
             ! shifted, then rotated above pftsz
             n = PLANT_TURN(2)
             call plant(pair, sz, iref, fixture_ring(sz, REF_PTS(:, :, iref), n, PLANT_SHIFT))
             err(1) = max(err(1), table_error(pair%rotated(n + 1, PLANT_SHIFT), &
                                              fixture_ring(sz, REF_PTS(:, :, iref), n, PLANT_SHIFT)))
             err(7) = max(err(7), root_loss(pair%dist(n + 1, PLANT_SHIFT)))
-            err(3) = max(err(3), oracle_finite_or_inf(abs(1._real64 - pair%cc(n + 1, PLANT_SHIFT))), &
-                         oracle_finite_or_inf(abs(1._real64 - pair%cc_weighted(n + 1, PLANT_SHIFT))))
+            err(3) = nan_maxval([err(3), oracle_finite_or_inf(abs(1._real64 - pair%cc(n + 1, PLANT_SHIFT))), &
+                         oracle_finite_or_inf(abs(1._real64 - pair%cc_weighted(n + 1, PLANT_SHIFT)))])
             ! rotated, then shifted by u in the particle's frame, the phase at the particle's own angle: the
             ! same particle as the shift matmul(M, u) in the reference's frame before the rotation
             n = PLANT_TURN(1)
@@ -710,9 +711,9 @@ contains
             l_ref   = sum(rk / sigma2 * (1._real64 - c)**2 * pow) / sum(rk / sigma2 * c**2 * pow)
             cc_ref  = sum(c * pow) / sqrt(sum(pow) * sum(c**2 * pow))
             ccw_ref = sum(rk * c * pow) / sqrt(sum(rk * pow) * sum(rk * c**2 * pow))
-            err(1)  = max(err(1), oracle_finite_or_inf(abs(pair%dist(1, zero) - l_ref) / abs(l_ref)))
-            err(2)  = max(err(2), oracle_finite_or_inf(abs(pair%cc(1, zero) - cc_ref) / abs(cc_ref)))
-            err(3)  = max(err(3), oracle_finite_or_inf(abs(pair%cc_weighted(1, zero) - ccw_ref) / abs(ccw_ref)))
+            err(1)  = nan_max(err(1), oracle_finite_or_inf(abs(pair%dist(1, zero) - l_ref) / abs(l_ref)))
+            err(2)  = nan_max(err(2), oracle_finite_or_inf(abs(pair%cc(1, zero) - cc_ref) / abs(cc_ref)))
+            err(3)  = nan_max(err(3), oracle_finite_or_inf(abs(pair%cc_weighted(1, zero) - ccw_ref) / abs(ccw_ref)))
         end do
         call pair%kill()
     end subroutine check_scaled
@@ -762,23 +763,23 @@ contains
         if( oracle_polar_valid(nan) ) nbad = nbad + 1
         if( .not. ieee_is_nan(oracle_polar_score(nan)) ) nbad = nbad + 1
         if( .not. ieee_is_nan(oracle_polar_clamp(nan)) ) nbad = nbad + 1
-        err(1) = max(err(1), real(nbad, real64), &
+        err(1) = nan_maxval([err(1), real(nbad, real64), &
                      oracle_finite_or_inf(abs(oracle_polar_score(0.5_real64) - 0.60653065971263342_real64)), &
                      oracle_finite_or_inf(abs(oracle_polar_score(-0.3_real64) - 1._real64)), &
                      oracle_finite_or_inf(abs(oracle_polar_clamp(-0.3_real64))), &
                      oracle_finite_or_inf(abs(oracle_polar_clamp(0.4_real64) - 0.4_real64)), &
-                     oracle_finite_or_inf(abs(DIST_LIMIT - 23.025850929940457_real64)))
+                     oracle_finite_or_inf(abs(DIST_LIMIT - 23.025850929940457_real64))])
         ! rotation 9 of 32 is a quarter turn: M has rows [0, 1] and [-1, 0], and maps u = (1, 0) to (0, -1)
         m      = oracle_polar_frame(9, 32)
         u      = matmul(m, [1._real64, 0._real64])
         e      = oracle_polar_frame(1, 24)
-        err(2) = max(err(2), oracle_finite_or_inf(abs(oracle_polar_angle(1, 32))), &
+        err(2) = nan_maxval([err(2), oracle_finite_or_inf(abs(oracle_polar_angle(1, 32))), &
                      oracle_finite_or_inf(abs(oracle_polar_angle(17, 32) - 180._real64)), &
                      oracle_finite_or_inf(abs(oracle_polar_angle(2, 32) - 11.25_real64)), &
                      oracle_finite_or_inf(abs(oracle_polar_angle(24, 24) - 345._real64)), &
                      oracle_finite_or_inf(abs(m(1, 1)) + abs(m(1, 2) - 1._real64) + abs(m(2, 1) + 1._real64) + abs(m(2, 2))), &
                      oracle_finite_or_inf(abs(u(1)) + abs(u(2) + 1._real64)), &
-                     oracle_finite_or_inf(abs(e(1, 1) - 1._real64) + abs(e(1, 2)) + abs(e(2, 1)) + abs(e(2, 2) - 1._real64)))
+                     oracle_finite_or_inf(abs(e(1, 1) - 1._real64) + abs(e(1, 2)) + abs(e(2, 1)) + abs(e(2, 2) - 1._real64))])
     end subroutine check_scalars
 
     ! the reductions on hand-made tables with ties
@@ -904,7 +905,7 @@ contains
         if( ieee_is_nan(cc) )then
             e = ieee_value(e, ieee_positive_inf)
         else
-            e = max(0._real64, abs(cc) - 1._real64)
+            e = nan_max(0._real64, abs(cc) - 1._real64)
         endif
     end function bound_excess
 

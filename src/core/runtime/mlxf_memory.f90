@@ -5,13 +5,14 @@ module mlxf_memory
 use, intrinsic :: iso_c_binding,   only: c_int, c_size_t
 use, intrinsic :: iso_fortran_env, only: int64
 use mlxf_c_memory, only: mlxc_get_active_memory, mlxc_get_peak_memory, mlxc_reset_peak_memory, mlxc_get_cache_memory, &
-                         mlxc_clear_cache, mlxc_set_memory_limit, mlxc_set_cache_limit
+                         mlxc_clear_cache, mlxc_set_memory_limit, mlxc_set_cache_limit, mlxc_get_memory_limit, &
+                         mlxc_set_wired_limit
 use mlxf_error,    only: mlxf_check
 use mlxf_device,   only: mlxf_enter
 implicit none
 
 public :: mlx_active_memory, mlx_peak_memory, mlx_reset_peak_memory, mlx_cache_memory, mlx_clear_cache
-public :: mlx_set_memory_limit, mlx_set_cache_limit
+public :: mlx_set_memory_limit, mlx_set_cache_limit, mlx_memory_limit, mlx_set_wired_limit
 private
 
 abstract interface
@@ -66,6 +67,26 @@ contains
         call mlxf_check(mlxc_set_memory_limit(old, int(bytes, c_size_t)), 'mlx_set_memory_limit', status)
         if( present(previous) ) previous = int(old, int64)
     end subroutine mlx_set_memory_limit
+
+    ! the memory limit in force
+    function mlx_memory_limit() result(n)
+        integer(int64) :: n
+        call mlxf_enter('mlx_memory_limit')
+        n = size_query(mlxc_get_memory_limit, 'mlx_memory_limit')
+    end function mlx_memory_limit
+
+    ! the bytes of memory the GPU may keep wired (0, MLX's default: none is held); returns the previous limit. A
+    ! limit above what the system allows is refused with a status
+    subroutine mlx_set_wired_limit( bytes, previous, status )
+        integer(int64),           intent(in)  :: bytes
+        integer(int64), optional, intent(out) :: previous
+        integer,        optional, intent(out) :: status
+        integer(c_size_t) :: old
+        call mlxf_enter('mlx_set_wired_limit')
+        old = 0
+        call mlxf_check(mlxc_set_wired_limit(old, int(bytes, c_size_t)), 'mlx_set_wired_limit', status)
+        if( present(previous) ) previous = int(old, int64)
+    end subroutine mlx_set_wired_limit
 
     ! the cache limit; returns the previous limit
     subroutine mlx_set_cache_limit( bytes, previous )

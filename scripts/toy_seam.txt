@@ -1,0 +1,39 @@
+# toy_seam.txt -- the seam ledger of the toys (doc/policies/toy_example_policy.md, "The integration shape").
+#
+# One line per mlxf_toy_* file of src/test that is not a tester: the file's stem and its class.
+#     host     a parent, a host submodule or a driver: it imports no MLX name (not mlxf, a generated module or a
+#              device module) and compiles without the library
+#     glue     a submodule of a toy class named <host unit>_mlx, the only files of the class that import mlxf or a
+#              device module, and only inside their one #ifdef USE_MLX branch (stubs under #else)
+#     device   a module (with its submodules) that holds MLX state and kernels; it imports no host or glue
+#              module of a toy class (mlxf_toy_device_work, the opaque type it extends, excepted; a device module
+#              <stem>_mlx may import <stem>, its own host half: the device engine fills the host record)
+#     pending  not yet in its class; the count of pending lines may only shrink (SEAM_PENDING in check_rules.py)
+# Rule `seam` of scripts/check_rules.py holds the ledger to the files.
+
+mlxf_toy_device_work host
+mlxf_toy_eul_prob_tab host
+mlxf_toy_pcg_solver host
+mlxf_toy_pcg_solver_mlx device
+mlxf_toy_polarft_block host
+mlxf_toy_polarft_block_mlx glue
+mlxf_toy_polarft_calc host
+mlxf_toy_polarft_core host
+mlxf_toy_polarft_core_mlx glue
+mlxf_toy_polarft_memo host
+mlxf_toy_polarft_memo_mlx glue
+mlxf_toy_polarft_shiftmap host
+mlxf_toy_polarft_shiftmap_mlx glue
+mlxf_toy_polarft_workspace device
+mlxf_toy_polarft_workspace_lifecycle device
+mlxf_toy_polarft_workspace_score device
+mlxf_toy_polarft_workspace_shiftmap device
+mlxf_toy_polarft_workspace_tail device
+mlxf_toy_projector host
+mlxf_toy_projector_mlx glue
+mlxf_toy_projector_pft_batch host
+mlxf_toy_projector_pft_batch_mlx glue
+mlxf_toy_projector_workspace device
+mlxf_toy_reconstructor_pcg host
+mlxf_toy_reconstructor_pcg_mlx glue
+mlxf_toy_reconstructor_pcg_workspace device

@@ -10,14 +10,16 @@
 ! sign(t) floor(|t| + 0.5) - 1, each axis divided by its sum, the 27 values summed and multiplied by OSMPL_PAD_FAC**3.
 module mlxf_toy_projector_workspace
 use, intrinsic :: iso_fortran_env, only: int32, int64, real32, real64
-use mlxf,           only: mlx_array, mlx_metal_kernel, mlx_metal_kernel_spec, mlx_from, mlx_to, mlx_eval, mlx_rfftn, &
-                          mlx_take, mlx_slice, mlx_concatenate, mlx_astype, mlx_sign, mlx_zeros_like, &
-                          mlx_default_device, reshape, conjg, floor, abs, max, merge, sum, MLX_DTYPES, MLX_DEVICES
-use mlxf_test_defs, only: KBWINSZ, KBALPHA, OSMPL_PAD_FAC, PROJ_FORMS, PROJ_TILE_DEFAULT, PROJ_TG_DEFAULT, &
-                          fproject_spec
+use mlxf,                 only: mlx_array, mlx_metal_kernel, mlx_metal_kernel_spec, mlx_from, mlx_to, mlx_eval, &
+                                mlx_rfftn, mlx_take, mlx_slice, mlx_concatenate, mlx_astype, mlx_sign, mlx_zeros_like, &
+                                mlx_default_device, reshape, conjg, floor, abs, max, merge, sum, MLX_DTYPES, &
+                                MLX_DEVICES
+use mlxf_test_defs,       only: KBWINSZ, KBALPHA, OSMPL_PAD_FAC, PROJ_FORMS, PROJ_TILE_DEFAULT, PROJ_TG_DEFAULT, &
+                                fproject_spec
+use mlxf_toy_device_work, only: device_work
 implicit none
 
-public :: projector_workspace
+public :: projector_workspace, projector_bank
 private
 
 character(len=1), parameter :: NL = achar(10)
@@ -78,8 +80,10 @@ character(len=*), parameter :: GATHER_SOURCE = &
 ! one projector's device state: m the padded box, the gather's form, its directions per tile and the fused
 ! kernel's threads per threadgroup; ft the padded transform and cube the expanded cube, with their flags; kern
 ! the fused gather's kernel objects (1 for a full tile, 2 for the last partial one) and kern_conf the launch each
-! was built for (points, directions, threads per group); stage_s the seconds of the expansions and projections
-type :: projector_workspace
+! was built for (points, directions, threads per group, the padded box, which fixes the kernel's strides and
+! origin); stage_s the seconds of the expansions and projections. It extends device_work, the opaque type a
+! projector holds it as
+type, extends(device_work) :: projector_workspace
     private
     integer                       :: m              = 0
     integer                       :: form           = PROJ_FORMS%graph
@@ -87,7 +91,7 @@ type :: projector_workspace
     integer                       :: tg             = PROJ_TG_DEFAULT
     logical                       :: l_ft           = .false.
     logical                       :: l_cube         = .false.
-    integer                       :: kern_conf(3, 2) = 0
+    integer                       :: kern_conf(4, 2) = 0
     real(real64)                  :: stage_s(2)     = 0._real64
     type(mlx_array)               :: ft
     type(mlx_array)               :: cube
@@ -105,11 +109,19 @@ type :: projector_workspace
     procedure :: has_transform
     procedure :: has_cube
     procedure :: seconds
-    procedure :: set_message
     procedure :: message
     procedure :: kill
     final     :: projector_workspace_final
 end type projector_workspace
+
+! a bank of projected sections (pftsz nk, nspace) that stays on the device: what the batch projector hands the
+! polar calculator on its device route, opaque to both classes' host files
+type, extends(device_work) :: projector_bank
+    type(mlx_array) :: sections
+  contains
+    procedure :: kill => projector_bank_kill
+    final     :: projector_bank_final
+end type projector_bank
 
 contains
 
@@ -391,9 +403,9 @@ contains
         tn   = rs(3)
         slot = 1
         if( tn /= self%tile ) slot = 2
-        if( any(self%kern_conf(:, slot) /= [npts, tn, self%tg]) )then
+        if( any(self%kern_conf(:, slot) /= [npts, tn, self%tg, self%m]) )then
             self%kern(slot) = mlx_metal_kernel(gather_spec(self%m, npts, tn, self%tg))
-            self%kern_conf(:, slot) = [npts, tn, self%tg]
+            self%kern_conf(:, slot) = [npts, tn, self%tg, self%m]
         endif
         call self%kern(slot)%apply([self%cube, hkd, rt, self%coef], outs, status)
         if( status /= 0 ) return
@@ -470,13 +482,6 @@ contains
         t = self%stage_s
     end function seconds
 
-    ! the projector's refusals are kept with the workspace's own, so that one message() reports either
-    subroutine set_message( self, msg )
-        class(projector_workspace), intent(inout) :: self
-        character(len=*),           intent(in)    :: msg
-        self%msg = msg
-    end subroutine set_message
-
     pure function message( self ) result(msg)
         class(projector_workspace), intent(in) :: self
         character(len=:), allocatable :: msg
@@ -507,6 +512,17 @@ contains
         type(projector_workspace), intent(inout) :: self
         call self%kill()
     end subroutine projector_workspace_final
+
+    ! idempotent: the sections released
+    subroutine projector_bank_kill( self )
+        class(projector_bank), intent(inout) :: self
+        call self%sections%kill()
+    end subroutine projector_bank_kill
+
+    subroutine projector_bank_final( self )
+        type(projector_bank), intent(inout) :: self
+        call self%kill()
+    end subroutine projector_bank_final
 
     real(real64) function seconds_since( t0 )
         integer(int64), intent(in) :: t0

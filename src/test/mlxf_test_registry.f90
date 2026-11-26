@@ -9,12 +9,18 @@ use mlxf,                              only: mlx_array, mlx_from, mlx_eval, mlx_
                                              mlx_set_default_device, MLX_DEVICES, exp, mlx_fft, mlx_fft2, mlx_astype, &
                                              mlx_zeros, mlx_arange, mlx_metal_kernel, mlx_metal_kernel_spec, &
                                              mlx_segmented_mm, mlx_qr, mlx_eigvalsh, mlx_conv2d, mlx_conv_spec, &
-                                             mlx_as_strided, matmul
+                                             mlx_as_strided, matmul, mlx_random_categorical, mlx_random_normal, &
+                                             mlx_function, mlx_grad_function, mlx_value_and_grad, mlx_set_compile_mode, &
+                                             mlx_scaled_dot_product_attention, mlx_attention_spec, mlx_rope, &
+                                             mlx_layer_norm, mlx_send
 use mlxf_array_tester,                 only: run_all_array_tests
 use mlxf_device_tester,                only: run_all_device_tests
 use mlxf_error_tester,                 only: run_all_error_tests, run_all_recovery_half_tests
 use mlxf_memory_tester,                only: run_all_memory_tests
 use mlxf_registry_tester,              only: run_all_registry_tests
+use mlxf_stream_tester,                only: run_all_stream_tests
+use mlxf_io_tester,                    only: run_all_io_tests
+use mlxf_distributed_tester,           only: run_all_distributed_tests, run_all_distributed_ring_tests
 use mlxf_version_tester,               only: run_all_version_tests
 use mlxf_ops_tester,                   only: run_all_ops_tests
 use mlxf_ops_math_tester,              only: run_all_ops_math_tests
@@ -32,7 +38,11 @@ use mlxf_conv_tester,                  only: run_all_conv_tests
 use mlxf_fft_tester,                   only: run_all_fft_tests
 use mlxf_fft_nd_tester,                only: run_all_fft_nd_tests
 use mlxf_fast_tester,                  only: run_all_fast_tests
+use mlxf_fast_layers_tester,           only: run_all_fast_layers_tests
+use mlxf_random_tester,                only: run_all_random_tests
 use mlxf_compile_tester,               only: run_all_compile_tests
+use mlxf_transforms_tester,            only: run_all_transforms_tests
+use mlxf_export_tester,                only: run_all_export_tests
 use mlxf_toy_polarft_calc_tester,      only: run_all_polarft_calc_tests
 use mlxf_toy_polarft_shiftmap_tester,  only: run_all_polar_shiftmap_tests, run_all_polar_shiftmap_accuracy_tests
 use mlxf_toy_eul_prob_tab_tester,      only: run_all_eul_prob_tab_tests
@@ -41,6 +51,8 @@ use mlxf_oracle_projection_tester,     only: run_all_oracle_projection_tests
 use mlxf_toy_projector_tester,         only: run_all_projector_tests, run_all_projector_chain_tests
 use mlxf_toy_reconstructor_pcg_tester, only: run_all_reconstructor_pcg_tests, run_all_reconstructor_pcg_n32_tests
 use mlxf_toy_pcg_solver_tester,        only: run_all_pcg_solver_tests
+use mlxf_toy_seam_tester,              only: run_all_seam_tests
+use mlxf_toy_polarft_host_tester,      only: run_all_polarft_host_tests
 use mlxf_abi_tester,                   only: run_all_abi_tests
 use mlxf_bench_polar_table,            only: run_bench_polar_table
 use mlxf_bench_recon_pcg,              only: run_bench_recon_pcg
@@ -57,14 +69,14 @@ abstract interface
     end subroutine tester_entry
 end interface
 
-character(len=*), parameter :: AREAS(8) = [character(len=16) :: 'core', 'array', 'ops', 'linalg', 'fft', 'compile', &
-    &'fast', 'kernels']
+character(len=*), parameter :: AREAS(12) = [character(len=16) :: 'core', 'array', 'ops', 'linalg', 'fft', 'compile', &
+    &'transforms', 'fast', 'random', 'io', 'distributed', 'kernels']
 ! the measure-only benchmarks, run by hand (never by CTest): mlxf_test_exec test=bench_<x> suite=<mode>
 character(len=*), parameter :: BENCHES(4) = [character(len=32) :: 'polar_table', 'recon_pcg', 'projector', &
     &'insert_probe']
 ! sub-suites an area runs only when suite= names them (too costly for the fast gate)
-character(len=*), parameter :: NAMED_ONLY(3) = [character(len=32) :: 'recovery_half', 'polar_shiftmap_accuracy', &
-    &'reconstructor_pcg_n32']
+character(len=*), parameter :: NAMED_ONLY(4) = [character(len=32) :: 'recovery_half', 'polar_shiftmap_accuracy', &
+    &'reconstructor_pcg_n32', 'distributed_ring']
 
 ! a member of a guard group and the device its fixture needs: 'cpu' (any session that allocates) or 'gpu' (a
 ! GPU device; on a CPU-only MLX the member skips)
@@ -74,7 +86,7 @@ type :: guard_member
     character(len=3)  :: device = 'cpu'
 end type guard_member
 
-type(guard_member), parameter :: GUARDS(21) = [&
+type(guard_member), parameter :: GUARDS(30) = [&
     &guard_member('guard_empty_operation',   'object_contracts', 'cpu'), &
     &guard_member('guard_stale_handle',      'object_contracts', 'cpu'), &
     &guard_member('guard_openmp_region',     'object_contracts', 'cpu'), &
@@ -95,7 +107,16 @@ type(guard_member), parameter :: GUARDS(21) = [&
     &guard_member('guard_eigh_uplo',         'object_contracts', 'cpu'), &
     &guard_member('guard_conv_spec',         'object_contracts', 'cpu'), &
     &guard_member('guard_strided_span',      'object_contracts', 'cpu'), &
-    &guard_member('guard_matmul_integer',    'object_contracts', 'cpu')]
+    &guard_member('guard_matmul_integer',    'object_contracts', 'cpu'), &
+    &guard_member('guard_categorical_forms', 'object_contracts', 'cpu'), &
+    &guard_member('guard_normal_shape',      'object_contracts', 'cpu'), &
+    &guard_member('guard_grad_argnums',      'object_contracts', 'cpu'), &
+    &guard_member('guard_compile_mode',      'object_contracts', 'cpu'), &
+    &guard_member('guard_attention_mask',    'object_contracts', 'cpu'), &
+    &guard_member('guard_rope_offset',       'object_contracts', 'cpu'), &
+    &guard_member('guard_optional_empty',    'object_contracts', 'cpu'), &
+    &guard_member('guard_fused_on_cpu',      'object_contracts', 'cpu'), &
+    &guard_member('guard_send_rank',         'object_contracts', 'cpu')]
 
 contains
 
@@ -115,6 +136,7 @@ contains
                 call run_suite('error',         run_all_error_tests,         suite, ran)
                 call run_suite('recovery_half', run_all_recovery_half_tests, suite, ran)
                 call run_suite('abi',           run_all_abi_tests,           suite, ran)
+                call run_suite('stream',        run_all_stream_tests,        suite, ran)
             case('array')
                 call run_suite('array',    run_all_array_tests,    suite, ran)
             case('ops')
@@ -137,8 +159,19 @@ contains
                 call run_suite('fft_nd', run_all_fft_nd_tests, suite, ran)
             case('compile')
                 call run_suite('compile', run_all_compile_tests, suite, ran)
+            case('transforms')
+                call run_suite('transforms', run_all_transforms_tests, suite, ran)
+                call run_suite('export', run_all_export_tests, suite, ran)
             case('fast')
                 call run_suite('fast', run_all_fast_tests, suite, ran)
+                call run_suite('fast_layers', run_all_fast_layers_tests, suite, ran)
+            case('random')
+                call run_suite('random', run_all_random_tests, suite, ran)
+            case('io')
+                call run_suite('io', run_all_io_tests, suite, ran)
+            case('distributed')
+                call run_suite('distributed', run_all_distributed_tests, suite, ran)
+                call run_suite('distributed_ring', run_all_distributed_ring_tests, suite, ran)
             case('kernels')
                 call run_suite('polarft_calc', run_all_polarft_calc_tests, suite, ran)
                 call run_suite('polar_shiftmap', run_all_polar_shiftmap_tests, suite, ran)
@@ -155,6 +188,8 @@ contains
                 ! the operator's 512 columns on each device, and the fixed solves of every iterate up to the stop
                 call run_suite('reconstructor_pcg', run_all_reconstructor_pcg_tests, suite, ran)
                 call run_suite('reconstructor_pcg_n32', run_all_reconstructor_pcg_n32_tests, suite, ran)
+                call run_suite('seam', run_all_seam_tests, suite, ran)
+                call run_suite('polarft_host', run_all_polarft_host_tests, suite, ran)
             case default
                 found = .false.
                 return
@@ -268,6 +303,24 @@ contains
                 call guard_strided_span
             case('guard_matmul_integer')
                 call guard_matmul_integer
+            case('guard_categorical_forms')
+                call guard_categorical_forms
+            case('guard_normal_shape')
+                call guard_normal_shape
+            case('guard_grad_argnums')
+                call guard_grad_argnums
+            case('guard_compile_mode')
+                call guard_compile_mode
+            case('guard_attention_mask')
+                call guard_attention_mask
+            case('guard_rope_offset')
+                call guard_rope_offset
+            case('guard_optional_empty')
+                call guard_optional_empty
+            case('guard_fused_on_cpu')
+                call guard_fused_on_cpu
+            case('guard_send_rank')
+                call guard_send_rank
             case('guard_empty_operation')
                 call guard_empty_operation
             case('guard_stale_handle')
@@ -406,6 +459,106 @@ contains
         b = mlx_from(x)
         r = matmul(a, b)
     end subroutine guard_matmul_integer
+
+    ! num_samples and shape are two forms of a categorical draw: both together stop
+    subroutine guard_categorical_forms
+        type(mlx_array) :: logits, r
+        real(real32)    :: x(3)
+        write(*,'(a)') 'guard_categorical_forms: mlx_random_categorical with num_samples and shape'
+        x = 0._real32
+        logits = mlx_from(x)
+        r = mlx_random_categorical(logits, num_samples=2, shape=[2])
+    end subroutine guard_categorical_forms
+
+    ! an array mean that does not broadcast to the sample's shape stops (MLX 0.32.4 would return its shape)
+    subroutine guard_normal_shape
+        type(mlx_array) :: loc, r
+        real(real32)    :: x(5)
+        write(*,'(a)') 'guard_normal_shape: mlx_random_normal of shape [1] with a mean of 5 elements'
+        x = 0._real32
+        loc = mlx_from(x)
+        r = mlx_random_normal([1], loc)
+    end subroutine guard_normal_shape
+
+    ! a position among the inputs is one-based: 0 stops (MLX would take it for the first input)
+    subroutine guard_grad_argnums
+        type(mlx_function)      :: f
+        type(mlx_grad_function) :: g
+        write(*,'(a)') 'guard_grad_argnums: mlx_value_and_grad with argnums [0]'
+        f = mlx_function(guard_callback)
+        g = mlx_value_and_grad(f, [0])
+    end subroutine guard_grad_argnums
+
+    ! a compile mode outside MLX_COMPILE_MODES stops
+    subroutine guard_compile_mode
+        write(*,'(a)') 'guard_compile_mode: mlx_set_compile_mode(99)'
+        call mlx_set_compile_mode(99)
+    end subroutine guard_compile_mode
+
+    ! a causal attention is its own mask: an array mask with it stops
+    subroutine guard_attention_mask
+        type(mlx_array) :: q, m, r
+        real(real32)    :: x(2, 3, 1, 1), keep(3, 3)
+        write(*,'(a)') 'guard_attention_mask: mlx_scaled_dot_product_attention, causal and with a mask'
+        x = 1._real32
+        keep = 0._real32
+        q = mlx_from(x)
+        m = mlx_from(keep)
+        r = mlx_scaled_dot_product_attention(q, q, q, mlx_attention_spec(causal=.true.), mask=m)
+    end subroutine guard_attention_mask
+
+    ! a rank-1 offset of one element for two batches stops (MLX's GPU kernel would read one per batch)
+    subroutine guard_rope_offset
+        type(mlx_array) :: a, o, r
+        real(real32)    :: x(4, 3, 2)
+        write(*,'(a)') 'guard_rope_offset: mlx_rope with a rank-1 offset of one element for two batches'
+        x = 1._real32
+        a = mlx_from(x)
+        o = mlx_from([7_int32])
+        r = mlx_rope(a, offset=o)
+    end subroutine guard_rope_offset
+
+    ! an optional array that is given must be live: an empty weight stops instead of counting as absent
+    subroutine guard_optional_empty
+        type(mlx_array) :: a, empty, r
+        real(real32)    :: x(4, 3)
+        write(*,'(a)') 'guard_optional_empty: mlx_layer_norm with an empty weight'
+        x = 1._real32
+        a = mlx_from(x)
+        r = mlx_layer_norm(a, weight=empty)
+    end subroutine guard_optional_empty
+
+    ! MLX's fused attention kernel is the GPU's: demanded on the CPU device, the attention stops
+    subroutine guard_fused_on_cpu
+        type(mlx_array) :: q, r
+        real(real32)    :: x(64, 3, 1, 1)
+        write(*,'(a)') 'guard_fused_on_cpu: mlx_scaled_dot_product_attention with force_fused on the CPU device'
+        call mlx_set_default_device(MLX_DEVICES%cpu)
+        x = 1._real32
+        q = mlx_from(x)
+        r = mlx_scaled_dot_product_attention(q, q, q, mlx_attention_spec(force_fused=.true.))
+    end subroutine guard_fused_on_cpu
+
+    ! a rank is one-based: sending to rank 0 stops (MLX would take it for the first member)
+    subroutine guard_send_rank
+        type(mlx_array) :: a, r
+        real(real32)    :: x(3)
+        integer         :: st
+        write(*,'(a)') 'guard_send_rank: mlx_send to rank 0, with a status that MLX''s own refusals would fill'
+        x = 1._real32
+        a = mlx_from(x)
+        r = mlx_send(a, 0, status=st)
+    end subroutine guard_send_rank
+
+    ! the callback of the guards that need a function: its first input back
+    subroutine guard_callback( inputs, outputs, status )
+        type(mlx_array), intent(in)               :: inputs(:)
+        type(mlx_array), allocatable, intent(out) :: outputs(:)
+        integer,         intent(out)              :: status
+        allocate(outputs(1))
+        outputs(1) = inputs(1)
+        status = 0
+    end subroutine guard_callback
 
     subroutine guard_empty_operation
         type(mlx_array) :: a, b

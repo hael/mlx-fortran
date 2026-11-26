@@ -6,14 +6,15 @@
 ! oracle's matrix-free solve at n = 8 in m = 16.
 module mlxf_toy_pcg_solver_tester
 use, intrinsic :: iso_fortran_env, only: real32, real64
-use, intrinsic :: ieee_arithmetic, only: ieee_value, ieee_quiet_nan
-use mlxf,                only: mlx_array, mlx_from, mlx_to, mlx_eval, mlx_rfftn, mlx_irfftn, mlx_slice, &
-                               mlx_set_default_device, mlx_default_device, matmul, reshape, sum
-use mlxf_test_defs,      only: pcg_solver_options, RECON_PCG_TOLERANCES, ELEM_CEILING, PCG_STOP_INDEFINITE
-use mlxf_toy_pcg_solver, only: pcg_operator, pcg_solver_outcome, pcg_solve
-use mlxf_oracle_pcg,     only: oracle_pcg_problem, oracle_pcg_true, oracle_pcg_cholesky
-use mlxf_test_utils,     only: assert_true, assert_int, device_name, test_devices, bits_equal
-use mlxf_test_reduce,    only: nan_maxval
+use, intrinsic :: ieee_arithmetic, only: ieee_value, ieee_quiet_nan, ieee_is_finite
+use mlxf,                    only: mlx_array, mlx_from, mlx_to, mlx_eval, mlx_rfftn, mlx_irfftn, mlx_slice, &
+                                   mlx_set_default_device, mlx_default_device, matmul, reshape, sum
+use mlxf_test_defs,          only: pcg_solver_options, RECON_PCG_TOLERANCES, ELEM_CEILING, PCG_STOP_INDEFINITE
+use mlxf_toy_pcg_solver,     only: pcg_solver_outcome
+use mlxf_toy_pcg_solver_mlx, only: pcg_operator, pcg_solve
+use mlxf_oracle_pcg,         only: oracle_pcg_problem, oracle_pcg_true, oracle_pcg_cholesky
+use mlxf_test_utils,         only: assert_true, assert_int, device_name, test_devices, bits_equal
+use mlxf_test_reduce,        only: nan_maxval
 implicit none
 private
 public :: run_all_pcg_solver_tests
@@ -154,6 +155,17 @@ contains
         near = nan_maxval(abs(real(x, real64) - ref)) <= ELEM_CEILING * max(1._real64, nan_maxval(abs(ref)))
     end function near
 
+    ! both histories allocated, one value per iteration, every value finite
+    logical function histories_sound( oc )
+        type(pcg_solver_outcome), intent(in) :: oc
+        histories_sound = .false.
+        if( .not. allocated(oc%rel_residual_history) ) return
+        if( .not. allocated(oc%rel_update_history) ) return
+        if( size(oc%rel_residual_history) /= oc%iteration_count ) return
+        if( size(oc%rel_update_history) /= oc%iteration_count ) return
+        histories_sound = all(ieee_is_finite(oc%rel_residual_history)) .and. all(ieee_is_finite(oc%rel_update_history))
+    end function histories_sound
+
     function opts_of( rtol, xtol, maxits ) result(o)
         real(real64), intent(in) :: rtol, xtol
         integer,      intent(in) :: maxits
@@ -184,6 +196,7 @@ contains
             'pcg_solve: three distinct eigenvalues stop on rtol after three iterations and three applications'//dev)
         call assert_true(near(x, x3), 'pcg_solve: the third iterate is (1, 1/2, 1/3)'//dev)
         call assert_true(size(oc%rel_residual_history) == 3, 'pcg_solve: one residual per iteration'//dev)
+        call assert_true(histories_sound(oc), 'pcg_solve: both histories hold one finite value per iteration'//dev)
         if( size(oc%rel_residual_history) == 3 ) call assert_true(abs(oc%rel_residual_history(1) - &
             real(1._real64 / sqrt(6._real64), real32)) <= 1.e-6_real32 .and. abs(oc%rel_residual_history(2) - &
             real(sqrt(2._real64) / 10._real64, real32)) <= 1.e-6_real32, 'pcg_solve: the residuals are 1/sqrt(6), '//&

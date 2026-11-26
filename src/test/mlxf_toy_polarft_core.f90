@@ -1,7 +1,6 @@
 !@descr: the toy polar calculator's core: new, kill, the particles' halves, the shell weights, the tile plan and tail, the message
 submodule (mlxf_toy_polarft_calc) mlxf_toy_polarft_core
-use mlxf,                         only: mlx_array
-use mlxf_toy_projector_pft_batch, only: fproject_polar_batch_opt, fproject_polar_batch_resident
+use mlxf_toy_projector_pft_batch, only: fproject_polar_batch_opt
 implicit none
 
 contains
@@ -12,7 +11,7 @@ contains
         integer,             intent(in)    :: nrefs
         integer,             intent(in)    :: pfromto(2), kfromto(2)
         real(real32) :: dang, ang
-        integer      :: i, irot, k
+        integer      :: i, irot, k, st
         call self%kill
         if( params%pftsz < 2 .or. mod(params%pftsz, 2) /= 0 )then
             self%msg = 'polarft_calc%new: refused: pftsz must be even and at least 2'
@@ -22,8 +21,19 @@ contains
             self%msg = 'polarft_calc%new: refused: pfromto must be an ascending range of positive indices'
         else if( kfromto(1) < 1 .or. kfromto(2) < kfromto(1) )then
             self%msg = 'polarft_calc%new: refused: kfromto must be an ascending range of positive shells'
+        else if( .not. params%l_mlx .and. params%nthr < 1 )then
+            self%msg = 'polarft_calc%new: refused: the host backend''s team has at least one thread'
         endif
         if( len(self%msg) > 0 ) return
+        ! the backend is chosen here: the MLX one makes the device state, and a build without MLX refuses it
+        self%l_mlx = params%l_mlx
+        if( self%l_mlx )then
+            call new_mlx(self, st)
+            if( st /= 0 )then
+                self%l_mlx = .false.
+                return
+            endif
+        endif
         self%pfromto = pfromto
         self%kfromto = kfromto
         self%nk      = kfromto(2) - kfromto(1) + 1
@@ -36,8 +46,7 @@ contains
         call alloc_ptcls(self)
         allocate(self%ft_ref(self%pftsz+1, kfromto(1):kfromto(2), nrefs, N_REF_PARITIES), &
             &self%ft_ref2(self%pftsz+1, kfromto(1):kfromto(2), nrefs, N_REF_PARITIES), &
-            &self%sigma2_wk(kfromto(1):kfromto(2), 2), self%sigma2_wk8(kfromto(1):kfromto(2), 2), &
-            &self%ws(N_REF_PARITIES))
+            &self%sigma2_wk(kfromto(1):kfromto(2), 2), self%sigma2_wk8(kfromto(1):kfromto(2), 2))
         self%ft_ref    = cmplx(0._real32, 0._real32, real32)
         self%ft_ref2   = cmplx(0._real32, 0._real32, real32)
         self%sigma2_wk  = 0._real32
@@ -45,6 +54,9 @@ contains
         self%ldim       = [params%box, params%box, 1]
         self%nspace     = params%nspace
         self%nstates    = params%nstates
+        self%nthr       = params%nthr
+        ! the host backend's block kernel works in its team's own arrays, as SIMPLE's
+        if( .not. self%l_mlx ) call new_block_work(self, self%nthr)
         ! SIMPLE's polar coordinates in single precision: h = sin(a) k, k = -cos(a) k
         allocate(self%polar(2, kfromto(1):kfromto(2), self%nrots))
         dang = 2._real32 * acos(-1._real32) / real(self%nrots, real32)
@@ -61,6 +73,8 @@ contains
     module subroutine kill( self )
         class(polarft_calc), intent(inout) :: self
         integer :: ieo
+        ! every workspace is killed before the deallocation: the release of its handles does not rest on the
+        ! finalization of a polymorphic component
         if( allocated(self%ws) )then
             do ieo = 1, size(self%ws)
                 call self%ws(ieo)%kill()
@@ -83,6 +97,9 @@ contains
         if( allocated(self%banks_next) ) deallocate(self%banks_next)
         if( allocated(self%l_bank_next) ) deallocate(self%l_bank_next)
         if( allocated(self%rows) ) deallocate(self%rows)
+        if( allocated(self%ft_ref_bins) ) deallocate(self%ft_ref_bins)
+        if( allocated(self%ref_full) ) deallocate(self%ref_full)
+        call kill_block_work(self)
         call kill_ptcls(self)
         self%nptcls        = 1
         self%nrefs         = 1
@@ -111,6 +128,7 @@ contains
         self%sm_l_profile  = .false.
         self%nref_staged   = 0
         self%l_refs_pending = .false.
+        self%l_refs_memoized = .false.
         self%bt            = POLAR_CANON_BT
         self%rt            = POLAR_CANON_RT
         self%tail          = POLARFT_TAILS%graph
@@ -119,6 +137,10 @@ contains
         self%l_profile     = .false.
         self%slot_ieo      = 0
         self%msg           = ''
+        self%l_mlx         = .false.
+        self%nthr          = 1
+        self%rnd_seed      = 0
+        self%l_keys        = .false.
         self%existence     = .false.
     end subroutine kill
 
@@ -221,8 +243,12 @@ contains
             self%msg = 'polarft_calc%set_ref_route: refused: no calculator (new)'
         else if( route /= POLARFT_REF_ROUTES%host .and. route /= POLARFT_REF_ROUTES%device )then
             self%msg = 'polarft_calc%set_ref_route: refused: the route is one of POLARFT_REF_ROUTES'
+        else if( route == POLARFT_REF_ROUTES%device .and. .not. self%l_mlx )then
+            self%msg = 'polarft_calc%set_ref_route: refused: the device route needs the MLX backend'
         else if( self%l_refs_pending )then
             self%msg = 'polarft_calc%set_ref_route: refused: references wait to be memoized (memoize_refs)'
+        else if( self%l_refs_memoized .and. route /= self%route )then
+            self%msg = 'polarft_calc%set_ref_route: refused: the references are memoized on the other route (kill and new)'
         else
             self%msg = ''
         endif
@@ -278,8 +304,7 @@ contains
         integer,             intent(in)    :: state
         logical,             intent(in)    :: iseven
         complex(real32), allocatable :: refs_state(:,:,:)
-        type(mlx_array)              :: bank
-        integer                      :: iref_from, iref_to, i, st
+        integer                      :: iref_from, iref_to, i
         if( .not. self%existence )then
             self%msg = 'vol_pad2ref_pfts_opt: refused: no calculator (new)'
             return
@@ -299,19 +324,8 @@ contains
             return
         endif
         self%msg = ''
-        if( self%route == POLARFT_REF_ROUTES%device )then
-            ! the bank stays on the device, with the parity's workspace, until memoize_refs
-            call fproject_polar_batch_resident(vol_pad, eulspace, self%nspace, self, bank)
-            if( len(vol_pad%message()) > 0 )then
-                self%msg = vol_pad%message()
-                return
-            endif
-            call self%ws(merge(REF_EVEN, REF_ODD, iseven))%set_sections(bank, iref_from, self%nrefs, st)
-            if( st /= 0 )then
-                self%msg = self%ws(merge(REF_EVEN, REF_ODD, iseven))%message()
-                return
-            endif
-            self%l_refs_pending = .true.
+        if( self%l_mlx .and. self%route == POLARFT_REF_ROUTES%device )then
+            call vol_pad2ref_pfts_opt_mlx(self, vol_pad, eulspace, state, iseven)
             return
         endif
         allocate(refs_state(self%pftsz, self%nk, self%nspace))

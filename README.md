@@ -62,7 +62,10 @@ score ([K1](doc/implementation_notes/completed/mlxf_kernel_k1_report.md)) and a 
 that reprojects the references on the GPU in a graph and a fused form and hands them to the calculator without
 leaving the device ([K2](doc/implementation_notes/completed/mlxf_kernel_k2_report.md)), and a miniature of SIMPLE's PCG
 reconstruction (`reconstructor_pcg` with its engine) that assembles and solves one half on the GPU
-([K8](doc/implementation_notes/completed/mlxf_kernel_k8_report.md)). The API is still growing, so expect
+([K8](doc/implementation_notes/completed/mlxf_kernel_k8_report.md)). The three models have the file layout an
+integration in SIMPLE would have: host files that build without MLX, glue submodules beside them and device
+modules behind one opaque component
+([report](doc/implementation_notes/completed/mlxf_toy_seam_report.md)). The API is still growing, so expect
 it to change. The work to come is ranked in the
 [roadmap](doc/implementation_notes/planned/mlxf_roadmap.md).
 See the [implementation-notes index](doc/implementation_notes/README.md) for active work and completed records.
@@ -106,7 +109,7 @@ The full contract is [`doc/policies/binding_contract_policy.md`](doc/policies/bi
 | area | names |
 | --- | --- |
 | arrays | `mlx_array`, `mlx_from`, `mlx_to`, `mlx_to_alloc`, `mlx_item`, `mlx_view`, `mlx_alloc`, `mlx_is_live`, `mlx_astype`, `mlx_copy`, `mlx_zeros`, `mlx_ones`, `mlx_full`, `mlx_zeros_like`, `mlx_ones_like`, `mlx_full_like`, `mlx_arange`, `mlx_linspace`, `mlx_identity`, `mlx_eye`, `mlx_tri`, `mlx_meshgrid`, `mlx_bartlett`, `mlx_blackman`, `mlx_hamming`, `mlx_hanning` |
-| evaluation | `mlx_eval`, `mlx_async_eval`, `mlx_synchronize` |
+| evaluation | `mlx_eval`, `mlx_async_eval`, `mlx_synchronize` (every device, or one `mlx_stream`) |
 | operators | `+ - * / **`, `< <= > >= == /=`, `.and. .or. .not. .eqv. .neqv.` on arrays and scalars |
 | elementwise | `abs`, `exp`, `sqrt`, `log`, `log10`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`, `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh`, `erf`, `floor`, `ceiling`, `aint`, `modulo`, `min`, `max`, `merge`, `real`, `aimag`, `conjg`, `cmplx`, `mlx_round`, `mlx_sign`, `mlx_sigmoid`, `mlx_square`, `mlx_reciprocal`, `mlx_rsqrt`, `mlx_expm1`, `mlx_log1p`, `mlx_log2`, `mlx_erfinv`, `mlx_degrees`, `mlx_radians`, `mlx_logaddexp`, `mlx_floor_divide`, `mlx_divmod`, `mlx_clip`, `mlx_nan_to_num`, `mlx_stop_gradient` |
 | tests and predicates | `mlx_isnan`, `mlx_isinf`, `mlx_isfinite`, `mlx_isposinf`, `mlx_isneginf`, `mlx_isclose`, `mlx_allclose`, `mlx_array_equal` |
@@ -119,9 +122,16 @@ The full contract is [`doc/policies/binding_contract_policy.md`](doc/policies/bi
 | linear algebra | `mlx_inv`, `mlx_pinv`, `mlx_tri_inv`, `mlx_det`, `mlx_slogdet`, `mlx_cholesky`, `mlx_cholesky_inv`, `mlx_qr`, `mlx_lu`, `mlx_lu_factor`, `mlx_svd`, `mlx_eigh`, `mlx_eigvalsh`, `mlx_eig`, `mlx_eigvals`, `mlx_solve`, `mlx_solve_triangular` (a matrix is dimensions 1 and 2; these run on the CPU whatever the default device), `norm2`, `mlx_norm`, `mlx_norm_matrix` |
 | convolutions | `mlx_conv1d`, `mlx_conv2d`, `mlx_conv3d`, `mlx_conv_general`, `mlx_conv_transpose1d`, `mlx_conv_transpose2d`, `mlx_conv_transpose3d` (input (C, W[, H[, D]], N); options in `mlx_conv_spec`, per spatial dimension, W first) |
 | Fourier transforms | `mlx_fft`, `mlx_ifft`, `mlx_rfft`, `mlx_irfft`, `mlx_fft2`, `mlx_ifft2`, `mlx_fftn`, `mlx_ifftn`, `mlx_rfft2`, `mlx_irfft2`, `mlx_rfftn`, `mlx_irfftn` (the half-size dimension is the first listed), `mlx_fftshift`, `mlx_ifftshift`, `mlx_fftfreq`, `mlx_rfftfreq`, `MLX_FFT_NORMS` |
-| compilation | `mlx_function` (from a Fortran callback), `mlx_compile` |
+| random numbers | `mlx_random_seed`, `mlx_random_key`, `mlx_random_split`, `mlx_random_bits`, `mlx_random_uniform`, `mlx_random_normal`, `mlx_random_laplace`, `mlx_random_gumbel`, `mlx_random_truncated_normal`, `mlx_random_randint`, `mlx_random_bernoulli`, `mlx_random_multivariate_normal`, `mlx_random_categorical`, `mlx_random_permutation` (the sample's Fortran shape first; an optional `key`; categories and permutations one-based) |
+| compilation | `mlx_function` (from a Fortran callback), `mlx_compile`, `mlx_enable_compile`, `mlx_disable_compile`, `mlx_set_compile_mode`, `MLX_COMPILE_MODES` |
+| transforms | `mlx_value_and_grad` (a `mlx_grad_function`; positions among the inputs one-based), `mlx_vjp`, `mlx_jvp`, `mlx_custom_vjp`, `mlx_custom_function`, `mlx_checkpoint`, `mlx_stop_gradient`, `mlx_depends` |
+| functions in files | `mlx_export_function`, `mlx_function_exporter` (several traces), `mlx_imported_function` |
+| files | `mlx_save`, `mlx_load` (NumPy's `.npy`), `mlx_save_safetensors`, `mlx_load_safetensors`, `mlx_save_gguf`, `mlx_load_gguf`, `mlx_print_graph`, `mlx_export_to_dot` (a Fortran (m, n) array is a C-order (n, m) array on disk) |
+| distributed | `mlx_group` (`rank`, `size`, `split`; ranks one-based), `mlx_distributed_init`, `mlx_distributed_is_available`, `mlx_all_sum`, `mlx_all_max`, `mlx_all_min`, `mlx_all_gather`, `mlx_sum_scatter`, `mlx_send`, `mlx_recv`, `mlx_recv_like` |
 | custom kernels | `mlx_metal_kernel` (a Metal kernel from source text, GPU only), `mlx_metal_kernel_spec` |
-| devices and memory | `mlx_metal_is_available`, `mlx_device_count`, `mlx_default_device`, `mlx_set_default_device`, `mlx_device_info_*`, `mlx_active_memory`, `mlx_peak_memory`, `mlx_reset_peak_memory`, `mlx_cache_memory`, `mlx_clear_cache`, `mlx_set_memory_limit`, `mlx_set_cache_limit` |
+| fused layers | `mlx_layer_norm`, `mlx_rms_norm`, `mlx_rope` (`mlx_rope_spec`), `mlx_scaled_dot_product_attention` (`mlx_attention_spec`), `mlx_cross_entropy` (features along dimension 1, positions along dimension 2, classes one-based) |
+| devices and memory | `mlx_metal_is_available`, `mlx_device_count`, `mlx_device_is_available`, `mlx_default_device`, `mlx_set_default_device`, `mlx_device_info_*`, `mlx_active_memory`, `mlx_peak_memory`, `mlx_reset_peak_memory`, `mlx_cache_memory`, `mlx_clear_cache`, `mlx_memory_limit`, `mlx_set_memory_limit`, `mlx_set_cache_limit`, `mlx_set_wired_limit`, `mlx_buffer_size`, `a%nbytes()`, `a%itemsize()`, `mlx_metal_start_capture`, `mlx_metal_stop_capture` |
+| streams | `mlx_stream`, `mlx_new_stream`, `mlx_default_stream`, `mlx_set_default_stream` (operations take no stream: they run on the default stream of the default device) |
 | runtime | `mlx_last_error`, `mlx_live_count`, `mlx_runtime_version`, `mlxf_version_string`, `mlxf_build_description`, `mlxf_runtime_description`, `MLX_DTYPES`, `MLX_DEVICES`, `MLXF_HARD_ERROR_STATUS` |
 
 Fortran intrinsics that the library extends (`matmul`, `sum`, `exp`, ...) keep their names. Everything that
@@ -161,7 +171,7 @@ failure on any skip or editor side effect; its log names the commit, the toolcha
 | path | what |
 | --- | --- |
 | `src/defs/` | `mlxf_defs`: constants and vocabularies more than one module uses |
-| `src/core/` | the Fortran layer, by capability: `runtime/`, `array/`, `ops/`, `linalg/`, `fft/`, `compile/`; `mlxf.f90` is the user module |
+| `src/core/` | the Fortran layer, by capability: `runtime/`, `array/`, `ops/`, `linalg/`, `fft/`, `compile/`, `transforms/`, `fast/`, `random/`, `io/`, `distributed/`; `mlxf.f90` is the user module |
 | `src/test/` | test infrastructure, the toys that mirror SIMPLE's classes (`polarft_calc`, `eul_prob_tab`, `projector`, `reconstructor_pcg`), their oracles and benchmarks, built only with tests |
 | `test/` | `mlxf_test_exec`, the one test executable, and the CTest entries |
 | `scripts/` | the static gate, the formatters, the compile helpers, the dependency build, the C-layer generator |

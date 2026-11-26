@@ -9,6 +9,7 @@ use, intrinsic :: iso_fortran_env, only: real64
 use mlxf_oracle_dft,        only: oracle_dft_3d, oracle_idft_3d, oracle_flat, oracle_rel_error
 use mlxf_oracle_projection, only: oracle_proj_phantom, oracle_proj_rotation, oracle_proj_stencil, oracle_proj_matrix, &
                                   oracle_proj_expand
+use mlxf_test_reduce,       only: nan_max
 implicit none
 
 public :: oracle_grid_plane, oracle_grid_lattice, oracle_grid_volume, oracle_grid_transform, oracle_grid_envelope, &
@@ -775,7 +776,7 @@ contains
         ! and the rest of the accumulator is not empty
         dens   = lat%density()
         ds     = sum(dens(HALO_LOW+1:HALO_LOW+nyq+1, HALO+1:HALO+n, HALO+1:HALO+n))
-        err(4) = max(err(4), abs(sum(rho) - ds) / ds)
+        err(4) = nan_max(err(4), abs(sum(rho) - ds) / ds)
         if( .not. (sum(dens) > 1.25_real64 * ds) ) nbad = nbad + 1
         err(1) = err(1) + real(nbad, real64)
         ! the conjugate rule by value, from the module's own accumulators

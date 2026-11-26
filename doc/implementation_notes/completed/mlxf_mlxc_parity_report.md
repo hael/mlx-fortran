@@ -1,5 +1,10 @@
 # mlx-c parity, Phases 2 and 3: review report of run `mlxf_parity`
 
+Status, 2026-11-26: section 10 adds Phases 5 to 9 (run `mlxf_parity_rest`): random numbers, transforms and
+exported functions, the fused layers, files, streams and the distributed operations, delivered in a scratch copy
+of the working tree, nothing committed. The ledger has no pending line; the report's closing tables (the
+ledger by class with every exclusion, the upstream questions, the frozen tolerances) are sections 10.8 to 10.10.
+
 Status, 2026-11-25: section 9 adds Phase 4, linear algebra, products and convolutions, delivered in a scratch
 copy of the working tree, nothing committed. One gate waits for a ruling: the Release build-time bound, which
 the base itself exceeds (section 9.4).
@@ -414,3 +419,350 @@ Parity Phase 4: linear algebra, products and convolutions
 
 Release clean build 15.5 s (base 15.0 s): the bound frozen in Phase 2 (14.08 s) needs a new ruling.
 ```
+
+## 10. Phases 5 to 9: random numbers, transforms, the fused layers, files, streams, distributed
+
+Delivered 2026-11-26 by run `mlxf_parity_rest` in a scratch copy of the maintainer's working tree on the M5 Ultra
+(`6f1af0d` plus the uncommitted, verified result of run `mlxf_toy_seam`: 50 changed and 16 untracked paths),
+nothing committed. The run finished: every phase reached its exit and no stop condition of the plan's section 7
+arose. The detail is in the plan's Progress, in the entries "Phase 5, the base measurements", "Phase 5, ruling
+R6", "Phase 5a", "Phase 6a", "Phase 7a", the four closing entries "Phase 5" to "Phase 8 ... complete" and "Phase
+9". Evidence paths are under the run's root, `.../scratchpad/parity5_work/scratch/keep`. Rulings R5 (the bounds
+on this base) and R6 (the thirty scalar `max` reductions) are the run's `spec/rulings.md`.
+
+### 10.1 What was learned
+
+- **The ledger is closed.** Every one of mlx-c 0.8.0's 680 functions is public (399), plumbing (90), internal
+  (101) or excluded with its reason (90); none is pending (10.8).
+- **No accuracy finding in the new families.** The gradients, the vector-Jacobian and Jacobian-vector products
+  and the six fused layers are all at the floor of 4 epsilons of their kind; the largest judged errors are 1.96
+  float32 epsilons (`mlx_layer_norm`, CPU) and 1.62 (`mlx_rope`, GPU). The samplers' largest z-score over three
+  seeds is 2.84 against 5 sigmas at 2^20 samples (10.10).
+- **Five functions of MLX 0.32.4 read past what they were given, or return something else than their
+  documentation says** (questions 29 to 31, all written, none sent):
+  - a `FunctionExporter` whose trace failed ends in a segmentation fault at its next application (reproduced);
+    a custom vjp that returns fewer arrays than inputs is given a cotangent as its product (read);
+  - the Metal kernel of `fast::rope` reads one offset per batch from a rank-1 offset of one element: batches 2
+    and up differ by 0.6 to 0.8 from the CPU's result (measured, `phase7/rope_offset_probe.txt`);
+  - the array parameters of `random::normal` are not held to the sample's shape (read, then pinned by a guard);
+  - `value_and_grad` returns the gradients sorted by position, whatever the order asked for (measured);
+  - a save refused for its dtype has already emptied the file of that name (measured,
+    `phase8/refused_save_probe.txt`).
+- **Four families run on the CPU only, whatever the default device:** the multivariate normal (its root is an
+  SVD), every file load ("[Load::eval_gpu] Not implemented"), and the distributed operations ("has no GPU
+  implementation"). The wrappers build them on the CPU's default stream; a graph that crosses the two streams
+  evaluates correctly.
+- **float64 is thinner than the dtype suggests:** three samplers refuse it and two return float64 holding a
+  float32 draw; the fused layers return float64 with float32 accuracy on the CPU; safetensors refuses it and
+  GGUF has no float64 or int64.
+- **A group of one hides most of a distributed wrapper.** MLX returns the operand of a collective without a
+  node, so the peer's rank, the group handed on, the reversed shape of a receive and the stream of the node are
+  invisible to the gate; the review found the wrong stream by reading. The two-process suite is written and was
+  never run (10.6).
+- **Which stream carries an operation cannot be tested through the public API** (it does not show in a result,
+  and `mlx_stream_get_device` is internal): the stream tests prove lifetime, statuses and that work goes on.
+- **Three holes in the static gate, each found by a planted violation that passed:** a stop written as the
+  action of a one-line `if` in a callback (rule `cbstop`, Phase 6), a handle type without its finalizer (new rule
+  `handle`, Phase 8), and, in the run's own tooling, a mutation runner that reused objects because restored
+  files kept their times.
+- **The independent review earned its place in every phase:** 49, 40, 3 and 52 assertions were added after it
+  (and in Phases 7 and 8 most blind fixtures were replaced by discriminating ones), and four behaviours changed
+  (the shape check of the array normal; the exporter's failed state and the custom vjp's count; the rope's
+  offset check and the attention's scale; the stream of the distributed nodes).
+
+### 10.2 What changed, phase by phase
+
+| | Phase 5, random | Phase 6, transforms and export | Phase 7, fused layers | Phase 8, files, streams, distributed |
+| --- | --- | --- | --- | --- |
+| mlx-c functions made public | 19 | 16 | 6 | 34 |
+| excluded | 0 | 0 | 1 (`mlx_fast_gated_delta_update`) | 0 |
+| pending after | 57 | 41 | 34 | 0 |
+| new modules | `mlxf_random` | `mlxf_transforms`, `mlxf_export` | (in `mlxf_fast`) | `mlxf_stream`, `mlxf_io`, `mlxf_distributed` |
+| helper submodules of `mlxf_array` | `mlxf_array_random` (11 helpers) | (in `mlxf_compile`) | `mlxf_array_fast` (5) | `mlxf_array_io` (4), `mlxf_array_distributed` (3) |
+| new types | `mlxf_random_spec` | `mlx_grad_function`, `mlx_function_exporter`, `mlx_imported_function`, `MLX_COMPILE_MODES` | `mlx_rope_spec`, `mlx_attention_spec` | `mlx_stream`, `mlx_group`, `mlxf_group_spec` |
+| test area | `unit_random` (new) | `unit_transforms` (new: `transforms`, `export`) | `unit_fast` (new sub-suite `fast_layers`) | `unit_io`, `unit_distributed` (new); sub-suite `stream` of `unit_core` |
+| checks, both devices / CPU / GPU | 486 / 244 / 242 | 274 / 147 / 129 | 58 / 34 / 25 | 846 / 446 / 400; 55 / 28 / 28; 33 / 25 / 25 |
+| guards added (`object_contracts`) | 2 | 2 | 4 | 1 |
+| mutations failing | 28 of 28, after a test was added for one that survived | 24 of 24 | 22 of 23, the other equivalent | 37 of 37, after a test was strengthened for one that survived |
+| plants failing the static gate | 10 | 11 | 7 | 13 |
+| policy sections | 13 | 14 | 15 | 16, 17, 18 |
+| upstream question | | 29 | 30 | 31 |
+
+Before Phase 5's first wrapper, ruling R6: 28 accumulations `x = max(x, abs(...))` in five testers became
+`nan_max` or `nan_maxval`, two statements that were not error reductions were rewritten, and `NANMAX_LEDGER` is
+empty; the areas' counts did not move (`r6/`).
+
+Against the base, 31 files changed and 21 are new; none was renamed or deleted (`phase9_final/diff_base_repo.txt`).
+Every file is under a row of the file table; the run added rows before the edits they cover (the five testers of
+R6; the three helper submodules and `mlxf_array_evaluation.f90`; `CONTRIBUTING.md`, the quickstart and its
+example; rules `cbstop` and `handle`; `scripts/check_tree.sh`).
+
+The new public names, with their signatures, are in the four closing Progress entries under "The new public
+names of the phase". In short: `mlx_random_seed`, `_key`, `_split`, `_bits`, `_uniform`, `_normal`, `_laplace`,
+`_gumbel`, `_truncated_normal`, `_randint`, `_bernoulli`, `_multivariate_normal`, `_categorical`, `_permutation`;
+`mlx_grad_function` and `mlx_value_and_grad`, `mlx_vjp`, `mlx_jvp`, `mlx_custom_vjp`, `mlx_custom_function`,
+`mlx_checkpoint`, `mlx_depends`, `mlx_export_function`, `mlx_function_exporter`, `mlx_imported_function`,
+`mlx_enable_compile`, `mlx_disable_compile`, `mlx_set_compile_mode`, `MLX_COMPILE_MODES`; `mlx_layer_norm`,
+`mlx_rms_norm`, `mlx_rope`, `mlx_rope_spec`, `mlx_scaled_dot_product_attention`, `mlx_attention_spec`,
+`mlx_cross_entropy`; `mlx_stream`, `mlx_new_stream`, `mlx_default_stream`, `mlx_set_default_stream`,
+`mlx_synchronize(stream)`, `mlx_device_is_available`, `mlx_metal_start_capture`, `mlx_metal_stop_capture`,
+`mlx_memory_limit`, `mlx_set_wired_limit`, `mlx_buffer_size`, `a%nbytes()`, `a%itemsize()`, `mlx_save`, `mlx_load`,
+`mlx_save_safetensors`, `mlx_load_safetensors`, `mlx_save_gguf`, `mlx_load_gguf`, `mlx_print_graph`,
+`mlx_export_to_dot`, `mlx_group`, `mlx_distributed_init`, `mlx_distributed_is_available`, `mlx_all_sum`,
+`mlx_all_max`, `mlx_all_min`, `mlx_all_gather`, `mlx_sum_scatter`, `mlx_send`, `mlx_recv`, `mlx_recv_like`.
+
+### 10.3 Decisions taken under delegation
+
+Each is in the closing Progress entry of its phase, under "Decisions under delegation", with its reason. The
+ones that shape the API:
+
+1. *Phase 5.* A sampler takes its Fortran shape first and its key last; parameters keep mlx-c's types (arrays
+   where C takes arrays, real32 where C takes `float`); `mlx_random_normal` is a generic of the scalar and the
+   array form.
+2. *Phase 5.* `mlx_random_split` is two subroutines under one name; `mlx_random_categorical` is one procedure
+   with keywords for mlx-c's three functions; categories and `mlx_random_permutation(n)` are one-based;
+   `mlx_random_randint` keeps MLX's range, `high` excluded.
+3. *Phase 5.* The multivariate normal runs on the CPU's default stream; `cpu_stream` became a procedure of the
+   `mlxf_array` family. An absent key is an empty handle read through `optional_handle`.
+4. *Phase 5.* A quickstart row (D20) and its example block: a sample is a function of its key and shape.
+5. *Phase 6.* `mlx_grad_function%apply` returns the gradients in the order of `argnums` (MLX sorts them);
+   `argnums` defaults to the first input and a position below 1 stops.
+6. *Phase 6.* `mlx_vjp` and `mlx_jvp` are subroutines of five dummies without `status`; `apply` is the checked
+   route.
+7. *Phase 6.* Custom rules are checked subroutines; mlx-c's `vmap` closure is passed null; derived functions
+   share the callback's payload through two helpers of the compile module.
+8. *Phase 6.* Export lives in `src/core/compile/mlxf_export.f90`, its tests in `unit_transforms`;
+   `mlx_function_exporter` and `mlx_imported_function` have a checked `new` beside their constructors; an
+   exporter refuses another application after a failed one.
+9. *Phase 6.* Rule `cbstop` was tightened after a plant passed.
+10. *Phase 7.* `mlx_fast_gated_delta_update` is excluded under decision 17 (its shapes are in no header, and the
+    docstring disagrees with the code).
+11. *Phase 7.* Features along dimension 1, positions along dimension 2; `eps` optional, 1e-5; two public
+    records `mlx_rope_spec` and `mlx_attention_spec`; `mlx_rope` is one procedure for mlx-c's two; the
+    attention's `sinks` are not offered; the mask mode is derived; a rank-1 offset whose extent is not the
+    number of batches stops (MLX's GPU defect).
+12. *Phase 8.* Every procedure of `mlxf_io` and `mlxf_distributed` takes `status`, beyond the signatures of
+    decisions 15 and 18; the distributed helpers carry the procedure's name in `mlxf_group_spec`.
+13. *Phase 8.* Loaded names and metadata come back sorted; metadata are a (2, n) character array; a name given
+    twice is refused; loads and distributed nodes run on the CPU's default stream.
+14. *Phase 8.* `mlx_synchronize` is a generic of two modules; the sizes live in the evaluation submodule and
+    `mlx_buffer_size` evaluates first; `mlx_print_graph` without a file writes to a copy of the standard
+    output's descriptor; an absent backend is `'any'`; ranks are one-based and a rank below 1 stops.
+15. *Phase 8.* Streams and the runtime controls are tested as the sub-suite `stream` of `unit_core`; the
+    two-process suite is the named-only `distributed_ring`; the new rule `handle`.
+16. *All phases.* The independent review, the mutations and the plants were run before each closing entry, and
+    their findings acted on inside the phase; tests added after a freeze changed no tolerance.
+
+### 10.4 Deviations from the plan
+
+- **Decisions 15 and 18 list signatures without `status`;** the wrappers of files and of distributed operations
+  all take it (10.3, item 12).
+- **Decision 12's `mlx_vjp` and `mlx_jvp` have no `status`** (rule `arity`); `mlx_value_and_grad` is a handle
+  type with `apply`, not a function that returns a function.
+- **One function left the ledger as excluded** in Phase 7, under decision 17, which reserves that choice.
+- **Two rules of the static gate changed** (`cbstop` tightened, `handle` new) and `scripts/check_tree.sh` got a
+  word in a comment: rows were added to the file table before each edit.
+- **Phase 8's exit asks for the reported-not-gated commands in Progress:** they are there, and were not run.
+- **The plan's Phase 5 is "FFTs and random";** its FFT half was delivered by Phase 10, so this run's Phase 5 is
+  the random half. Likewise Phase 7's Metal kernel.
+- **Expected and not found:** an accuracy finding in the transforms or the fused layers; a function to exclude
+  under decision 22; a bound of R5 approached (the Release build is 0.75 s above its base against 6.57 s of
+  room); a failure of an existing suite.
+- **Found and not expected:** the three upstream defects of 10.1 that the wrappers now refuse; the stream of the
+  distributed nodes; the two holes in the rules.
+- **Files changed outside the table:** none.
+- **Skill edits proposed, not applied** (four closing entries, "Proposed, not applied").
+
+### 10.5 Evidence against the baseline
+
+| | base (`base/`) | Phase 5 | Phase 6 | Phase 7 | Phase 8 | final (`phase9_final/`) | bound (R5) |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Release clean build, s | 19.512, 19.553 | 19.746, 19.756 | 19.969, 19.916 | 20.140, 20.179 | 20.303, 20.270 | 20.267, 20.242 | 26.10 |
+| fast gate, Release, s | 10.54, 10.54 | 10.44, 10.48 | 10.68, 10.69 | 10.64, 11.88 | 10.70, 10.77 | 10.70, 10.70 | 38.74 |
+| new area in the Release gate, s | | `unit_random` 0.9 | `unit_transforms` 0.65 | | `unit_io` 0.25, `unit_distributed` 0.16 | random 1.00, transforms 0.74, io 0.25, distributed 0.16 | 3 |
+| fast gate entries | 9 | 10 | 11 | 11 | 13 | 13 | at most 13 |
+| warnings, Debug and Release | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| ledger pending | 76 | 57 | 41 | 34 | 0 | 0 | |
+| `object_contracts` members | 21 | 23 | 25 | 29 | 30 | 30 | |
+| release gate | | passes | passes | passes, 75 s | passes, 76 s | passes, 76 s | |
+
+All times *measured*, each build and gate twice, serial, with the one-minute load at most 3.7 before and after;
+the bound of the build is *derived* by R5 (the base's mean 19.533 s plus 7.04 s less 0.47 s). The Debug clean
+build went from 7.56 s to 7.90 s.
+
+Assertions per area, both devices / CPU / GPU, the same in Debug and Release (`phase9_final/areas_*.txt`):
+
+| area | base | final |
+| --- | --- | --- |
+| `unit_core` | 181 to 183 / 156 or 157 / 156 or 157 | 215 or 216 / 181 or 182 / 181 or 182 |
+| `unit_array` | 193 / 103 / 101 | 193 / 103 / 101 |
+| `unit_ops` | 2,462 / 1,469 / 995 | 2,462 / 1,469 / 995 |
+| `unit_linalg` | 632 / 397 / 239 | 632 / 397 / 239 |
+| `unit_fft` | 194 / 101 / 94 | 194 / 101 / 94 |
+| `unit_compile` | 63 / 32 / 32 | 63 / 32 / 32 |
+| `unit_transforms` | | 274 / 147 / 129 |
+| `unit_fast` | 94 / 13 / 82 | 152 / 47 / 107 |
+| `unit_random` | | 486 / 244 / 242 |
+| `unit_io` | | 846 / 446 / 400 |
+| `unit_distributed` | | 55 / 28 / 28 |
+| `unit_kernels` | 1,955 / 896 / 1,145 | 1,955 / 896 / 1,145 |
+
+`unit_core` varies by two checks of its registry sub-suite that depend on the allocator's reuse of an address,
+in the base as now; its gain is the sub-suite `stream`, 33 / 25 / 25. No existing assertion changed or left.
+
+### 10.6 Left open for the maintainer
+
+*Reported, not gated (written, never run).*
+
+- **Two processes through MLX's ring backend:** the host file and the two commands are in the Progress entry of
+  Phase 8; the suite is `test=unit_distributed suite=distributed_ring`. Homebrew's MLX 0.32.4 has the backend
+  (`mlx_distributed_is_available('ring')` is true, measured). It is the only test of a peer's rank, of a group
+  handed on, of `mlx_recv`'s shape and of the CPU stream of a distributed node.
+- **A Metal capture opened in Xcode** (`MTL_CAPTURE_ENABLED=1`); the gate tests the refusal.
+
+*Not verified by this run.*
+
+- A CPU-only MLX and a session without a GPU: `mlx_synchronize()` and the stream constructors were written for
+  them from MLX's source and not run there (the CI's CPU job would run the first).
+- Which stream carries an operation (10.1).
+- An export on one device imported on the other; grouped heads of the attention; a batched covariance of the
+  multivariate normal; complex64 samples; that `mlx_depends` evaluates its dependencies; the three tracing
+  compile modes told apart.
+
+*For a ruling or a read.*
+
+- **The API of four phases was not read at a hold.** The names and signatures are listed in the closing Progress
+  entries for that read; the ones most likely to be questioned: `status` on every file and distributed
+  procedure; `mlx_grad_function` as a type; the records `mlx_rope_spec` and `mlx_attention_spec` in `mlxf_defs`;
+  names sorted on load; `mlx_random_randint`'s excluded `high`.
+- **`mlx_fast_gated_delta_update` excluded and the attention's `sinks` not offered** (decision 17 and its
+  precedent): say so if either is wanted.
+- **A query of a stream's device** would make streams testable; it needs a ledger line moved from internal to
+  public.
+- **Rules `cbstop` and `handle`, and four names in `LIBC_NAMES`,** are changes of the gate for review.
+- **Questions 29, 30 and 31 for Apple** are written and not sent.
+- **The skill edits** proposed in the four closing entries.
+- **The plan's place and the roadmap:** the plan is still under `planned/`, and `mlxf_roadmap.md` (rank 3) and
+  `doc/implementation_notes/README.md` still describe parity as it was after Phase 3; neither is in the run's
+  file table, so they were not edited.
+
+### 10.7 A commit message
+
+```
+Parity Phases 5 to 9: random numbers, transforms, fused layers, files, streams, distributed
+
+75 mlx-c functions get public Fortran wrappers and one is excluded; the parity ledger has no pending line
+(399 public, 90 plumbing, 101 internal, 90 excluded).
+
+- Random (new module mlxf_random): keys (mlx_random_seed, _key, _split) and the samplers _bits, _uniform, _normal,
+  _laplace, _gumbel, _truncated_normal, _randint, _bernoulli, _multivariate_normal, _categorical, _permutation;
+  shape first, key last, one-based categories and permutations.
+- Transforms (new modules mlxf_transforms, mlxf_export): mlx_grad_function and mlx_value_and_grad, mlx_vjp, mlx_jvp,
+  mlx_custom_vjp, mlx_custom_function, mlx_checkpoint, mlx_depends; mlx_export_function, mlx_function_exporter,
+  mlx_imported_function; mlx_enable_compile, mlx_disable_compile, mlx_set_compile_mode with MLX_COMPILE_MODES.
+- Fused layers (mlxf_fast): mlx_layer_norm, mlx_rms_norm, mlx_rope with mlx_rope_spec,
+  mlx_scaled_dot_product_attention with mlx_attention_spec, mlx_cross_entropy. mlx_fast_gated_delta_update is
+  excluded (its shapes are in no header).
+- Streams and runtime (new module mlxf_stream): mlx_stream, mlx_new_stream, mlx_default_stream,
+  mlx_set_default_stream, mlx_synchronize(stream); mlx_device_is_available, mlx_metal_start_capture and
+  _stop_capture, mlx_memory_limit, mlx_set_wired_limit, mlx_buffer_size, a%nbytes(), a%itemsize().
+- Files (new module mlxf_io): mlx_save and mlx_load (.npy), mlx_save_safetensors and mlx_load_safetensors,
+  mlx_save_gguf and mlx_load_gguf, mlx_print_graph, mlx_export_to_dot. On disk a Fortran (m, n) array is NumPy's
+  C-order (n, m); loads run on the CPU's stream.
+- Distributed (new module mlxf_distributed): mlx_group, mlx_distributed_init, mlx_distributed_is_available,
+  mlx_all_sum, mlx_all_max, mlx_all_min, mlx_all_gather, mlx_sum_scatter, mlx_send, mlx_recv, mlx_recv_like;
+  one-based ranks; tested on the group of one process, a two-process suite by name only.
+- Tests: new areas unit_random, unit_transforms, unit_io and unit_distributed, sub-suites fast_layers and stream;
+  nine guards; the fast gate has 13 entries. The thirty scalar max reductions of five testers are NaN-safe and
+  NANMAX_LEDGER is empty.
+- Rules: cbstop also reads a stop that is the action of a one-line if; new rule handle (every handle type has a
+  finalizer and a defined assignment); HANDLE_TYPES, ENTRY_IF_LIVE, ENTRY_HELPERS, CALLBACKS, LIBC_NAMES extended.
+- Policy sections 13 to 18, README, CONTRIBUTING, the quickstart's row D20, questions 29 to 31 for Apple.
+
+New files:
+  src/core/array/mlxf_array_random.f90
+  src/core/array/mlxf_array_fast.f90
+  src/core/array/mlxf_array_io.f90
+  src/core/array/mlxf_array_distributed.f90
+  src/core/random/mlxf_random.f90
+  src/core/random/mlxf_random_tester.f90
+  src/core/random/random.inf
+  src/core/transforms/mlxf_transforms.f90
+  src/core/transforms/mlxf_transforms_tester.f90
+  src/core/transforms/transforms.inf
+  src/core/compile/mlxf_export.f90
+  src/core/compile/mlxf_export_tester.f90
+  src/core/fast/mlxf_fast_layers_tester.f90
+  src/core/runtime/mlxf_stream.f90
+  src/core/runtime/mlxf_stream_tester.f90
+  src/core/io/mlxf_io.f90
+  src/core/io/mlxf_io_tester.f90
+  src/core/io/io.inf
+  src/core/distributed/mlxf_distributed.f90
+  src/core/distributed/mlxf_distributed_tester.f90
+  src/core/distributed/distributed.inf
+
+Release clean build 20.3 s (base 19.5 s, bound 26.1 s); fast gate 10.7 s (bound 38.7 s).
+```
+
+### 10.8 The ledger: final counts and every exclusion
+
+`scripts/mlxc_parity.txt`, 680 lines (*exact*):
+
+| class | at the run's base | final |
+| --- | --- | --- |
+| public | 324 | 399 |
+| plumbing (called by the library, no name of its own) | 59 | 90 |
+| internal (not called; reachable through a public name or not needed) | 132 | 101 |
+| excluded | 89 | 90 |
+| pending | 76 | 0 |
+
+The 90 excluded lines, by the reason each carries in the ledger:
+
+| lines | reason |
+| --- | --- |
+| 14 | CUDA: out of scope (Apple silicon only) |
+| 12 | IO through reader/writer vtables: the generator skips `mlx_io_vtable` |
+| 9 | keyword-argument closures: Fortran has no keyword dictionaries |
+| 9 | GGUF metadata: typed maps with no Fortran counterpart |
+| 8 | unsigned scalars: no standard Fortran type (device-only dtypes) |
+| 8 | decision 2: quantised and fp8 inference formats, no Fortran data type |
+| 6 + 2 | vmap: excluded with `mlx_detail_vmap`; mlx-c 0.8.0 exposes it only as `detail_` |
+| 6 | one submitting thread: thread-local and thread-unsafe streams excluded |
+| 4 | float16/bfloat16 scalars: no standard Fortran type (device-only dtypes) |
+| 4 | `detail_`: internal API of mlx-c |
+| 2 | stream registry management: one default stream per device is offered |
+| 2 | custom distributed backends: not offered |
+| 2 | build configuration, not API (the metallib path setters) |
+| 1 | the `_payload` form serves `mlx_alloc`: its deleter tells a failed call whether MLX freed the buffer |
+| 1 | decision 17: `mlx_fast_gated_delta_update`, whose shapes are not in MLX's header (this run) |
+
+### 10.9 The upstream questions
+
+`doc/collaboration/apple_questions.md`, all open, none sent. Those the parity plan's wrappers met:
+
+| | question | from |
+| --- | --- | --- |
+| 19 | FFT length defaults in mlx-c and the Python `irfft` documentation | the earlier phases (sections 1 to 9) |
+| 20 | float32 `expm1` on the GPU loses accuracy as its argument grows | the earlier phases |
+| 21 | mlx-c's Metal kernel cannot choose the math mode | the earlier phases |
+| 22 | `segmented_mm` does not check that the inner extents agree | the earlier phases |
+| 23 | a transposed convolution with a padding above `dilation*(k-1)` returns a shorter result | Phase 4 |
+| 24 | float64 convolutions and the float64 Hadamard transform do not evaluate | Phase 4 |
+| 29 | an exporter read unchecked after a failed trace; the count of a custom vjp; empty lists | Phase 6, this run |
+| 30 | RoPE's GPU kernel and a rank-1 offset of one element; the docstring of `gated_delta_update` | Phase 7, this run |
+| 31 | a refused save empties the file; loads and distributed operations on a GPU stream; the end code of mlx-c's map iterators | Phase 8, this run |
+
+### 10.10 The frozen tolerances of these phases
+
+All in `src/test/mlxf_test_defs.f90`, frozen in sub-phase a on seed 1 on both devices as `max(2 x observed, 4
+epsilons)` and judged in sub-phase b on seeds 2 and 3; none was changed after its freeze.
+
+| family | constant | value | largest observed |
+| --- | --- | --- | --- |
+| samplers (moments, frequencies) | `RANDOM_SIGMAS`, `RANDOM_NSAMPLES` | 5 sigmas at 2^20 samples (section 6's) | z = 2.41 on seed 1, 2.84 on seeds 2 and 3 |
+| `mlx_value_and_grad`, `mlx_vjp`, `mlx_jvp` | `GRAD_TOLERANCES(3)` | 4 eps32, 4 eps64: the floor | below the floor |
+| `mlx_layer_norm`, `mlx_rms_norm`, `mlx_rope`, the attention (graph and fused kernel), `mlx_cross_entropy` | `FAST_TOLERANCES(6)` | 4 eps32 in both columns: the floor (float64 operands have float32 accuracy) | 1.96 eps32 (`mlx_layer_norm`, CPU), 1.62 (`mlx_rope`, GPU) |
+| files, streams, distributed | none | exact comparisons (bytes, integers, statuses) | |
+
+Upstream-defect lines among the tolerances: 0.

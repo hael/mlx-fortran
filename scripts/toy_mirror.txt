@@ -13,6 +13,10 @@
 # simple_reconstructor_pcg.f90, simple_pcg_lattice.f90, whose members and procedures reconstructor_pcg inherits,
 # and src/main/opt/simple_pcg_solver.f90).
 
+# ---- the opaque device state of a toy class ----
+mlxf_toy_device_work device_work addition the abstract type a toy class holds its device state as, so that its host files import no MLX name; SIMPLE has no MLX backend yet
+mlxf_toy_device_work device_work%kill addition deferred: releases every device object of the extension; a holder calls it on each element before it deallocates
+
 # ---- the polar calculator ----
 mlxf_toy_polarft_calc polarft_calc simple_polarft_calc polarft_calc
 mlxf_toy_polarft_calc polarft_calc%new simple_polarft_calc polarft_calc%new
@@ -26,6 +30,10 @@ mlxf_toy_polarft_calc polarft_calc%memoize_refs simple_polarft_calc polarft_calc
 mlxf_toy_polarft_calc polarft_calc%memoize_ptcls simple_polarft_calc polarft_calc%memoize_ptcls
 mlxf_toy_polarft_calc polarft_calc%memoize_ref_bins simple_polarft_calc polarft_calc%memoize_ref_bins
 mlxf_toy_polarft_calc polarft_calc%score_block_posterior simple_polarft_calc polarft_calc%score_block_posterior
+mlxf_toy_polarft_calc polarft_calc%set_draw_keys addition the keys of the host backend's draws (the seed and each reference's full index); SIMPLE's calculator is given its scope by set_rnd_scope and keys on its own reference index
+mlxf_toy_polarft_calc polarft_calc%check_block_work addition whether a team may score blocks on the host backend, asked before the team's region; SIMPLE stops inside it
+mlxf_toy_polarft_calc polarft_calc%copy_block_rows addition the calling thread's full rows of its last block on the host backend, copied without an allocation; SIMPLE's kernel keeps no rows
+mlxf_toy_polarft_calc keyed_variate addition the keyed variate of a pair's draw (SIMPLE's rnd_keyed of simple_rnd, which the toy does not model)
 mlxf_toy_polarft_calc polarft_calc%get_nrefs simple_polarft_calc polarft_calc%get_nrefs
 mlxf_toy_polarft_calc polarft_calc%get_pftsz simple_polarft_calc polarft_calc%get_pftsz
 mlxf_toy_polarft_calc polarft_calc%ptcl_iseven simple_polarft_calc polarft_calc%ptcl_iseven
@@ -112,6 +120,7 @@ mlxf_toy_projector projector%expand_cmat simple_projector projector%expand_cmat
 mlxf_toy_projector projector%is_expanded simple_projector projector%is_expanded
 mlxf_toy_projector projector%kill_expanded simple_projector projector%kill_expanded
 mlxf_toy_projector projector%kill simple_projector projector%kill
+mlxf_toy_projector projector%set_message addition the batch projector keeps its refusals with the projector's own, so that one message reports either; SIMPLE stops instead
 mlxf_toy_projector projector%set_fproject_form addition the polar gather as the graph or the fused Metal kernel; SIMPLE has one loop nest with an offload directive
 mlxf_toy_projector projector%set_fproject_tile addition the directions of one tile of the gather and the fused kernel's threads per group; no SIMPLE procedure or parameter carries the GPU route's layout
 mlxf_toy_projector projector%fproject_seconds addition inquiry: the seconds of the stages (pad and transform, expansion, projection), the benchmark's columns
@@ -133,11 +142,18 @@ mlxf_toy_projector_workspace projector_workspace%copy_transform addition the pad
 mlxf_toy_projector_workspace projector_workspace%has_transform addition inquiry: the padded transform is held
 mlxf_toy_projector_workspace projector_workspace%has_cube addition inquiry: the expanded cube is held
 mlxf_toy_projector_workspace projector_workspace%seconds addition inquiry: the seconds of the expansions and projections
-mlxf_toy_projector_workspace projector_workspace%set_message addition the projector's refusals are kept with the workspace's own, so that one message reports either
 mlxf_toy_projector_workspace projector_workspace%message addition inquiry: the reason of the last refusal or failure
 mlxf_toy_projector_workspace projector_workspace%kill addition releases the transform, the cube and the kernels
+mlxf_toy_projector_workspace projector_bank addition a bank of projected sections that stays on the device: what the batch projector hands the calculator's device route, opaque to both classes' host files
+mlxf_toy_projector_workspace projector_bank%kill addition releases the sections
 
 # ---- the PCG reconstruction (one half's assembly after the reduction) ----
+# mask_mul, apply_normal, apply_normal_kernel, apply_precond and dot_real_volume take and return SIMPLE's host arrays
+# with SIMPLE's dummy lists (dot_real_volume returns a double). What stays different: each body is a round trip to
+# the device (the toy has no host route; on the host backend each is refused with a message), self is intent(inout)
+# in all five so that a refusal can leave its message (SIMPLE's mask_mul and dot_real_volume are pure, self
+# intent(in)), and dot_real_volume adds the device's float32 line sums in double where SIMPLE adds the products
+# in double. new takes an optional params (the backend, as projector%new does) after SIMPLE's box and lambda.
 mlxf_toy_reconstructor_pcg reconstructor_pcg simple_reconstructor_pcg reconstructor_pcg
 mlxf_toy_reconstructor_pcg reconstructor_pcg%new simple_reconstructor_pcg reconstructor_pcg%new
 mlxf_toy_reconstructor_pcg reconstructor_pcg%kill simple_reconstructor_pcg reconstructor_pcg%kill
@@ -158,19 +174,24 @@ mlxf_toy_reconstructor_pcg reconstructor_pcg%copy_volumes addition hands over th
 mlxf_toy_reconstructor_pcg reconstructor_pcg%message addition inquiry: the reason of the last refusal; a mirrored procedure has no status argument and SIMPLE stops where the toy refuses
 mlxf_toy_reconstructor_pcg reconstructor_pcg%stage_seconds addition inquiry: the seconds of the finalisation and the solve by stage, the benchmark's columns (SIMPLE's PCG_ASSEMBLE_BENCH phases)
 mlxf_toy_reconstructor_pcg reconstructor_pcg%host_waits addition inquiry: the host's waits for the device, the seam's count
+mlxf_toy_reconstructor_pcg reconstructor_pcg%get_pcg_operator addition hands the operator the engine solves with to a caller that works on device vectors (a tester, a benchmark), as the opaque class(device_work); SIMPLE's adapter is private and its operator's procedures are host procedures
 
 # ---- the PCG engine (src/main/opt/simple_pcg_solver.f90) ----
-mlxf_toy_pcg_solver pcg_operator simple_pcg_solver pcg_operator
-mlxf_toy_pcg_solver pcg_operator%size simple_pcg_solver pcg_operator%size
-mlxf_toy_pcg_solver pcg_operator%apply simple_pcg_solver pcg_operator%apply
-mlxf_toy_pcg_solver pcg_operator%precond simple_pcg_solver pcg_operator%precond
-mlxf_toy_pcg_solver pcg_operator%dot simple_pcg_solver pcg_operator%dot
+# Two halves of one miniature: the record stays in the host module mlxf_toy_pcg_solver; the abstract operator and
+# pcg_solve, on device vectors, are the device module mlxf_toy_pcg_solver_mlx (the seam ledger classes it), which
+# stands beside simple_pcg_solver as the engine SIMPLE would gain there. SIMPLE's host engine is not modelled.
 mlxf_toy_pcg_solver pcg_solver_outcome simple_pcg_solver pcg_solver_outcome
 mlxf_toy_pcg_solver pcg_solver_outcome%kill simple_pcg_solver pcg_solver_outcome%kill
-mlxf_toy_pcg_solver pcg_solve simple_pcg_solver pcg_solve
+mlxf_toy_pcg_solver_mlx pcg_operator simple_pcg_solver pcg_operator
+mlxf_toy_pcg_solver_mlx pcg_operator%size simple_pcg_solver pcg_operator%size
+mlxf_toy_pcg_solver_mlx pcg_operator%apply simple_pcg_solver pcg_operator%apply
+mlxf_toy_pcg_solver_mlx pcg_operator%precond simple_pcg_solver pcg_operator%precond
+mlxf_toy_pcg_solver_mlx pcg_operator%dot simple_pcg_solver pcg_operator%dot
+mlxf_toy_pcg_solver_mlx pcg_operator%kill addition the operator extends device_work, so that a class can hand it out as the opaque type; kill releases what an extension holds (nothing by default)
+mlxf_toy_pcg_solver_mlx pcg_solve simple_pcg_solver pcg_solve
 
 # ---- the reconstruction's device state: everything here is the toy's own (the seam) ----
-mlxf_toy_reconstructor_pcg_workspace reconstructor_pcg_workspace addition the one type that holds MLX handles of the reconstruction: spectra, envelopes, mask, right-hand side, and the raw accumulators until end_accum
+mlxf_toy_reconstructor_pcg_workspace reconstructor_pcg_workspace addition the one type that holds MLX handles of the reconstruction: spectra, envelopes, mask, right-hand side, and the raw accumulators until end_accum; it extends device_work
 mlxf_toy_reconstructor_pcg_workspace reconstructor_pcg_workspace%new addition the state of a native box on the padded lattice
 mlxf_toy_reconstructor_pcg_workspace reconstructor_pcg_workspace%kill addition releases every handle
 mlxf_toy_reconstructor_pcg_workspace reconstructor_pcg_workspace%set_envelopes addition uploads the envelope and its reciprocal

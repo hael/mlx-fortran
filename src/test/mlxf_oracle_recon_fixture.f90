@@ -9,7 +9,7 @@ use, intrinsic :: iso_fortran_env, only: real64
 use mlxf_oracle_projection, only: oracle_proj_stencil
 use mlxf_oracle_gridding,   only: oracle_grid_plane
 use mlxf_oracle_recon_pcg,  only: oracle_recon_lattice
-use mlxf_test_reduce,       only: nan_maxval
+use mlxf_test_reduce,       only: nan_maxval, nan_max
 implicit none
 
 public :: oracle_recon_fixture_accum, oracle_recon_fixture_nplanes, oracle_recon_fixture_check
@@ -120,7 +120,7 @@ contains
             call plane%set_pose(pl%rot, pl%omega, pl%sh)
             call lat%insert(plane)
         end do
-        err = max(nan_maxval(abs(b - lat%packed_numerator())) / nan_maxval(abs(lat%packed_numerator())), &
+        err = nan_max(nan_maxval(abs(b - lat%packed_numerator())) / nan_maxval(abs(lat%packed_numerator())), &
                   nan_maxval(abs(d - lat%packed_density())) / nan_maxval(abs(lat%packed_density())))
         call plane%kill()
         call lat%kill()

@@ -13,7 +13,7 @@ use mlxf_test_defs,        only: POLAR_MAP_CAP_L2, POLAR_MAP_CAP_LOG, POLAR_MAP_
 use mlxf_toy_polarft_calc, only: polarft_calc
 use mlxf_oracle_polar,     only: polar_full_ring
 use mlxf_test_utils,       only: assert_true, assert_int, device_name, bits_equal, test_devices
-use mlxf_test_reduce,      only: nan_maxval
+use mlxf_test_reduce,      only: nan_maxval, nan_max
 implicit none
 private
 public :: run_all_polar_shiftmap_tests, run_all_polar_shiftmap_accuracy_tests
@@ -593,7 +593,7 @@ contains
                 endif
                 lor   = oracle_map(fx, pids(b), cands(c, b))
                 lo    = lor(res%ialpha(c, b), res%irot(c, b), res%irho(c, b))
-                worst = max(worst, abs(real(res%loss(c, b), real64) - lo) / max(1._real64, abs(lo)))
+                worst = nan_max(worst, abs(real(res%loss(c, b), real64) - lo) / max(1._real64, abs(lo)))
             end do
         end do
     end function loss_error
@@ -668,7 +668,7 @@ contains
                     lor = oracle_map(fx, pids(b), CANDS(c, 1))
                     rel = sqrt(sum((real(res%maps(:, :, :, c, b), real64) - lor)**2)) / sqrt(sum(lor**2))
                     worst_rel = max(worst_rel, rel)
-                    worst_abs = max(worst_abs, nan_maxval(abs(real(res%maps(:, :, :, c, b), real64) - lor)))
+                    worst_abs = nan_max(worst_abs, nan_maxval(abs(real(res%maps(:, :, :, c, b), real64) - lor)))
                     sm    = summarize(fx, lor, [TEMP_T, TEMP_PHYS], 0._real64)
                     bound = real(TEMP_T, real64) * POLAR_MAP_CAP_L2 * sqrt(sum(lor**2))
                     if( sm%margin > 2._real64 * bound )then
@@ -738,7 +738,7 @@ contains
             do c = 1, NREF
                 dmax = nan_maxval(abs(real(rows(:, c, b), real64)))
                 do ir = 1, fx%nrot
-                    worst  = max(worst, abs(real(res%maps(1, ir, 1, c, b), real64) - &
+                    worst  = nan_max(worst, abs(real(res%maps(1, ir, 1, c, b), real64) - &
                         &real(rows(ir, c, b), real64)) / dmax)
                     spread = max(spread, real(maxval(res%maps(:, ir, 1, c, b)) - minval(res%maps(:, ir, 1, c, b)), &
                         &real64) / dmax)
@@ -858,11 +858,11 @@ contains
                 do c = 1, size(CANDS, 1)
                     lor = oracle_map(fx, pids(b), CANDS(c, 1))
                     sm  = summarize(fx, lor, temps, prior_w)
-                    worst_logz = max(worst_logz, abs(real(res%logz(c, b), real64) - sm%logz))
-                    worst_var  = max(worst_var, abs(real(res%sdev(c, b), real64)**2 - sm%sdev**2))
+                    worst_logz = nan_max(worst_logz, abs(real(res%logz(c, b), real64) - sm%logz))
+                    worst_var  = nan_max(worst_var, abs(real(res%sdev(c, b), real64)**2 - sm%sdev**2))
                     if( icase == 1 )then
                         smt   = summarize(fx, lor, [temps(1), temps(1)], prior_w)
-                        tdiff = max(tdiff, abs(smt%sdev**2 - sm%sdev**2))
+                        tdiff = nan_max(tdiff, abs(smt%sdev**2 - sm%sdev**2))
                     endif
                     if( icase == 3 ) call assert_true(abs(sm%logz) <= 1.e-12_real64, 'a flat likelihood has '//&
                         &'evidence 0 on the host')
@@ -925,9 +925,9 @@ contains
                     rel = max(rel, sqrt(sum((real(res%maps(:,:,:, c, b), real64)-expected(:,:,:, c, b))**2)/ &
                         &sum(expected(:,:,:, c, b)**2)))
                     lo = expected(res%ialpha(c, b), res%irot(c, b), res%irho(c, b), c, b)
-                    losserr = max(losserr, abs(real(res%loss(c, b), real64)-lo)/max(1._real64, abs(lo)))
-                    logerr = max(logerr, abs(real(res%logz(c, b), real64)-sm(c, b)%logz))
-                    varerr = max(varerr, abs(real(res%sdev(c, b), real64)**2-sm(c, b)%sdev**2))
+                    losserr = nan_max(losserr, abs(real(res%loss(c, b), real64)-lo)/max(1._real64, abs(lo)))
+                    logerr = nan_max(logerr, abs(real(res%logz(c, b), real64)-sm(c, b)%logz))
+                    varerr = nan_max(varerr, abs(real(res%sdev(c, b), real64)**2-sm(c, b)%sdev**2))
                     bound = real(mb%temps(b), real64)*POLAR_MAP_CAP_L2*sqrt(sum(expected(:,:,:, c, b)**2))
                     if( sm(c, b)%margin > 2._real64*bound )then
                         njudged = njudged+1
@@ -980,8 +980,8 @@ contains
             do c = 1, 3
                 expected = oracle_map(fx, mb%ptcl_ids(b), mb%cands(c, b))
                 sm = summarize(fx, expected, [mb%temps(b), mb%temps_phys(b)], PRIOR_SCREEN)
-                varerr = max(varerr, abs(real(base%sdev(c, b), real64)**2 - sm%sdev**2))
-                logerr = max(logerr, abs(real(base%logz(c, b), real64) - sm%logz))
+                varerr = nan_max(varerr, abs(real(base%sdev(c, b), real64)**2 - sm%sdev**2))
+                logerr = nan_max(logerr, abs(real(base%logz(c, b), real64) - sm%logz))
             end do
         end do
         call assert_true(varerr <= POLAR_MAP_CAP_VAR*max(1._real64, maxval(fx%rho)**2), &

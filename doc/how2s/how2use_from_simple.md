@@ -69,3 +69,55 @@ for ownership, supported expressions and the one-submitting-thread rule.
 SIMPLE production integration needs its own reviewed performance verdict and integration plan. A future
 integration should keep reference tiles and their lifecycle with the calculator, and link this installed
 target from the existing SIMPLE build. This guide establishes the generic package interface.
+
+## The shape an integration takes
+
+The toys under `src/test/` model the file layout a SIMPLE class has once it can run on MLX
+([toy example policy](../policies/toy_example_policy.md), section 8): host files that import no MLX name, a glue
+submodule `<unit>_mlx` beside each host unit that crosses to the device (its body under `#ifdef USE_MLX`, stubs
+under `#else`), device modules behind one opaque component, and a backend chosen at `new`. The tables below are
+the record an integration reads: what each toy file stands for in SIMPLE (read at `d354efee2`), and what each
+mirrored host procedure gained. `scripts/toy_seam.txt` and `scripts/toy_mirror.txt` are the checked lists.
+
+| Toy file (`src/test/`) | Class | Stands for in SIMPLE |
+| --- | --- | --- |
+| `mlxf_toy_device_work.f90` | host | a new module: the abstract type a class holds its device state as |
+| `mlxf_toy_polarft_calc.f90` | host | `src/main/pftc/simple_polarft_calc.f90`, which gains the component `ws(:)`, the member `l_mlx` and the "MLX" interface block |
+| `mlxf_toy_polarft_core.f90`, `_memo.f90`, `_block.f90`, `_shiftmap.f90` | host | `simple_polarft_core.f90`, `_memo.f90`, `_block.f90`, `_shiftmap.f90`, each gaining guarded calls |
+| `mlxf_toy_polarft_core_mlx.f90`, `_memo_mlx.f90`, `_block_mlx.f90`, `_shiftmap_mlx.f90` | glue | new submodules beside those four |
+| `mlxf_toy_polarft_workspace.f90` and its submodules `_lifecycle`, `_score`, `_tail`, `_shiftmap` | device | a new module: the calculator's device state and kernels |
+| `mlxf_toy_eul_prob_tab.f90` | host | `src/main/strategies/search/probabilistic/simple_eul_prob_tab.f90`, whose fill gains the MLX branch beside its OpenMP loop |
+| `mlxf_toy_projector.f90`, `mlxf_toy_projector_pft_batch.f90` | host | `src/main/image/simple_projector.f90`, `simple_projector_pft_batch.f90` |
+| `mlxf_toy_projector_mlx.f90`, `mlxf_toy_projector_pft_batch_mlx.f90` | glue | new submodules beside those two |
+| `mlxf_toy_projector_workspace.f90` | device | a new module: the padded transform, the expanded cube, the gather's kernels, the bank handed to the calculator |
+| `mlxf_toy_reconstructor_pcg.f90` | host | `src/main/volume/simple_reconstructor_pcg.f90` (with the members of `simple_pcg_lattice.f90` it reads) |
+| `mlxf_toy_reconstructor_pcg_mlx.f90` | glue | a new submodule beside it: the device forms of the operator, the adapter, the transfers |
+| `mlxf_toy_reconstructor_pcg_workspace.f90` | device | a new module: the spectra, envelopes, mask and right-hand side |
+| `mlxf_toy_pcg_solver.f90` | host | `src/main/opt/simple_pcg_solver.f90`, for the record `pcg_solver_outcome` (SIMPLE's host engine is not modelled) |
+| `mlxf_toy_pcg_solver_mlx.f90` | device | a new module beside it: `pcg_operator` and `pcg_solve` on device vectors |
+
+What each mirrored host procedure gained. "A guarded call" is `if( self%l_mlx ) call <name>_mlx(self, ...)`; where
+the toy has no host route the other branch is a refusal.
+
+| Host procedure | What it gained |
+| --- | --- |
+| `polarft_calc%new` | the backend from `params%l_mlx`; a guarded call that makes the two workspaces; on the host backend, the per-thread work of the block kernel |
+| `polarft_calc%kill` | `kill` on each element of `ws(:)` before the deallocation |
+| `vol_pad2ref_pfts_opt` | on the device route a guarded call that passes the projector's bank on as `class(device_work)`; the host route as in SIMPLE |
+| `polarft_calc%memoize_refs`, `%memoize_ref_bins` | a guarded call each (the tiles and the memos of the device route); on the host backend SIMPLE's sums per angular bin |
+| `polarft_calc%score_block_posterior` | a guarded call on the MLX backend; on the host backend SIMPLE's block kernel (no change of its dummy list) |
+| `polarft_calc%new_shiftmap`, `%kill_shiftmap`, `%shiftmap_mode` | a guarded call each; the host backend refuses the maps (not modelled) |
+| `eul_prob_tab%fill_tab_range` | one selection: the host branch calls `score_block_posterior` from inside `!$omp parallel do` over the blocks; the MLX branch submits and collects serially from one thread |
+| `projector%new` | the backend (an optional `params`); a guarded call that makes the device state; a refusal on the host backend |
+| `projector%get_cmat`, `%pad_fft`, `%expand_cmat`, `%is_expanded`, `%kill_expanded` | a guarded call each |
+| `projector%kill` | `kill` on `ws` before the deallocation |
+| `fproject_polar_batch_opt` | a guarded call that projects on the device and copies the bank to `pfts_refs` |
+| `reconstructor_pcg%new` | the backend (an optional `params`); a guarded call that makes the device state and sends the envelopes; a refusal on the host backend |
+| `reconstructor_pcg%set_window_sphere` | a guarded call that sends or clears the hard support |
+| `reconstructor_pcg%end_accum` | two guarded calls: the right-hand side with a view of the raw density for the host's statistics, and the finalisation's wait; its private steps `update_lambda_from_density`, `finalize_density_accum`, `finalize_khat` and `calibrate_kernel` one each |
+| `reconstructor_pcg%mask_mul`, `%apply_normal`, `%apply_normal_kernel`, `%apply_precond`, `%dot_real_volume` | SIMPLE's host arrays kept; a guarded call each, whose glue sends the volume, applies the device form and brings the result back (in an integration these keep their host bodies, and the solve alone crosses) |
+| `reconstructor_pcg%solve_accum` | a guarded call: the start sent, the device engine run through the glue's adapter, the solution brought back unless the solve is given up; the window at the start and at the exit stays host code |
+| `reconstructor_pcg%kill` | `kill` on `ws` before the deallocation |
+
+The build without MLX is `test/offstate/` (`scripts/check_toy_offstate.sh`): the same host and glue files without
+`USE_MLX` and without the library.

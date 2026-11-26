@@ -103,6 +103,11 @@ end type polar_map_results
 ! array of every section, once released, would stay in the process's footprint
 integer, parameter :: POLARFT_STAGE_N = 64
 
+! SIMPLE's block of the dense scorer: at most PFTC_BLOCK_NB particles of one half, against tiles of PFTC_BLOCK_NR
+! references
+integer, parameter :: PFTC_BLOCK_NB = 16
+integer, parameter :: PFTC_BLOCK_NR = 32
+
 ! the shift maps a polar calculator holds, SIMPLE's: the full band's, the screen's over the disk, the window's
 integer, parameter :: SHIFTMAP_FULL   = 1
 integer, parameter :: SHIFTMAP_SCREEN = 2
@@ -113,7 +118,8 @@ integer, parameter :: NSHIFTMAPS      = 3
 ! half ring, the box whose pixels the shifts are in, the host team, the tempering factor of the shift maps, and
 ! what sets up the two coarse maps: the shift prior's width and the window's radius (Angstrom and pixels) and
 ! the sampling distance; for the reprojection, the directions and states of the reference bank and the cropped
-! box the projected volumes have
+! box the projected volumes have. l_mlx is the toy's own: the backend a toy class takes at new, MLX (the default
+! here) or the host's; a build without MLX refuses the first
 type :: parameters
     integer      :: pftsz       = 0
     integer      :: box         = 0
@@ -125,6 +131,7 @@ type :: parameters
     integer      :: nspace      = 0
     integer      :: nstates     = 1
     integer      :: box_crop    = 0
+    logical      :: l_mlx       = .true.
 end type parameters
 
 ! SIMPLE's Kaiser-Bessel window of the oversampled gather and scatter (simple_defs: the half-width KBWINSZ, the
@@ -244,6 +251,42 @@ real(real64), parameter :: POLARFT_TAIL_ROW_TOL = 2.3816146966584994e-07_real64
 integer,      parameter :: POLARFT_TAIL_ROT_FIX = 1
 integer,      parameter :: POLARFT_TAIL_ROT_BLK = 5
 
+! the fixture of the polar host route (sub-suite polarft_host and the off-state program): shells kfrom .. kfrom +
+! nk - 1 on a half ring of pftsz samples, nrefs references per half (more than one tile of PFTC_BLOCK_NR, the
+! last one partial), nptcls particles (more than one block of PFTC_BLOCK_NB per half, the last one partial)
+integer, parameter :: PH_PFTSZ  = 16
+integer, parameter :: PH_KFROM  = 2
+integer, parameter :: PH_NK     = 6
+integer, parameter :: PH_NREFS  = 40
+integer, parameter :: PH_NPTCLS = 44
+
+! the fixture's values of one seed: the shell weights k / sigma2 of both halves, the reference rings of both
+! parities, the particles' rings and CTFs, their inverse temperatures, and each reference's full index (the key of
+! its draws)
+type :: polarft_host_fixture
+    integer                      :: seed = 0
+    real(real64),    allocatable :: w(:,:)
+    complex(real64), allocatable :: rref(:,:,:,:)
+    complex(real32), allocatable :: x(:,:,:)
+    real(real32),    allocatable :: ctf(:,:,:)
+    real(real32),    allocatable :: temps(:)
+    integer,         allocatable :: ref_full(:)
+end type polarft_host_fixture
+
+! one fill of the fixture's table: the backend and the host team asked for, whether the full rows are kept; the
+! dense entries (references, particles in the batch's order), that order, the rows when kept, and the reason of
+! a refusal
+type :: polarft_host_table
+    logical                       :: l_mlx  = .false.
+    integer                       :: nthr   = 1
+    logical                       :: l_rows = .false.
+    real(real32),     allocatable :: dists(:,:)
+    integer,          allocatable :: irots(:,:)
+    integer,          allocatable :: order(:)
+    real(real32),     allocatable :: rows(:,:,:)
+    character(len=:), allocatable :: msg
+end type polarft_host_table
+
 ! the tile plan a workspace's reference tiles are prepared under: the polar geometry (pftsz, nk shells), the
 ! references and particles per tile, every tile padded to them, and the form of the tail
 type :: polarft_tile_spec
@@ -310,6 +353,11 @@ integer,      parameter :: POLAR_FIXTURE_ROT_Q   = 1
 real(real64), parameter :: POLAR_BLOCK_ERR_CPU = 7.2525524223032628e-07_real64
 integer,      parameter :: POLAR_BLOCK_ROT_CPU = 2
 integer,      parameter :: POLAR_BLOCK_ROT_Q   = 5
+
+! the samplers' tester: the size of a sample, and the standard errors within which a sample's mean and variance must
+! lie of the distribution's (the normal approximation of an estimator's error: a false failure about 6e-7 a check)
+integer,      parameter :: RANDOM_NSAMPLES = 2**20
+real(real64), parameter :: RANDOM_SIGMAS   = 5._real64
 
 ! the elementwise testers: points per function, the calibration seed and the seeds it judges
 integer, parameter :: ELEM_NPOINTS          = 1024
@@ -470,6 +518,27 @@ type(elem_tolerance), parameter :: CONV_TOLERANCES(7) = [&
     &elem_tolerance('mlx_conv_transpose1d', ELEM_FLOOR32, ELEM_FLOOR32), &
     &elem_tolerance('mlx_conv_transpose2d', ELEM_FLOOR32, ELEM_FLOOR32), &
     &elem_tolerance('mlx_conv_transpose3d', ELEM_FLOOR32, ELEM_FLOOR32)]
+
+! the fused layers' largest error relative to max(1, |reference|) against real64 loops. Calibrated on seed 1 on both
+! devices and frozen as ELEM_TOLERANCES is: none reached two float32 epsilons. MLX computes them in float32 on the
+! CPU for float64 operands too (the result is float64, the accuracy float32), so the float64 column holds the
+! float32 floor; the cross entropy is float32 whatever its logits. mlx_attention_fused is MLX's fused kernel, demanded
+! on the GPU for 64 features (calibrated there)
+type(elem_tolerance), parameter :: FAST_TOLERANCES(6) = [&
+    &elem_tolerance('mlx_layer_norm', ELEM_FLOOR32, ELEM_FLOOR32), &
+    &elem_tolerance('mlx_rms_norm', ELEM_FLOOR32, ELEM_FLOOR32), &
+    &elem_tolerance('mlx_rope', ELEM_FLOOR32, ELEM_FLOOR32), &
+    &elem_tolerance('mlx_attention', ELEM_FLOOR32, ELEM_FLOOR32), &
+    &elem_tolerance('mlx_attention_fused', ELEM_FLOOR32, ELEM_FLOOR32), &
+    &elem_tolerance('mlx_cross_entropy', ELEM_FLOOR32, ELEM_FLOOR32)]
+
+! the transforms' largest error against a closed-form derivative, over a polynomial, exp(a x) and a chain of two
+! matrix products, relative to max(1, the same sum of magnitudes). Calibrated on seed 1 on both devices and frozen
+! as ELEM_TOLERANCES is: none reached two epsilons of its kind, so each holds the floor
+type(elem_tolerance), parameter :: GRAD_TOLERANCES(3) = [&
+    &elem_tolerance('mlx_value_and_grad', ELEM_FLOOR32, ELEM_FLOOR64), &
+    &elem_tolerance('mlx_vjp', ELEM_FLOOR32, ELEM_FLOOR64), &
+    &elem_tolerance('mlx_jvp', ELEM_FLOOR32, ELEM_FLOOR64)]
 
 ! the reconstruction's PCG benchmark: its native boxes n, each solved on the padded lattice of m = 2 n
 integer, parameter :: RECON_PCG_BENCH_N(2) = [160, 256]

@@ -6,9 +6,10 @@
 ! a user writes; lifecycle, scoring, the fused tail and the shift maps are submodules.
 module mlxf_toy_polarft_workspace
 use, intrinsic :: iso_fortran_env, only: int64, real32, real64
-use mlxf,           only: mlx_array, mlx_function, mlx_metal_kernel
-use mlxf_test_defs, only: NSHIFTMAPS, POLARFT_TAILS, polarft_tile_spec, polarft_block_spec, polarft_map_spec, &
-                          polarft_map_block, polar_map_results
+use mlxf,                 only: mlx_array, mlx_function, mlx_metal_kernel
+use mlxf_test_defs,       only: NSHIFTMAPS, POLARFT_TAILS, polarft_tile_spec, polarft_block_spec, polarft_map_spec, &
+                                polarft_map_block, polar_map_results
+use mlxf_toy_device_work, only: device_work
 implicit none
 
 public :: polarft_workspace
@@ -87,8 +88,9 @@ end type tail_outputs
 ! first block that asks for rows, l_tail_rows) and tail_par the constants they read; stage_s the
 ! profiled stages' seconds: particle terms, products, inverse transform, distances and draw, concatenation;
 ! rows_host the full rows of the last block collected with them; maps the shift maps, and mstage_s their
-! profiled seconds: construction, mode, width, copy-out
-type :: polarft_workspace
+! profiled seconds: construction, mode, width, copy-out. It extends device_work, the opaque type a calculator holds
+! it as
+type, extends(device_work) :: polarft_workspace
     private
     logical                       :: prepared   = .false.
     integer                       :: pftsz      = 0

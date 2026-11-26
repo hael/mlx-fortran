@@ -5,17 +5,24 @@
 module mlxf_defs
 use, intrinsic :: iso_c_binding, only: c_double, c_float, c_int64_t
 use mlxf_c_types, only: MLXC_FFT_NORM_BACKWARD, MLXC_FFT_NORM_ORTHO, MLXC_FFT_NORM_FORWARD, MLXC_CPU, MLXC_GPU, &
-                        MLXC_BOOL, MLXC_INT32, MLXC_INT64, MLXC_FLOAT32, MLXC_FLOAT64, MLXC_COMPLEX64, MLXC_INT8, &
-                        MLXC_INT16, MLXC_UINT8, MLXC_UINT16, MLXC_UINT32, MLXC_UINT64, MLXC_FLOAT16, MLXC_BFLOAT16
+                        MLXC_COMPILE_MODE_DISABLED, MLXC_COMPILE_MODE_NO_SIMPLIFY, MLXC_COMPILE_MODE_NO_FUSE, &
+                        MLXC_COMPILE_MODE_ENABLED, MLXC_BOOL, MLXC_INT32, MLXC_INT64, MLXC_FLOAT32, MLXC_FLOAT64, &
+                        MLXC_COMPLEX64, MLXC_INT8, MLXC_INT16, MLXC_UINT8, MLXC_UINT16, MLXC_UINT32, MLXC_UINT64, &
+                        MLXC_FLOAT16, MLXC_BFLOAT16, mlxc_distributed_group
 implicit none
 
 private :: MLXC_FFT_NORM_BACKWARD, MLXC_FFT_NORM_ORTHO, MLXC_FFT_NORM_FORWARD
+private :: mlxc_distributed_group
+private :: MLXC_COMPILE_MODE_DISABLED, MLXC_COMPILE_MODE_NO_SIMPLIFY, MLXC_COMPILE_MODE_NO_FUSE, MLXC_COMPILE_MODE_ENABLED
 private :: c_double, c_float, c_int64_t
 private :: MLXC_CPU, MLXC_GPU, MLXC_BOOL, MLXC_INT32, MLXC_INT64, MLXC_FLOAT32, MLXC_FLOAT64, MLXC_COMPLEX64
 private :: MLXC_INT8, MLXC_INT16, MLXC_UINT8, MLXC_UINT16, MLXC_UINT32, MLXC_UINT64, MLXC_FLOAT16, MLXC_BFLOAT16
 
 ! the exit status of every stop the library makes, so that a test can tell it from a runtime failure
 integer, parameter :: MLXF_HARD_ERROR_STATUS = 86
+
+! what mlx-c's map iterators return when no pair is left (0 is a pair, 1 a failure)
+integer, parameter :: MLXF_MAP_END = 2
 
 ! the device types the device procedures take and return
 type :: mlx_device_codes
@@ -50,7 +57,18 @@ type :: mlx_fft_norm_codes
     integer :: forward = int(MLXC_FFT_NORM_FORWARD)
 end type mlx_fft_norm_codes
 type(mlx_fft_norm_codes), parameter :: MLX_FFT_NORMS = mlx_fft_norm_codes()
-type                                :: mlxf_slice_spec
+
+! what mlx_compile does to a function, for mlx_set_compile_mode: nothing (disabled: the callback runs at every
+! call), everything but the simplification of the graph (no_simplify), everything but the fusion of its
+! operations into kernels (no_fuse), or all of it (enabled, MLX's default)
+type :: mlx_compile_mode_codes
+    integer :: disabled    = int(MLXC_COMPILE_MODE_DISABLED)
+    integer :: no_simplify = int(MLXC_COMPILE_MODE_NO_SIMPLIFY)
+    integer :: no_fuse     = int(MLXC_COMPILE_MODE_NO_FUSE)
+    integer :: enabled     = int(MLXC_COMPILE_MODE_ENABLED)
+end type mlx_compile_mode_codes
+type(mlx_compile_mode_codes), parameter :: MLX_COMPILE_MODES = mlx_compile_mode_codes()
+type :: mlxf_slice_spec
     integer, allocatable :: lower(:), upper(:), stride(:)
 end type mlxf_slice_spec
 
@@ -164,6 +182,50 @@ type :: mlxf_norm_spec
     logical              :: keepdims = .false.
     logical              :: on_cpu = .false.
 end type mlxf_norm_spec
+
+! what a sampler takes besides its arrays and its key: the Fortran shape of the sample, its dtype, a count (the
+! width of random bits in bytes, the samples per distribution, the length of a permutation), the dimension of the
+! categories or of a permutation, a location and a scale, and whether MLX draws the sample on the CPU only
+type :: mlxf_random_spec
+    integer, allocatable :: shape(:)
+    integer              :: dtype = int(MLXC_FLOAT32)
+    integer              :: number = 0
+    integer              :: dim = 1
+    real(c_float)        :: loc = 0, scale = 1
+    logical              :: on_cpu = .false.
+end type mlxf_random_spec
+
+! the options of a rotary position embedding (mlx_rope): how many elements of dimension 1 are rotated, from the
+! first (even; 0: all of them); traditional pairs neighbours (1, 2), (3, 4), ..., otherwise element p goes with
+! element p + features/2; the base of the divisors of the angle, base**((p-1)/(features/2)) for pair p, used when
+! none are given; the scale of the positions; and the number of positions before the first
+type :: mlx_rope_spec
+    integer       :: features = 0
+    logical       :: traditional = .false.
+    real(c_float) :: base = 10000._c_float
+    real(c_float) :: scale = 1._c_float
+    integer       :: offset = 0
+end type mlx_rope_spec
+
+! the options of mlx_scaled_dot_product_attention: the factor of the scores (not set: one over the square root
+! of the queries' first extent), whether a query attends only the keys up to its own position, and whether MLX's
+! fused kernel is demanded (it then stops where it has none)
+type :: mlx_attention_spec
+    real(c_float), allocatable :: scale
+    logical                    :: causal = .false.
+    logical                    :: force_fused = .false.
+end type mlx_attention_spec
+
+! what a distributed operation takes besides its array: the group (a null handle is MLX's default group), the
+! zero-based rank of the peer, the Fortran shape and the dtype of what is received, and the name of the public
+! procedure, for the messages
+type :: mlxf_group_spec
+    type(mlxc_distributed_group)  :: group
+    integer                       :: peer = 0
+    integer,          allocatable :: shape(:)
+    integer                       :: dtype = int(MLXC_FLOAT32)
+    character(len=:), allocatable :: proc
+end type mlxf_group_spec
 
 ! a custom Metal kernel and its launch (mlx_metal_kernel): the body of the Metal function (source), declarations
 ! put before it (header), the names its buffers take in the source, the thread grid and the threadgroup as

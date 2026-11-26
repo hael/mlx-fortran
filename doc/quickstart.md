@@ -37,6 +37,7 @@ float64, `m` boolean.
 | D17 | `mlx_take(x, idx)` with an index 0 | out of bounds (undefined, or a runtime check) | unchecked: 0 wraps to the last element | different | D17 |
 | D18 | `x > 1.5` | a logical array | a boolean array; copied out as `logical(c_bool)` | same | D18 |
 | D19 | `matmul(a3, b3)`, `transpose(a3)` of rank 3 | not allowed (rank 2 only) | batched over dimensions 3 and up | different | D19 |
+| D20 | `call random_number(x)` against `mlx_random_uniform(shape, key=key)` | the processor's generator, its state hidden | float32, a function of the key and the shape: the same key gives the same sample; without a key MLX's global key, which `mlx_random_seed` sets and each draw advances | different | D20 |
 
 Scalars are weak in every binary operation that takes one (arithmetic, comparisons, `max`, `min`, `atan2`,
 `modulo`, ...): a real64 literal never makes a float64 graph. Integer arrays with a real scalar give float32.

@@ -2,12 +2,17 @@
 ! The iterate after k iterations is the oracle's solve under fixed k iterations; the step quantity of iteration k
 ! is |x_k - x_(k-1)| / max(|x_k|, epsilon) from two of them. System R (relative ridge) runs SIMPLE's engine rules
 ! (E) and rule T past them; system P (SIMPLE's absolute ridge) runs SIMPLE's production, two and five iterations.
-! Rule T and the residual floor reach the engine through a test operator over the toy's public procedures.
+! Rule T and the residual floor reach the engine through the operator the toy hands out (get_pcg_operator), the
+! opaque device state this tester resolves to the engine's pcg_operator; the same operator gives the testers the
+! device forms of the product, the preconditioner and the inner product (device_apply, device_precond, device_dot).
 submodule (mlxf_toy_reconstructor_pcg_tester) mlxf_toy_reconstructor_pcg_tester_solve
-use mlxf_test_defs,        only: PCG_LAMBDA, RECON_PCG_RTOL_T, pcg_solver_options
-use mlxf_toy_pcg_solver,   only: pcg_operator, pcg_solver_outcome, pcg_solve
-use mlxf_oracle_recon_pcg, only: oracle_recon_support_index, oracle_recon_symmetric_eigenvalues
-use mlxf_oracle_pcg,       only: oracle_pcg_cholesky
+use, intrinsic :: ieee_arithmetic, only: ieee_value, ieee_positive_inf, ieee_quiet_nan, ieee_is_finite
+use mlxf_test_defs,          only: PCG_LAMBDA, RECON_PCG_RTOL_T, pcg_solver_options
+use mlxf_toy_device_work,    only: device_work
+use mlxf_toy_pcg_solver,     only: pcg_solver_outcome
+use mlxf_toy_pcg_solver_mlx, only: pcg_operator, pcg_solve
+use mlxf_oracle_recon_pcg,   only: oracle_recon_support_index, oracle_recon_symmetric_eigenvalues
+use mlxf_oracle_pcg,         only: oracle_pcg_cholesky
 implicit none
 
 ! SIMPLE's engine rules (E) and production's iterations (F2, F5); rule T's iterations; the residual floor's samples
@@ -22,43 +27,55 @@ integer,      parameter :: REASON_XTOL = 2
 ! the calibration seed: its stop under rule E is reported and not gated (its margin under 5 %)
 integer, parameter :: SEED_STOP_REPORTED = 1
 
-! the toy's public operator, preconditioner and dot as the engine's client
-type, extends(pcg_operator) :: test_operator
-    type(reconstructor_pcg), pointer :: rec => null()
-  contains
-    procedure :: size    => test_size
-    procedure :: apply   => test_apply
-    procedure :: precond => test_precond
-    procedure :: dot     => test_dot
-end type test_operator
-
 contains
 
-    integer function test_size( self ) result(n)
-        class(test_operator), intent(in) :: self
-        n = self%rec%box**3
-    end function test_size
+    ! H x by the reconstructor's operator on the device (P H P with a support), unevaluated
+    module function device_apply( rec, x ) result(y)
+        type(reconstructor_pcg), target, intent(inout) :: rec
+        type(mlx_array),                 intent(in)    :: x
+        type(mlx_array)                 :: y
+        class(device_work), allocatable :: op
+        call rec%get_pcg_operator(op)
+        if( .not. allocated(op) ) return
+        select type( op )
+            class is( pcg_operator )
+                call op%apply(x, y)
+        end select
+        call op%kill()
+        deallocate(op)
+    end function device_apply
 
-    subroutine test_apply( self, x, y )
-        class(test_operator), intent(inout) :: self
-        type(mlx_array),      intent(in)    :: x
-        type(mlx_array),      intent(out)   :: y
-        y = self%rec%apply_normal(x)
-    end subroutine test_apply
+    ! the preconditioner's product by the reconstructor's operator on the device, unevaluated
+    module function device_precond( rec, r ) result(z)
+        type(reconstructor_pcg), target, intent(inout) :: rec
+        type(mlx_array),                 intent(in)    :: r
+        type(mlx_array)                 :: z
+        class(device_work), allocatable :: op
+        call rec%get_pcg_operator(op)
+        if( .not. allocated(op) ) return
+        select type( op )
+            class is( pcg_operator )
+                call op%precond(r, z)
+        end select
+        call op%kill()
+        deallocate(op)
+    end function device_precond
 
-    subroutine test_precond( self, r, z )
-        class(test_operator), intent(inout) :: self
-        type(mlx_array),      intent(in)    :: r
-        type(mlx_array),      intent(out)   :: z
-        z = self%rec%apply_precond(r)
-    end subroutine test_precond
-
-    function test_dot( self, a, b ) result(d)
-        class(test_operator), intent(in) :: self
-        type(mlx_array),      intent(in) :: a, b
-        type(mlx_array) :: d
-        d = self%rec%dot_real_volume(a, b)
-    end function test_dot
+    ! the device half of a . b by the reconstructor's operator: the partial sums of the lines, unevaluated
+    module function device_dot( rec, a, b ) result(d)
+        type(reconstructor_pcg), target, intent(inout) :: rec
+        type(mlx_array),                 intent(in)    :: a, b
+        type(mlx_array)                 :: d
+        class(device_work), allocatable :: op
+        call rec%get_pcg_operator(op)
+        if( .not. allocated(op) ) return
+        select type( op )
+            class is( pcg_operator )
+                d = op%dot(a, b)
+        end select
+        call op%kill()
+        deallocate(op)
+    end function device_dot
 
     ! the oracle's iterates u(:, k), k = 0 .. kmax, of fixed solves from zero, and their step quantities
     subroutine oracle_iterates( prob, b, kmax, u, step )
@@ -116,22 +133,73 @@ contains
     end function iterate_error
 
     ! the residual and step histories of a toy outcome against the oracle's, the largest absolute differences
-    ! (residual, step)
+    ! (residual, step); +infinity for both when a history is missing, shorter than kmax or holds a value that is
+    ! not finite, so that no tolerance accepts a corrupt history
     function history_errors( oc, hist, step, kmax ) result(e)
         type(pcg_solver_outcome), intent(in) :: oc
         real(real64),             intent(in) :: hist(0:), step(:)
         integer,                  intent(in) :: kmax
         real(real64) :: e(2)
-        integer      :: k
-        e = huge(1._real64)
+        e = ieee_value(1._real64, ieee_positive_inf)
         if( .not. allocated(oc%rel_residual_history) ) return
-        if( size(oc%rel_residual_history) < kmax ) return
+        if( .not. allocated(oc%rel_update_history) ) return
+        if( size(oc%rel_residual_history) < kmax .or. size(oc%rel_update_history) < kmax ) return
+        if( ubound(hist, 1) < kmax .or. size(step) < kmax ) return
+        if( .not. all(ieee_is_finite(oc%rel_residual_history(1:kmax))) ) return
+        if( .not. all(ieee_is_finite(oc%rel_update_history(1:kmax))) ) return
         e = 0._real64
-        do k = 1, kmax
-            e(1) = max(e(1), abs(real(oc%rel_residual_history(k), real64) - hist(k)))
-            e(2) = max(e(2), abs(real(oc%rel_update_history(k), real64) - step(k)))
-        end do
+        if( kmax < 1 ) return
+        e(1) = nan_maxval(abs(real(oc%rel_residual_history(1:kmax), real64) - hist(1:kmax)))
+        e(2) = nan_maxval(abs(real(oc%rel_update_history(1:kmax), real64) - step(1:kmax)))
     end function history_errors
+
+    ! the comparator's negative controls: on copies of a real outcome (system P, five iterations) with one NaN
+    ! planted at the first, a middle and the last entry of each history, history_errors gives +infinity; a
+    ! missing and a short history give it too; the outcome as it is compares finite against itself
+    module subroutine test_history_controls( fx )
+        type(recon_fixture), intent(in) :: fx
+        type(reconstructor_pcg)   :: rec
+        type(pcg_solver_outcome)  :: oc, bad
+        real(real32), allocatable :: x(:,:,:), z(:,:,:)
+        real(real64)              :: hist(0:MAXITS_F), step(MAXITS_F), e(2)
+        real(real32)              :: nan32
+        integer                   :: pos(3), ih, ip
+        character(len=8)          :: where_(3)
+        write(*,'(a,a)') 'test_history_controls ', device_name_now()
+        allocate(x(fx%n, fx%n, fx%n), z(fx%n, fx%n, fx%n))
+        z = 0._real32
+        call assemble_production(fx, rec)
+        call toy_iterate(rec, z, MAXITS_F, x, oc)
+        call rec%kill()
+        call assert_true(oc%iteration_count == MAXITS_F, 'history controls: the outcome holds five iterations')
+        if( oc%iteration_count /= MAXITS_F ) return
+        hist(0)  = 1._real64
+        hist(1:) = real(oc%rel_residual_history(1:MAXITS_F), real64)
+        step     = real(oc%rel_update_history(1:MAXITS_F), real64)
+        e = history_errors(oc, hist, step, MAXITS_F)
+        call assert_true(all(e <= 0._real64), 'history controls: a sound outcome compares finite, at zero from itself')
+        nan32  = ieee_value(1._real32, ieee_quiet_nan)
+        pos    = [1, (MAXITS_F + 1) / 2, MAXITS_F]
+        where_ = [character(len=8) :: 'first', 'middle', 'last']
+        do ih = 1, 2
+            do ip = 1, 3
+                bad = oc
+                if( ih == 1 ) bad%rel_residual_history(pos(ip)) = nan32
+                if( ih == 2 ) bad%rel_update_history(pos(ip)) = nan32
+                e = history_errors(bad, hist, step, MAXITS_F)
+                call assert_true(all(e > huge(1._real64)), 'history controls: a NaN at the '//trim(where_(ip))//&
+                    ' entry of the '//trim(merge('residual', 'update  ', ih == 1))//' history gives +infinity')
+            end do
+        end do
+        bad = oc
+        deallocate(bad%rel_update_history)
+        e = history_errors(bad, hist, step, MAXITS_F)
+        call assert_true(all(e > huge(1._real64)), 'history controls: a missing update history gives +infinity')
+        bad = oc
+        bad%rel_residual_history = oc%rel_residual_history(1:MAXITS_F-1)
+        e = history_errors(bad, hist, step, MAXITS_F)
+        call assert_true(all(e > huge(1._real64)), 'history controls: a short residual history gives +infinity')
+    end subroutine test_history_controls
 
     ! the small fixture on one device: O9; gate (a) under rule E on system R (the stop iteration and reason, every
     ! iterate, residual and step); gate (a') under F2 and F5 on system P; start and ship; gate (b) under rule T, or
@@ -219,10 +287,11 @@ contains
         call probp%kill()
     end subroutine test_solve_small
 
-    ! O9: dot_real_volume of two fixed vectors, its partial sums added in double, against the host's double sum
+    ! O9: the operator's inner product of two fixed vectors on the device, its partial sums added in double, against
+    ! the host's double sum
     real(real64) function dot_error( rec, n ) result(e)
-        type(reconstructor_pcg), intent(inout) :: rec
-        integer,                 intent(in)    :: n
+        type(reconstructor_pcg), target, intent(inout) :: rec
+        integer,                 intent(in)            :: n
         type(mlx_array) :: ud, vd, d
         real(real32)    :: u(n, n, n), v(n, n, n), part(n * n)
         real(real64)    :: ref, val
@@ -230,27 +299,34 @@ contains
         v   = fixed_volume(n, 6)
         ud  = mlx_from(u)
         vd  = mlx_from(v)
-        d   = rec%dot_real_volume(ud, vd)
+        d   = device_dot(rec, ud, vd)
         call mlx_to(part, d)
         val = sum(real(part, real64))
         ref = sum(real(u, real64) * real(v, real64))
         e   = abs(val - ref) / abs(ref)
     end function dot_error
 
-    ! the device's iterate u (not shipped) after a solve of the test operator from zero under the given rules
+    ! the device's iterate u (not shipped) after a solve of the toy's operator from zero under the given rules
     subroutine engine_solve( rec, bt, opts, u, outcome )
         type(reconstructor_pcg), target, intent(inout) :: rec
         real(real32),                    intent(in)    :: bt(:,:,:)
         type(pcg_solver_options),        intent(in)    :: opts
         real(real64),                    intent(out)   :: u(:)
         type(pcg_solver_outcome),        intent(out)   :: outcome
-        type(test_operator) :: op
-        type(mlx_array)     :: bd, xd
-        real(real32)        :: y(size(u))
-        op%rec => rec
+        class(device_work), allocatable :: op
+        type(mlx_array)                 :: bd, xd
+        real(real32)                    :: y(size(u))
         bd = mlx_from(bt)
         xd = mlx_from(0._real32 * bt)
-        call pcg_solve(op, bd, xd, opts, outcome)
+        call rec%get_pcg_operator(op)
+        if( allocated(op) )then
+            select type( op )
+                class is( pcg_operator )
+                    call pcg_solve(op, bd, xd, opts, outcome)
+            end select
+            call op%kill()
+            deallocate(op)
+        endif
         call mlx_to(y, xd)
         u = real(y, real64)
     end subroutine engine_solve
@@ -375,10 +451,15 @@ contains
         call assert_true((trim(oc%stop_reason) == 'xtol' .and. info(2) == REASON_XTOL) .or. &
             (trim(oc%stop_reason) == 'rtol' .and. info(2) == REASON_RTOL), '(a): at n = 32 the device stops by the '//&
             'oracle''s test')
-        e = 0._real64
-        do i = 1, min(oc%iteration_count, kstop)
-            e = max(e, abs(real(oc%rel_residual_history(i), real64) - hist_e(i+1)))
-        end do
+        e = ieee_value(1._real64, ieee_positive_inf)
+        if( allocated(oc%rel_residual_history) )then
+            if( size(oc%rel_residual_history) >= min(oc%iteration_count, kstop) )then
+                e = 0._real64
+                do i = 1, min(oc%iteration_count, kstop)
+                    e = nan_max(e, abs(real(oc%rel_residual_history(i), real64) - hist_e(i+1)))
+                end do
+            endif
+        endif
         call report('residual history E', fx, e, tol('residual history'))
         call assert_true(e <= tol('residual history'), '(a): at n = 32 the residual history agrees with the oracle''s')
         ks = [1, 2, 5, kstop]

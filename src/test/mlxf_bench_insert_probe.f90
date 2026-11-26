@@ -19,7 +19,7 @@ use mlxf_test_defs,         only: KBWINSZ, KBALPHA, MAXIMGBATCHSZ, PROJ_TIE_MARG
 use mlxf_oracle_gridding,   only: oracle_grid_plane, oracle_grid_lattice, oracle_grid_selfcheck
 use mlxf_oracle_projection, only: oracle_proj_stencil
 use mlxf_test_utils,        only: assert_true, set_fixed_seed, bits_equal
-use mlxf_test_reduce,       only: nan_maxval
+use mlxf_test_reduce,       only: nan_maxval, nan_max
 implicit none
 private
 
@@ -531,9 +531,9 @@ contains
             ndiff  = max(ndiff, nworst)
             d = nan_maxval(merge(abs(real(again%dens, real64) - real(run%dens, real64)) / max(dens, tiny(1._real64)), &
                 &0._real64, dens > 0._real64))
-            dmax = max(dmax, d, nan_maxval(merge(abs(cmplx(real(again%num(1, :), real64), real(again%num(2, :), real64), &
-                &real64) - cmplx(real(run%num(1, :), real64), real(run%num(2, :), real64), real64)) / &
-                &max(scale, tiny(1._real64)), 0._real64, scale > 0._real64)))
+            dmax = nan_max(nan_max(dmax, d), nan_maxval(merge(abs(cmplx(real(again%num(1, :), real64), &
+                &real(again%num(2, :), real64), real64) - cmplx(real(run%num(1, :), real64), real(run%num(2, :), real64), &
+                &real64)) / max(scale, tiny(1._real64)), 0._real64, scale > 0._real64)))
             write(line,'(a,i0,a,i0,a,i0)') '    repeat ', i, ': voxels whose bits differ from run 1 ', nworst, ' of ', &
                 &nvox
             write(*,'(a)') trim(line)

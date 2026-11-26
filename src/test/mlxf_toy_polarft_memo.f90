@@ -4,8 +4,7 @@
 ! a few sections at a time; a full staging is turned into memos at once, by the whole team, and memoize_refs
 ! and memoize_ptcls finish what is staged.
 submodule (mlxf_toy_polarft_calc) mlxf_toy_polarft_memo
-!$ use omp_lib,     only: omp_get_thread_num, omp_get_max_threads
-use mlxf_test_defs, only: polarft_tile_spec
+!$ use omp_lib, only: omp_get_thread_num, omp_get_max_threads
 implicit none
 
 contains
@@ -93,7 +92,7 @@ contains
         integer,             intent(in)    :: iref
         logical,             intent(in)    :: iseven
         complex(real32),     intent(inout) :: pft(self%pftsz, self%kfromto(1):self%kfromto(2))
-        integer :: ieo, j, st
+        integer :: ieo, j
         pft = cmplx(0._real32, 0._real32, real32)
         if( .not. self%existence )then
             self%msg = 'polarft_calc%get_ref_pft: refused: no calculator (new)'
@@ -105,9 +104,8 @@ contains
         endif
         ieo      = merge(REF_EVEN, REF_ODD, iseven)
         self%msg = ''
-        if( self%route == POLARFT_REF_ROUTES%device )then
-            call self%ws(ieo)%get_section(iref, pft, st)
-            if( st /= 0 ) self%msg = self%ws(ieo)%message()
+        if( self%l_mlx .and. self%route == POLARFT_REF_ROUTES%device )then
+            call get_ref_pft_mlx(self, iref, iseven, pft)
             return
         endif
         do j = 1, self%nref_staged
@@ -297,25 +295,19 @@ contains
 
     module subroutine memoize_refs( self )
         class(polarft_calc), intent(inout) :: self
-        integer :: ieo, st
         if( .not. self%existence )then
             self%msg = 'polarft_calc%memoize_refs: refused: no calculator (new)'
             return
         endif
         self%msg = ''
-        if( self%route == POLARFT_REF_ROUTES%device )then
-            ! the device route: the ring transforms of the projected sections, made where they are
-            do ieo = 1, N_REF_PARITIES
-                if( .not. self%ws(ieo)%has_sections() ) cycle
-                call self%ws(ieo)%memoize_sections(self%pftsz, self%nk, st)
-                if( st /= 0 )then
-                    self%msg = self%ws(ieo)%message()
-                    return
-                endif
-            end do
+        if( self%l_mlx .and. self%route == POLARFT_REF_ROUTES%device )then
+            call memoize_refs_mlx(self)
+            if( len(self%msg) > 0 ) return
         else
             call flush_refs(self)
         endif
+        ! from here the route is fixed: the memos of the references that waited exist on this route only
+        if( self%l_refs_pending ) self%l_refs_memoized = .true.
         self%l_refs_pending = .false.
         self%ref_gen        = self%ref_gen + 1_int64
     end subroutine memoize_refs
@@ -347,8 +339,6 @@ contains
 
     module subroutine memoize_ref_bins( self )
         class(polarft_calc), intent(inout) :: self
-        type(polarft_tile_spec) :: spec
-        integer                 :: ieo, st
         if( .not. self%existence )then
             self%msg = 'polarft_calc%memoize_ref_bins: refused: no calculator (new)'
             return
@@ -359,25 +349,41 @@ contains
         endif
         self%msg          = ''
         self%ref_gen_bins = -1_int64
-        spec%pftsz        = self%pftsz
-        spec%nk           = self%nk
-        spec%rt           = self%rt
-        spec%bt           = self%bt
-        spec%tail         = self%tail
-        do ieo = 1, N_REF_PARITIES
-            if( self%route == POLARFT_REF_ROUTES%device )then
-                ! the device route: the tiles from the device memos, which they replace
-                call self%ws(ieo)%new_from_memos(spec, st)
-            else
-                call self%ws(ieo)%new(spec, self%ft_ref(:, :, :, ieo), self%ft_ref2(:, :, :, ieo), st)
-            endif
-            if( st /= 0 )then
-                self%msg = self%ws(ieo)%message()
-                return
-            endif
-        end do
+        if( self%l_mlx )then
+            call memoize_ref_bins_mlx(self)
+        else
+            call host_ref_bins(self)
+        endif
+        if( len(self%msg) > 0 ) return
         self%ref_gen_bins = self%ref_gen
     end subroutine memoize_ref_bins
+
+    ! SIMPLE's bin-major memo of the references: per angular bin the 2nk shell terms of every reference, rows
+    ! 1..nk conj(ft_ref2) and rows nk+1..2nk ft_ref, so that a block's sums of a bin read contiguous memory
+    subroutine host_ref_bins( self )
+        class(polarft_calc), intent(inout) :: self
+        integer :: iref, ieo, j, k, kk, ierr
+        if( .not. allocated(self%ft_ref_bins) )then
+            allocate(self%ft_ref_bins(2 * self%nk, self%nrefs, self%pftsz + 1, N_REF_PARITIES), stat=ierr)
+            if( ierr /= 0 )then
+                self%msg = 'polarft_calc%memoize_ref_bins: the bin-major memo could not be allocated'
+                return
+            endif
+        endif
+        !$omp parallel do default(shared) private(iref, ieo, j, k, kk) schedule(static) proc_bind(close)
+        do iref = 1, self%nrefs
+            do ieo = REF_EVEN, REF_ODD
+                do j = 1, self%pftsz + 1
+                    do k = self%kfromto(1), self%kfromto(2)
+                        kk = k - self%kfromto(1) + 1
+                        self%ft_ref_bins(kk, iref, j, ieo)           = conjg(self%ft_ref2(j, k, iref, ieo))
+                        self%ft_ref_bins(self%nk + kk, iref, j, ieo) = self%ft_ref(j, k, iref, ieo)
+                    end do
+                end do
+            end do
+        end do
+        !$omp end parallel do
+    end subroutine host_ref_bins
 
     module subroutine kill_ref_bins( self )
         class(polarft_calc), intent(inout) :: self
@@ -385,6 +391,7 @@ contains
         self%msg          = ''
         self%ref_gen_bins = -1_int64
         self%slot_ieo     = 0
+        if( allocated(self%ft_ref_bins) ) deallocate(self%ft_ref_bins)
         if( .not. allocated(self%ws) ) return
         do ieo = 1, size(self%ws)
             call self%ws(ieo)%kill()

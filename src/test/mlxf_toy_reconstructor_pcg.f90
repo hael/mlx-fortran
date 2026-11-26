@@ -3,16 +3,20 @@
 ! mirrored or as an addition. SIMPLE's reconstructor_pcg extends pcg_lattice; the toy has the one type, with the
 ! lattice's members it reads public as in SIMPLE. The host keeps SIMPLE's host work: the envelopes, the soft window
 ! and its mask, the density's shell statistics, the window at the start and at the exit. All MLX state is the
-! component ws, made in new and released in kill; the solve runs on the toy engine through a private adapter.
+! component ws, made in new and released in kill; this module sees it as class(device_work) and imports no MLX
+! name, and the glue submodule mlxf_toy_reconstructor_pcg_mlx holds what needs the device: the device forms of the
+! operator, the adapter the engine solves through, and the transfers. The five procedures of the operator
+! (mask_mul, apply_normal, apply_normal_kernel, apply_precond, dot_real_volume) take and return host arrays, as
+! SIMPLE's do: each sends its volume to the device, applies the device form and brings the result back. The toy
+! has no host route: a reconstructor is made on the MLX backend or refused.
 module mlxf_toy_reconstructor_pcg
-use, intrinsic :: iso_fortran_env,        only: int64, real32, real64
-use, intrinsic :: ieee_arithmetic,        only: ieee_is_finite
-use mlxf,                                 only: mlx_array, mlx_from, mlx_to
-use mlxf_test_defs,                       only: KBWINSZ, KBALPHA, OSMPL_PAD_FAC, PCG_XTOL, PCG_RESID_REPLACE, &
-                                                PCG_RHO_FLOOR_FRAC, PCG_RHO_SAMPLED_FRAC, PCG_SUPPORT_DIV_MIN, &
-                                                PCG_ENVELOPE_FLOOR, PCG_STOP_INDEFINITE, pcg_solver_options
-use mlxf_toy_pcg_solver,                  only: pcg_operator, pcg_solver_outcome, pcg_solve
-use mlxf_toy_reconstructor_pcg_workspace, only: reconstructor_pcg_workspace
+use, intrinsic :: iso_fortran_env, only: int64, real32, real64
+use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+use mlxf_test_defs,       only: KBWINSZ, KBALPHA, OSMPL_PAD_FAC, PCG_XTOL, PCG_RESID_REPLACE, PCG_RHO_FLOOR_FRAC, &
+                                PCG_RHO_SAMPLED_FRAC, PCG_SUPPORT_DIV_MIN, PCG_ENVELOPE_FLOOR, PCG_STOP_INDEFINITE, &
+                                pcg_solver_options, parameters
+use mlxf_toy_device_work, only: device_work
+use mlxf_toy_pcg_solver,  only: pcg_solver_outcome
 implicit none
 
 public :: reconstructor_pcg
@@ -25,13 +29,16 @@ real(real64), parameter :: SOFT_EDGE = 6._real64
 integer, parameter :: DATA_SCALE_NATIVE_SHELLS = 6
 ! the stages timed: the density's statistics, the finalisation's graph and wait, the engine, the map's copy
 integer, parameter :: NSTAGES = 4
+! what a procedure that needs the device answers on the host backend
+character(len=*), parameter :: NO_HOST_ROUTE = 'refused: the toy has no host route'
 
 ! SIMPLE's members under SIMPLE's names, for the members the toy has. The lattice's (public, as pcg_lattice's are
 ! in SIMPLE): the native and padded boxes, the padding factor and offset, the native Nyquist radius, padsc =
 ! padf**3, the window's half-width in taps, the deposition envelope of the padded lattice (offset from voxel 1),
 ! the hard support, the soft window. The reconstructor's: the ridge, absolute or relative to the data scale, the
 ! envelope and its guarded reciprocal on the native box, the state flags. The toy's own: msg, the reason of the
-! last refusal; nwaits, the host's waits; stage_s, the stages' seconds; ws, the device state
+! last refusal; nwaits, the host's waits; stage_s, the stages' seconds; l_mlx, the backend taken at new; ws, the
+! device state
 type :: reconstructor_pcg
     private
     integer,                           public              :: box     = 0
@@ -56,10 +63,11 @@ type :: reconstructor_pcg
     logical                                                :: l_precond = .false.
     logical                                                :: l_kernel  = .false.
     logical                                                :: exists    = .false.
+    logical                                                :: l_mlx     = .false.
     integer                                                :: nwaits    = 0
     real(real64)                                           :: stage_s(NSTAGES) = 0._real64
     character(len=:),                  allocatable         :: msg
-    type(reconstructor_pcg_workspace), allocatable         :: ws
+    class(device_work),                allocatable         :: ws
   contains
     procedure          :: new
     procedure          :: kill
@@ -80,38 +88,155 @@ type :: reconstructor_pcg
     procedure          :: message
     procedure          :: stage_seconds
     procedure          :: host_waits
+    procedure          :: get_pcg_operator
     procedure, private :: build_env
     procedure, private :: update_lambda_from_density
     procedure, private :: finalize_density_accum
     procedure, private :: finalize_khat
     procedure, private :: calibrate_kernel
-    procedure, private :: add_ridge
-    procedure, private :: deapod_mul
     procedure, private :: window_mul
     procedure, private :: window_div
+    procedure, private, nopass :: solve_stopped
     final              :: reconstructor_pcg_final
 end type reconstructor_pcg
 
-! the rank-1 view of a reconstruction operator for the engine (SIMPLE's private adapter)
-type, extends(pcg_operator) :: reconstructor_pcg_adapter
-    class(reconstructor_pcg), pointer :: client => null()
-  contains
-    procedure :: size    => reconstruction_vector_size
-    procedure :: apply   => reconstruction_vector_apply
-    procedure :: precond => reconstruction_vector_precond
-    procedure :: dot     => reconstruction_vector_dot
-end type reconstructor_pcg_adapter
+! MLX: the glue procedures, private to the class. A host procedure's whole knowledge of the device is a guarded
+! call of its <name>_mlx; the bodies are in the glue submodule mlxf_toy_reconstructor_pcg_mlx, which alone imports
+! the workspace and the device engine, and which a build without MLX compiles as stubs that refuse with "built
+! without MLX"
+interface
+    ! the device state of a new reconstructor: the envelopes and the ridge
+    module subroutine new_mlx( self, status )
+        class(reconstructor_pcg), intent(inout) :: self
+        integer,                  intent(out)   :: status
+    end subroutine new_mlx
+
+    ! the hard support as the reconstructor holds it, uploaded or cleared
+    module subroutine set_window_sphere_mlx( self )
+        class(reconstructor_pcg), intent(inout) :: self
+    end subroutine set_window_sphere_mlx
+
+    ! the raw accumulators handed to the device
+    module subroutine set_raw_accum_mlx( self, b, d )
+        class(reconstructor_pcg), intent(inout) :: self
+        complex(real32),          intent(in)    :: b(:,:,:)
+        real(real32),             intent(in)    :: d(:,:,:)
+    end subroutine set_raw_accum_mlx
+
+    ! the right-hand side from the numerator (folded, deapodised, masked), and a view of the raw density for the
+    ! host's statistics
+    module subroutine end_accum_mlx( self, rho, status )
+        class(reconstructor_pcg), intent(inout) :: self
+        real(real32), pointer,    intent(inout) :: rho(:,:,:)
+        integer,                  intent(out)   :: status
+    end subroutine end_accum_mlx
+
+    ! the finalisation's one wait
+    module subroutine end_accum_wait_mlx( self, status )
+        class(reconstructor_pcg), intent(inout) :: self
+        integer,                  intent(out)   :: status
+    end subroutine end_accum_wait_mlx
+
+    ! the ridge as the device applies it
+    module subroutine update_lambda_from_density_mlx( self )
+        class(reconstructor_pcg), intent(inout) :: self
+    end subroutine update_lambda_from_density_mlx
+
+    ! the preconditioner's spectrum from the host's shell thresholds and floors, indexed 0 .. rho_lim
+    module subroutine finalize_density_accum_mlx( self, shthr, shfloor, rho_lim )
+        class(reconstructor_pcg), intent(inout) :: self
+        real(real32),             intent(in)    :: shthr(0:), shfloor(0:)
+        integer,                  intent(in)    :: rho_lim
+    end subroutine finalize_density_accum_mlx
+
+    ! the kernel's spectrum inside shell khat_lim
+    module subroutine finalize_khat_mlx( self, khat_lim )
+        class(reconstructor_pcg), intent(inout) :: self
+        integer,                  intent(in)    :: khat_lim
+    end subroutine finalize_khat_mlx
+
+    module subroutine calibrate_kernel_mlx( self )
+        class(reconstructor_pcg), intent(inout) :: self
+    end subroutine calibrate_kernel_mlx
+
+    ! the five procedures of the operator: the host volume sent to the device, the device form applied, the result
+    ! brought back; a volume of size zero when the device form refuses
+    module subroutine mask_mul_mlx( self, v )
+        class(reconstructor_pcg), intent(inout) :: self
+        real(real32),             intent(inout) :: v(self%box, self%box, self%box)
+    end subroutine mask_mul_mlx
+
+    module function apply_normal_mlx( self, p ) result(hp)
+        class(reconstructor_pcg), intent(inout) :: self
+        real(real32),             intent(in)    :: p(self%box, self%box, self%box)
+        real(real32), allocatable :: hp(:,:,:)
+    end function apply_normal_mlx
+
+    module function apply_normal_kernel_mlx( self, p ) result(hp)
+        class(reconstructor_pcg), intent(inout) :: self
+        real(real32),             intent(in)    :: p(self%box, self%box, self%box)
+        real(real32), allocatable :: hp(:,:,:)
+    end function apply_normal_kernel_mlx
+
+    module function apply_precond_mlx( self, r ) result(z)
+        class(reconstructor_pcg), intent(inout) :: self
+        real(real32),             intent(in)    :: r(self%box, self%box, self%box)
+        real(real32), allocatable :: z(:,:,:)
+    end function apply_precond_mlx
+
+    module function dot_real_volume_mlx( self, a, b ) result(d)
+        class(reconstructor_pcg), intent(inout) :: self
+        real(real32),             intent(in)    :: a(self%box, self%box, self%box), b(self%box, self%box, self%box)
+        real(real64) :: d
+    end function dot_real_volume_mlx
+
+    ! the engine's solve from the start in x against the right-hand side on the device, the waits and the seconds
+    ! counted; the solution is copied into x unless the solve is given up (solve_stopped), which leaves x as it came
+    module subroutine solve_accum_mlx( self, x, options, l_outcome, result )
+        class(reconstructor_pcg), target, intent(inout) :: self
+        real(real32),                     intent(inout) :: x(:,:,:)
+        type(pcg_solver_options),         intent(in)    :: options
+        logical,                          intent(in)    :: l_outcome
+        type(pcg_solver_outcome),         intent(out)   :: result
+    end subroutine solve_accum_mlx
+
+    module subroutine copy_spectra_mlx( self, khat, pre )
+        class(reconstructor_pcg), intent(in)    :: self
+        real(real32),             intent(inout) :: khat(:,:,:), pre(:,:,:)
+    end subroutine copy_spectra_mlx
+
+    module subroutine copy_volumes_mlx( self, b_rhs )
+        class(reconstructor_pcg), intent(in)    :: self
+        real(real32),             intent(inout) :: b_rhs(:,:,:)
+    end subroutine copy_volumes_mlx
+
+    ! the adapter the engine solves through, bound to self
+    module subroutine get_pcg_operator_mlx( self, op )
+        class(reconstructor_pcg), target, intent(inout) :: self
+        class(device_work), allocatable,  intent(out)   :: op
+    end subroutine get_pcg_operator_mlx
+end interface
 
 contains
 
-    ! a solve of the native box (even) on the padded lattice, with the absolute ridge lambda (default zero)
-    subroutine new( self, box, lambda )
-        class(reconstructor_pcg), intent(inout) :: self
-        integer,                  intent(in)    :: box
-        real(real32), optional,   intent(in)    :: lambda
+    ! a solve of the native box (even) on the padded lattice, with the absolute ridge lambda (default zero), on the
+    ! backend params%l_mlx names (the MLX one when params is absent); a refusal (message) leaves no reconstructor.
+    ! The toy has no host route.
+    subroutine new( self, box, lambda, params )
+        class(reconstructor_pcg),   intent(inout) :: self
+        integer,                    intent(in)    :: box
+        real(real32),     optional, intent(in)    :: lambda
+        type(parameters), optional, intent(in)    :: params
+        integer :: st
         call self%kill()
         if( box < 2 .or. modulo(box, 2) /= 0 )then
             self%msg = 'reconstructor_pcg%new: refused: the box is even and at least 2'
+            return
+        endif
+        self%l_mlx = .true.
+        if( present(params) ) self%l_mlx = params%l_mlx
+        if( .not. self%l_mlx )then
+            self%msg = 'reconstructor_pcg%new: '//NO_HOST_ROUTE
             return
         endif
         self%box     = box
@@ -122,14 +247,16 @@ contains
         self%padsc   = real(self%padf, real32)**3
         self%iwinsz  = ceiling(KBWINSZ - 0.5_real32)
         if( present(lambda) ) self%lambda = lambda
-        allocate(self%ws)
-        call self%ws%new(box)
         call self%build_env()
-        call self%ws%set_ridge(self%lambda)
+        call new_mlx(self, st)
+        if( st /= 0 )then
+            call self%kill()
+            return
+        endif
         self%exists = .true.
     end subroutine new
 
-    ! releases the device state and the host members; idempotent
+    ! releases the device state, killed before it is deallocated, and the host members; idempotent
     subroutine kill( self )
         class(reconstructor_pcg), intent(inout) :: self
         if( allocated(self%ws) )then
@@ -148,11 +275,18 @@ contains
         self%l_precond         = .false.
         self%l_kernel          = .false.
         self%exists            = .false.
+        self%l_mlx             = .false.
         self%nwaits            = 0
         self%stage_s           = 0._real64
         self%lambda            = 0._real32
         self%lambda_rel        = 0._real32
         self%data_scale        = 0._real32
+        self%box               = 0
+        self%boxpd             = 0
+        self%pad_off           = 0
+        self%Rnat              = 0
+        self%padsc             = 1._real32
+        self%iwinsz            = 0
     end subroutine kill
 
     subroutine reconstructor_pcg_final( self )
@@ -162,7 +296,8 @@ contains
 
     ! the deposition envelope of the padded lattice, w0 + 2 w1 cos(2 pi d / boxpd) with the normalised weights of
     ! the window's centre taps, at the offset d from voxel 1; the native envelope as its product about voxel
-    ! box/2 + 1 (unity there) and its reciprocal, zero where the envelope is below the floor
+    ! box/2 + 1 (unity there) and its reciprocal, zero where the envelope is below the floor. The device takes both
+    ! when its state is made
     subroutine build_env( self )
         class(reconstructor_pcg), intent(inout) :: self
         real(real64) :: k0, k1, w0, w1, e(self%box), env(self%box, self%box, self%box)
@@ -189,7 +324,6 @@ contains
         self%env    = real(env, real32)
         allocate(self%invenv(n, n, n), source=0._real32)
         where( .not. (abs(env) < PCG_ENVELOPE_FLOOR) ) self%invenv = real(1._real64 / env, real32)
-        call self%ws%set_envelopes(self%env, self%invenv)
     end subroutine build_env
 
     ! the spherical support: SIMPLE's soft mask of radius mskrad (pixels) about voxel box/2 + 1 (one inside
@@ -203,7 +337,7 @@ contains
         if( allocated(self%mask) ) deallocate(self%mask)
         if( allocated(self%window) ) deallocate(self%window)
         self%l_mask = .false.
-        call self%ws%set_mask()
+        if( self%l_mlx ) call set_window_sphere_mlx(self)
         if( .not. (mskrad > 0._real32) ) return
         n      = self%box
         maxrad = real(min(nint(2._real64 * (real(mskrad, real64) + SOFT_EDGE)), n) / 2, real64)
@@ -226,14 +360,18 @@ contains
         self%window = real(win, real32)
         self%mask   = merge(1._real32, 0._real32, self%window > 0._real32)
         self%l_mask = .true.
-        call self%ws%set_mask(self%mask)
+        if( self%l_mlx ) call set_window_sphere_mlx(self)
     end subroutine set_window_sphere
 
-    ! v = P v on the device (identity without a support)
+    ! v = P v (identity without a support), by the device; a refusal (message) leaves v as it came
     subroutine mask_mul( self, v )
-        class(reconstructor_pcg), intent(in)    :: self
-        type(mlx_array),          intent(inout) :: v
-        call self%ws%mask_mul(v)
+        class(reconstructor_pcg), intent(inout) :: self
+        real(real32),             intent(inout) :: v(self%box, self%box, self%box)
+        if( self%l_mlx )then
+            call mask_mul_mlx(self, v)
+        else
+            self%msg = 'reconstructor_pcg%mask_mul: '//NO_HOST_ROUTE
+        endif
     end subroutine mask_mul
 
     ! the ridge as a multiple of the data scale, derived when the density is finalised
@@ -262,7 +400,7 @@ contains
             self%msg = 'reconstructor_pcg%set_raw_accum: refused: the accumulators are (box + 1, boxpd, boxpd)'
             return
         endif
-        call self%ws%set_raw_accum(b, d)
+        if( self%l_mlx ) call set_raw_accum_mlx(self, b, d)
         self%l_accum   = .true.
         self%l_rhs     = .false.
         self%l_precond = .false.
@@ -274,7 +412,6 @@ contains
     subroutine end_accum( self, l_kernel )
         class(reconstructor_pcg), intent(inout) :: self
         logical,                  intent(in)    :: l_kernel
-        type(mlx_array)       :: v
         real(real32), pointer :: rho(:,:,:)
         real(real64)          :: t0
         integer               :: status
@@ -287,23 +424,18 @@ contains
             return
         endif
         t0 = clock_s()
-        v  = self%ws%fold_rhs()
-        call self%deapod_mul(v)
-        call self%mask_mul(v)
-        call self%ws%set_rhs(v)
-        call v%kill()
-        call self%ws%density_view(rho, status)
-        if( status /= 0 )then
-            self%msg = 'reconstructor_pcg%end_accum: the raw density cannot be read: '//self%ws%message()
-            return
-        endif
+        nullify(rho)
+        status = 1
+        if( self%l_mlx ) call end_accum_mlx(self, rho, status)
+        if( status /= 0 ) return
         call self%finalize_density_accum(rho, l_kernel)
         nullify(rho)
         if( .not. self%l_precond ) return
         call self%finalize_khat()
         self%stage_s(1) = self%stage_s(1) + clock_s() - t0
         t0 = clock_s()
-        call self%ws%finish(status)
+        status = 1
+        if( self%l_mlx ) call end_accum_wait_mlx(self, status)
         self%nwaits = self%nwaits + 1
         self%stage_s(2) = self%stage_s(2) + clock_s() - t0
         if( status /= 0 )then
@@ -358,7 +490,7 @@ contains
             self%lambda = real(real(self%lambda_rel, real64) * dsum / real(nscale, real64) * &
                                real(self%padsc, real64)**2, real32)
         endif
-        call self%ws%set_ridge(self%lambda)
+        if( self%l_mlx ) call update_lambda_from_density_mlx(self)
     end subroutine update_lambda_from_density
 
     ! the density's shell statistics on the host (pass 1: the mean of each shell's positive densities, in double)
@@ -398,7 +530,7 @@ contains
                 shthr(sh)   = real(real(PCG_RHO_SAMPLED_FRAC, real64) * shsum(sh) / real(shcnt(sh), real64), real32)
             endif
         end do
-        call self%ws%build_precond(shthr, shfloor, rho_lim)
+        if( self%l_mlx ) call finalize_density_accum_mlx(self, shthr, shfloor, rho_lim)
         self%l_precond = .true.
         self%l_kernel  = l_kernel
     end subroutine finalize_density_accum
@@ -409,75 +541,71 @@ contains
         class(reconstructor_pcg), intent(inout) :: self
         integer :: khat_lim
         khat_lim = self%padf * self%Rnat + ceiling(sqrt(3._real64) * (real(self%iwinsz, real64) + 0.5_real64))
-        call self%ws%build_kernel(khat_lim, real(self%dep1d, real32))
+        if( self%l_mlx ) call finalize_khat_mlx(self, khat_lim)
         call self%calibrate_kernel()
     end subroutine finalize_khat
 
     ! the analytic scale of the kernel, padsc**2
     subroutine calibrate_kernel( self )
         class(reconstructor_pcg), intent(inout) :: self
-        call self%ws%scale_kernel(self%padsc**2)
+        if( self%l_mlx ) call calibrate_kernel_mlx(self)
     end subroutine calibrate_kernel
 
-    ! the operator the solver sees, P H P with a support and H otherwise; the result is unevaluated
+    ! the operator the solver sees, P H P with a support and H otherwise, by the device; of size zero on a refusal
+    ! (message)
     function apply_normal( self, p ) result(hp)
         class(reconstructor_pcg), intent(inout) :: self
-        type(mlx_array),          intent(in)    :: p
-        type(mlx_array) :: hp, pm
-        pm = p
-        call self%mask_mul(pm)
-        hp = self%apply_normal_kernel(pm)
-        call self%mask_mul(hp)
+        real(real32),             intent(in)    :: p(self%box, self%box, self%box)
+        real(real32), allocatable :: hp(:,:,:)
+        if( self%l_mlx )then
+            hp = apply_normal_mlx(self, p)
+        else
+            self%msg = 'reconstructor_pcg%apply_normal: '//NO_HOST_ROUTE
+            allocate(hp(0, 0, 0))
+        endif
     end function apply_normal
 
-    ! H p = C^T F^-1 diag(Khat) F C p + lambda p, unevaluated; an empty result before end_accum (message)
+    ! H p = C^T F^-1 diag(Khat) F C p + lambda p, by the device; of size zero before end_accum and on a refusal
+    ! (message)
     function apply_normal_kernel( self, p ) result(hp)
         class(reconstructor_pcg), intent(inout) :: self
-        type(mlx_array),          intent(in)    :: p
-        type(mlx_array) :: hp
-        if( .not. self%l_kernel )then
-            self%msg = 'reconstructor_pcg%apply_normal_kernel: refused: no kernel has been built'
-            return
+        real(real32),             intent(in)    :: p(self%box, self%box, self%box)
+        real(real32), allocatable :: hp(:,:,:)
+        if( self%l_mlx )then
+            hp = apply_normal_kernel_mlx(self, p)
+        else
+            self%msg = 'reconstructor_pcg%apply_normal_kernel: '//NO_HOST_ROUTE
+            allocate(hp(0, 0, 0))
         endif
-        hp = self%ws%kernel_product(p)
-        call self%add_ridge(p, hp)
     end function apply_normal_kernel
 
-    ! z = P E C^T F^-1 diag(pi) F C E r, unevaluated; P r without a preconditioner
+    ! z = P E C^T F^-1 diag(pi) F C E r, by the device; P r without a preconditioner; of size zero on a refusal
+    ! (message)
     function apply_precond( self, r ) result(z)
         class(reconstructor_pcg), intent(inout) :: self
-        type(mlx_array),          intent(in)    :: r
-        type(mlx_array) :: z
-        if( .not. self%l_precond )then
-            z = r
-            call self%mask_mul(z)
-            return
+        real(real32),             intent(in)    :: r(self%box, self%box, self%box)
+        real(real32), allocatable :: z(:,:,:)
+        if( self%l_mlx )then
+            z = apply_precond_mlx(self, r)
+        else
+            self%msg = 'reconstructor_pcg%apply_precond: '//NO_HOST_ROUTE
+            allocate(z(0, 0, 0))
         endif
-        z = self%ws%precond_product(r)
     end function apply_precond
 
-    ! the device half of a . b: the (box, box) partial sums of the lines, which the engine adds in double
+    ! a . b in double: the device's float32 sums of the (box, box) lines, added on the host in double as the engine
+    ! adds them; zero on a refusal (message)
     function dot_real_volume( self, a, b ) result(d)
-        class(reconstructor_pcg), intent(in) :: self
-        type(mlx_array),          intent(in) :: a, b
-        type(mlx_array) :: d
-        d = self%ws%line_dots(a, b)
+        class(reconstructor_pcg), intent(inout) :: self
+        real(real32),             intent(in)    :: a(self%box, self%box, self%box), b(self%box, self%box, self%box)
+        real(real64) :: d
+        d = 0._real64
+        if( self%l_mlx )then
+            d = dot_real_volume_mlx(self, a, b)
+        else
+            self%msg = 'reconstructor_pcg%dot_real_volume: '//NO_HOST_ROUTE
+        endif
     end function dot_real_volume
-
-    ! hp = hp + lambda p
-    subroutine add_ridge( self, p, hp )
-        class(reconstructor_pcg), intent(in)    :: self
-        type(mlx_array),          intent(in)    :: p
-        type(mlx_array),          intent(inout) :: hp
-        call self%ws%add_ridge(p, hp)
-    end subroutine add_ridge
-
-    ! v = E^-1 v (deapodisation)
-    subroutine deapod_mul( self, v )
-        class(reconstructor_pcg), intent(in)    :: self
-        type(mlx_array),          intent(inout) :: v
-        call self%ws%deapod_mul(v)
-    end subroutine deapod_mul
 
     ! x = window u, the shipped map
     pure subroutine window_mul( self, v )
@@ -511,13 +639,10 @@ contains
         integer,                  optional, intent(out)   :: niters
         type(pcg_solver_outcome), optional, intent(out)   :: outcome
         real(real32),             optional, intent(in)    :: start_max_rel_resid
-        type(reconstructor_pcg_adapter) :: op
-        type(pcg_solver_options)        :: options
-        type(pcg_solver_outcome)        :: result
-        type(mlx_array)                 :: xd, b
-        real(real32), allocatable       :: x0(:,:,:)
-        real(real64)                    :: t0
-        logical                         :: l_stop
+        type(pcg_solver_options)  :: options
+        type(pcg_solver_outcome)  :: result
+        real(real32), allocatable :: x0(:,:,:)
+        real(real64)              :: t0
         if( .not. self%l_rhs )then
             self%msg = 'reconstructor_pcg%solve_accum: refused: end_accum has not been called'
             return
@@ -535,22 +660,12 @@ contains
         if( present(start_max_rel_resid) ) options%start_max_rel_residual = start_max_rel_resid
         x0 = x
         call self%window_div(x)
-        t0 = clock_s()
-        xd = mlx_from(x)
-        b  = self%ws%rhs()
-        op%client => self
-        call pcg_solve(op, b, xd, options, result)
-        self%nwaits     = self%nwaits + engine_waits(result)
-        self%stage_s(3) = self%stage_s(3) + clock_s() - t0
-        l_stop = refused(result)
-        if( trim(result%stop_reason) == PCG_STOP_INDEFINITE .and. .not. present(outcome) ) l_stop = .true.
-        if( l_stop )then
+        if( self%l_mlx ) call solve_accum_mlx(self, x, options, present(outcome), result)
+        if( self%solve_stopped(result, present(outcome)) )then
             self%msg = 'reconstructor_pcg%solve_accum: the solve stopped: '//trim(result%stop_reason)
             x = x0
         else
             t0 = clock_s()
-            call mlx_to(x, xd)
-            self%nwaits = self%nwaits + 1
             call self%window_mul(x)
             self%stage_s(4) = self%stage_s(4) + clock_s() - t0
         endif
@@ -582,14 +697,17 @@ contains
     subroutine copy_spectra( self, khat, pre )
         class(reconstructor_pcg), intent(in)  :: self
         real(real32),             intent(out) :: khat(:,:,:), pre(:,:,:)
-        call self%ws%copy_spectra(khat, pre)
+        khat = 0._real32
+        pre  = 0._real32
+        if( self%l_mlx ) call copy_spectra_mlx(self, khat, pre)
     end subroutine copy_spectra
 
     ! host copies of the right-hand side (after end_accum), the envelope and its reciprocal, (box, box, box)
     subroutine copy_volumes( self, b_rhs, env, invenv )
         class(reconstructor_pcg), intent(in)  :: self
         real(real32),             intent(out) :: b_rhs(:,:,:), env(:,:,:), invenv(:,:,:)
-        call self%ws%copy_rhs(b_rhs)
+        b_rhs = 0._real32
+        if( self%l_mlx ) call copy_volumes_mlx(self, b_rhs)
         env    = self%env
         invenv = self%invenv
     end subroutine copy_volumes
@@ -616,55 +734,38 @@ contains
         host_waits = self%nwaits
     end function host_waits
 
-    integer function reconstruction_vector_size( self ) result(n)
-        class(reconstructor_pcg_adapter), intent(in) :: self
-        n = self%client%box**3
-    end function reconstruction_vector_size
+    ! the operator the engine solves with, as the opaque device state, for a caller that works on device vectors
+    ! (a tester, a benchmark): the glue's adapter, bound to this reconstructor, which must outlive it. The holder
+    ! calls kill on it before it deallocates. Not allocated on a refusal (message)
+    subroutine get_pcg_operator( self, op )
+        class(reconstructor_pcg), target, intent(inout) :: self
+        class(device_work), allocatable,  intent(out)   :: op
+        if( self%l_mlx )then
+            call get_pcg_operator_mlx(self, op)
+        else
+            self%msg = 'reconstructor_pcg%get_pcg_operator: '//NO_HOST_ROUTE
+        endif
+    end subroutine get_pcg_operator
 
-    subroutine reconstruction_vector_apply( self, x, y )
-        class(reconstructor_pcg_adapter), intent(inout) :: self
-        type(mlx_array),                  intent(in)    :: x
-        type(mlx_array),                  intent(out)   :: y
-        y = self%client%apply_normal(x)
-    end subroutine reconstruction_vector_apply
+    ! whether a solve is given up, x left as it came: the engine did not run or refused, or it stopped on an
+    ! indefinite product that the caller did not ask to see (l_outcome: the caller takes the outcome)
+    logical function solve_stopped( result, l_outcome )
+        type(pcg_solver_outcome), intent(in) :: result
+        logical,                  intent(in) :: l_outcome
+        solve_stopped = refused(result)
+        if( trim(result%stop_reason) == PCG_STOP_INDEFINITE .and. .not. l_outcome ) solve_stopped = .true.
+    end function solve_stopped
 
-    subroutine reconstruction_vector_precond( self, r, z )
-        class(reconstructor_pcg_adapter), intent(inout) :: self
-        type(mlx_array),                  intent(in)    :: r
-        type(mlx_array),                  intent(out)   :: z
-        z = self%client%apply_precond(r)
-    end subroutine reconstruction_vector_precond
-
-    function reconstruction_vector_dot( self, a, b ) result(d)
-        class(reconstructor_pcg_adapter), intent(in) :: self
-        type(mlx_array),                  intent(in) :: a, b
-        type(mlx_array) :: d
-        d = self%client%dot_real_volume(a, b)
-    end function reconstruction_vector_dot
-
-    ! whether the engine refused the solve before iterating
+    ! whether the engine did not run, or refused the solve before iterating
     logical function refused( outcome )
         type(pcg_solver_outcome), intent(in) :: outcome
         select case( trim(outcome%stop_reason) )
-            case( 'size_differs', 'options_invalid', 'zero_rhs', 'nonpositive_rz' )
+            case( 'not_started', 'size_differs', 'options_invalid', 'zero_rhs', 'nonpositive_rz' )
                 refused = .true.
             case default
                 refused = .false.
         end select
     end function refused
-
-    ! the engine's waits, by its schedule: one before the loop (two from a used non-zero start), two per iteration
-    ! done, one for an iteration stopped on an indefinite product
-    integer function engine_waits( outcome ) result(n)
-        type(pcg_solver_outcome), intent(in) :: outcome
-        n = 0
-        if( trim(outcome%stop_reason) == 'size_differs' .or. trim(outcome%stop_reason) == 'options_invalid' ) return
-        n = 1
-        if( trim(outcome%stop_reason) == 'zero_rhs' ) return
-        n = n + 2 * outcome%iteration_count
-        if( outcome%start_norm > 0._real32 .or. outcome%start_rejected ) n = n + 1
-        if( trim(outcome%stop_reason) == PCG_STOP_INDEFINITE ) n = n + 1
-    end function engine_waits
 
     ! the signed index -m/2 .. m/2 - 1 at position i of a lattice of m
     pure integer function signed_index( i, m ) result(g)

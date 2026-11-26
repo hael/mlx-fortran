@@ -7,7 +7,7 @@
 module mlxf_oracle_dft
 use, intrinsic :: iso_fortran_env, only: real64
 use, intrinsic :: ieee_arithmetic, only: ieee_is_finite, ieee_value, ieee_positive_inf
-use mlxf_test_reduce, only: nan_maxval
+use mlxf_test_reduce, only: nan_maxval, nan_max
 implicit none
 
 public :: oracle_dft_1d, oracle_idft_1d, oracle_dft_3d, oracle_idft_3d, oracle_dft_selfcheck, oracle_flat, &
@@ -162,7 +162,7 @@ contains
         ! Parseval: the sum of |X|**2 is n times the sum of |x|**2
         x      = sequence_1d(n)
         s      = real(n, real64) * sum(abs(x)**2)
-        err(4) = max(err(4), oracle_finite_or_inf(abs(sum(abs(oracle_dft_1d(x))**2) - s) / s))
+        err(4) = nan_max(err(4), oracle_finite_or_inf(abs(sum(abs(oracle_dft_1d(x))**2) - s) / s))
         ! the inverse undoes the forward transform
         err(5) = max(err(5), oracle_rel_error(oracle_idft_1d(oracle_dft_1d(x)), x))
         ! the inverse of an impulse at AT(2) is exp(+2 pi i AT(2) m / n) / n
@@ -207,7 +207,7 @@ contains
         ! Parseval
         x      = sequence_3d(shp)
         s      = real(size(x), real64) * sum(abs(x)**2)
-        err(4) = max(err(4), oracle_finite_or_inf(abs(sum(abs(oracle_dft_3d(x))**2) - s) / s))
+        err(4) = nan_max(err(4), oracle_finite_or_inf(abs(sum(abs(oracle_dft_3d(x))**2) - s) / s))
         ! the inverse undoes the forward transform
         err(5) = max(err(5), oracle_rel_error(oracle_flat(oracle_idft_3d(oracle_dft_3d(x))), oracle_flat(x)))
         ! the inverse of an impulse at AT is exp(+2 pi i sum of k AT / n) / (n1 n2 n3)

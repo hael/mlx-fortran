@@ -1,0 +1,1 @@
+The off-state build of the toys: a project of its own that compiles their host files and glue stubs without USE_MLX and without the library, and its program.
