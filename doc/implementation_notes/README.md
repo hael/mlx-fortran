@@ -30,6 +30,7 @@ and unfinished work; `completed/` contains delivered records and reviews. A comp
 
 | Record | Delivered scope |
 | --- | --- |
+| [Code quality review: hardening, toys and parity](completed/mlxf_quality_review_parity.md) | Reviewed 2026-11-26 through `b2c43a4`: the four previous findings addressed; two new findings on the missing CPU-only dependency-builder option and the ring test's unsupported sum-scatter expectation; fresh Debug/Release gates, installed consumer, embedding and MLX-free host checks passed |
 | [Code quality follow-up](completed/mlxf_quality_review_followup.md) | Reviewed 2026-11-25 through `0071f5a`, including K1, K2 and completed K8: all five earlier fixes verified; four new findings on NaN histories, route transitions, fused-kernel cache invalidation and asynchronous memory measurement; Debug passed, Release exposed the lifecycle race |
 | [Code quality review](completed/mlxf_quality_review.md) | Original review of `c6ea867` against local MLX and mlx-c; its five fixes were verified in the follow-up above; original reproductions and validation limits retained |
 | [Core design](completed/mlxf_design.md), [report](completed/mlxf_design_report.md) | Core/handle model; original numbered design decisions |
