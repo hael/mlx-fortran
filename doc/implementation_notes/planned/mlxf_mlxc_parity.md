@@ -2312,8 +2312,9 @@ and closes the phase.
 
       Each process must end with all its assertions passed: the ring has two members, `mlx_all_sum`,
       `mlx_all_max` and `mlx_all_min` of a (3, 2) matrix that holds the rank, `mlx_all_gather` to (3, 4) with the
-      first member's matrix first, `mlx_sum_scatter` to (3, 1) with column r of the sum on the member of rank r,
-      and one message from the first member to the second (`mlx_send`, `mlx_recv_like`). The variables are those
+      first member's matrix first, `mlx_sum_scatter`'s node of shape (3, 1) built and its evaluation refused by
+      the ring backend with a status (corrected 2026-11-26 after the review of `b2c43a4`, its F2: MLX's ring has no
+      sum-scatter; the suite expected a result and stopped there), and one message from the first member to the second (`mlx_send`, `mlx_recv_like`). The variables are those
       MLX's `ring.cpp` reads at `v0.32.4` (`MLX_RANK`, zero-based; `MLX_HOSTFILE`). Homebrew's MLX 0.32.4 has the
       ring backend: `mlx_distributed_is_available` gives true for `'any'`, `'ring'` and `'jaccl'`, false for
       `'mpi'` and `'nccl'` (*measured*, `scratch/keep/phase8/backends_available.txt`).

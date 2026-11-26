@@ -102,6 +102,22 @@ the subsequent peer checks, and test successful sum-scatter separately on a back
 Update the parity plan's runnable example and the binding policy's backend limitations accordingly.
 Run the repaired two-process test before counting distributed peer behavior as validated.
 
+## Resolution (2026-11-26, in the session on the M5 Ultra)
+
+- **F1, fixed.** `scripts/build_mlx_deps.sh` takes `--cpu-only`: it builds MLX with `-DMLX_BUILD_METAL=OFF`, skips
+  the Metal-compiler check, defaults its prefix and scratch to `.deps/install-cpu` and `.deps/work-cpu`, and
+  writes `Metal OFF` into the prefix's `mlxf_deps.txt`. Cold start verified: `scripts/ci_cpu_job.sh Debug
+  gfortran-16 --jobs 12` with `MLXC_ROOT` at an empty scratch prefix built MLX v0.32.4 and mlx-c v0.8.0 without
+  Metal (66 s wall), passed the fast gate 13 of 13 with `Metal backend: F`, 5 GPU-only skips and 0 no-device
+  skips, and passed `scripts/check_install.sh` against the new prefix (default device cpu). The CI cache key
+  already hashes `scripts/build_mlx_deps.sh`, so this change forces a cold build on every runner once.
+- **F2, fixed.** `run_all_distributed_ring_tests` expects the ring backend to build the `mlx_sum_scatter` node
+  (status 0, shape (3, 1)) and to refuse its evaluation with a status, then runs the peer messages. Two Release
+  processes on the review's `ring.json`: 14 of 14 assertions each, exit 0. The binding contract policy (section
+  on distributed groups) and the parity plan's runnable example say that the ring refuses sum-scatter; the
+  share is tested on the group of one (`unit_distributed` 55 of 55). Debug and Release with `MLXF_WERROR=ON`
+  build without warnings; both fast gates 13 of 13; `scripts/check_tree.sh` passes.
+
 ## Scope and comparison bases
 
 The delta is **`0071f5a..b2c43a4`**: 146 changed files, 22,292 insertions and 1,529 deletions, including

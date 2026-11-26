@@ -1073,7 +1073,9 @@ dimension 1 and, where there is a sequence, positions along dimension 2**; the f
   by operations on either device.
 - With `status`, what MLX refuses when the node is built returns a status and an empty array; what fails in the
   exchange fails the evaluation (section 6). On a group of one the collectives return their operand and a
-  message is refused ("Cannot send to a singleton group"), as is a split.
+  message is refused ("Cannot send to a singleton group"), as is a split. MLX's ring backend builds a
+  `mlx_sum_scatter` node and refuses it at evaluation ("[ring] sum_scatter not supported", MLX 0.32.4 and 0.33.0):
+  on the ring the scattered sum is a status, never a result.
 - The gate (`unit_distributed`) tests the group of one. Two processes on one Mac through MLX's ring backend are
   the named-only sub-suite `distributed_ring`, run by hand (the command and the host file are in the parity
   plan's Progress); nothing of it is gated.

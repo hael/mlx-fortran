@@ -131,8 +131,8 @@ contains
     end subroutine test_refusals
 
     ! two processes on one Mac through MLX's ring backend, each started with MLX_RANK and MLX_HOSTFILE: the sum,
-    ! the gathering and the scattered sum of a matrix that holds the process's rank, and a message from the first
-    ! member to the second. Never run by the gate
+    ! the extremes and the gathering of a matrix that holds the process's rank, the scattered sum the ring backend
+    ! refuses when it is evaluated, and a message from the first member to the second. Never run by the gate
     subroutine run_all_distributed_ring_tests
         type(mlx_group) :: g
         type(mlx_array) :: a, r
@@ -175,16 +175,18 @@ contains
             call assert_true(all(bits_equal(both(:, 3:4), x+real(100*(2-rank), real32))), &
                 &'the second member''s matrix comes second')
         endif
+        ! MLX's ring backend builds the node (one column of the sum per member) and refuses it at evaluation
+        ! ("[ring] sum_scatter not supported"); the share is tested on the group of one
         r = mlx_sum_scatter(a, g, status=st)
-        call assert_int(0, st, 'mlx_sum_scatter returns status zero')
+        call assert_int(0, st, 'mlx_sum_scatter builds its node on the ring')
         shaped = st == 0
         if( shaped ) shaped = all(r%shape() == [3, 1])
-        call assert_true(shaped, 'each of two members keeps one of the sum''s two columns: (3, 1)')
+        call assert_true(shaped, 'each of two members would keep one of the sum''s two columns: (3, 1)')
         if( shaped )then
-            call mlx_to(share, r)
-            call assert_true(all(bits_equal(share(:, 1), 2._real32*x(:, rank)+real(100*(3-2*rank), real32))), &
-                &'the member of rank r keeps column r of the sum')
+            call mlx_to(share, r, status=st)
+            call assert_true(st /= 0, 'the ring backend refuses the scattered sum at evaluation: a status')
         endif
+        call r%kill()
         ! the first member sends its matrix, the second receives it
         if( rank == 1 )then
             r = mlx_send(a, 2, g, status=st)
