@@ -1,6 +1,6 @@
 # K8, family D: the PCG solve of the reconstruction as a toy `reconstructor_pcg` (run `mlxf_kernel_k8`, on the M5 Ultra)
 
-Status, 2026-11-25: planned and ruled (the maintainer's go); run in the session on the M5 Ultra, in order K1, K8, K2. **Run `mlxf_kernel_k8` stopped in Phase 0 (2026-11-25, 09:48): decision 10's F2 fails at 4N, 8N and 16N planes (section 7); a ruling is asked at the end of Phase 0's Progress. Ruled (R1, Progress): F2 reported, not gated; the solver judged at 2 and 5 iterations, as SIMPLE runs it; resumes at Phase 1 after K2.** Run `mlxf_kernel_k8` on the M5 Ultra (arun host `local`), one run at a time on
+Status, 2026-11-25: planned and ruled (the maintainer's go); run in the session on the M5 Ultra, in order K1, K8, K2. **Run `mlxf_kernel_k8` stopped in Phase 0 (2026-11-25, 09:48): decision 10's F2 fails at 4N, 8N and 16N planes (section 7); a ruling is asked at the end of Phase 0's Progress. Ruled (R1, Progress): F2 reported, not gated; the solver judged at 2 and 5 iterations, as SIMPLE runs it; resumes at Phase 1 after K2.** **Resumed under R1 at 13:24: Phase 1 done; stopped in Phase 2 at 14:15 (section 7: rtol_t would exceed 1e-4; gate (a) at n = 32 fails on seed 3 at the stop iterate); rulings asked at the end of Phase 2's Progress.** **Resumed under R2 at 14:21; Phases 3 to 6 done at 16:30: delivered, the graph form only (Progress; [report](../completed/mlxf_kernel_k8_report.md)).** Run `mlxf_kernel_k8` on the M5 Ultra (arun host `local`), one run at a time on
 it. Base: the commit that holds this plan (the run pins its hash in Phase 0 and records it); the plan was
 checked against the working tree of 2026-11-25 on `1e0ae97`, the maintainer's uncommitted work included.
 SIMPLE is read at `d354efee2` with `git -C ~/src/SIMPLE show d354efee2:<path>`, never its working tree, and
@@ -668,6 +668,7 @@ or each missing cell says why; the two Phase 5 plants fail.
 | `src/test/mlxf_toy_pcg_solver.f90` (new) | the engine | 2, 3 |
 | `src/test/mlxf_toy_pcg_solver_tester.f90` (new) | the suite `pcg_solver` | 2, 3 |
 | `src/test/mlxf_toy_*.f90` (new, decision 23) | submodules of the three toy modules, if a module passes 700 lines | 1, 2, 3, 4 |
+| `src/test/mlxf_toy_reconstructor_pcg_tester_solve.f90` (new, decision 23, row added in Phase 2) | the solve's gates of the reconstructor's tester, a submodule (the tester passed 700 lines with them) | 2 |
 | `src/test/mlxf_test_defs.f90` | `pcg_solver_options`, `RECON_PCG_TOLERANCES`, the fixtures' constants | 0, 1, 2, 3, 4 |
 | `src/test/mlxf_test_registry.f90` | three `run_suite` rows, one `NAMED_ONLY` name, one `BENCHES` name | 0, 1, 2 |
 | `src/test/test.inf` | the directory's description | 6 |
@@ -843,3 +844,428 @@ ever." The rest stands as recommended, open to the review (the run's `spec/rulin
    25, 50 and 200 iterations are reported. W1 and W0 are judged within 10 % of W2's true residual after 2 and
    5 iterations, 25 and 50 reported.
 5. **Order:** K8 resumes at Phase 1 after run `mlxf_kernel_k2` (one timed run at a time on the M5).
+
+### Phase 1, the operator against the explicit matrix: done (2026-11-25, 13:24 to 13:42 EST, M5 Ultra, in the session)
+
+**Base.** The maintainer's checkout after ruling R1 (`6a4d5f9` plus 78 lines of `git status --porcelain`; it holds
+K1, K2 and this run's Phase 0). Built from scratch in Debug and Release with `MLXF_WERROR=ON`: 0 warnings, fast gate
+9 of 9. Counts (*measured*, both builds): `unit_kernels` 1,496, `unit_array` 193, `unit_ops` 2,462, `unit_core` 80
+(Debug) and 82 (Release), `unit_fft` 194, `unit_linalg` 632, `unit_compile` 63, `unit_fast` 94
+(`/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k8_work/scratch/keep/p1/base_counts.log`).
+
+**Files changed:** `src/test/mlxf_toy_reconstructor_pcg.f90` (new), `src/test/mlxf_toy_reconstructor_pcg_workspace.f90`
+(new), `src/test/mlxf_toy_pcg_solver.f90` (new: the engine, written here because the reconstructor's
+`solve_accum` and adapter need it; its suite is Phase 2's), `src/test/mlxf_toy_reconstructor_pcg_tester.f90` (new),
+`src/test/mlxf_test_defs.f90` (the fixtures' constants, SIMPLE's PCG constants, `pcg_solver_options`,
+`recon_pcg_tolerance` and `RECON_PCG_TOLERANCES`), `src/test/mlxf_test_registry.f90` (rows `reconstructor_pcg` and
+`reconstructor_pcg_n32`, `NAMED_ONLY` gains `reconstructor_pcg_n32`), `scripts/toy_mirror.txt` (the toy's lines and
+SIMPLE's three files in the header).
+
+| Exit item | Result | Evidence |
+| --- | --- | --- |
+| O1 to O8 on the small fixture, seeds 2 and 3, both devices, both builds | pass (88 checks per build, 0.69 s Release) | `/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k8_work/scratch/keep/p1/judged_{rel,dbg}_small.log` |
+| O10 and O7 at n = 32, seeds 1 to 3, both devices, both builds | pass (54 checks; 13.4 s Release, 31.3 s Debug) | `/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k8_work/scratch/keep/p1/judged_{rel,dbg}_n32.log` |
+| The seven plants fail | each fails its gate (below); every file restored to its checksum | `/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k8_work/scratch/keep/p1/plants/` |
+| Rule `mirror` | passes; plant 7 shows it fails on a missing line | `/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k8_work/scratch/keep/p1/plants/p7_ledger.log` |
+| 100 cycles of new, end_accum, one application and kill | live handles and active memory as they were, both devices | `test_lifecycle` in the logs above |
+| Builds at the exit | Debug and Release from scratch, `MLXF_WERROR=ON`: 0 warnings, fast gate 9 of 9 (10.6 s, 11.3 s); `unit_kernels` 1,584 in both (1,496 + 88), other areas unchanged | `/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k8_work/scratch/keep/p1/exit_*` |
+
+**Calibration** (seed 1, both devices, both builds, *measured*; frozen = max(2 x the larger error, 4 float32
+epsilons = 4.768e-7), at most the ceiling; written to `RECON_PCG_TOLERANCES` before seeds 2 and 3 ran):
+
+| Gate | Largest error, seed 1 (n = 8 and 32, both devices) | Frozen | Ceiling |
+| --- | --- | --- | --- |
+| O1 window | 2.67e-8 | 4.768e-7 | 4.77e-7 |
+| O1 envelope and its reciprocal | 9.94e-8 | 4.768e-7 | 4.77e-7 |
+| O2 kernel | 7.23e-8 (GPU, n = 32) | 4.768e-7 | 1e-4 |
+| O3 spectrum (non-zero entries) | 9.16e-8 | 4.768e-7 | 4.77e-7 |
+| O4 ridge | 2.09e-8 | 4.768e-7 | 1e-6 |
+| O5 right-hand side | 1.46e-7 | 4.768e-7 | 1e-4 |
+| O6 operator | 4.04e-7 (GPU, n = 32) | 8.07704e-7 | 1e-4 |
+| O7 symmetry, O8 symmetry on the support | 1.20e-7 | 4.768e-7 | 1e-5 |
+| O8 preconditioner | 4.94e-7 (GPU, n = 32) | 9.88876e-7 | 1e-4 |
+
+Seeds 2 and 3: largest errors 2.90e-7 (operator, n = 8) and 4.62e-7 (preconditioner, n = 32), every gate inside
+its frozen tolerance; the mask equal to the oracle's support voxel for voxel and the spectrum's zeros exact on every
+seed and device.
+
+**Plants** (each on the repository copy, built in Release, run, the file restored):
+
+| Plant | Fails |
+| --- | --- |
+| 1 the crop moved by one voxel | O6, O7 |
+| 2 the kernel's scale 64 as 8 | O2, O6 |
+| 3 the ridge on the unmasked input, after the output mask | O6, O6's zeros outside the mask |
+| 4 the envelope left out on one side of the preconditioner | O8 (match and symmetry) |
+| 5 the preconditioner's threshold 0.1 as 0.01 | O3 (zeros), O8 |
+| 6 `mlx_fftshift` left out of the right-hand side | O5 |
+| 7 a public binding missing from the ledger | rule `mirror` |
+
+**Decisions taken under delegation.**
+1. Two inquiries added to `reconstructor_pcg` beyond decision 4's list, `copy_spectra` and `copy_volumes`: gates O1
+   to O5 must read the kernel's and the preconditioner's spectra, the right-hand side and the envelopes, which SIMPLE
+   keeps private; the policy forbids testers the workspace's internals. Each has its ledger line with the reason.
+2. The lattice's members the toy reads (`box`, `boxpd`, `padf`, `pad_off`, `Rnat`, `padsc`, `iwinsz`, `dep1d`,
+   `mask`, `window`, `l_mask`) are public components, as `pcg_lattice`'s are in SIMPLE; O1 reads `window` there.
+   `get_solve_support` and `get_effective_lambda` are SIMPLE's getters, mirrored.
+3. `mask_mul`, `deapod_mul` and `add_ridge` act on device volumes (calls into the workspace); `window_mul` and
+   `window_div` stay host procedures on the host map, as decision 5 lists the window as host work.
+4. The density's shell statistics run on the host over a read-only view of the device's raw density
+   (`density_view`, no copy); the per-voxel thresholds are applied on the device through a shell index computed in
+   float32 (exact for these boxes: |q|² below 2^24 and no integer's square root within rounding of a half-integer).
+5. The window, envelope and reciprocal are computed in double on the host and rounded once; SIMPLE's
+   `kb_stencil` envelopes are the normalised three-tap window's transform, the toy computes I0 by its series.
+6. Plant 3 is placed after the output mask (inside it the mask makes it invisible); the plant fails O6's zeros.
+7. The engine module was written in Phase 1 because the reconstructor's adapter needs it; its gates are Phase 2's.
+
+**What it means, in short:** the device's operator, preconditioner, kernel and right-hand side reproduce the oracle's
+to within one or two float32 roundings (largest 4.9e-7) at n = 8 and 32 on both devices, and every plant is caught.
+
+### Phase 2, the solve on the small fixture: stopped at gate (b) (2026-11-25, 13:42 to 14:15 EST, M5 Ultra, in the session)
+
+**Stopped by section 7: "rtol_t would exceed 1e-4".** Decision 15 sets rtol_t to ten times the lowest true residual
+the device reaches in 200 iterations on seed 1. Under rule T (system R, `xtol` off) the preconditioned solve does not
+reach float32's floor in 200 iterations: the lowest true residual is 5.74e-5 (CPU) and 5.79e-5 (GPU), both at
+iteration 200 (*measured*, `/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k8_work/scratch/keep/p2/calib_rel_reconstructor_pcg.log`), so rtol_t would be 5.7e-4. The floor itself
+exists and is low: run on to 3,200 iterations the true residual falls to 3.62e-7 (CPU, iteration 1,200) and 3.32e-7
+(GPU, 1,400), then rises with the float32 updates (6.9e-6 and 2.7e-6 at 3,200; `/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k8_work/scratch/keep/p2/residual_floor_diag_3200.log`,
+a diagnostic build, the file restored). It is the preconditioner of 9.4 again (Phase 0: SIMPLE's preconditioner
+slows CG fivefold on this fixture), not float32. Every other gate of Phase 2 ran; gate (b) did not, and nothing of
+Phase 3 started.
+
+**A second finding, for the same ruling.** Gate (a) at n = 32 (the named-only suite, rule E on system R) fails on
+seed 3 at the frozen iterate tolerance: the iterate at the stop (k = 40) is 2.00e-4 (CPU) and 1.39e-4 (GPU) from the
+oracle's, against 1.673e-5 frozen from seed 1 (8.36e-6 at its stop, k = 33) and a ceiling of 1e-3. The diagnosis
+(`/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k8_work/scratch/keep/p2/n32_iterate_diag.log`): at k = 1, 2 and 5 every seed and device is within 1.2e-6 to 3.1e-6; only the last
+iterate of a 40-iteration solve departs, on both devices alike, while the device stops at the oracle's iteration by
+the oracle's test (40, `xtol`), the residual histories agree within 4e-8 and the reported residual equals the
+oracle's true one. That is float32's rounding carried through 40 iterations of a badly preconditioned recurrence,
+not a defect of the toy (two diagnoses: the per-k errors; the agreement of both devices). Decision 16 forbids
+moving the frozen value.
+
+**Files changed:** `src/test/mlxf_toy_pcg_solver_tester.f90` (new, suite `pcg_solver`),
+`src/test/mlxf_toy_reconstructor_pcg_tester_solve.f90` (new, decision 23: a submodule of the reconstructor's tester,
+which the solve's gates took past 700 lines; its row is added to the file table), `src/test/mlxf_toy_pcg_solver.f90`
+(a non-finite `|b|` or `r . z` reaches the curvature test as in SIMPLE), `src/test/mlxf_toy_reconstructor_pcg.f90`
+(700 lines), `src/test/mlxf_toy_reconstructor_pcg_tester.f90` (the solve's calls; shared helpers as module
+procedures for the submodule), `src/test/mlxf_test_defs.f90` (the solve's tolerances, `RECON_PCG_RTOL_T` = 0, not
+measurable), `src/test/mlxf_test_registry.f90` (row `pcg_solver`, the registration comment of `reconstructor_pcg`).
+
+| Exit item | Result | Evidence |
+| --- | --- | --- |
+| `pcg_solver`: the constructed systems (every stop, count and reason, the step test's epsilon at a right-hand side of 1e-17, the recomputation's 24, 26, 31 and 52 applications and the changed operator's residual at 25 and 30, a rejected start) and the stencil problem (operator, solutions and true residuals from zero and from a guess, zero face, unpadded one step, -H refused, the cap of two, n = 8 in m = 16) | pass, both devices, both builds (84 checks, 0.21 s Release) | `/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k8_work/scratch/keep/p2/judged_{rel,dbg}_pcg_solver.log` |
+| O9 and gates (a), (a'), start and ship, decision 17 on the small fixture, seeds 2 and 3 | pass, both devices, both builds; rule E stops at the oracle's iteration by its test on seeds 2 and 3 (14 and 16, `xtol`; seed 1 at 16 reported, not gated) | `/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k8_work/scratch/keep/p2/judged_{rel,dbg}_reconstructor_pcg.log` |
+| Gate (b) | **not run: rtol_t unmeasurable within 1e-4 (stop)** | above |
+| Gates at n = 32 (named-only) | (a') on system P passes k = 1 to 5 on all seeds; (a) passes on seeds 1 and 2, **fails on seed 3** at the stop iteration (above) | `/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k8_work/scratch/keep/p2/judged_{rel,dbg}_reconstructor_pcg_n32.log` |
+| The nine plants fail | each fails its gate (below); every file restored to its checksum | `/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k8_work/scratch/keep/p2/plants/` |
+| Each new fast suite under 0.5 s in Release or its registration says why; the two add at most 5 s | `pcg_solver` 0.21 s; `reconstructor_pcg` 2.93 s (with the Phase 1 gates and the residual floor's 20 solves), registration comment written; together 3.1 s | `/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k8_work/scratch/keep/p2/exit_counts.log` |
+| Builds | Debug and Release from scratch, `MLXF_WERROR=ON`: 0 warnings, fast gate 9 of 9 (10.6 s, 11.2 s); `unit_kernels` 1,732 in both (1,496 + 84 + 152), `unit_core` 80 in both (it moves between 80 and 82 from run to run, section 5's range), every other area at the base's count; the named-only suite 90 checks, the two of seed 3 failing | `/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k8_work/scratch/keep/p2/final_*` |
+
+**Calibration** (seed 1, both devices, both builds, n = 8 and 32, *measured*; frozen as in Phase 1):
+
+| Gate | Largest error, seed 1 | Frozen | Ceiling |
+| --- | --- | --- | --- |
+| O9 inner product | 1.48e-8 | 4.768e-7 | 1e-6 |
+| stencil operator | 1.39e-7 | 4.768e-7 | 1e-4 |
+| stencil solution | 1.28e-6 | 2.5665e-6 | 1e-3 |
+| stencil true residual | 1.01e-6 | 2.02348e-6 | 1e-4 |
+| (a), (a') iterate (and start and ship) | 8.36e-6 (n = 32, rule E, k = 33) | 1.672904e-5 | 1e-3 |
+| (a), (a') residual history | 8.93e-8 | 4.768e-7 | 2e-6 |
+| (a) step quantity | 3.71e-7 | 7.42524e-7 | 3e-4 |
+| rtol_t | lowest true residual in 200 iterations 5.74e-5 | not frozen: 5.7e-4 > 1e-4 | 1e-4 |
+
+Seeds 2 and 3 (both sizes): largest iterate error under rule E 2.35e-6 at n = 8, residual history 8.3e-8, step
+2.4e-7, start and ship 5.8e-7; under F2 and F5 (system P) the iterates within 2.3e-6 of the oracle's at k = 1 to 5 at
+n = 8 and within 5.0e-6 at n = 32.
+
+**Plants** (each on the repository copy, built in Release, run, restored):
+
+| Plant | Fails |
+| --- | --- |
+| 1 `beta` as rho' / kappa | the constructed stops (the iterates and every rule), (a) and (a') (iterates, histories), start and ship |
+| 2 the recomputation every 24 | the application counts (24 expected, 25), the changed operator's residual |
+| 3 the step test without `|alpha|` | the `xtol` case (0.408 against 0.45) |
+| 4 `xtol` tested before `rtol` | their order (both cases) |
+| 5 the curvature tested after the update | "x as it was" at iteration 1 and 2, the stencil's -H |
+| 6 the window applied twice at exit | (a), (a'), start and ship |
+| 7 the window's floor 0.1 as 0 | start and ship |
+| 8 a term from a call counter added to the map | decision 17 (and the oracle gates) |
+| 9 the stencil's window left off one side | the stencil operator, its solutions and residuals |
+
+**Reported, ruling R1 item 2** (the iterates' error after 2 and 5 iterations against the exact solution, host oracle
+in double, scratch driver `scratch/p0drv/p2_iter_error.f90`, `/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k8_work/scratch/keep/p2/iter_error_n{8,32}.log`):
+
+| | Seed | Preconditioned (9.4): 2 / 5 iterations | M = P (no preconditioner): 2 / 5 |
+| --- | --- | --- | --- |
+| n = 8, system R | 1, 2, 3 | 0.414 / 0.300, 0.400 / 0.277, 0.425 / 0.292 | 0.233 / 0.144, 0.238 / 0.141, 0.228 / 0.138 |
+| n = 8, system P | 1, 2, 3 | 0.9999 / 0.9999, 0.990 / 0.991, 0.983 / 0.986 | 0.9999 / 0.9999, 0.990 / 0.989, 0.982 / 0.980 |
+| n = 32, system R | 2 | 0.678 / 0.358 | 0.310 / 0.185 |
+| n = 32, system P | 2 | 0.9987 / 0.9990 | 0.9987 / 0.9982 |
+
+Exact: LU of the support block at n = 8 (residual below 7e-15); at n = 32, unpreconditioned CG to 1e-12 (system R, 87
+iterations) and, for system P, 3,000 iterations reaching 3.4e-7 (the best available, not exact). On system P the
+exact solution of the near-singular system (ridge 1e-3) is dominated by directions two or five iterations do not
+reach, with or without the preconditioner; on system R the preconditioner doubles the error after 2 and 5 iterations.
+
+**Decisions taken under delegation.**
+1. Rules R4 and T need `xtol` off, which `solve_accum` (SIMPLE's) does not offer: they reach the engine through a
+   test-only `pcg_operator` over the reconstructor's public `apply_normal`, `apply_precond` and `dot_real_volume`.
+2. Gate (b)'s second ceiling ("reported against true", 0.1 rtol_t) is computed from rtol_t, not calibrated; it and the
+   "ship" tolerance left the table; start and ship are judged with the iterate's tolerance.
+3. The residual floor is measured on seed 1 by fixed solves of 10, 20, .., 200 iterations, the true residual by the
+   explicit matrix against the device's own right-hand side.
+4. The engine lets a non-finite `|b|` or `r . z` reach the curvature test (`indefinite` at once), as SIMPLE's does;
+   only `|b| <= 0` and `r . z <= 0` are refused.
+5. The host's waits are counted from the engine's schedule (one before the loop, two from a used non-zero start, two
+   per iteration, one for an indefinite iteration), not by a channel from the engine: the engine has no member for it
+   (section 7). The count is `host_waits`'s.
+6. The iterates of (a) are the shipped maps of `solve_accum` under fixed iterations against the oracle's
+   `ship(u_k)`; residual and step histories come from the toy's outcome.
+7. The tester's solve gates are a submodule; its shared helpers became module procedures (rule
+   `check_submodule_linkage`).
+
+**Ruling needed** (one of, for gate (b); and one for (a) at n = 32):
+1. **Recommended for (b):** gate (b) reported, not gated, in line with R1 (SIMPLE never runs past 5 iterations);
+   rule T kept as a measurement: the true residual after 200 iterations and the floor (3.3e-7 at 1,200 to 1,400
+   iterations) reported. The run resumes at Phase 3.
+2. For (b), rule T at 1,400 iterations (the measured floor), rtol_t = 10 x 3.32e-7 = 3.3e-6, frozen now; the fast
+   suite would grow by about 2 s.
+3. **Recommended for (a) at n = 32:** judge the named-only rule E iterates at k = 1, 2 and 5 (where SIMPLE runs; all
+   within 3.1e-6) and report the stop iterate (k = 33 to 40), whose float32 departure grows with the iterations.
+
+**What it means, in short:** the engine and the solve reproduce the oracle iterate by iterate where SIMPLE runs (2
+and 5 iterations, system P, within 6e-6 at n = 8 and 32 on both devices), stop where the oracle stops by its test,
+repeat bit for bit, and fail on every plant. What does not hold is a rule that asks the preconditioned solve to reach
+float32's floor in 200 iterations: with SIMPLE's preconditioner it needs about 1,300.
+
+#### Ruling R2 applied (2026-11-25, 14:21 to 14:42)
+
+R2 (the run's `spec/rulings.md`): gate (b) reported, not gated, `RECON_PCG_RTOL_T` stays 0; gate (a) at n = 32 judges
+k = 1, 2 and 5 against the frozen iterate tolerance and the stop iteration and test exactly, the stop iterate
+reported; the preconditioner finding reported, not a stop.
+
+**Re-stated assertions** (`src/test/mlxf_toy_reconstructor_pcg_tester_solve.f90`): rule T runs on every judged seed
+and device as 200 fixed iterations of system R (`xtol` off) and reports the true residual, the reported residual's
+distance from it and the solution's from Cholesky (it asserts only once `RECON_PCG_RTOL_T` is frozen); the n = 32 gate
+(a) asserts the iterates at k = 1, 2 and 5, the stop iteration and the stopping test, and reports the stop iterate.
+The 20 solves of the residual floor's scan left the fast suite (the floor stays in this Progress).
+
+**Rule T, reported** (*measured*, small fixture, both devices, `keep/r2/{dbg,rel}_reconstructor_pcg.log`):
+
+| Seed | True residual at 200 (CPU / GPU) | \|reported - true\| | Solution against Cholesky | cond(H_s) |
+| --- | --- | --- | --- | --- |
+| 1 | 5.74e-5 / 5.79e-5 | 9.4e-9 / 2.6e-8 | 5.22e-3 / 5.23e-3 | 121.9 |
+| 2 | 4.91e-5 / 4.90e-5 | 1.9e-9 / 2.8e-9 | 4.54e-3 / 4.54e-3 | 122.0 |
+| 3 | 5.63e-5 / 5.63e-5 | 4.6e-9 / 3.0e-9 | 5.22e-3 / 5.21e-3 | 121.6 |
+
+Beside the plan's formulas: 0.1 rtol_t and min(1e-3, 10 rtol_t cond) would need rtol_t, which is not frozen; the
+reported residual agrees with the true one to 3e-8 and the solution lies 4.5e-3 to 5.2e-3 from Cholesky after 200
+iterations. The float32 floor of the diagnostic run: 3.6e-7 (CPU, 1,200 iterations), 3.3e-7 (GPU, 1,400).
+
+**Builds and counts after R2** (from scratch, `MLXF_WERROR=ON`, `keep/r2/`): 0 warnings, fast gate 9 of 9,
+`scripts/check_tree.sh` passing. Debug and Release: `unit_fast` 94, `unit_fft` 194, `unit_linalg` 632, `unit_ops`
+2,462, `unit_array` 193, `unit_compile` 63, `unit_core` 82, `unit_kernels` 1,732 (`pcg_solver` 84, `reconstructor_pcg`
+152: 2.86 s Release, 7.80 s Debug); the named-only `reconstructor_pcg_n32` **passes, 96 checks** (174 s Release,
+403 s Debug), its stop iterates reported (seed 3: 2.0e-4 CPU, 1.39e-4 GPU). The benchmark gained the suites of
+Phases 3 and 5 in the same build (below).
+
+### Phase 3, the probe: scalar precision, waits, and the transforms' share: done (2026-11-25, 14:40 to 14:44 EST, M5 Ultra, in the session)
+
+**Base:** the R2 builds (the benchmark's suites `time`, `profile`, `probe` and `accuracy` entered with them;
+`src/test/mlxf_bench_recon_pcg.f90` is the one file of this phase). Release, `MLX_ENABLE_TF32=0`, the GPU unless said;
+each invocation started at a one-minute load of 1.3 to 1.9, `uptime` before and after, no `cmake`, `gfortran` or other
+`mlxf_test_exec` seen during it (a sampler every second), `/usr/bin/time -l` around it (`/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k8_work/scratch/keep/p3/*.meta`). Verdicts
+are read at 2 and 5 iterations of system P (R1); 50 iterations are reported.
+
+**1. The canonical driver** (warm, best of three, *measured*, `/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k8_work/scratch/keep/p3/probe_n{160,256}.log`):
+
+| n | Rule | Driver | end_accum | Solve | Waits (all) | MLX peak |
+| --- | --- | --- | --- | --- | --- | --- |
+| 160 | F2 | 0.0855 s | 0.0606 s | 0.0247 s | 7 | 3.39e9 B |
+| 160 | F5 | 0.1010 s | 0.0555 s | 0.0455 s | 13 | 3.39e9 B |
+| 160 | F50 (reported) | 0.4662 s | 0.0557 s | 0.4105 s | 103 | 3.69e9 B |
+| 256 | F2 | 0.3310 s | 0.2458 s | 0.0852 s | 7 | 1.14e10 B |
+| 256 | F5 | 0.4079 s | 0.2262 s | 0.1816 s | 13 | 1.14e10 B |
+| 256 | F50 (reported) | 1.8922 s | 0.2313 s | 1.6606 s | 103 | 1.47e10 B |
+
+Every pass's map bit for bit equal to the first. The process's peak footprint: 5.89e9 B (n = 160), 2.27e10 B
+(n = 256); decision 20's guard (5.89e9 x 4.1 = 2.4e10 below 0.8 x 1.031e11) admits n = 256. **The MLX peak at n = 256
+is 1.14e10 B, against decision 20's hypothesis of at most 4.3e9 B** (the transforms' working memory, Apple question 25).
+
+**2. The transforms' share, f = 1 - t_fft / t_solve** (t_fft: the same solves' transform pairs alone, with the same
+waits; best of three):
+
+| n | F2 | F5 | F50 (reported) |
+| --- | --- | --- | --- |
+| 160 | 0.497 (0.0235 s, 0.0118 s) | 0.346 (0.0457, 0.0299) | 0.274 |
+| 256 | 0.458 (0.0852, 0.0462) | 0.364 (0.1817, 0.1156) | 0.304 |
+| 8 (reported) | 0.273 | 0.170 | 0.169 |
+
+**Decision 18: f >= 0.30 at both boxes under F2 and F5, so Phase 4 is entered.** The profile (`/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k8_work/scratch/keep/p3/profile_*`,
+cold, explains only): at n = 256 the operator alone takes 14.4 ms and its transform pair 11.6 ms; the preconditioner
+15.7 ms; an inner product with its copy 0.31 ms; in a cold assembly the host's density statistics and the graph take
+0.166 s and the finalisation's wait 0.230 s (0.040 s and 0.061 s at n = 160).
+
+**3. The cost of a wait** (an evaluation and copy of n^2 partial sums, median of 100): 0.163 ms at n = 160, 0.168 ms
+at n = 256 (0.160 ms at n = 8). Hypothesis (under 1 % of an iteration at n >= 160) holds: an F5 iteration at n = 256
+is 0.036 s, two waits 0.34 ms, 0.9 %.
+
+**4. The scalars** (decision 12; 250 inner products of 50 iterations of system R, the largest relative error against
+S4, the host's double sum over views): n = 160 GPU: S1 1.20e-7, **S2 5.9e-9**; n = 256 GPU: S1 1.34e-7, **S2 6.4e-9**;
+n = 8 CPU: S1 1.56e-7, S2 4.3e-8; n = 8 GPU: S1 1.44e-7, S2 3.8e-8. **S2 is accurate (at most 1e-6) and stays**; S3 is
+not reached by the rule and was not built. The views S4 needs were never refused. **The drift** without the
+recomputation, `| |r_k| - |b - H x_k| | / |b|` at k = 5 .. 50: at most 7.0e-9 (n = 160), 6.9e-9 (n = 256), 2.3e-8
+(n = 8); the hypothesis (at most 1e-5 at k = 25) holds by three orders, so the recomputation every 25 iterations has
+nothing to repair here (and production never reaches it).
+
+**5. W1, W0 and C, by their ceilings** (decision 13's rule: more than 30 % on the canonical driver at n = 256, not
+slower at 160, judged at 2 and 5 iterations of system P by R1):
+- W0 and W1 remove waits only: the solve's waits under F2 and F5 cost at most 6 x 0.168 ms = 1.0 ms and 12 x 0.168 ms =
+  2.0 ms of a driver of 331 and 408 ms at n = 256 (0.3 % and 0.5 %); no form that removes them all can gain 30 %.
+- C fuses the pointwise chains; it can at most remove the solve's non-transform time, t_solve - t_fft = 39 ms (F2) and
+  66 ms (F5) at n = 256: 12 % and 16 % of the driver (a driver of 292 and 342 ms at best, ratios 1.13 and 1.19).
+- **None of the three can meet the rule; none was written** (decision under delegation 1, below). W2 and S2 stay.
+
+**Exit:** each rule's outcome is above with its numbers; the benchmark holds no losing alternative (none was
+written); Phase 4 is entered by f, and its decision is recorded in Phase 4's entry. No toy file changed, so Phases 1
+and 2's gates stand; the R2 builds are this phase's builds.
+
+**Decisions taken under delegation.**
+1. W1, W0 and C were judged by ceilings measured on the canonical driver rather than built: each removes at most a
+   measured part of the driver (the waits, the solve's non-transform time), and each part is below the 23 % a 30 %
+   gain needs. Building them could not change the verdict.
+2. S3 was not built: decision 12's ladder reaches it only if S2 fails.
+3. t_fft repeats the solve's waits: one pair and a wait before the loop, per iteration one pair and a wait, and a
+   second unless the iteration is the last, as the engine waits.
+4. The probe's 50 iterations of system R run the engine's recurrence in the benchmark (S2 forming the scalars), so that
+   every inner product can be formed three ways.
+
+**What it means, in short:** the solve at SIMPLE's 2 and 5 iterations takes 85 and 182 ms at n = 256 and 25 and 46 ms
+at n = 160 on the M5's GPU, and the assembly around it (end_accum) costs more than the solve: 0.23 to 0.25 s at
+n = 256, most of it the host's statistics of the density and the finalisation's first evaluation. The scalars are
+exact enough in S2, the waits are cheap, and no batching or compilation of the iteration can buy 30 %.
+
+### Phase 4, the fused pointwise kernels: entered, not built, by its ceiling (2026-11-25, 14:44 EST)
+
+Entered: f is 0.46 to 0.50 under F2 and 0.35 to 0.36 under F5 at n = 160 and 256 (Phase 3), above decision 18's 0.30.
+**The kept-only rule cannot be met.** A fused form can at most remove the solve's non-transform time; if it cost
+nothing, the canonical driver at n = 256 would go from 0.331 s to 0.292 s under F2 (1.13 times) and from 0.408 s to
+0.342 s under F5 (1.19 times), below the 1.30 decision 18 requires (at n = 160: 1.16 and 1.19). The 30 % rule is
+judged on the driver, whose largest part is end_accum (0.23 to 0.25 s at n = 256), host work and transforms a
+pointwise kernel does not touch. **The two kernels were not written** (decision under delegation: a ceiling measured on
+the driver decides as K1's probe did; building and deleting them could not change the verdict). The graph form stays
+the only form. No file changed.
+
+**What it means, in short:** a fused kernel for the Khat product and the updates is not worth writing for SIMPLE's
+2 to 5 iterations; the time is in the assembly and the transforms.
+
+### Phase 5, the bench at n = 160 and 256, and the verdict: done (2026-11-25, 14:44 to 16:24 EST, M5 Ultra, in the session)
+
+**Base:** the R2 builds; no toy file changed in this phase (the plants of Phase 5 ran on scratch copies). Each timed
+invocation waited for a one-minute load of at most 4 (it was 1.3 to 1.9), recorded `uptime` before and after and the
+machine's free pages, sampled the process table every second (no `cmake`, `gfortran` or second `mlxf_test_exec`
+seen in any), and ran under `/usr/bin/time -l` (`/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k8_work/scratch/keep/p5/*/*.meta`). Release, `MLX_ENABLE_TF32=0`. Decision 20's
+guard (Phase 3): n = 160's footprint 5.9e9 B x 4.1 = 2.4e10 B, below 8.2e10 B: n = 256 admitted.
+
+**1. `suite=accuracy`** (seed 1, the GPU, `/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k8_work/scratch/keep/p5/acc/`): passes at both sizes (7 of 7 assertions each).
+
+| n | O2 kernel | O4 ridge (system R) | O5 right-hand side | F2: count, reported vs true residual | F5 | E (reported) | R4 (reported) |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 160 | 8.06e-8 | 3.1e-10 | 2.98e-7 | 2, 2.05e-7 (true 3.887e-2) | 5, 3.7e-8 (4.488e-3) | 31 `xtol`, true 8.996e-4 | 200 `maxits`, true 1.663e-4 |
+| 256 | 1.01e-7 | 3.16e-8 | 2.51e-7 | 2, 7.7e-8 (4.291e-2) | 5, 2.0e-8 (3.013e-3) | 28 `xtol`, true 1.026e-3 | 200 `maxits`, true 1.691e-4 |
+
+All within the frozen tolerances (4.768e-7). The oracle's system took 68 s and 778 s, each `apply` 66 to 67 s and
+744 to 750 s (*measured*; Phase 0 predicted 6 and 67 minutes for the suite, it took 6.3 and 69.5). The run at
+n = 256 overlapped the final builds and the named-only suites (not a timed step: its own times are the oracle's,
+reported). Footprint 9.1e9 B and 3.58e10 B.
+
+**2. `suite=time` on the GPU, two invocations** (`/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k8_work/scratch/keep/p5/inv{1,2}/`; best of three after a warm-up; the second
+invocation's best in brackets; the spread is the three passes' range):
+
+| n | System, rule | Iterations, reason | Driver (inv 2) | Spread | end_accum | Solve | Per iteration | Two halves | Waits | MLX peak | Cache after kill |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 160 | P, F2 | 2, fixed | 0.0843 (0.0853) s | 0.0012 s | 0.0605 s | 0.0231 s | 0.0115 s | 0.183 s | 7 | 3.39e9 B | 3.74e9 B |
+| 160 | P, F5 | 5, fixed | 0.1051 (0.1100) s | 0.0016 s | 0.0576 s | 0.0472 s | 0.0094 s | 0.221 s | 13 | 3.39e9 B | 3.75e9 B |
+| 256 | P, F2 | 2, fixed | 0.3323 (0.3350) s | 0.0087 s | 0.2470 s | 0.0852 s | 0.0426 s | 0.701 s | 7 | 1.14e10 B | 1.85e10 B |
+| 256 | P, F5 | 5, fixed | 0.4129 (0.4129) s | 0.0002 s | 0.2310 s | 0.1818 s | 0.0364 s | 0.882 s | 13 | 1.14e10 B | 1.86e10 B |
+| 160 | R, E | 31, `xtol` | 0.3200 (0.3189) s | 0.0017 s | 0.0604 s | 0.2595 s | 0.0084 s | 0.657 s | 65 | 3.69e9 B | 4.81e9 B |
+| 160 | R, R4 | 200, `maxits` | 1.672 (1.679) s | 0.0032 s | 0.0569 s | 1.614 s | 0.0081 s | 3.36 s | (1) | 3.70e9 B | 4.82e9 B |
+| 256 | R, E | 28, `xtol` | 1.203 (1.201) s | 0.0060 s | 0.2505 s | 0.9522 s | 0.0340 s | 2.45 s | 59 | 1.47e10 B | 2.39e10 B |
+| 256 | R, R4 | 200, `maxits` | 6.818 (6.817) s | 0.0046 s | 0.2469 s | 6.571 s | 0.0329 s | 13.69 s | (1) | 1.47e10 B | 2.39e10 B |
+
+True residuals, the device's own recomputation (`|b - H u| / |b|`, equal to the reported one to the digits shown):
+F2 3.887e-2 and 4.291e-2, F5 4.488e-3 and 3.013e-3, E 8.996e-4 and 1.026e-3, R4 1.663e-4 and 1.691e-4 (n = 160 and
+256); R4 does not reach its `rtol` of 1e-4 in 200 iterations at either size. MLX's active memory after `kill` is 0
+on every row. The process (both sizes in one invocation): peak footprint 2.24e10 B (system P) and 2.78e10 B (system
+R), maximum resident 9.1e9 B and 1.5e10 B. Waits of R4 (in brackets) count only end_accum's: R4 runs the engine
+outside `solve_accum` (its step test off), which does not count. Decision 20's "noise floor" (the two invocations'
+difference): at most 4.7 % (n = 160, F5), at most 0.8 % at n = 256.
+
+**3. Decision 17 at bench size:** the two invocations' maps are equal byte for byte for all eight configurations
+(`cmp`), and the residual and update histories in hexadecimal are equal (`diff`) (`/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k8_work/scratch/keep/p5/cmp_diff.log`); within
+each invocation every pass's map is bit for bit the first's (`repeat_bits=T` on every row).
+
+**4. MLX's CPU device** (decision 21; the same graph, one process; `/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k8_work/scratch/keep/p5/cpu/`): n = 160: F2 1.991 s (end_accum
+0.763 s, solve 1.227 s), F5 3.816 s, E 20.26 s (31 iterations), R4 125.0 s (200); n = 256: F2 8.524 s (end_accum
+3.240 s, solve 5.274 s). One core busy (user time equals real time: 50.7 of 51.0 s, 1,041 of 1,043 s, 87.6 of
+88.4 s). **The GPU is 23.6 (F2) and 36.3 (F5) times the CPU device at n = 160 and 25.7 times (F2) at n = 256;
+63 (E) and 75 (R4) times at n = 160.** This is MLX's own CPU path, single-threaded here; it is not SIMPLE.
+
+**5. The verdict table** (*measured*; decision 20's rows above; R1: judged at 2 and 5 iterations of system P):
+
+| n | Rule | GPU driver | GPU solve | CPU device driver | GPU / CPU device | SIMPLE |
+| --- | --- | --- | --- | --- | --- | --- |
+| 160 | F2 | 0.084 s | 0.023 s | 1.99 s | 23.6 | no record (decision 21's gap) |
+| 160 | F5 | 0.105 s | 0.047 s | 3.82 s | 36.3 | no record |
+| 256 | F2 | 0.332 s | 0.085 s | 8.52 s | 25.7 | no record |
+| 256 | F5 | 0.413 s | 0.182 s | not run (decision 21: F2 only at 256) | | no record |
+
+What the numbers say: one half's assembly and SIMPLE's production solve run in a third of a second at n = 256 on
+the M5's GPU, about a quarter of it the solve; the rest is `end_accum` (the host's statistics of the density and
+the finalisation's transforms). What they do not say: anything about SIMPLE's own CPU solve (not measured; its
+`PCG_ASSEMBLE_BENCH` record at these boxes is not in hand), about a map, about more iterations helping, about the
+ML or atomicity priors, symmetry or a density mask, or about two halves in one batch. **Family D's difference:** the
+master runs this between iterations while the parts are idle, so the alternative to the GPU really is all the cores
+of the machine, idle then; both could also work at once, one half each, which is not measured here.
+
+**6. The two plants of Phase 5** (`/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k8_work/scratch/keep/p5/plants/`): **s1**, the device's iterate stopped one iteration early (the engine run with `maxits - 1` in the
+benchmark): `suite=accuracy` fails "F2 runs exactly its iterations" and "F5 runs exactly its iterations" (n = 16,
+`/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k8_work/scratch/keep/p5/plants/s1_iterate_early.log`); **s2**, an unread key (`foo=1`): `error stop 2`, "suite=accuracy does not read
+foo=1" (`s2_unread_key.log`). The file restored to its checksum.
+
+**Decisions taken under delegation.**
+1. Rule R4 is timed through the engine on the toy's public procedures (`solve_accum`, SIMPLE's, fixes the step test
+   on); its waits are not counted.
+2. The CPU device ran system P at both sizes (F2 only at 256, decision 21) and system R at n = 160 (both rules); every
+   pass was predicted and measured below 30 minutes.
+3. The device's own true residual comes from an extra, untimed assembly whose engine run uses the same options as
+   `solve_accum` (the same arithmetic, so the same solution), the map being shipped and not invertible outside the
+   window's floor.
+4. `suite=accuracy` judges where SIMPLE runs (F2 and F5: the count, the reason, the reported residual against the
+   oracle's) and reports E and R4 (R1); O4's reference for system R is section 9.3's formula typed in the
+   benchmark (one oracle system, the absolute ridge, serves both ridges, the relative ridge's term added on the host).
+
+**What it means, in short:** SIMPLE's production assembly of one half, 2 iterations, takes 0.084 s at n = 160 and 0.33 s at
+n = 256 on the M5's GPU, 24 to 26 times MLX's CPU device; 5 iterations 0.105 s and 0.41 s. The device's iterates and
+residuals agree with the oracle at bench size, the maps repeat bit for bit across invocations, and the solve's
+memory is the transforms' (1.14e10 B at n = 256).
+
+### Phase 6, the record: done (2026-11-25, 14:50 to 16:30 EST, M5 Ultra, in the session)
+
+**Files changed:** `doc/implementation_notes/planned/mlxf_kernel_families.md` (section 2a's row D with the methods
+kept and the driver, section 6's K8 record: the seam with measured bytes, "Differences from SIMPLE", the numbers in
+hand, the open decisions answered; section 8's K8 row), `doc/policies/test_environment_policy.md` (the suites
+`pcg_solver`, `reconstructor_pcg` and `reconstructor_pcg_n32`, the benchmark `bench_recon_pcg`),
+`doc/implementation_notes/README.md` (the K8 row), `doc/history/2026-11.md` (the entry),
+`src/test/test.inf`, `README.md` (the status and the test-only toys), the report
+`doc/implementation_notes/completed/mlxf_kernel_k8_report.md`, this note.
+
+| Exit item | Result | Evidence |
+| --- | --- | --- |
+| The report exists | written in the how-to's order, with a commit message naming every new file, no attribution line | the report |
+| `scripts/check_tree.sh` | passes | `/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k8_work/scratch/keep/final/check_tree.log` |
+| Builds | Debug and Release from scratch, `MLXF_WERROR=ON`: 0 warnings, fast gate 9 of 9 (12.3 s, 12.9 s); `unit_kernels` 1,732, every other area at the base's count (`unit_core` 80 Debug, 82 Release); `reconstructor_pcg_n32` passes, 96 checks (159 s Release, 414 s Debug) | `/private/tmp/claude-501/-Users-hael--claude-spares-spare-j03Dq7/b43a4d7a-d6e9-44b1-9278-f4eb389a9694/scratchpad/k8_work/scratch/keep/final/` |
+| `git status` | file-table paths only, beside the maintainer's own uncommitted work | 85 lines of `git status --porcelain` against the 78 handed over: the 7 new files of the table (with Phase 0's two, already there) and the edited table paths |
+
+**What it means, in short:** K8 is delivered with the graph form only; the record says where the time goes
+(`end_accum`), what SIMPLE's preconditioner does on full coverage, and what a batched or SIMPLE-side plan needs.

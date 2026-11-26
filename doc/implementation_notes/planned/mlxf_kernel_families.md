@@ -57,7 +57,7 @@ of `d354efee2` added.
 | B1 | `projector` (`image/simple_projector.f90`, `simple_projector_pft_batch.f90`) | `new`, `set_rmat`, `get_cmat`, `pad_fft`, `expand_cmat`, `is_expanded`, `kill_expanded`, `kill`; `fproject_polar_batch_opt` (built: `src/test/mlxf_toy_projector.f90`, `_workspace.f90`, `_pft_batch.f90`, K2) | the reprojection model's `vol_pad2ref_pfts_opt`, which fills `polarft_calc` through `set_ref_pft`, or on the toy's device route through the workspace (built: `src/test/mlxf_toy_polarft_core.f90`) |
 | B2 | `cartft_calc` (`cftc/simple_cartft_calc.f90`) | `new`, `kill`, `set_ref`, `new_ptcls`, the particle setters, `pose_normal_terms`, `shift_normal_terms` | `cartft_pose_opt` (`cftc/simple_cartft_pose_opt.f90`) |
 | C | `reconstructor` (`volume/simple_reconstructor.f90`) | `insert_plane_oversamp`, `compress_exp`, `sampl_dens_correct` | `calc_3Drec` (`strategies/search/simple_matcher_3Drec.f90`) with its batches of prepared planes |
-| D | `reconstructor_pcg` (`volume/simple_reconstructor_pcg.f90`) | `apply_normal_kernel`, `apply_precond`, `dot_real_volume` | `pcg_solve` (`opt/simple_pcg_solver.f90`) |
+| D | `reconstructor_pcg` (`volume/simple_reconstructor_pcg.f90`, with the members of `volume/simple_pcg_lattice.f90` it reads) | `new`, `kill`, `set_window_sphere`, `mask_mul`, `set_lambda_relative`, `end_accum`, `apply_normal`, `apply_normal_kernel`, `apply_precond`, `dot_real_volume`, `solve_accum`, `get_effective_lambda`, `get_solve_support` (built: `src/test/mlxf_toy_reconstructor_pcg.f90`) | `pcg_solve` with `pcg_operator` and `pcg_solver_outcome` (`opt/simple_pcg_solver.f90`; built: `src/test/mlxf_toy_pcg_solver.f90`); the master's assembly in `simple_rec3D_pcg_strategy.f90` is the canonical driver |
 
 For each toy, its plan fixes the seam (which component holds the MLX state, what stays resident, where the
 host waits) and lists the differences from SIMPLE. Family A's toy was refactored to this form by the roadmap's
@@ -362,14 +362,15 @@ orientation) of the density's mass. Against the gridding oracle the error is 1.0
 with one orientation), above the probe's cap 1e-5: **outcome C by decision 20's letter**. The same deposits in
 double precision from float32 coordinates differ from the oracle by 1.09e-4 and 8.1e-5, so the excess is the
 coordinates' rounding, which every form on float32 coordinates shares; the atomic update itself varies by at most
-2.4e-6 between runs and is not bit-repeatable (49 % and 1.8 % of the voxels differ): **B in character**. K6's plan
-waits on the maintainer's ruling between the two readings (K2's report, section 6).
+2.4e-6 between runs and is not bit-repeatable (49 % and 1.8 % of the voxels differ): **B in character**. **Ruled B**
+(Hans, 2026-11-25: "B for the probe, keep the defaults"): K6 needs a deterministic form, the atomic kernel its speed reference.
+
 
 **Open decisions.**
 - Whether bitwise identity with the CPU's order is required, or repeatability on the GPU is enough.
 - The block size of form 3.
-- After the probe: whether K6 starts from outcome C (`mlx_scatter_add` and the sorted form) or B (a deterministic
-  form required, the atomic kernel the speed reference), and the reference its cap is judged against.
+- After the probe (ruled B): K6 requires a deterministic form, with the atomic kernel as its speed reference; its
+  cap is judged against a reference on the kernel's own float32 coordinates (or coordinates kept in double).
 
 ## 6. Family D: the PCG solve
 
@@ -419,6 +420,71 @@ expected to pay; that is measured before any is written.
 - Whether both halves, and several states, are solved as one batch.
 - The largest volume the toy must time: 256 (padded 512) needs the 5.7 GB above plus the transforms'
   working memory.
+- (K8) Answered: the scalars as line sums added in double (S2, within 6.4e-9); two waits per iteration (a wait costs
+  0.17 ms); n = 256 timed (MLX's peak 1.14e10 B). Open: the halves and states as one batch; SIMPLE's own record at
+  these boxes; the preconditioner of SIMPLE's `finalize_density_accum` on full coverage (worse iterates at 2 and 5,
+  reported for SIMPLE).
+
+**K8, delivered 2026-11-25** (run `mlxf_kernel_k8`, M5 Ultra; [report](../completed/mlxf_kernel_k8_report.md)). A toy
+`reconstructor_pcg` (`src/test/mlxf_toy_reconstructor_pcg.f90`, its device state in
+`mlxf_toy_reconstructor_pcg_workspace.f90`) and the engine `pcg_solve` (`mlxf_toy_pcg_solver.f90`): one half's
+assembly from the raw packed accumulators to the shipped map, under SIMPLE's names, with the graph form only.
+
+**The seam, with measured bytes** (*measured* at n = 160 and 256, the GPU, MLX 0.32.4):
+- **Who owns the device state:** `reconstructor_pcg%ws`, made in `new` and released in `kill`; the engine holds `x`,
+  `r`, `p`, `hp` and `z` for the length of one `pcg_solve`. After `kill` MLX's active memory is 0.
+- **What is resident** from `end_accum` to `kill`: the kernel and the preconditioner's spectra, the envelope, the mask
+  and the right-hand side (2.6e8 B and 1.08e9 B *derived* for one half with the solve's vectors). **What a solve
+  peaks at:** MLX's peak 3.39e9 B (n = 160) and 1.14e10 B (n = 256) under SIMPLE's 2 and 5 iterations, 1.47e10 B at
+  n = 256 under 28 to 200; the transforms' working memory dominates (one padded pair alone peaks at 6.0e9 B at 512³).
+  The process's footprint with the fixture's generator: 2.24e10 B and 2.78e10 B.
+- **What crosses:** in, `B` and `D` once (`set_raw_accum`, no host copy) and a non-zero start; out, per wait the
+  inner products' n² line sums, and the map. **Where the host waits:** once at the end of `end_accum`, once before
+  the loop, twice per iteration, once for the map: 7 waits under F2, 13 under F5; a wait costs 0.17 ms.
+- **Host work that stays host work:** the density's shell statistics (the ridge's scale, the preconditioner's
+  floors and thresholds) over a view of the device's density, the window and the mask, the stop tests. At n = 256
+  the statistics and the finalisation's graph take about 0.17 s of `end_accum`'s 0.23 to 0.25 s.
+
+**Differences from SIMPLE** (each is a line of `scripts/toy_mirror.txt` or below):
+- One type: the lattice's members (`box`, `boxpd`, `padf`, `pad_off`, `Rnat`, `padsc`, `iwinsz`, `dep1d`, `mask`,
+  `window`, `l_mask`) are `reconstructor_pcg`'s, public as `pcg_lattice`'s are; `set_window_sphere` and `mask_mul`
+  are bound to it.
+- `new(box, lambda)` drops `smpd` and `fft_nthreads`; `end_accum(l_kernel)` drops `d_raw` and refuses the
+  matrix-free operator; `solve_accum` keeps SIMPLE's eight dummies with `solve_core` folded in.
+- The volumes of `apply_normal`, `apply_normal_kernel`, `apply_precond`, `mask_mul`, `deapod_mul` and `add_ridge` are
+  device arrays and the results unevaluated; `dot_real_volume` returns the n² line sums (the engine adds them in
+  double); the engine's `apply`, `precond` and `dot` take and return device arrays.
+- The operator embeds at the corner of the padded cube through the transform's length (a translation of SIMPLE's
+  centre embedding, which the Fourier multiplier does not see).
+- Where SIMPLE stops (`THROW_HARD`), the toy returns with `x` untouched and the reason in `stop_reason` and
+  `message`; the engine does not precondition after its last iteration under `maxits`.
+- Additions: `set_raw_accum` (the master's reduction of the parts' files), `copy_spectra` and `copy_volumes`
+  (the testers' readers), `message`, `stage_seconds`, `host_waits`; the workspace's bindings.
+
+**Numbers in hand** (*measured*, Release, the GPU, the canonical driver from `set_raw_accum` to the map on the host,
+best of three, two invocations bit for bit equal; seed 1 of the full-coverage fixture):
+
+| n | System, rule | Iterations | Driver | end_accum | Solve | Per iteration | MLX peak |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 160 | P, F2 (production) | 2 | 0.084 s | 0.060 s | 0.023 s | 0.012 s | 3.39e9 B |
+| 160 | P, F5 (final) | 5 | 0.105 s | 0.058 s | 0.047 s | 0.009 s | 3.39e9 B |
+| 256 | P, F2 | 2 | 0.332 s | 0.247 s | 0.085 s | 0.043 s | 1.14e10 B |
+| 256 | P, F5 | 5 | 0.413 s | 0.231 s | 0.182 s | 0.036 s | 1.14e10 B |
+| 160 | R, E (reported) | 31, `xtol` | 0.320 s | 0.060 s | 0.260 s | 0.008 s | 3.69e9 B |
+| 256 | R, E (reported) | 28, `xtol` | 1.203 s | 0.251 s | 0.952 s | 0.034 s | 1.47e10 B |
+| 160 | R, R4 (reported) | 200, `maxits` | 1.672 s | 0.057 s | 1.614 s | 0.008 s | 3.70e9 B |
+| 256 | R, R4 (reported) | 200, `maxits` | 6.818 s | 0.247 s | 6.571 s | 0.033 s | 1.47e10 B |
+
+MLX's CPU device with the same graph: 1.99 s (F2) and 3.82 s (F5) at n = 160, 8.52 s (F2) at n = 256, one core busy: the GPU 24 to 36 times faster. The transforms are 46 to 50 % of the solve under F2 and 64 % under
+F5; no fused kernel, wait-free or compiled form can gain 30 % on the driver (the ceilings 1.13 to 1.19); the
+inner products' line sums added in double are within 6.4e-9 of the double sum. SIMPLE was not measured: no record of
+a PCG solve at box 160 or 256 is in hand.
+
+**On this fixture SIMPLE's preconditioner (9.4) makes the iterates worse, not better:** after 2 and 5 iterations of
+system R the error against the exact solution is 0.40 / 0.28 with it and 0.23 / 0.14 without it (n = 8; 0.68 / 0.36
+against 0.31 / 0.19 at n = 32); under SIMPLE's absolute ridge (system P) five iterations are far from the exact
+solution of the near-singular system either way. Reported for SIMPLE, not a K8 gate (ruling R2).
+
 
 ## 7. Across the families
 
@@ -437,13 +503,13 @@ expected to pay; that is measured before any is written.
 | | Deliverable | Needs from the library | Exit |
 | --- | --- | --- | --- |
 | K1 | A1: the fused tail of the dense score | Metal kernel wrapper; the refactored polar toy and its baseline (roadmap rank 0b) | the polar-table checks pass on the GPU at their recorded counts; judged on the canonical driver's elapsed time against the compiled graph tail (roadmap decision 15), alone and at 3 and 6 processes. **Kept** (2026-11-25, the maintainer's ruling): 1.80 (`2500_4`) and 1.65 (`2500_1`) at one process, 1.74 at six of `2500_1`; `2500_4` at three not resolved by per-process rates (1.52 to 1.59 on the time to the last exit); +6e9 B peak per process; selectable, the default `graph` ([report](../completed/mlxf_kernel_k1_report.md)) |
-| K2 | B1: the polar projection | Metal kernel wrapper; `mlx_rfftn` for the bench | the host matrix oracle and controls pass; the chained test with A passes; timed at 2,500 directions, pftsz 182, 61 shells. **Delivered** (2026-11-25, [report](../completed/mlxf_kernel_k2_report.md)): the fused gather kept (24.6 and 24.4 at one process, 5.27 and 6.30 at three from go to the last exit), the device route kept (32.5 and 35.1); the probe's outcome C by the letter, B by the diagnosis (a ruling for K6) |
+| K2 | B1: the polar projection | Metal kernel wrapper; `mlx_rfftn` for the bench | the host matrix oracle and controls pass; the chained test with A passes; timed at 2,500 directions, pftsz 182, 61 shells. **Delivered** (2026-11-25, [report](../completed/mlxf_kernel_k2_report.md)): the fused gather kept (24.6 and 24.4 at one process, 5.27 and 6.30 at three from go to the last exit), the device route kept (32.5 and 35.1); the probe's outcome C by the letter, B by the diagnosis, **ruled B**; the defaults kept (graph form, host route) |
 | K3 | A2: arbitrary reference sets | `mlx_gather_mm` or `mlx_block_masked_mm` | listed pairs equal the dense kernel's; occupancy and rate reported for cone-shaped sets, with and without orientation order |
 | K4 | A3: the shift lattice and the map reductions | K1's tail | the reference-side variant reproduces the Fourier-Bessel oracle's cells; a particle-side variant passes a decision-level test frozen before timing (roadmap decision 13); the chosen variant passes the map gates; timed against milestone 1's maps at the M5 grids |
 | K5 | B2: the pose objective with gradient and Gauss-Newton matrix | Metal kernel wrapper | the objective, gradient and matrix match the host oracle; planted poses are recovered; evaluations per second timed |
 | K6 | C: the insertion, three forms | `mlx_scatter_add`, `mlx_argsort`, the scans, Metal kernel wrapper; K2 | the adjoint identity, numerator and density pass; the repeatability gate is applied to each form, and only a form that passes it is kept (roadmap decision 14); timed. A protected-update probe on a collision-heavy fixture follows K2 directly |
 | K7 | A4: the cc finish and the classic reductions | `mlx_argpartition` or `mlx_topk` | both objectives and each reduction match the oracle |
-| K8 | D: the PCG solve | `mlx_rfftn`, `mlx_irfftn` | the operator matches the explicit matrix; the solution and true residual match host Cholesky; the termination gates pass; judged by the time to the same true residual at N = 160 and 256, with the iteration count and peak memory beside it |
+| K8 | D: the PCG solve | `mlx_rfftn`, `mlx_irfftn` | the operator matches the explicit matrix; the solution and true residual match host Cholesky; the termination gates pass; judged by the time to the same true residual at N = 160 and 256, with the iteration count and peak memory beside it. **Delivered 2026-11-25** (rulings R1 and R2: judged at SIMPLE's 2 and 5 iterations; [report](../completed/mlxf_kernel_k8_report.md)) |
 
 The order K1 to K7 is accepted (roadmap decision 7). K8 entered afterwards. It needs only the n-dimensional
 FFTs and its own files, so its proposed slot is right after K2; that slot is open to a veto. A deliverable

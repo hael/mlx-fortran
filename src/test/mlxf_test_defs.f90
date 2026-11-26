@@ -473,5 +473,70 @@ type(elem_tolerance), parameter :: CONV_TOLERANCES(7) = [&
 
 ! the reconstruction's PCG benchmark: its native boxes n, each solved on the padded lattice of m = 2 n
 integer, parameter :: RECON_PCG_BENCH_N(2) = [160, 256]
+! the reconstruction's PCG fixtures: the boxes of the fast suite and of the named-only one, the mask radius
+! (pixels) of each and of the benchmark's boxes, the planes per unit of n, and the relative ridge of system R
+integer,      parameter :: RECON_PCG_N_SMALL         = 8
+integer,      parameter :: RECON_PCG_N_NAMED         = 32
+real(real64), parameter :: RECON_PCG_MSKRAD_SMALL    = 2.5_real64
+real(real64), parameter :: RECON_PCG_MSKRAD_NAMED    = 8._real64
+real(real64), parameter :: RECON_PCG_BENCH_MSKRAD(2) = [56._real64, 90._real64]
+integer,      parameter :: RECON_PCG_PLANES_PER_N    = 4
+real(real32), parameter :: RECON_PCG_LAMBDA_REL      = 0.05_real32
+
+! SIMPLE's PCG constants, restated (simple_pcg_solver, simple_reconstructor_pcg): the step test's tolerance, the
+! interval of the residual's recomputation, the preconditioner's floor and threshold as shares of a shell's mean
+! density, the least window a start is divided by, the absolute ridge of production, the reason of an indefinite
+! stop; and the floor under which an envelope or the kernel's deposition envelope counts as zero
+real(real32),     parameter :: PCG_XTOL             = 1.5e-2_real32
+integer,          parameter :: PCG_RESID_REPLACE    = 25
+real(real32),     parameter :: PCG_RHO_FLOOR_FRAC   = 1.e-2_real32
+real(real32),     parameter :: PCG_RHO_SAMPLED_FRAC = 0.1_real32
+real(real32),     parameter :: PCG_SUPPORT_DIV_MIN  = 0.1_real32
+real(real32),     parameter :: PCG_LAMBDA           = 1.e-3_real32
+character(len=*), parameter :: PCG_STOP_INDEFINITE  = 'indefinite'
+real(real64),     parameter :: PCG_ENVELOPE_FLOOR   = 1.e-8_real64
+
+! the options of a PCG solve, SIMPLE's record for the members the toy engine reads: the iteration limit, the
+! residual's and the step's tolerances (rtol <= 0: exactly maxits iterations, no test), the recomputation's
+! interval, and the relative residual above which a non-zero start is replaced by zero (negative: never)
+type :: pcg_solver_options
+    integer      :: maxits                 = 50
+    real(real32) :: rtol                   = 1.e-4_real32
+    real(real32) :: xtol                   = PCG_XTOL
+    integer      :: residual_replace       = PCG_RESID_REPLACE
+    real(real32) :: start_max_rel_residual = -1._real32
+end type pcg_solver_options
+
+! a gate of the reconstruction's PCG toy: its name, its ceiling and the tolerance frozen from seed 1 on both
+! devices (max(2 x the larger error, the float32 floor), at most the ceiling; zero until it is frozen)
+type :: recon_pcg_tolerance
+    character(len=24) :: name    = ''
+    real(real64)      :: ceiling = 0._real64
+    real(real64)      :: frozen  = 0._real64
+end type recon_pcg_tolerance
+
+! the operator's gates (first nine), the engine's and the stencil's, and the solve's: calibrated on seed 1 and frozen before seeds 2 and 3 ran
+type(recon_pcg_tolerance), parameter :: RECON_PCG_TOLERANCES(16) = [&
+    &recon_pcg_tolerance('window', 4.77e-7_real64, 4.76837158e-7_real64), &
+    &recon_pcg_tolerance('envelope', 4.77e-7_real64, 4.76837158e-7_real64), &
+    &recon_pcg_tolerance('kernel', 1.e-4_real64, 4.76837158e-7_real64), &
+    &recon_pcg_tolerance('spectrum', 4.77e-7_real64, 4.76837158e-7_real64), &
+    &recon_pcg_tolerance('ridge', 1.e-6_real64, 4.76837158e-7_real64), &
+    &recon_pcg_tolerance('rhs', 1.e-4_real64, 4.76837158e-7_real64), &
+    &recon_pcg_tolerance('operator', 1.e-4_real64, 8.07704e-7_real64), &
+    &recon_pcg_tolerance('symmetry', 1.e-5_real64, 4.76837158e-7_real64), &
+    &recon_pcg_tolerance('precond', 1.e-4_real64, 9.88876e-7_real64), &
+    &recon_pcg_tolerance('dot', 1.e-6_real64, 4.76837158e-7_real64), &
+    &recon_pcg_tolerance('stencil operator', 1.e-4_real64, 4.76837158e-7_real64), &
+    &recon_pcg_tolerance('stencil solution', 1.e-3_real64, 2.56650e-6_real64), &
+    &recon_pcg_tolerance('stencil residual', 1.e-4_real64, 2.02348e-6_real64), &
+    &recon_pcg_tolerance('iterate', 1.e-3_real64, 1.672904e-5_real64), &
+    &recon_pcg_tolerance('residual history', 2.e-6_real64, 4.76837158e-7_real64), &
+    &recon_pcg_tolerance('step', 3.e-4_real64, 7.42524e-7_real64)]
+! rule T's residual tolerance: ten times the lowest true residual the device reaches in 200 iterations on seed 1
+! of the small fixture, system R, on either device, at most 1e-4; the residual the solve reports is held to the
+! true one within a tenth of it. Zero: not frozen (the preconditioned solve does not reach the floor in 200
+! iterations), and rule T is reported, not gated
+real(real64), parameter :: RECON_PCG_RTOL_T = 0._real64
 
 end module mlxf_test_defs

@@ -66,6 +66,19 @@ the oracle's own polar coordinates, a plane wave's pattern, Hermitian pairs), re
 and the fused form's refusals. Its sub-suite `projector_chain` takes two projected volumes through family A on both
 routes (host and device) and both forms to the dense rows, against an oracle chain within `PROJ_CHAIN_ERR_HOST`
 and `PROJ_CHAIN_ERR_DEVICE`, with the refusals of the device route and three runs bit for bit.
+Its sub-suite `pcg_solver` checks the toy PCG engine (`mlxf_toy_pcg_solver`) on both devices: every stop, count
+and reason on small diagonal systems whose iterates are known in rationals (`rtol`, `xtol` and their order, the step
+test's epsilon, `maxits`, fixed iterations, indefinite products at iterations 1 and 2, the refusals, a used and a
+rejected start, the recomputation's 24, 26, 31 and 52 applications), and the stencil problem of
+`mlxf_oracle_pcg` through a test-only operator against its explicit matrix and Cholesky. Its sub-suite
+`reconstructor_pcg` checks the toy `reconstructor_pcg` on the full-coverage fixture (n = 8, `mlxf_oracle_recon_fixture`)
+against `mlxf_oracle_recon_pcg` on both devices, within `RECON_PCG_TOLERANCES` (calibrated on seed 1 on both
+devices, frozen, then seeds 2 and 3): the mask, window, envelopes, kernel and preconditioner spectra, ridge and
+right-hand side; the operator and the preconditioner against their explicit matrices; the iterates of SIMPLE's
+production (2 and 5 iterations, absolute ridge) and of the engine's rules up to their stop; start and ship; three
+assemblies bit for bit; 100 lifecycle cycles. Rule T (200 iterations past the engine's rules) is reported, not gated.
+`unit_kernels suite=reconstructor_pcg_n32` is named-only: the same at n = 32 against the oracle's matrix-free
+products (the iterates at 1, 2 and 5 and the stop iteration and test judged, the stop iterate reported).
 `unit_kernels suite=polar_shiftmap_accuracy` is named-only: a direct-residual sample at the production
 window/screen geometry, on both devices. It uses the same frozen caps, has assertions, and is outside the
 fast CTest process budget.
@@ -82,7 +95,13 @@ maps on SIMPLE's grid (read from a key = value file of SIMPLE's rows) with SIMPL
 `bench_projector` times the reprojection of one state at SIMPLE's bench (`suite=time`: the canonical driver to the
 evaluated banks; `suite=chain`: on to the reference bins on `route=host|device` and a dense score) and judges 16
 directions against the oracle on the device's own transform (`suite=accuracy`, `PROJ_BENCH_ERR`); unlike the polar
-bench, a key a suite does not read stops it. `bench_insert_probe suite=probe` measures an atomic gridding insertion
+bench, a key a suite does not read stops it. `bench_recon_pcg` runs the toy `reconstructor_pcg` at SIMPLE's boxes (n = 160 and 256, the padded 320³ and 512³):
+`suite=transform` the padded transforms alone; `suite=time` the canonical driver (new, the support, `set_raw_accum`,
+`end_accum`, the solve, kill) per `system=P|R` and `rules=F2,F5,E,R4`, with `out=` for the maps' bytes and the
+histories in hexadecimal for comparing two invocations; `suite=profile` the stages and pieces; `suite=probe` the
+transforms' share, the cost of a wait, the inner products' forms and the drift; `suite=accuracy` the device against
+the oracle at bench size (it asserts). A key a suite does not read stops it.
+`bench_insert_probe suite=probe` measures an atomic gridding insertion
 against the gridding oracle (the protected-update probe of the roadmap's decision 14). `scripts/run_parts.sh`
 starts any of them (`RUN_PARTS_BENCH`, `RUN_PARTS_SUITE`, `RUN_PARTS_UNIT`).
 `tail=graph` or `tail=metal` selects the tail's form in `accuracy`, `time` and `profile`; `suite=time` reads

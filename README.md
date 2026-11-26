@@ -18,7 +18,9 @@ SIMPLE's `polarft_calc` with the table driver `eul_prob_tab`
 ([report](doc/implementation_notes/completed/mlxf_toy_architecture_report.md)), now with a fused tail of its dense
 score ([K1](doc/implementation_notes/completed/mlxf_kernel_k1_report.md)) and a miniature of SIMPLE's `projector`
 that reprojects the references on the GPU in a graph and a fused form and hands them to the calculator without
-leaving the device ([K2](doc/implementation_notes/completed/mlxf_kernel_k2_report.md)). The API is still growing, so expect
+leaving the device ([K2](doc/implementation_notes/completed/mlxf_kernel_k2_report.md)), and a miniature of SIMPLE's PCG
+reconstruction (`reconstructor_pcg` with its engine) that assembles and solves one half on the GPU
+([K8](doc/implementation_notes/completed/mlxf_kernel_k8_report.md)). The API is still growing, so expect
 it to change. The work to come is ranked in the
 [roadmap](doc/implementation_notes/planned/mlxf_roadmap.md).
 See the [implementation-notes index](doc/implementation_notes/README.md) for active work and completed records.
@@ -124,7 +126,7 @@ failure on any skip; its log names the commit, the toolchain, MLX and the device
 | --- | --- |
 | `src/defs/` | `mlxf_defs`: constants and vocabularies more than one module uses |
 | `src/core/` | the Fortran layer, by capability: `runtime/`, `array/`, `ops/`, `linalg/`, `fft/`, `compile/`; `mlxf.f90` is the user module |
-| `src/test/` | test infrastructure, the toys that mirror SIMPLE's classes (`polarft_calc`, `eul_prob_tab`, `projector`), their oracles and benchmarks, built only with tests |
+| `src/test/` | test infrastructure, the toys that mirror SIMPLE's classes (`polarft_calc`, `eul_prob_tab`, `projector`, `reconstructor_pcg`), their oracles and benchmarks, built only with tests |
 | `test/` | `mlxf_test_exec`, the one test executable, and the CTest entries |
 | `scripts/` | the static gate, the formatters, the compile helpers, the dependency build, the C-layer generator |
 | `build/gen/` | generated at build time: the `bind(c)` layer from the mlx-c headers that are linked |

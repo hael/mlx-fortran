@@ -141,6 +141,9 @@ Each with its reason in the plan's Progress entry of its phase.
 
 ## 6. Left open for the maintainer
 
+**Ruled 2026-11-25** (Hans, 2026-11-25: "B for the probe, keep the defaults"): the probe is outcome B, as recommended below; the defaults stay the
+graph form and the host route. Still open: whether the miniature reads like SIMPLE's reprojection.
+
 **A ruling for K6 (the probe).** Decision 20's letter gives C: K6 starts from `mlx_scatter_add` and the sorted form.
 The diagnosis gives B: the atomic kernel is correct to the floor single-precision coordinates set and is not
 bit-repeatable, so K6 needs a deterministic form with the atomic kernel as its speed reference. Recommended: B, with

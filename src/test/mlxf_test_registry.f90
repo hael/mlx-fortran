@@ -4,46 +4,48 @@
 ! A guard member is a stop the library makes by contract: it runs in a child process (mlxf_test_exec
 ! expect_aborts <group>) and its last reachable statement is the guarded call.
 module mlxf_test_registry
-use, intrinsic :: iso_fortran_env,    only: int32, real32, real64
-use mlxf,                             only: mlx_array, mlx_from, mlx_eval, mlx_live_count, mlx_last_error, &
-                                            mlx_set_default_device, MLX_DEVICES, exp, mlx_fft, mlx_fft2, mlx_astype, &
-                                            mlx_zeros, mlx_arange, mlx_metal_kernel, mlx_metal_kernel_spec, &
-                                            mlx_segmented_mm, mlx_qr, mlx_eigvalsh, mlx_conv2d, mlx_conv_spec, &
-                                            mlx_as_strided, matmul
-use mlxf_array_tester,                only: run_all_array_tests
-use mlxf_device_tester,               only: run_all_device_tests
-use mlxf_error_tester,                only: run_all_error_tests, run_all_recovery_half_tests
-use mlxf_memory_tester,               only: run_all_memory_tests
-use mlxf_registry_tester,             only: run_all_registry_tests
-use mlxf_version_tester,              only: run_all_version_tests
-use mlxf_ops_tester,                  only: run_all_ops_tests
-use mlxf_ops_math_tester,             only: run_all_ops_math_tests
-use mlxf_ops_logic_tester,            only: run_all_ops_logic_tests
-use mlxf_ops_create_tester,           only: run_all_ops_create_tests
-use mlxf_ops_reduce_tester,           only: run_all_ops_reduce_tests
-use mlxf_ops_sort_tester,             only: run_all_ops_sort_tests
-use mlxf_ops_shape_tester,            only: run_all_ops_shape_tests
-use mlxf_ops_index_tester,            only: run_all_ops_index_tests
-use mlxf_linalg_tester,               only: run_all_linalg_tests
-use mlxf_linalg_mm_tester,            only: run_all_linalg_mm_tests
-use mlxf_linalg_products_tester,      only: run_all_linalg_products_tests
-use mlxf_linalg_matrix_tester,        only: run_all_linalg_matrix_tests
-use mlxf_conv_tester,                 only: run_all_conv_tests
-use mlxf_fft_tester,                  only: run_all_fft_tests
-use mlxf_fft_nd_tester,               only: run_all_fft_nd_tests
-use mlxf_fast_tester,                 only: run_all_fast_tests
-use mlxf_compile_tester,              only: run_all_compile_tests
-use mlxf_toy_polarft_calc_tester,     only: run_all_polarft_calc_tests
-use mlxf_toy_polarft_shiftmap_tester, only: run_all_polar_shiftmap_tests, run_all_polar_shiftmap_accuracy_tests
-use mlxf_toy_eul_prob_tab_tester,     only: run_all_eul_prob_tab_tests
-use mlxf_toy_polarft_tail_tester,     only: run_all_polarft_tail_tests
-use mlxf_oracle_projection_tester,    only: run_all_oracle_projection_tests
-use mlxf_toy_projector_tester,        only: run_all_projector_tests, run_all_projector_chain_tests
-use mlxf_bench_polar_table,           only: run_bench_polar_table
-use mlxf_bench_recon_pcg,             only: run_bench_recon_pcg
-use mlxf_bench_projector,             only: run_bench_projector
-use mlxf_bench_insert_probe,          only: run_bench_insert_probe
-use mlxf_test_utils,                  only: begin_test_suite, end_test_suite
+use, intrinsic :: iso_fortran_env,     only: int32, real32, real64
+use mlxf,                              only: mlx_array, mlx_from, mlx_eval, mlx_live_count, mlx_last_error, &
+                                             mlx_set_default_device, MLX_DEVICES, exp, mlx_fft, mlx_fft2, mlx_astype, &
+                                             mlx_zeros, mlx_arange, mlx_metal_kernel, mlx_metal_kernel_spec, &
+                                             mlx_segmented_mm, mlx_qr, mlx_eigvalsh, mlx_conv2d, mlx_conv_spec, &
+                                             mlx_as_strided, matmul
+use mlxf_array_tester,                 only: run_all_array_tests
+use mlxf_device_tester,                only: run_all_device_tests
+use mlxf_error_tester,                 only: run_all_error_tests, run_all_recovery_half_tests
+use mlxf_memory_tester,                only: run_all_memory_tests
+use mlxf_registry_tester,              only: run_all_registry_tests
+use mlxf_version_tester,               only: run_all_version_tests
+use mlxf_ops_tester,                   only: run_all_ops_tests
+use mlxf_ops_math_tester,              only: run_all_ops_math_tests
+use mlxf_ops_logic_tester,             only: run_all_ops_logic_tests
+use mlxf_ops_create_tester,            only: run_all_ops_create_tests
+use mlxf_ops_reduce_tester,            only: run_all_ops_reduce_tests
+use mlxf_ops_sort_tester,              only: run_all_ops_sort_tests
+use mlxf_ops_shape_tester,             only: run_all_ops_shape_tests
+use mlxf_ops_index_tester,             only: run_all_ops_index_tests
+use mlxf_linalg_tester,                only: run_all_linalg_tests
+use mlxf_linalg_mm_tester,             only: run_all_linalg_mm_tests
+use mlxf_linalg_products_tester,       only: run_all_linalg_products_tests
+use mlxf_linalg_matrix_tester,         only: run_all_linalg_matrix_tests
+use mlxf_conv_tester,                  only: run_all_conv_tests
+use mlxf_fft_tester,                   only: run_all_fft_tests
+use mlxf_fft_nd_tester,                only: run_all_fft_nd_tests
+use mlxf_fast_tester,                  only: run_all_fast_tests
+use mlxf_compile_tester,               only: run_all_compile_tests
+use mlxf_toy_polarft_calc_tester,      only: run_all_polarft_calc_tests
+use mlxf_toy_polarft_shiftmap_tester,  only: run_all_polar_shiftmap_tests, run_all_polar_shiftmap_accuracy_tests
+use mlxf_toy_eul_prob_tab_tester,      only: run_all_eul_prob_tab_tests
+use mlxf_toy_polarft_tail_tester,      only: run_all_polarft_tail_tests
+use mlxf_oracle_projection_tester,     only: run_all_oracle_projection_tests
+use mlxf_toy_projector_tester,         only: run_all_projector_tests, run_all_projector_chain_tests
+use mlxf_toy_reconstructor_pcg_tester, only: run_all_reconstructor_pcg_tests, run_all_reconstructor_pcg_n32_tests
+use mlxf_toy_pcg_solver_tester,        only: run_all_pcg_solver_tests
+use mlxf_bench_polar_table,            only: run_bench_polar_table
+use mlxf_bench_recon_pcg,              only: run_bench_recon_pcg
+use mlxf_bench_projector,              only: run_bench_projector
+use mlxf_bench_insert_probe,           only: run_bench_insert_probe
+use mlxf_test_utils,                   only: begin_test_suite, end_test_suite
 implicit none
 private
 
@@ -60,7 +62,8 @@ character(len=*), parameter :: AREAS(8) = [character(len=16) :: 'core', 'array',
 character(len=*), parameter :: BENCHES(4) = [character(len=32) :: 'polar_table', 'recon_pcg', 'projector', &
     &'insert_probe']
 ! sub-suites an area runs only when suite= names them (too costly for the fast gate)
-character(len=*), parameter :: NAMED_ONLY(2) = [character(len=32) :: 'recovery_half', 'polar_shiftmap_accuracy']
+character(len=*), parameter :: NAMED_ONLY(3) = [character(len=32) :: 'recovery_half', 'polar_shiftmap_accuracy', &
+    &'reconstructor_pcg_n32']
 
 type :: guard_member
     character(len=32) :: name  = ''
@@ -142,6 +145,11 @@ contains
                 ! the GPU's first compilation of the fused gather
                 call run_suite('projector', run_all_projector_tests, suite, ran)
                 call run_suite('projector_chain', run_all_projector_chain_tests, suite, ran)
+                call run_suite('pcg_solver', run_all_pcg_solver_tests, suite, ran)
+                ! reconstructor_pcg: above 0.5 s in Release: the oracle's explicit matrices of 512 unknowns per seed,
+                ! the operator's 512 columns on each device, and the fixed solves of every iterate up to the stop
+                call run_suite('reconstructor_pcg', run_all_reconstructor_pcg_tests, suite, ran)
+                call run_suite('reconstructor_pcg_n32', run_all_reconstructor_pcg_n32_tests, suite, ran)
             case default
                 found = .false.
                 return

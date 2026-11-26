@@ -9,7 +9,9 @@
 #
 # Read from SIMPLE commit d354efee2 (src/main/pftc/simple_polarft_calc.f90 and its submodules; for the projector
 # src/main/image/simple_projector.f90, simple_projector_pft_batch.f90 and, for the procedures projector inherits
-# from image, simple_image.f90 and simple_image_fft.f90).
+# from image, simple_image.f90 and simple_image_fft.f90; for the PCG reconstruction src/main/volume/
+# simple_reconstructor_pcg.f90, simple_pcg_lattice.f90, whose members and procedures reconstructor_pcg inherits,
+# and src/main/opt/simple_pcg_solver.f90).
 
 # ---- the polar calculator ----
 mlxf_toy_polarft_calc polarft_calc simple_polarft_calc polarft_calc
@@ -134,3 +136,63 @@ mlxf_toy_projector_workspace projector_workspace%seconds addition inquiry: the s
 mlxf_toy_projector_workspace projector_workspace%set_message addition the projector's refusals are kept with the workspace's own, so that one message reports either
 mlxf_toy_projector_workspace projector_workspace%message addition inquiry: the reason of the last refusal or failure
 mlxf_toy_projector_workspace projector_workspace%kill addition releases the transform, the cube and the kernels
+
+# ---- the PCG reconstruction (one half's assembly after the reduction) ----
+mlxf_toy_reconstructor_pcg reconstructor_pcg simple_reconstructor_pcg reconstructor_pcg
+mlxf_toy_reconstructor_pcg reconstructor_pcg%new simple_reconstructor_pcg reconstructor_pcg%new
+mlxf_toy_reconstructor_pcg reconstructor_pcg%kill simple_reconstructor_pcg reconstructor_pcg%kill
+mlxf_toy_reconstructor_pcg reconstructor_pcg%set_window_sphere simple_reconstructor_pcg reconstructor_pcg%set_window_sphere
+mlxf_toy_reconstructor_pcg reconstructor_pcg%mask_mul simple_reconstructor_pcg reconstructor_pcg%mask_mul
+mlxf_toy_reconstructor_pcg reconstructor_pcg%set_lambda_relative simple_reconstructor_pcg reconstructor_pcg%set_lambda_relative
+mlxf_toy_reconstructor_pcg reconstructor_pcg%end_accum simple_reconstructor_pcg reconstructor_pcg%end_accum
+mlxf_toy_reconstructor_pcg reconstructor_pcg%apply_normal simple_reconstructor_pcg reconstructor_pcg%apply_normal
+mlxf_toy_reconstructor_pcg reconstructor_pcg%apply_normal_kernel simple_reconstructor_pcg reconstructor_pcg%apply_normal_kernel
+mlxf_toy_reconstructor_pcg reconstructor_pcg%apply_precond simple_reconstructor_pcg reconstructor_pcg%apply_precond
+mlxf_toy_reconstructor_pcg reconstructor_pcg%dot_real_volume simple_reconstructor_pcg reconstructor_pcg%dot_real_volume
+mlxf_toy_reconstructor_pcg reconstructor_pcg%solve_accum simple_reconstructor_pcg reconstructor_pcg%solve_accum
+mlxf_toy_reconstructor_pcg reconstructor_pcg%get_effective_lambda simple_reconstructor_pcg reconstructor_pcg%get_effective_lambda
+mlxf_toy_reconstructor_pcg reconstructor_pcg%get_solve_support simple_reconstructor_pcg reconstructor_pcg%get_solve_support
+mlxf_toy_reconstructor_pcg reconstructor_pcg%set_raw_accum addition stands for the master's reduction of the parts' raw files into its accumulators; the inverse of SIMPLE's get_raw_accum
+mlxf_toy_reconstructor_pcg reconstructor_pcg%copy_spectra addition hands over the kernel's and the preconditioner's spectra, which the testers hold to the oracle; SIMPLE keeps them private
+mlxf_toy_reconstructor_pcg reconstructor_pcg%copy_volumes addition hands over the right-hand side and the envelopes, which the testers hold to the oracle; SIMPLE keeps them private
+mlxf_toy_reconstructor_pcg reconstructor_pcg%message addition inquiry: the reason of the last refusal; a mirrored procedure has no status argument and SIMPLE stops where the toy refuses
+mlxf_toy_reconstructor_pcg reconstructor_pcg%stage_seconds addition inquiry: the seconds of the finalisation and the solve by stage, the benchmark's columns (SIMPLE's PCG_ASSEMBLE_BENCH phases)
+mlxf_toy_reconstructor_pcg reconstructor_pcg%host_waits addition inquiry: the host's waits for the device, the seam's count
+
+# ---- the PCG engine (src/main/opt/simple_pcg_solver.f90) ----
+mlxf_toy_pcg_solver pcg_operator simple_pcg_solver pcg_operator
+mlxf_toy_pcg_solver pcg_operator%size simple_pcg_solver pcg_operator%size
+mlxf_toy_pcg_solver pcg_operator%apply simple_pcg_solver pcg_operator%apply
+mlxf_toy_pcg_solver pcg_operator%precond simple_pcg_solver pcg_operator%precond
+mlxf_toy_pcg_solver pcg_operator%dot simple_pcg_solver pcg_operator%dot
+mlxf_toy_pcg_solver pcg_solver_outcome simple_pcg_solver pcg_solver_outcome
+mlxf_toy_pcg_solver pcg_solver_outcome%kill simple_pcg_solver pcg_solver_outcome%kill
+mlxf_toy_pcg_solver pcg_solve simple_pcg_solver pcg_solve
+
+# ---- the reconstruction's device state: everything here is the toy's own (the seam) ----
+mlxf_toy_reconstructor_pcg_workspace reconstructor_pcg_workspace addition the one type that holds MLX handles of the reconstruction: spectra, envelopes, mask, right-hand side, and the raw accumulators until end_accum
+mlxf_toy_reconstructor_pcg_workspace reconstructor_pcg_workspace%new addition the state of a native box on the padded lattice
+mlxf_toy_reconstructor_pcg_workspace reconstructor_pcg_workspace%kill addition releases every handle
+mlxf_toy_reconstructor_pcg_workspace reconstructor_pcg_workspace%set_envelopes addition uploads the envelope and its reciprocal
+mlxf_toy_reconstructor_pcg_workspace reconstructor_pcg_workspace%set_mask addition uploads or clears the hard support
+mlxf_toy_reconstructor_pcg_workspace reconstructor_pcg_workspace%set_raw_accum addition uploads the raw packed accumulators
+mlxf_toy_reconstructor_pcg_workspace reconstructor_pcg_workspace%density_view addition a read-only view of the raw density for the host's shell statistics
+mlxf_toy_reconstructor_pcg_workspace reconstructor_pcg_workspace%fold_rhs addition the unscaled inverse transform of the numerator, centred and cropped
+mlxf_toy_reconstructor_pcg_workspace reconstructor_pcg_workspace%set_rhs addition keeps the right-hand side
+mlxf_toy_reconstructor_pcg_workspace reconstructor_pcg_workspace%build_precond addition the preconditioner's spectrum from the density and the host's shell thresholds
+mlxf_toy_reconstructor_pcg_workspace reconstructor_pcg_workspace%build_kernel addition the kernel spectrum from the density with the deposition envelope divided out
+mlxf_toy_reconstructor_pcg_workspace reconstructor_pcg_workspace%scale_kernel addition the kernel's calibration
+mlxf_toy_reconstructor_pcg_workspace reconstructor_pcg_workspace%finish addition the finalisation's one wait; releases the raw accumulators
+mlxf_toy_reconstructor_pcg_workspace reconstructor_pcg_workspace%kernel_product addition the padded kernel product with its crop
+mlxf_toy_reconstructor_pcg_workspace reconstructor_pcg_workspace%precond_product addition the preconditioner's product
+mlxf_toy_reconstructor_pcg_workspace reconstructor_pcg_workspace%mask_mul addition the hard support on a device volume
+mlxf_toy_reconstructor_pcg_workspace reconstructor_pcg_workspace%deapod_mul addition the reciprocal envelope on a device volume
+mlxf_toy_reconstructor_pcg_workspace reconstructor_pcg_workspace%set_ridge addition the ridge as the device applies it
+mlxf_toy_reconstructor_pcg_workspace reconstructor_pcg_workspace%add_ridge addition hp + lambda p on the device
+mlxf_toy_reconstructor_pcg_workspace reconstructor_pcg_workspace%line_dots addition the device half of the inner product: one partial sum per line
+mlxf_toy_reconstructor_pcg_workspace reconstructor_pcg_workspace%rhs addition the right-hand side for the engine
+mlxf_toy_reconstructor_pcg_workspace reconstructor_pcg_workspace%copy_spectra addition host copies of the spectra
+mlxf_toy_reconstructor_pcg_workspace reconstructor_pcg_workspace%copy_rhs addition a host copy of the right-hand side
+mlxf_toy_reconstructor_pcg_workspace reconstructor_pcg_workspace%is_final addition inquiry: the spectra and the right-hand side are made
+mlxf_toy_reconstructor_pcg_workspace reconstructor_pcg_workspace%set_message addition records a refusal
+mlxf_toy_reconstructor_pcg_workspace reconstructor_pcg_workspace%message addition inquiry: the reason of the last refusal

@@ -1056,3 +1056,12 @@ the probe is not finished); the phase's gates.
   scratch, 0 warnings, fast gate 9 of 9 (`scratch/keep/phase6/gate/`).
 - **What it means, in short.** K2's results are in the notes that cite them; the one open question is the ruling
   K6 needs on the probe's reading.
+
+### Rulings after the run (2026-11-25)
+
+Hans, 2026-11-25: "B for the probe, keep the defaults". **The probe is outcome B:** the atomic kernel is correct to the floor that float32 coordinates set and is
+not bit-repeatable, so K6 needs a deterministic form with the atomic kernel as its speed reference, and K6's cap
+is judged against a reference on the kernel's own float32 coordinates (or with coordinates in double precision).
+**The defaults stay** the graph form and the host route, the references and the CPU path. Open: whether the
+miniature reads like SIMPLE's reprojection.
+
