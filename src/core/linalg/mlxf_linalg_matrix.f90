@@ -6,20 +6,26 @@
 ! run on the CPU's default stream whatever the default device. The norms run on the default device, except those
 ! of the singular values.
 module mlxf_linalg_matrix
-use, intrinsic :: iso_c_binding, only: c_double
-use mlxf_c_linalg, only: mlxc_linalg_cholesky, mlxc_linalg_cholesky_inv, mlxc_linalg_det, mlxc_linalg_eig, &
-                         mlxc_linalg_eigh, mlxc_linalg_eigvals, mlxc_linalg_eigvalsh, mlxc_linalg_inv, mlxc_linalg_lu, &
-                         mlxc_linalg_lu_factor, mlxc_linalg_norm, mlxc_linalg_norm_l2, mlxc_linalg_norm_matrix, &
-                         mlxc_linalg_pinv, mlxc_linalg_qr, mlxc_linalg_slogdet, mlxc_linalg_solve, &
-                         mlxc_linalg_solve_triangular, mlxc_linalg_svd, mlxc_linalg_tri_inv
-use mlxf_c_ops,    only: mlxc_conjugate, mlxc_flatten, mlxc_reshape, mlxc_swapaxes
-use mlxf_defs,     only: MLX_DTYPES, mlxf_reduce_spec, mlxf_norm_spec
-use mlxf_array,    only: mlx_array, mlxf_unary, mlxf_int2_op, mlxf_vector_op, mlxf_reduce_dims_op, mlxf_one_based, &
-                         mlxf_cpu_unary, mlxf_cpu_binary, mlxf_cpu_flag_op, mlxf_cpu_compare_op, mlxf_cpu_pair_op, &
-                         mlxf_cpu_pair_text_op, mlxf_cpu_text_op, mlxf_cpu_unstack_op, mlxf_cpu_svd_op, mlxf_norm_op, &
-                         mlxf_norm_text_op
-use mlxf_device,   only: mlxf_enter
-use mlxf_error,    only: mlxf_fail
+use, intrinsic :: iso_c_binding, only: c_double, c_bool, c_int, c_null_char, c_size_t
+use mlxf_c_array,      only: mlxc_array_free, mlxc_array_new
+use mlxf_c_linalg,     only: mlxc_linalg_cholesky, mlxc_linalg_cholesky_inv, mlxc_linalg_det, mlxc_linalg_eig, &
+                             mlxc_linalg_eigh, mlxc_linalg_eigvals, mlxc_linalg_eigvalsh, mlxc_linalg_inv, &
+                             mlxc_linalg_lu, mlxc_linalg_lu_factor, mlxc_linalg_norm, mlxc_linalg_norm_l2, &
+                             mlxc_linalg_norm_matrix, mlxc_linalg_pinv, mlxc_linalg_qr, mlxc_linalg_slogdet, &
+                             mlxc_linalg_solve, mlxc_linalg_solve_triangular, mlxc_linalg_svd, mlxc_linalg_tri_inv
+use mlxf_c_ops,        only: mlxc_conjugate, mlxc_flatten, mlxc_reshape, mlxc_swapaxes
+use mlxf_c_signatures, only: mlxc_binary_op, mlxc_compare_op, mlxc_flag_op, mlxc_norm_op, mlxc_norm_text_op, &
+                             mlxc_pair_op, mlxc_pair_text_op, mlxc_unary_op, mlxc_unary_text_op, mlxc_unstack_op, &
+                             mlxc_vector_flag_op
+use mlxf_c_stream,     only: mlxc_stream_free
+use mlxf_c_types,      only: mlxc_array, mlxc_stream, mlxc_vector_array
+use mlxf_c_vector,     only: mlxc_vector_array_free, mlxc_vector_array_new
+use mlxf_defs,         only: MLX_DTYPES, mlxf_reduce_spec, mlxf_norm_spec
+use mlxf_array,        only: mlx_array, mlxf_handle, mlxf_vector_import, mlxf_adopt
+use mlxf_device,       only: mlxf_enter, mlxf_default_stream, mlxf_require_device
+use mlxf_error,        only: mlxf_fail, mlxf_check
+use mlxf_calls,        only: mlxf_axes_of, mlxf_cpu_stream, mlxf_int2_op, mlxf_one_based, mlxf_reduce_dims_op, &
+                             mlxf_unary, mlxf_vector_op
 implicit none
 public :: mlx_inv, mlx_pinv, mlx_tri_inv, mlx_det, mlx_slogdet, mlx_cholesky, mlx_cholesky_inv, mlx_qr, mlx_lu
 public :: mlx_lu_factor, mlx_svd, mlx_eigh, mlx_eigvalsh, mlx_eig, mlx_eigvals, mlx_solve, mlx_solve_triangular
@@ -392,5 +398,286 @@ contains
                 call mlxf_fail(proc, 'uplo is ''L'' or ''U''')
         end select
     end function other_triangle
+
+    ! r = f(a) on the CPU's default stream whatever the default device, for a function of mlxc_unary_op's signature
+    ! that MLX implements on the CPU only
+    subroutine mlxf_cpu_unary( r, f, a, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_unary_op)        :: f
+        type(mlx_array),  intent(in)    :: a
+        character(len=*), intent(in)    :: proc
+        type(mlxc_array)  :: ha
+        type(mlxc_array)  :: res
+        type(mlxc_stream) :: s
+        integer(c_int)    :: ierr
+        call mlxf_require_device(proc)
+        ha = mlxf_handle(a, proc)
+        res = mlxc_array_new()
+        s = mlxf_cpu_stream(proc)
+        ierr = f(res, ha, s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call mlxf_adopt(r, res, proc)
+    end subroutine mlxf_cpu_unary
+
+    ! r = f(a, b) on the CPU's default stream, for a function of mlxc_binary_op's signature that MLX implements on
+    ! the CPU only
+    subroutine mlxf_cpu_binary( r, f, a, b, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_binary_op)       :: f
+        type(mlx_array),  intent(in)    :: a, b
+        character(len=*), intent(in)    :: proc
+        type(mlxc_array)  :: ha, hb
+        type(mlxc_array)  :: res
+        type(mlxc_stream) :: s
+        integer(c_int)    :: ierr
+        call mlxf_require_device(proc)
+        ha = mlxf_handle(a, proc)
+        hb = mlxf_handle(b, proc)
+        res = mlxc_array_new()
+        s = mlxf_cpu_stream(proc)
+        ierr = f(res, ha, hb, s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call mlxf_adopt(r, res, proc)
+    end subroutine mlxf_cpu_binary
+
+    ! r = f(a, option) on the CPU's default stream, for every int f(mlx_array* res, const mlx_array a, bool flag,
+    ! const mlx_stream s) that MLX implements on the CPU only; the flag goes to MLX as given
+    subroutine mlxf_cpu_flag_op( r, f, a, option, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_flag_op)         :: f
+        type(mlx_array),  intent(in)    :: a
+        logical,          intent(in)    :: option
+        character(len=*), intent(in)    :: proc
+        type(mlxc_array)  :: ha
+        type(mlxc_array)  :: res
+        type(mlxc_stream) :: s
+        integer(c_int)    :: ierr
+        call mlxf_require_device(proc)
+        ha = mlxf_handle(a, proc)
+        res = mlxc_array_new()
+        s = mlxf_cpu_stream(proc)
+        ierr = f(res, ha, logical(option, c_bool), s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call mlxf_adopt(r, res, proc)
+    end subroutine mlxf_cpu_flag_op
+
+    ! r = f(a(1), a(2), option) on the CPU's default stream, for every int f(mlx_array* res, const mlx_array a,
+    ! const mlx_array b, bool flag, const mlx_stream s) that MLX implements on the CPU only
+    subroutine mlxf_cpu_compare_op( r, f, a, option, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_compare_op)      :: f
+        type(mlx_array),  intent(in)    :: a(2)
+        logical,          intent(in)    :: option
+        character(len=*), intent(in)    :: proc
+        type(mlxc_array)  :: h(2)
+        type(mlxc_array)  :: res
+        type(mlxc_stream) :: s
+        integer(c_int)    :: ierr
+        call mlxf_require_device(proc)
+        h(1) = mlxf_handle(a(1), proc)
+        h(2) = mlxf_handle(a(2), proc)
+        res = mlxc_array_new()
+        s = mlxf_cpu_stream(proc)
+        ierr = f(res, h(1), h(2), logical(option, c_bool), s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call mlxf_adopt(r, res, proc)
+    end subroutine mlxf_cpu_compare_op
+
+    ! the two results of f(a), in MLX's order, on the CPU's default stream, for every int f(mlx_array* res_0,
+    ! mlx_array* res_1, const mlx_array a, const mlx_stream s)
+    subroutine mlxf_cpu_pair_op( r, f, a, proc )
+        type(mlx_array),  intent(inout) :: r(2)
+        procedure(mlxc_pair_op)         :: f
+        type(mlx_array),  intent(in)    :: a
+        character(len=*), intent(in)    :: proc
+        type(mlxc_array)  :: ha
+        type(mlxc_array)  :: res(2)
+        type(mlxc_stream) :: s
+        integer(c_int)    :: ierr
+        call mlxf_require_device(proc)
+        ha = mlxf_handle(a, proc)
+        res(1) = mlxc_array_new()
+        res(2) = mlxc_array_new()
+        s = mlxf_cpu_stream(proc)
+        ierr = f(res(1), res(2), ha, s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 )then
+            call mlxf_check(mlxc_array_free(res(1)), proc)
+            call mlxf_check(mlxc_array_free(res(2)), proc)
+        endif
+        call mlxf_check(ierr, proc)
+        call mlxf_adopt(r(1), res(1), proc)
+        call mlxf_adopt(r(2), res(2), proc)
+    end subroutine mlxf_cpu_pair_op
+
+    ! the two results of f(a, option), in MLX's order, on the CPU's default stream, for every int f(mlx_array* res_0,
+    ! mlx_array* res_1, const mlx_array a, const char* text, const mlx_stream s)
+    subroutine mlxf_cpu_pair_text_op( r, f, a, option, proc )
+        type(mlx_array),  intent(inout) :: r(2)
+        procedure(mlxc_pair_text_op)    :: f
+        type(mlx_array),  intent(in)    :: a
+        character(len=*), intent(in)    :: option
+        character(len=*), intent(in)    :: proc
+        type(mlxc_array)  :: ha
+        type(mlxc_array)  :: res(2)
+        type(mlxc_stream) :: s
+        integer(c_int)    :: ierr
+        call mlxf_require_device(proc)
+        ha = mlxf_handle(a, proc)
+        res(1) = mlxc_array_new()
+        res(2) = mlxc_array_new()
+        s = mlxf_cpu_stream(proc)
+        ierr = f(res(1), res(2), ha, trim(option)//c_null_char, s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 )then
+            call mlxf_check(mlxc_array_free(res(1)), proc)
+            call mlxf_check(mlxc_array_free(res(2)), proc)
+        endif
+        call mlxf_check(ierr, proc)
+        call mlxf_adopt(r(1), res(1), proc)
+        call mlxf_adopt(r(2), res(2), proc)
+    end subroutine mlxf_cpu_pair_text_op
+
+    ! r = f(a, option) on the CPU's default stream, for every int f(mlx_array* res, const mlx_array a,
+    ! const char* text, const mlx_stream s)
+    subroutine mlxf_cpu_text_op( r, f, a, option, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_unary_text_op)   :: f
+        type(mlx_array),  intent(in)    :: a
+        character(len=*), intent(in)    :: option
+        character(len=*), intent(in)    :: proc
+        type(mlxc_array)  :: ha
+        type(mlxc_array)  :: res
+        type(mlxc_stream) :: s
+        integer(c_int)    :: ierr
+        call mlxf_require_device(proc)
+        ha = mlxf_handle(a, proc)
+        res = mlxc_array_new()
+        s = mlxf_cpu_stream(proc)
+        ierr = f(res, ha, trim(option)//c_null_char, s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call mlxf_adopt(r, res, proc)
+    end subroutine mlxf_cpu_text_op
+
+    ! the arrays of f(a), in MLX's order, on the CPU's default stream, for a function of mlxc_unstack_op's signature
+    ! that MLX implements on the CPU only
+    subroutine mlxf_cpu_unstack_op( r, f, a, proc )
+        type(mlx_array),  allocatable, intent(out) :: r(:)
+        procedure(mlxc_unstack_op)                 :: f
+        type(mlx_array),  intent(in)               :: a
+        character(len=*), intent(in)               :: proc
+        type(mlxc_array)        :: ha
+        type(mlxc_vector_array) :: res
+        type(mlxc_stream)       :: s
+        integer(c_int)          :: ierr
+        integer                 :: status
+        call mlxf_require_device(proc)
+        ha = mlxf_handle(a, proc)
+        res = mlxc_vector_array_new()
+        s = mlxf_cpu_stream(proc)
+        ierr = f(res, ha, s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_vector_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call mlxf_vector_import(r, res, status)
+        call mlxf_check(mlxc_vector_array_free(res), proc)
+        if( status /= 0 ) call mlxf_fail(proc, 'the results could not be adopted')
+    end subroutine mlxf_cpu_unstack_op
+
+    ! the arrays of f(a, option), in MLX's order, on the CPU's default stream, for every int f(mlx_vector_array* res,
+    ! const mlx_array a, bool flag, const mlx_stream s)
+    subroutine mlxf_cpu_svd_op( r, f, a, option, proc )
+        type(mlx_array),  allocatable, intent(out) :: r(:)
+        procedure(mlxc_vector_flag_op)             :: f
+        type(mlx_array),  intent(in)               :: a
+        logical,          intent(in)               :: option
+        character(len=*), intent(in)               :: proc
+        type(mlxc_array)        :: ha
+        type(mlxc_vector_array) :: res
+        type(mlxc_stream)       :: s
+        integer(c_int)          :: ierr
+        integer                 :: status
+        call mlxf_require_device(proc)
+        ha = mlxf_handle(a, proc)
+        res = mlxc_vector_array_new()
+        s = mlxf_cpu_stream(proc)
+        ierr = f(res, ha, logical(option, c_bool), s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_vector_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call mlxf_vector_import(r, res, status)
+        call mlxf_check(mlxc_vector_array_free(res), proc)
+        if( status /= 0 ) call mlxf_fail(proc, 'the results could not be adopted')
+    end subroutine mlxf_cpu_svd_op
+
+    ! the norm of order option%ord of a over the Fortran dimensions option%dims, each translated to its MLX axis in the
+    ! order given (of two, the first is the rows'), on the CPU's default stream when option%on_cpu, for every
+    ! int f(mlx_array* res, const mlx_array a, double ord, const int* axis, size_t axis_num, bool keepdims, const mlx_stream s)
+    subroutine mlxf_norm_op( r, f, a, option, proc )
+        type(mlx_array),      intent(inout) :: r
+        procedure(mlxc_norm_op)             :: f
+        type(mlx_array),      intent(in)    :: a
+        type(mlxf_norm_spec), intent(in)    :: option
+        character(len=*),     intent(in)    :: proc
+        type(mlxc_array)            :: ha
+        type(mlxc_array)            :: res
+        type(mlxc_stream)           :: s
+        integer(c_int)              :: ierr
+        integer(c_int), allocatable :: axes(:)
+        call mlxf_require_device(proc)
+        ha = mlxf_handle(a, proc)
+        axes = mlxf_axes_of(a, option%dims, proc)
+        res = mlxc_array_new()
+        if( option%on_cpu )then
+            s = mlxf_cpu_stream(proc)
+        else
+            s = mlxf_default_stream(proc)
+        endif
+        ierr = f(res, ha, option%ord, axes, int(size(axes), c_size_t), logical(option%keepdims, c_bool), s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call mlxf_adopt(r, res, proc)
+    end subroutine mlxf_norm_op
+
+    ! the matrix norm named option%name of a over the Fortran dimensions option%dims, as mlxf_norm_op takes them, for
+    ! every int f(mlx_array* res, const mlx_array a, const char* ord, const int* axis, size_t axis_num, bool keepdims,
+    ! const mlx_stream s)
+    subroutine mlxf_norm_text_op( r, f, a, option, proc )
+        type(mlx_array),      intent(inout) :: r
+        procedure(mlxc_norm_text_op)        :: f
+        type(mlx_array),      intent(in)    :: a
+        type(mlxf_norm_spec), intent(in)    :: option
+        character(len=*),     intent(in)    :: proc
+        type(mlxc_array)            :: ha
+        type(mlxc_array)            :: res
+        type(mlxc_stream)           :: s
+        integer(c_int)              :: ierr
+        integer(c_int), allocatable :: axes(:)
+        call mlxf_require_device(proc)
+        ha = mlxf_handle(a, proc)
+        axes = mlxf_axes_of(a, option%dims, proc)
+        res = mlxc_array_new()
+        if( option%on_cpu )then
+            s = mlxf_cpu_stream(proc)
+        else
+            s = mlxf_default_stream(proc)
+        endif
+        ierr = f(res, ha, trim(option%name)//c_null_char, axes, int(size(axes), c_size_t), logical(option%keepdims, c_bool), s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call mlxf_adopt(r, res, proc)
+    end subroutine mlxf_norm_text_op
 
 end module mlxf_linalg_matrix

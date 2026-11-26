@@ -123,7 +123,7 @@ and at `-O3`, the same output.
 - **Expected:** `empty: rank 1 size 0 arm 1`.
 - **Observed:** `empty: rank 1 size -1 arm default`; the nonempty control passes.
 - **Related:** not searched yet; check Bugzilla for assumed-rank and zero-size `pack` before filing.
-- **Where the repository meets it:** test code only. `nan_maxval` (`src/test/mlxf_test_reduce.f90`) has one
+- **Where the repository meets it:** test code only. `nan_maxval` (`src/test/framework/mlxf_test_reduce.f90`) has one
   specific per rank instead of an assumed-rank dummy, since its callers pass masked `pack()` results that
   may be empty.
 

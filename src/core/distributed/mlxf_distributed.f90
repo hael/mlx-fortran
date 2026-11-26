@@ -5,17 +5,18 @@
 module mlxf_distributed
 use, intrinsic :: iso_c_binding,   only: c_int, c_bool, c_intptr_t, c_null_ptr, c_null_char, c_associated
 use, intrinsic :: iso_fortran_env, only: int64
-use mlxf_c_types,             only: mlxc_distributed_group
 use mlxf_c_distributed,       only: mlxc_distributed_all_sum, mlxc_distributed_all_max, mlxc_distributed_all_min, &
                                     mlxc_distributed_all_gather, mlxc_distributed_sum_scatter, mlxc_distributed_send, &
                                     mlxc_distributed_recv, mlxc_distributed_recv_like
 use mlxf_c_distributed_group, only: mlxc_distributed_group_new, mlxc_distributed_group_free, mlxc_distributed_init, &
                                     mlxc_distributed_group_get_rank, mlxc_distributed_group_get_size, &
                                     mlxc_distributed_group_split, mlxc_distributed_is_available
+use mlxf_c_signatures,        only: mlxc_group_op, mlxc_group_peer_op, mlxc_group_recv_op
+use mlxf_c_types,             only: mlxc_distributed_group
 use mlxf_defs,                only: MLX_DTYPES, mlxf_group_spec
-use mlxf_array,               only: mlx_array, mlxf_group_op, mlxf_group_peer_op, mlxf_group_recv_op
+use mlxf_array,               only: mlx_array
 use mlxf_device,              only: mlxf_enter, mlxf_require_device
-use mlxf_error,               only: mlxf_check, mlxf_fail, mlxf_report, mlxf_guard_thread
+use mlxf_error,               only: mlxf_check, mlxf_fail, mlxf_guard_thread
 use mlxf_registry,            only: registry_add, registry_retain, registry_release, registry_is_live
 implicit none
 public :: mlx_group, mlx_distributed_init, mlx_distributed_is_available, mlx_all_sum, mlx_all_max, mlx_all_min, &
@@ -35,6 +36,36 @@ type :: mlx_group
     generic            :: assignment(=) => group_assign
     final              :: group_final
 end type mlx_group
+
+! the signature helpers of the distributed procedures, implemented in mlxf_distributed_calls
+interface
+    ! int f(mlx_array* res, const mlx_array x, const mlx_distributed_group group, const mlx_stream s)
+    module subroutine mlxf_group_op( r, f, a, option, status )
+        type(mlx_array),       intent(inout) :: r
+        procedure(mlxc_group_op)             :: f
+        type(mlx_array),       intent(in)    :: a
+        type(mlxf_group_spec), intent(in)    :: option
+        integer, optional,     intent(out)   :: status
+    end subroutine mlxf_group_op
+
+    ! int f(mlx_array* res, const mlx_array x, int peer, const mlx_distributed_group group, const mlx_stream s)
+    module subroutine mlxf_group_peer_op( r, f, a, option, status )
+        type(mlx_array),       intent(inout) :: r
+        procedure(mlxc_group_peer_op)        :: f
+        type(mlx_array),       intent(in)    :: a
+        type(mlxf_group_spec), intent(in)    :: option
+        integer, optional,     intent(out)   :: status
+    end subroutine mlxf_group_peer_op
+
+    ! int f(mlx_array* res, const int* shape, size_t shape_num, mlx_dtype dtype, int src,
+    ! const mlx_distributed_group group, const mlx_stream s)
+    module subroutine mlxf_group_recv_op( r, f, option, status )
+        type(mlx_array),       intent(inout) :: r
+        procedure(mlxc_group_recv_op)        :: f
+        type(mlxf_group_spec), intent(in)    :: option
+        integer, optional,     intent(out)   :: status
+    end subroutine mlxf_group_recv_op
+end interface
 
 contains
 

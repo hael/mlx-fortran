@@ -43,7 +43,7 @@ were adopted and why. What is checked is checked by a script, so a change that b
 
 - A test can fail, takes its expected value from outside the code under test, names and derives its tolerances,
   and runs on every device `test_devices` returns. It joins its area as a sub-suite (a `run_suite` row of
-  `src/test/mlxf_test_registry.f90`); a new CTest entry needs a reason and raises the budget of 13 (the parity plan's ceiling). A stop that is
+  `src/test/framework/mlxf_test_registry.f90`); a new CTest entry needs a reason and raises the budget of 13 (the parity plan's ceiling). A stop that is
   the contract is a member of a guard group. The rules: [`doc/policies/test_environment_policy.md`](doc/policies/test_environment_policy.md).
 - A change to the public API follows the parity ledger (`scripts/mlxc_parity.txt`) and the binding contract
   ([`doc/policies/binding_contract_policy.md`](doc/policies/binding_contract_policy.md)), which is the truth on

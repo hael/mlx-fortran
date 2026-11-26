@@ -1,31 +1,19 @@
 !@descr: helpers of file input: an array read on the CPU's stream, and the arrays of a map or of a GGUF file as counted handles
 ! MLX reads files on the CPU only, so what is read is built on the CPU's default stream whatever the default
 ! device. Names come back sorted, since MLX keeps them in a hash table whose order means nothing.
-submodule(mlxf_array) mlxf_array_io
-use, intrinsic :: iso_c_binding, only: c_null_char, c_null_ptr
-use mlxf_c_types,    only: mlxc_map_string_to_array, mlxc_map_string_to_array_iterator, mlxc_io_gguf, &
-                           mlxc_vector_string
+submodule(mlxf_io) mlxf_io_calls
+use, intrinsic :: iso_c_binding, only: c_size_t
 use mlxf_c_array,    only: mlxc_array_new, mlxc_array_free
 use mlxf_c_io_types, only: mlxc_io_gguf_get_keys, mlxc_io_gguf_get_array
 use mlxf_c_map,      only: mlxc_map_string_to_array_iterator_new, mlxc_map_string_to_array_iterator_next, &
                            mlxc_map_string_to_array_iterator_free
-use mlxf_c_stream,   only: mlxc_stream_free
+use mlxf_c_types,    only: mlxc_map_string_to_array_iterator, mlxc_vector_string, mlxc_array
 use mlxf_c_vector,   only: mlxc_vector_string_new, mlxc_vector_string_free, mlxc_vector_string_size, &
                            mlxc_vector_string_get
-use mlxf_defs,       only: MLXF_MAP_END
-use mlxf_device,     only: mlxf_require_device
-use mlxf_error,      only: mlxf_check
-use mlxf_libc,       only: c_string_copy
+use mlxf_array,      only: mlxf_adopt
 implicit none
 
 contains
-
-    ! the default stream of the CPU for the library's file readers; the caller frees it with mlxc_stream_free
-    module function mlxf_cpu_stream( proc ) result(s)
-        character(len=*), intent(in) :: proc
-        type(mlxc_stream) :: s
-        s = cpu_stream(proc)
-    end function mlxf_cpu_stream
 
     ! r = f(file) on the CPU's default stream, for every int f(mlx_array* res, const char* file, const mlx_stream s);
     ! with status, a failure returns with r empty
@@ -39,7 +27,7 @@ contains
         integer(c_int)    :: ierr
         call mlxf_require_device(proc)
         res = mlxc_array_new()
-        s = cpu_stream(proc)
+        s = mlxf_cpu_stream(proc)
         ierr = f(res, trim(file)//c_null_char, s)
         call mlxf_check(mlxc_stream_free(s), proc)
         if( ierr /= 0 )then
@@ -47,7 +35,7 @@ contains
             call mlxf_check(ierr, proc, status)
             return
         endif
-        call adopt(r, res, proc, status)
+        call mlxf_adopt(r, res, proc, status)
         if( present(status) )then
             if( status /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
         endif
@@ -94,7 +82,7 @@ contains
                     call mlxf_check(mlxc_array_free(h), 'map import', status=cleanup)
                 else
                     keys(n) = key
-                    call adopt(found(n), h, 'map import', status)
+                    call mlxf_adopt(found(n), h, 'map import', status)
                     if( status /= 0 ) call mlxf_check(mlxc_array_free(h), 'map import', status=cleanup)
                 endif
                 if( status /= 0 ) exit
@@ -141,7 +129,7 @@ contains
                 keys(i) = key
                 h = mlxc_array_new()
                 call mlxf_check(mlxc_io_gguf_get_array(h, g, key//c_null_char), 'gguf import', status=status)
-                if( status == 0 ) call adopt(found(i), h, 'gguf import', status)
+                if( status == 0 ) call mlxf_adopt(found(i), h, 'gguf import', status)
                 if( status /= 0 )then
                     call mlxf_check(mlxc_array_free(h), 'gguf import', status=cleanup)
                     exit
@@ -181,4 +169,4 @@ contains
         end do
     end subroutine sorted_by_name
 
-end submodule mlxf_array_io
+end submodule mlxf_io_calls

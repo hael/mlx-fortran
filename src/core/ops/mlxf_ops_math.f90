@@ -1,231 +1,346 @@
 !@descr: elementwise arithmetic and transcendental functions, rounding, clipping and NaN replacement
 ! Scalar operands of the binary functions are weak, as with the operators: they take the array's kind.
-submodule(mlxf_ops) mlxf_ops_math
-use mlxf_c_ops,  only: mlxc_abs, mlxc_arccos, mlxc_arccosh, mlxc_arcsin, mlxc_arcsinh, mlxc_arctan, mlxc_arctan2, &
-                       mlxc_arctanh, mlxc_ceil, mlxc_clip, mlxc_copy, mlxc_cos, mlxc_cosh, mlxc_degrees, mlxc_divmod, &
-                       mlxc_erf, mlxc_erfinv, mlxc_expm1, mlxc_floor, mlxc_floor_divide, mlxc_log, mlxc_log10, &
-                       mlxc_log1p, mlxc_log2, mlxc_logaddexp, mlxc_minimum, mlxc_nan_to_num, mlxc_radians, &
-                       mlxc_reciprocal, mlxc_remainder, mlxc_round, mlxc_rsqrt, mlxc_sigmoid, mlxc_sign, mlxc_sin, &
-                       mlxc_sinh, mlxc_square, mlxc_stop_gradient, mlxc_tan, mlxc_tanh, mlxc_trunc
-use mlxf_defs,   only: mlxf_nan_spec
-use mlxf_array,  only: mlxf_binary, mlxf_binary_vector_op, mlxf_int_op, mlxf_nan_op, mlxf_ternary_op, mlxf_unary, &
-                       mlxf_weak_scalar
-use mlxf_device, only: mlxf_enter
+module mlxf_ops_math
+use, intrinsic :: iso_c_binding,   only: c_bool, c_int
+use, intrinsic :: iso_fortran_env, only: real32, real64
+use mlxf_c_array,      only: mlxc_array_new, mlxc_array_free
+use mlxf_c_ops,        only: mlxc_abs, mlxc_arccos, mlxc_arccosh, mlxc_arcsin, mlxc_arcsinh, mlxc_arctan, mlxc_arctan2, &
+                             mlxc_arctanh, mlxc_ceil, mlxc_clip, mlxc_copy, mlxc_cos, mlxc_cosh, mlxc_degrees, &
+                             mlxc_divmod, mlxc_erf, mlxc_erfinv, mlxc_expm1, mlxc_floor, mlxc_floor_divide, mlxc_log, &
+                             mlxc_log10, mlxc_log1p, mlxc_log2, mlxc_logaddexp, mlxc_minimum, mlxc_nan_to_num, &
+                             mlxc_radians, mlxc_reciprocal, mlxc_remainder, mlxc_round, mlxc_rsqrt, mlxc_sigmoid, &
+                             mlxc_sign, mlxc_sin, mlxc_sinh, mlxc_square, mlxc_stop_gradient, mlxc_tan, mlxc_tanh, &
+                             mlxc_trunc
+use mlxf_c_signatures, only: mlxc_binary_vector_op, mlxc_nan_op
+use mlxf_c_stream,     only: mlxc_stream_free
+use mlxf_c_types,      only: mlxc_array, mlxc_stream, mlxc_vector_array, mlxc_optional_float
+use mlxf_c_vector,     only: mlxc_vector_array_free, mlxc_vector_array_new
+use mlxf_defs,         only: mlxf_nan_spec
+use mlxf_error,        only: mlxf_fail, mlxf_check
+use mlxf_device,       only: mlxf_enter, mlxf_require_device, mlxf_default_stream
+use mlxf_array,        only: mlx_array, mlxf_vector_import, mlxf_handle, mlxf_adopt
+use mlxf_calls,        only: mlxf_binary, mlxf_int_op, mlxf_ternary_op, mlxf_unary, mlxf_weak_scalar
 implicit none
+
+public :: abs, sin, cos, tan, sinh, cosh, tanh, log, log10, erf, asin, acos, atan, asinh, acosh, atanh, floor, &
+    &ceiling, aint, mlx_sign, mlx_sigmoid, mlx_square, mlx_reciprocal, mlx_rsqrt, mlx_expm1, mlx_log1p, mlx_log2, &
+    &mlx_erfinv, mlx_degrees, mlx_radians, mlx_stop_gradient, mlx_copy, mlx_round, mlx_clip, mlx_nan_to_num, atan2, &
+    &modulo, min, mlx_logaddexp, mlx_floor_divide, mlx_divmod
+private
+
+interface abs
+    module procedure abs_array
+end interface abs
+
+interface sin
+    module procedure sin_array
+end interface sin
+
+interface cos
+    module procedure cos_array
+end interface cos
+
+interface tan
+    module procedure tan_array
+end interface tan
+
+interface sinh
+    module procedure sinh_array
+end interface sinh
+
+interface cosh
+    module procedure cosh_array
+end interface cosh
+
+interface tanh
+    module procedure tanh_array
+end interface tanh
+
+interface log
+    module procedure log_array
+end interface log
+
+interface log10
+    module procedure log10_array
+end interface log10
+
+interface erf
+    module procedure erf_array
+end interface erf
+
+interface asin
+    module procedure asin_array
+end interface asin
+
+interface acos
+    module procedure acos_array
+end interface acos
+
+interface atan
+    module procedure atan_array
+end interface atan
+
+interface asinh
+    module procedure asinh_array
+end interface asinh
+
+interface acosh
+    module procedure acosh_array
+end interface acosh
+
+interface atanh
+    module procedure atanh_array
+end interface atanh
+
+interface floor
+    module procedure floor_array
+end interface floor
+
+interface ceiling
+    module procedure ceiling_array
+end interface ceiling
+
+interface aint
+    module procedure aint_array
+end interface aint
+
+interface mlx_clip
+    module procedure clip_array, clip_s, clip_d
+end interface mlx_clip
+
+interface atan2
+    module procedure atan2_array, atan2_ass, atan2_sas, atan2_asd, atan2_sad
+end interface atan2
+
+interface modulo
+    module procedure modulo_array, modulo_ass, modulo_sas, modulo_asd, modulo_sad
+end interface modulo
+
+interface min
+    module procedure min_array, min_ass, min_sas, min_asd, min_sad
+end interface min
+
+interface mlx_logaddexp
+    module procedure logaddexp_array, logaddexp_ass, logaddexp_sas, logaddexp_asd, logaddexp_sad
+end interface mlx_logaddexp
+
+interface mlx_floor_divide
+    module procedure floor_divide_array, floor_divide_ass, floor_divide_sas, floor_divide_asd, floor_divide_sad
+end interface mlx_floor_divide
 
 contains
 
     ! the absolute value (the modulus of a complex64 array, as float32)
-    module function abs_array( a ) result(r)
+    function abs_array( a ) result(r)
         type(mlx_array), intent(in) :: a
         type(mlx_array) :: r
         call mlxf_unary(r, mlxc_abs, a, 'abs')
     end function abs_array
 
-    module function sin_array( a ) result(r)
+    function sin_array( a ) result(r)
         type(mlx_array), intent(in) :: a
         type(mlx_array) :: r
         call mlxf_unary(r, mlxc_sin, a, 'sin')
     end function sin_array
 
-    module function cos_array( a ) result(r)
+    function cos_array( a ) result(r)
         type(mlx_array), intent(in) :: a
         type(mlx_array) :: r
         call mlxf_unary(r, mlxc_cos, a, 'cos')
     end function cos_array
 
-    module function tan_array( a ) result(r)
+    function tan_array( a ) result(r)
         type(mlx_array), intent(in) :: a
         type(mlx_array) :: r
         call mlxf_unary(r, mlxc_tan, a, 'tan')
     end function tan_array
 
-    module function sinh_array( a ) result(r)
+    function sinh_array( a ) result(r)
         type(mlx_array), intent(in) :: a
         type(mlx_array) :: r
         call mlxf_unary(r, mlxc_sinh, a, 'sinh')
     end function sinh_array
 
-    module function cosh_array( a ) result(r)
+    function cosh_array( a ) result(r)
         type(mlx_array), intent(in) :: a
         type(mlx_array) :: r
         call mlxf_unary(r, mlxc_cosh, a, 'cosh')
     end function cosh_array
 
-    module function tanh_array( a ) result(r)
+    function tanh_array( a ) result(r)
         type(mlx_array), intent(in) :: a
         type(mlx_array) :: r
         call mlxf_unary(r, mlxc_tanh, a, 'tanh')
     end function tanh_array
 
     ! the natural logarithm
-    module function log_array( a ) result(r)
+    function log_array( a ) result(r)
         type(mlx_array), intent(in) :: a
         type(mlx_array) :: r
         call mlxf_unary(r, mlxc_log, a, 'log')
     end function log_array
 
-    module function log10_array( a ) result(r)
+    function log10_array( a ) result(r)
         type(mlx_array), intent(in) :: a
         type(mlx_array) :: r
         call mlxf_unary(r, mlxc_log10, a, 'log10')
     end function log10_array
 
-    module function erf_array( a ) result(r)
+    function erf_array( a ) result(r)
         type(mlx_array), intent(in) :: a
         type(mlx_array) :: r
         call mlxf_unary(r, mlxc_erf, a, 'erf')
     end function erf_array
 
     ! the inverse functions, as Fortran's intrinsics
-    module function asin_array( a ) result(r)
+    function asin_array( a ) result(r)
         type(mlx_array), intent(in) :: a
         type(mlx_array) :: r
         call mlxf_unary(r, mlxc_arcsin, a, 'asin')
     end function asin_array
 
-    module function acos_array( a ) result(r)
+    function acos_array( a ) result(r)
         type(mlx_array), intent(in) :: a
         type(mlx_array) :: r
         call mlxf_unary(r, mlxc_arccos, a, 'acos')
     end function acos_array
 
-    module function atan_array( a ) result(r)
+    function atan_array( a ) result(r)
         type(mlx_array), intent(in) :: a
         type(mlx_array) :: r
         call mlxf_unary(r, mlxc_arctan, a, 'atan')
     end function atan_array
 
-    module function asinh_array( a ) result(r)
+    function asinh_array( a ) result(r)
         type(mlx_array), intent(in) :: a
         type(mlx_array) :: r
         call mlxf_unary(r, mlxc_arcsinh, a, 'asinh')
     end function asinh_array
 
-    module function acosh_array( a ) result(r)
+    function acosh_array( a ) result(r)
         type(mlx_array), intent(in) :: a
         type(mlx_array) :: r
         call mlxf_unary(r, mlxc_arccosh, a, 'acosh')
     end function acosh_array
 
-    module function atanh_array( a ) result(r)
+    function atanh_array( a ) result(r)
         type(mlx_array), intent(in) :: a
         type(mlx_array) :: r
         call mlxf_unary(r, mlxc_arctanh, a, 'atanh')
     end function atanh_array
 
     ! floor, ceiling and aint (truncation) keep the input's kind: a float result, unlike Fortran's integer floor and ceiling
-    module function floor_array( a ) result(r)
+    function floor_array( a ) result(r)
         type(mlx_array), intent(in) :: a
         type(mlx_array) :: r
         call mlxf_unary(r, mlxc_floor, a, 'floor')
     end function floor_array
 
-    module function ceiling_array( a ) result(r)
+    function ceiling_array( a ) result(r)
         type(mlx_array), intent(in) :: a
         type(mlx_array) :: r
         call mlxf_unary(r, mlxc_ceil, a, 'ceiling')
     end function ceiling_array
 
-    module function aint_array( a ) result(r)
+    function aint_array( a ) result(r)
         type(mlx_array), intent(in) :: a
         type(mlx_array) :: r
         call mlxf_unary(r, mlxc_trunc, a, 'aint')
     end function aint_array
 
     ! the signum: -1, 0 or 1 (one argument, unlike Fortran's sign(a, b))
-    module function mlx_sign( a ) result(r)
+    function mlx_sign( a ) result(r)
         type(mlx_array), intent(in) :: a
         type(mlx_array) :: r
         call mlxf_unary(r, mlxc_sign, a, 'mlx_sign')
     end function mlx_sign
 
     ! 1 / (1 + exp(-a))
-    module function mlx_sigmoid( a ) result(r)
+    function mlx_sigmoid( a ) result(r)
         type(mlx_array), intent(in) :: a
         type(mlx_array) :: r
         call mlxf_unary(r, mlxc_sigmoid, a, 'mlx_sigmoid')
     end function mlx_sigmoid
 
     ! a*a
-    module function mlx_square( a ) result(r)
+    function mlx_square( a ) result(r)
         type(mlx_array), intent(in) :: a
         type(mlx_array) :: r
         call mlxf_unary(r, mlxc_square, a, 'mlx_square')
     end function mlx_square
 
     ! 1 / a
-    module function mlx_reciprocal( a ) result(r)
+    function mlx_reciprocal( a ) result(r)
         type(mlx_array), intent(in) :: a
         type(mlx_array) :: r
         call mlxf_unary(r, mlxc_reciprocal, a, 'mlx_reciprocal')
     end function mlx_reciprocal
 
     ! 1 / sqrt(a)
-    module function mlx_rsqrt( a ) result(r)
+    function mlx_rsqrt( a ) result(r)
         type(mlx_array), intent(in) :: a
         type(mlx_array) :: r
         call mlxf_unary(r, mlxc_rsqrt, a, 'mlx_rsqrt')
     end function mlx_rsqrt
 
     ! exp(a) - 1, accurate near 0
-    module function mlx_expm1( a ) result(r)
+    function mlx_expm1( a ) result(r)
         type(mlx_array), intent(in) :: a
         type(mlx_array) :: r
         call mlxf_unary(r, mlxc_expm1, a, 'mlx_expm1')
     end function mlx_expm1
 
     ! log(1 + a), accurate near 0
-    module function mlx_log1p( a ) result(r)
+    function mlx_log1p( a ) result(r)
         type(mlx_array), intent(in) :: a
         type(mlx_array) :: r
         call mlxf_unary(r, mlxc_log1p, a, 'mlx_log1p')
     end function mlx_log1p
 
     ! the base-2 logarithm
-    module function mlx_log2( a ) result(r)
+    function mlx_log2( a ) result(r)
         type(mlx_array), intent(in) :: a
         type(mlx_array) :: r
         call mlxf_unary(r, mlxc_log2, a, 'mlx_log2')
     end function mlx_log2
 
     ! the inverse of erf on (-1, 1)
-    module function mlx_erfinv( a ) result(r)
+    function mlx_erfinv( a ) result(r)
         type(mlx_array), intent(in) :: a
         type(mlx_array) :: r
         call mlxf_unary(r, mlxc_erfinv, a, 'mlx_erfinv')
     end function mlx_erfinv
 
     ! radians to degrees
-    module function mlx_degrees( a ) result(r)
+    function mlx_degrees( a ) result(r)
         type(mlx_array), intent(in) :: a
         type(mlx_array) :: r
         call mlxf_unary(r, mlxc_degrees, a, 'mlx_degrees')
     end function mlx_degrees
 
     ! degrees to radians
-    module function mlx_radians( a ) result(r)
+    function mlx_radians( a ) result(r)
         type(mlx_array), intent(in) :: a
         type(mlx_array) :: r
         call mlxf_unary(r, mlxc_radians, a, 'mlx_radians')
     end function mlx_radians
 
     ! a with no gradient flowing through it (its values unchanged)
-    module function mlx_stop_gradient( a ) result(r)
+    function mlx_stop_gradient( a ) result(r)
         type(mlx_array), intent(in) :: a
         type(mlx_array) :: r
         call mlxf_unary(r, mlxc_stop_gradient, a, 'mlx_stop_gradient')
     end function mlx_stop_gradient
 
     ! a new graph node holding a copy of a (assignment shares the node instead)
-    module function mlx_copy( a ) result(r)
+    function mlx_copy( a ) result(r)
         type(mlx_array), intent(in) :: a
         type(mlx_array) :: r
         call mlxf_unary(r, mlxc_copy, a, 'mlx_copy')
     end function mlx_copy
 
     ! rounded to decimals places (default 0), halves to even: 0.5 -> 0, 1.5 -> 2, 2.5 -> 2 (unlike anint)
-    module function mlx_round( a, decimals ) result(r)
+    function mlx_round( a, decimals ) result(r)
         type(mlx_array), intent(in)           :: a
         integer,         optional, intent(in) :: decimals
         type(mlx_array) :: r
@@ -237,13 +352,13 @@ contains
     end function mlx_round
 
     ! a limited to [a_min, a_max] elementwise; the bounds broadcast, and scalar bounds are weak
-    module function clip_array( a, a_min, a_max ) result(r)
+    function clip_array( a, a_min, a_max ) result(r)
         type(mlx_array), intent(in) :: a, a_min, a_max
         type(mlx_array) :: r
         call mlxf_ternary_op(r, mlxc_clip, [a, a_min, a_max], 'mlx_clip')
     end function clip_array
 
-    module function clip_s( a, a_min, a_max ) result(r)
+    function clip_s( a, a_min, a_max ) result(r)
         type(mlx_array), intent(in) :: a
         real(real32),    intent(in) :: a_min, a_max
         type(mlx_array) :: r
@@ -253,7 +368,7 @@ contains
         call mlxf_ternary_op(r, mlxc_clip, [a, lo, hi], 'mlx_clip')
     end function clip_s
 
-    module function clip_d( a, a_min, a_max ) result(r)
+    function clip_d( a, a_min, a_max ) result(r)
         type(mlx_array), intent(in) :: a
         real(real64),    intent(in) :: a_min, a_max
         type(mlx_array) :: r
@@ -265,7 +380,7 @@ contains
 
     ! NaN replaced by nan (default 0), the infinities by posinf and neginf (default the largest finite values
     ! of a's kind)
-    module function mlx_nan_to_num( a, nan, posinf, neginf ) result(r)
+    function mlx_nan_to_num( a, nan, posinf, neginf ) result(r)
         type(mlx_array), intent(in)           :: a
         real(real32),    optional, intent(in) :: nan, posinf, neginf
         type(mlx_array)     :: r
@@ -284,13 +399,13 @@ contains
     end function mlx_nan_to_num
 
     ! atan2(y, x), the angle of (x, y), in Fortran's argument order
-    module function atan2_array( y, x ) result(r)
+    function atan2_array( y, x ) result(r)
         type(mlx_array), intent(in) :: y, x
         type(mlx_array) :: r
         call mlxf_binary(r, mlxc_arctan2, y, x, 'atan2')
     end function atan2_array
 
-    module function atan2_ass( y, x ) result(r)
+    function atan2_ass( y, x ) result(r)
         type(mlx_array), intent(in) :: y
         real(real32),    intent(in) :: x
         type(mlx_array) :: r
@@ -299,7 +414,7 @@ contains
         call mlxf_binary(r, mlxc_arctan2, y, s, 'atan2')
     end function atan2_ass
 
-    module function atan2_sas( y, x ) result(r)
+    function atan2_sas( y, x ) result(r)
         real(real32),    intent(in) :: y
         type(mlx_array), intent(in) :: x
         type(mlx_array) :: r
@@ -308,7 +423,7 @@ contains
         call mlxf_binary(r, mlxc_arctan2, s, x, 'atan2')
     end function atan2_sas
 
-    module function atan2_asd( y, x ) result(r)
+    function atan2_asd( y, x ) result(r)
         type(mlx_array), intent(in) :: y
         real(real64),    intent(in) :: x
         type(mlx_array) :: r
@@ -317,7 +432,7 @@ contains
         call mlxf_binary(r, mlxc_arctan2, y, s, 'atan2')
     end function atan2_asd
 
-    module function atan2_sad( y, x ) result(r)
+    function atan2_sad( y, x ) result(r)
         real(real64),    intent(in) :: y
         type(mlx_array), intent(in) :: x
         type(mlx_array) :: r
@@ -327,13 +442,13 @@ contains
     end function atan2_sad
 
     ! Fortran's modulo(a, p): a - floor(a/p) p, with the sign of p
-    module function modulo_array( a, p ) result(r)
+    function modulo_array( a, p ) result(r)
         type(mlx_array), intent(in) :: a, p
         type(mlx_array) :: r
         call mlxf_binary(r, mlxc_remainder, a, p, 'modulo')
     end function modulo_array
 
-    module function modulo_ass( a, p ) result(r)
+    function modulo_ass( a, p ) result(r)
         type(mlx_array), intent(in) :: a
         real(real32),    intent(in) :: p
         type(mlx_array) :: r
@@ -342,7 +457,7 @@ contains
         call mlxf_binary(r, mlxc_remainder, a, s, 'modulo')
     end function modulo_ass
 
-    module function modulo_sas( a, p ) result(r)
+    function modulo_sas( a, p ) result(r)
         real(real32),    intent(in) :: a
         type(mlx_array), intent(in) :: p
         type(mlx_array) :: r
@@ -351,7 +466,7 @@ contains
         call mlxf_binary(r, mlxc_remainder, s, p, 'modulo')
     end function modulo_sas
 
-    module function modulo_asd( a, p ) result(r)
+    function modulo_asd( a, p ) result(r)
         type(mlx_array), intent(in) :: a
         real(real64),    intent(in) :: p
         type(mlx_array) :: r
@@ -360,7 +475,7 @@ contains
         call mlxf_binary(r, mlxc_remainder, a, s, 'modulo')
     end function modulo_asd
 
-    module function modulo_sad( a, p ) result(r)
+    function modulo_sad( a, p ) result(r)
         real(real64),    intent(in) :: a
         type(mlx_array), intent(in) :: p
         type(mlx_array) :: r
@@ -370,13 +485,13 @@ contains
     end function modulo_sad
 
     ! Fortran's min(a, b) elementwise
-    module function min_array( a, b ) result(r)
+    function min_array( a, b ) result(r)
         type(mlx_array), intent(in) :: a, b
         type(mlx_array) :: r
         call mlxf_binary(r, mlxc_minimum, a, b, 'min')
     end function min_array
 
-    module function min_ass( a, b ) result(r)
+    function min_ass( a, b ) result(r)
         type(mlx_array), intent(in) :: a
         real(real32),    intent(in) :: b
         type(mlx_array) :: r
@@ -385,7 +500,7 @@ contains
         call mlxf_binary(r, mlxc_minimum, a, s, 'min')
     end function min_ass
 
-    module function min_sas( a, b ) result(r)
+    function min_sas( a, b ) result(r)
         real(real32),    intent(in) :: a
         type(mlx_array), intent(in) :: b
         type(mlx_array) :: r
@@ -394,7 +509,7 @@ contains
         call mlxf_binary(r, mlxc_minimum, s, b, 'min')
     end function min_sas
 
-    module function min_asd( a, b ) result(r)
+    function min_asd( a, b ) result(r)
         type(mlx_array), intent(in) :: a
         real(real64),    intent(in) :: b
         type(mlx_array) :: r
@@ -403,7 +518,7 @@ contains
         call mlxf_binary(r, mlxc_minimum, a, s, 'min')
     end function min_asd
 
-    module function min_sad( a, b ) result(r)
+    function min_sad( a, b ) result(r)
         real(real64),    intent(in) :: a
         type(mlx_array), intent(in) :: b
         type(mlx_array) :: r
@@ -413,13 +528,13 @@ contains
     end function min_sad
 
     ! log(exp(a) + exp(b)) without overflow
-    module function logaddexp_array( a, b ) result(r)
+    function logaddexp_array( a, b ) result(r)
         type(mlx_array), intent(in) :: a, b
         type(mlx_array) :: r
         call mlxf_binary(r, mlxc_logaddexp, a, b, 'mlx_logaddexp')
     end function logaddexp_array
 
-    module function logaddexp_ass( a, b ) result(r)
+    function logaddexp_ass( a, b ) result(r)
         type(mlx_array), intent(in) :: a
         real(real32),    intent(in) :: b
         type(mlx_array) :: r
@@ -428,7 +543,7 @@ contains
         call mlxf_binary(r, mlxc_logaddexp, a, s, 'mlx_logaddexp')
     end function logaddexp_ass
 
-    module function logaddexp_sas( a, b ) result(r)
+    function logaddexp_sas( a, b ) result(r)
         real(real32),    intent(in) :: a
         type(mlx_array), intent(in) :: b
         type(mlx_array) :: r
@@ -437,7 +552,7 @@ contains
         call mlxf_binary(r, mlxc_logaddexp, s, b, 'mlx_logaddexp')
     end function logaddexp_sas
 
-    module function logaddexp_asd( a, b ) result(r)
+    function logaddexp_asd( a, b ) result(r)
         type(mlx_array), intent(in) :: a
         real(real64),    intent(in) :: b
         type(mlx_array) :: r
@@ -446,7 +561,7 @@ contains
         call mlxf_binary(r, mlxc_logaddexp, a, s, 'mlx_logaddexp')
     end function logaddexp_asd
 
-    module function logaddexp_sad( a, b ) result(r)
+    function logaddexp_sad( a, b ) result(r)
         real(real64),    intent(in) :: a
         type(mlx_array), intent(in) :: b
         type(mlx_array) :: r
@@ -456,13 +571,13 @@ contains
     end function logaddexp_sad
 
     ! floor(a / b), the quotient of modulo
-    module function floor_divide_array( a, b ) result(r)
+    function floor_divide_array( a, b ) result(r)
         type(mlx_array), intent(in) :: a, b
         type(mlx_array) :: r
         call mlxf_binary(r, mlxc_floor_divide, a, b, 'mlx_floor_divide')
     end function floor_divide_array
 
-    module function floor_divide_ass( a, b ) result(r)
+    function floor_divide_ass( a, b ) result(r)
         type(mlx_array), intent(in) :: a
         real(real32),    intent(in) :: b
         type(mlx_array) :: r
@@ -471,7 +586,7 @@ contains
         call mlxf_binary(r, mlxc_floor_divide, a, s, 'mlx_floor_divide')
     end function floor_divide_ass
 
-    module function floor_divide_sas( a, b ) result(r)
+    function floor_divide_sas( a, b ) result(r)
         real(real32),    intent(in) :: a
         type(mlx_array), intent(in) :: b
         type(mlx_array) :: r
@@ -480,7 +595,7 @@ contains
         call mlxf_binary(r, mlxc_floor_divide, s, b, 'mlx_floor_divide')
     end function floor_divide_sas
 
-    module function floor_divide_asd( a, b ) result(r)
+    function floor_divide_asd( a, b ) result(r)
         type(mlx_array), intent(in) :: a
         real(real64),    intent(in) :: b
         type(mlx_array) :: r
@@ -489,7 +604,7 @@ contains
         call mlxf_binary(r, mlxc_floor_divide, a, s, 'mlx_floor_divide')
     end function floor_divide_asd
 
-    module function floor_divide_sad( a, b ) result(r)
+    function floor_divide_sad( a, b ) result(r)
         real(real64),    intent(in) :: a
         type(mlx_array), intent(in) :: b
         type(mlx_array) :: r
@@ -499,7 +614,7 @@ contains
     end function floor_divide_sad
 
     ! the quotient floor(a / b) and the remainder modulo(a, b) of one MLX node
-    module subroutine mlx_divmod( a, b, quotient, remainder )
+    subroutine mlx_divmod( a, b, quotient, remainder )
         type(mlx_array), intent(in)  :: a, b
         type(mlx_array), intent(out) :: quotient, remainder
         type(mlx_array), allocatable :: qr(:)
@@ -508,4 +623,55 @@ contains
         remainder = qr(2)
     end subroutine mlx_divmod
 
-end submodule mlxf_ops_math
+    ! r = f(a) with the replacements of option, for every int f(mlx_array* res, const mlx_array a, float nan,
+    ! mlx_optional_float posinf, mlx_optional_float neginf, const mlx_stream s)
+    subroutine mlxf_nan_op( r, f, a, option, proc )
+        type(mlx_array),     intent(inout) :: r
+        procedure(mlxc_nan_op)             :: f
+        type(mlx_array),     intent(in)    :: a
+        type(mlxf_nan_spec), intent(in)    :: option
+        character(len=*),    intent(in)    :: proc
+        type(mlxc_array)          :: ha
+        type(mlxc_optional_float) :: posinf, neginf
+        type(mlxc_array)          :: res
+        type(mlxc_stream)         :: s
+        integer(c_int)            :: ierr
+        call mlxf_require_device(proc)
+        ha = mlxf_handle(a, proc)
+        posinf%value = option%posinf
+        posinf%has_value = logical(option%has_posinf, c_bool)
+        neginf%value = option%neginf
+        neginf%has_value = logical(option%has_neginf, c_bool)
+        res = mlxc_array_new()
+        s = mlxf_default_stream(proc)
+        ierr = f(res, ha, option%nan, posinf, neginf, s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call mlxf_adopt(r, res, proc)
+    end subroutine mlxf_nan_op
+
+    ! the arrays of f(a(1), a(2)), in MLX's order, for every int f(mlx_vector_array* res, const mlx_array a,
+    ! const mlx_array b, const mlx_stream s); the vector is freed after its arrays are adopted
+    subroutine mlxf_binary_vector_op( r, f, a, proc )
+        type(mlx_array),  allocatable, intent(out) :: r(:)
+        procedure(mlxc_binary_vector_op)           :: f
+        type(mlx_array),  intent(in)               :: a(:)
+        character(len=*), intent(in)               :: proc
+        type(mlxc_vector_array) :: res
+        type(mlxc_stream)       :: s
+        integer(c_int)          :: ierr
+        integer                 :: status
+        call mlxf_require_device(proc)
+        res = mlxc_vector_array_new()
+        s = mlxf_default_stream(proc)
+        ierr = f(res, mlxf_handle(a(1), proc), mlxf_handle(a(2), proc), s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_vector_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call mlxf_vector_import(r, res, status)
+        call mlxf_check(mlxc_vector_array_free(res), proc)
+        if( status /= 0 ) call mlxf_fail(proc, 'the results could not be adopted')
+    end subroutine mlxf_binary_vector_op
+
+end module mlxf_ops_math

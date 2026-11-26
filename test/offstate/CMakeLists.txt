@@ -34,10 +34,23 @@ endif()
 set(_ledger "${MLXF_OFFSTATE_ROOT}/scripts/toy_seam.txt")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_ledger}")
 file(STRINGS "${_ledger}" _lines REGEX "^mlxf_toy_[a-z0-9_]+ +(host|glue)$")
+# a toy's file sits in src/test/toys/ or in the folder of its toy below it
+file(GLOB_RECURSE _toy_files "${MLXF_OFFSTATE_ROOT}/src/test/toys/mlxf_toy_*.f90")
 set(_sources "")
 foreach(_line IN LISTS _lines)
     string(REGEX REPLACE " .*$" "" _stem "${_line}")
-    list(APPEND _sources "${MLXF_OFFSTATE_ROOT}/src/test/${_stem}.f90")
+    set(_found "")
+    foreach(_file IN LISTS _toy_files)
+        get_filename_component(_name "${_file}" NAME)
+        if(_name STREQUAL "${_stem}.f90")
+            list(APPEND _found "${_file}")
+        endif()
+    endforeach()
+    list(LENGTH _found _nfound)
+    if(NOT _nfound EQUAL 1)
+        message(FATAL_ERROR "${_ledger} names ${_stem}: ${_nfound} files ${_stem}.f90 under src/test/toys, not one.")
+    endif()
+    list(APPEND _sources "${_found}")
 endforeach()
 if(NOT _sources)
     message(FATAL_ERROR "No host or glue file in ${_ledger}.")
@@ -45,7 +58,7 @@ endif()
 
 # with them the test definitions and the fixture of the polar host route, plain Fortran both
 add_executable(mlxf_offstate_exec "${CMAKE_CURRENT_LIST_DIR}/mlxf_offstate_exec.f90" ${_sources}
-    "${MLXF_OFFSTATE_ROOT}/src/test/mlxf_test_defs.f90" "${MLXF_OFFSTATE_ROOT}/src/test/mlxf_polarft_host_fixture.f90")
+    "${MLXF_OFFSTATE_ROOT}/src/test/framework/mlxf_test_defs.f90" "${MLXF_OFFSTATE_ROOT}/src/test/toys/polar/mlxf_polarft_host_fixture.f90")
 set_target_properties(mlxf_offstate_exec PROPERTIES
     LINKER_LANGUAGE          Fortran
     Fortran_MODULE_DIRECTORY "${PROJECT_BINARY_DIR}/modules")

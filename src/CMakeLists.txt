@@ -15,9 +15,10 @@ endif()
 set(MLXF_TEST_ONLY_SOURCES "${MLXF_TEST_ONLY_SOURCES}" PARENT_SCOPE)
 
 # The generated bind(c) layer (scripts/gen_mlxc_bindings.py): one types module and one interface module per
-# header of the mlx-c being linked, written into build/gen at build time and rerun when a header or either
-# script changes. The build fails unless the generated and skipped names equal the independent prototype
-# list (scripts/list_mlxc_prototypes.py). The set of files is known at configure time (--list-outputs).
+# header of the mlx-c being linked, and mlxf_c_signatures, the C signature classes of scripts/mlxc_signatures.txt,
+# written into build/gen at build time and rerun when a header, either script or the ledger changes. The build
+# fails unless the generated and skipped names equal the independent prototype list
+# (scripts/list_mlxc_prototypes.py). The set of files is known at configure time (--list-outputs).
 set(_mlxc_include "${MLX_C_INCLUDE_DIRS}")
 file(GLOB MLXF_MLXC_HEADERS CONFIGURE_DEPENDS "${_mlxc_include}/mlx/c/*.h")
 set(_gen_script  "${PROJECT_SOURCE_DIR}/scripts/gen_mlxc_bindings.py")
@@ -37,8 +38,8 @@ add_custom_command(
     COMMAND "${MLXF_PYTHON3}" -I "${_list_script}" "${_mlxc_include}" -o "${MLXF_GEN_DIR}/mlxc_prototypes.txt"
     COMMAND "${MLXF_PYTHON3}" -I "${_gen_script}" "${_mlxc_include}" "${MLXF_GEN_DIR}"
             --expect "${MLXF_GEN_DIR}/mlxc_prototypes.txt"
-    DEPENDS ${MLXF_MLXC_HEADERS} "${_gen_script}" "${_list_script}"
-    COMMENT "Generating the bind(c) layer from the mlx-c headers (mlxf_c_*)"
+    DEPENDS ${MLXF_MLXC_HEADERS} "${_gen_script}" "${_list_script}" "${PROJECT_SOURCE_DIR}/scripts/mlxc_signatures.txt"
+    COMMENT "Generating the bind(c) layer from the mlx-c headers (mlxf_c_*) and the signature classes"
     VERBATIM)
 
 mlxf_add_library(mlxf ${MLXF_SOURCES} ${MLXF_GENERATED_SOURCES})

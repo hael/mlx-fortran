@@ -2,18 +2,23 @@
 ! Along dim, or of the elements in array element order (a rank-1 result) without it. Positions (argsort,
 ! argpartition) are 1-based int32, and kth is a 1-based position, checked against 1 (MLX would count a
 ! smaller one from the end).
-submodule(mlxf_ops) mlxf_ops_sort
-use mlxf_c_ops,  only: mlxc_argpartition, mlxc_argpartition_axis, mlxc_argsort, mlxc_argsort_axis, mlxc_partition, &
-                       mlxc_partition_axis, mlxc_sort, mlxc_sort_axis, mlxc_topk, mlxc_topk_axis
-use mlxf_array,  only: mlxf_int2_op, mlxf_int_op, mlxf_unary, mlxf_one_based
-use mlxf_device, only: mlxf_enter
-use mlxf_error,  only: mlxf_fail
+module mlxf_ops_sort
+use mlxf_c_ops,     only: mlxc_argpartition, mlxc_argpartition_axis, mlxc_argsort, mlxc_argsort_axis, mlxc_partition, &
+                          mlxc_partition_axis, mlxc_sort, mlxc_sort_axis, mlxc_topk, mlxc_topk_axis
+use mlxf_error,     only: mlxf_fail
+use mlxf_device,    only: mlxf_enter
+use mlxf_array,     only: mlx_array
+use mlxf_ops_shape, only: axis_of
+use mlxf_calls,     only: mlxf_int2_op, mlxf_int_op, mlxf_one_based, mlxf_unary
 implicit none
+
+public :: mlx_sort, mlx_argsort, mlx_partition, mlx_argpartition, mlx_topk
+private
 
 contains
 
     ! the elements in ascending order
-    module function mlx_sort( a, dim ) result(r)
+    function mlx_sort( a, dim ) result(r)
         type(mlx_array), intent(in)           :: a
         integer,         optional, intent(in) :: dim
         type(mlx_array) :: r
@@ -26,7 +31,7 @@ contains
     end function mlx_sort
 
     ! the 1-based positions that sort a in ascending order
-    module function mlx_argsort( a, dim ) result(r)
+    function mlx_argsort( a, dim ) result(r)
         type(mlx_array), intent(in)           :: a
         integer,         optional, intent(in) :: dim
         type(mlx_array) :: r
@@ -42,7 +47,7 @@ contains
 
     ! a rearrangement with the element of sorted position kth in place: no element before it is larger and
     ! none after it smaller; the order inside the two parts is not defined
-    module function mlx_partition( a, kth, dim ) result(r)
+    function mlx_partition( a, kth, dim ) result(r)
         type(mlx_array), intent(in)           :: a
         integer,         intent(in)           :: kth
         integer,         optional, intent(in) :: dim
@@ -57,7 +62,7 @@ contains
     end function mlx_partition
 
     ! the 1-based positions that partition a as mlx_partition does
-    module function mlx_argpartition( a, kth, dim ) result(r)
+    function mlx_argpartition( a, kth, dim ) result(r)
         type(mlx_array), intent(in)           :: a
         integer,         intent(in)           :: kth
         integer,         optional, intent(in) :: dim
@@ -74,7 +79,7 @@ contains
     end function mlx_argpartition
 
     ! the k largest elements, in no defined order
-    module function mlx_topk( a, k, dim ) result(r)
+    function mlx_topk( a, k, dim ) result(r)
         type(mlx_array), intent(in)           :: a
         integer,         intent(in)           :: k
         integer,         optional, intent(in) :: dim
@@ -87,4 +92,4 @@ contains
         endif
     end function mlx_topk
 
-end submodule mlxf_ops_sort
+end module mlxf_ops_sort

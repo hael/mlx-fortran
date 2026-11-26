@@ -5,7 +5,8 @@
 #
 # Installs the configured build BUILD (default build/) into a scratch prefix whose path holds spaces, builds the
 # consumer project CONSUMER (default test/consumer/) against it with only -Dmlxf_DIR= and runs its programs (the
-# consumer and the examples of README.md and doc/quickstart.md), then
+# consumer and the examples of README.md and doc/quickstart.md), compiles CONSUMER/mlxf_api_names.f90, which
+# imports every public name of mlxf (scripts/list_public_api.py --check holds it to src/core/mlxf.f90), then
 # checks that only mlxf.mod was installed and no producer path or flag leaked, that the private modules cannot be
 # imported, that a copy of the package config naming another compiler version or another mlx-c version refuses
 # the consumer with its message, and that pkg-config links the consumer. Without --require-gpu the programs run
@@ -18,7 +19,7 @@ GPU_ARGS=()
 for arg in "$@"; do
     case "$arg" in
         --require-gpu) GPU_ARGS=(require-gpu) ;;
-        -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,14p' "$0"; exit 0 ;;
         -*) echo "check_install: unknown option: $arg (see --help)" >&2; exit 2 ;;
         *) positional+=("$arg") ;;
     esac
@@ -54,6 +55,10 @@ cp "$CONSUMER/CMakeLists.txt" "$CONSUMER"/*.f90 "$WORK/consumer/"
 cmake -S "$WORK/consumer" -B "$WORK/consumer build" \
     "-DCMAKE_Fortran_COMPILER=$FC" "-Dmlxf_DIR=$PACKAGE" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 cmake --build "$WORK/consumer build" --parallel 2
+# the public API: every name the source declares public, imported from the installed module
+"$PY" "$ROOT/scripts/list_public_api.py" "$ROOT" --check
+(cd "$WORK" && "$FC" "-I$PREFIX/$INCDIR/mlxf" -c "$WORK/consumer/mlxf_api_names.f90" -o api_names.o) \
+    || { echo "check_install: the installed mlxf does not export every public name" >&2; exit 1; }
 run_env=(env MLX_ENABLE_TF32=0 OMP_NUM_THREADS=1 OMP_WAIT_POLICY=PASSIVE OMP_THREAD_LIMIT=4)
 "${run_env[@]}" "$WORK/consumer build/mlxf_consumer" "${GPU_ARGS[@]+"${GPU_ARGS[@]}"}" | tee "$WORK/consumer.log"
 # the examples the documents show. The first, the README's program, takes no argument and runs on MLX's default

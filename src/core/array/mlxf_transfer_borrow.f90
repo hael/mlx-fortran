@@ -1,13 +1,14 @@
 !@descr: shared storage: mlx_view (read-only borrowing after evaluation) and mlx_alloc (writable initialisation of page-aligned memory)
-submodule (mlxf_array) mlxf_array_borrow
+submodule(mlxf_transfer) mlxf_transfer_borrow
 use, intrinsic :: iso_c_binding, only: c_null_ptr, c_associated, c_f_pointer, c_funloc, c_sizeof
-use mlxf_c_types, only: MLXC_BOOL, MLXC_INT8, MLXC_INT16, MLXC_INT32, MLXC_INT64, MLXC_FLOAT32, MLXC_FLOAT64, &
-                        MLXC_COMPLEX64
 use mlxf_c_array, only: mlxc_array_new_data_managed_payload, mlxc_array_size, mlxc_array_dtype, mlxc_array_eval, &
                         mlxc_internal_array_is_row_contiguous
+use mlxf_c_types, only: MLXC_BOOL, MLXC_INT8, MLXC_INT16, MLXC_INT32, MLXC_INT64, MLXC_FLOAT32, MLXC_FLOAT64, &
+                        MLXC_COMPLEX64
 use mlxf_libc,    only: c_posix_memalign, c_free
 use mlxf_error,   only: mlxf_check, mlxf_report
 use mlxf_device,  only: mlxf_enter, mlxf_require_device
+use mlxf_array,   only: mlxf_adopt, mlxf_handle
 implicit none
 
 integer(c_size_t), parameter :: PAGE_BYTES = 16384_c_size_t
@@ -619,7 +620,7 @@ contains
         ! when MLX copied the buffer, its deleter ran in the call and left the record to us; otherwise the
         ! deleter frees the record with the buffer when the array dies
         if( owner%freed /= 0 ) call c_free(rec)
-        call adopt(a, h, PROC)
+        call mlxf_adopt(a, h, PROC)
         if( present(status) ) status = 0
         p = data_pointer(h, dtype)
         if( present(zero_copy) ) zero_copy = c_associated(p, buf)
@@ -806,4 +807,4 @@ contains
         call point_l(q, fshape, view, 'mlx_alloc', status)
     end function alloc_l
 
-end submodule mlxf_array_borrow
+end submodule mlxf_transfer_borrow

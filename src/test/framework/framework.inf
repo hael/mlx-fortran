@@ -1,0 +1,1 @@
+!@descr: the test library: assertions and the summary, the suite registry, the test definitions, the NaN-safe reductions, and the ABI probe of the generated layer (a C header, its echo functions compiled by Apple's clang, and the tester)

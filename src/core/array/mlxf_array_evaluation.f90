@@ -26,7 +26,7 @@ contains
         type(mlxc_vector_array) :: v
         integer(c_int)          :: ierr
         call mlxf_enter('mlx_eval')
-        v    = vector_of(arrays, 'mlx_eval')
+        v    = mlxf_vector_of(arrays, 'mlx_eval')
         ierr = mlxc_eval(v)
         call mlxf_check(mlxc_vector_array_free(v), 'mlx_eval')
         call mlxf_check(ierr, 'mlx_eval', status)
@@ -48,13 +48,13 @@ contains
         type(mlxc_vector_array) :: v
         integer(c_int)          :: ierr
         call mlxf_enter('mlx_async_eval')
-        v    = vector_of(arrays, 'mlx_async_eval')
+        v    = mlxf_vector_of(arrays, 'mlx_async_eval')
         ierr = mlxc_async_eval(v)
         call mlxf_check(mlxc_vector_array_free(v), 'mlx_async_eval')
         call mlxf_check(ierr, 'mlx_async_eval', status)
     end subroutine async_eval_list
 
-    module function vector_of( arrays, proc ) result(v)
+    module function mlxf_vector_of( arrays, proc ) result(v)
         type(mlx_array),  intent(in) :: arrays(:)
         character(len=*), intent(in) :: proc
         type(mlxc_vector_array)       :: v
@@ -65,7 +65,7 @@ contains
             hs(i) = mlxf_handle(arrays(i), proc)
         end do
         v = mlxc_vector_array_new_data(hs, int(size(arrays), c_size_t))
-    end function vector_of
+    end function mlxf_vector_of
 
     ! waits for the work queued on the default stream of every device present: the default device's, where
     ! operations run, then the other device's. A device type that opens no device has no stream and is skipped
@@ -107,7 +107,7 @@ contains
         integer(c_int)          :: ierr
         call mlxf_enter('mlx_buffer_size')
         n = -1_int64
-        v = vector_of(arrays, 'mlx_buffer_size')
+        v = mlxf_vector_of(arrays, 'mlx_buffer_size')
         bytes = 0
         ierr = mlxc_eval(v)
         if( ierr == 0 ) ierr = mlxc_get_array_buffer_size(bytes, v)

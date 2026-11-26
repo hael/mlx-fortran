@@ -22,16 +22,19 @@ abstract interface
         type(mlx_array), intent(in) :: a
         type(mlx_array) :: r
     end function array_unary
+
     function real_predicate( x ) result(p)
         import :: real64
         real(real64), intent(in) :: x
         logical :: p
     end function real_predicate
+
     function array_binary( a, b ) result(r)
         import :: mlx_array
         type(mlx_array), intent(in) :: a, b
         type(mlx_array) :: r
     end function array_binary
+
     function integer_binary( x, y ) result(z)
         import :: int64
         integer(int64), intent(in) :: x, y

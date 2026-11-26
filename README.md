@@ -172,11 +172,11 @@ failure on any skip or editor side effect; its log names the commit, the toolcha
 | --- | --- |
 | `src/defs/` | `mlxf_defs`: constants and vocabularies more than one module uses |
 | `src/core/` | the Fortran layer, by capability: `runtime/`, `array/`, `ops/`, `linalg/`, `fft/`, `compile/`, `transforms/`, `fast/`, `random/`, `io/`, `distributed/`; `mlxf.f90` is the user module |
-| `src/test/` | test infrastructure, the toys that mirror SIMPLE's classes (`polarft_calc`, `eul_prob_tab`, `projector`, `reconstructor_pcg`), their oracles and benchmarks, built only with tests |
+| `src/test/` | test-only code, built only with tests: `framework/` (assertions, the suite registry, the ABI probe), `toys/` (the toys that mirror SIMPLE's classes, `polarft_calc`, `eul_prob_tab`, `projector`, `reconstructor_pcg`, one folder per toy), `oracles/`, `bench/` |
 | `test/` | `mlxf_test_exec`, the one test executable, and the CTest entries |
 | `scripts/` | the static gate, the formatters, the compile helpers, the dependency build, the C-layer generator |
-| `build/gen/` | generated at build time: the `bind(c)` layer from the mlx-c headers that are linked |
-| `doc/` | the binding contract and other policies, plans, history, how-tos, compiler issues, questions for the MLX team |
+| `build/gen/` | generated at build time: the `bind(c)` layer from the mlx-c headers that are linked, and the C signature classes of `scripts/mlxc_signatures.txt` |
+| `doc/` | the binding contract and other policies, plans, history, how-tos, compiler issues, questions for the MLX team; `doc/code_base_map.md`, every directory and Fortran file with its description |
 
 ## License
 

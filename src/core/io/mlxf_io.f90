@@ -5,8 +5,6 @@
 module mlxf_io
 use, intrinsic :: iso_c_binding,   only: c_int, c_ptr, c_null_ptr, c_null_char, c_associated
 use, intrinsic :: iso_fortran_env, only: output_unit
-use mlxf_c_types,       only: mlxc_stream, mlxc_vector_array, mlxc_map_string_to_array, mlxc_map_string_to_string, &
-                              mlxc_map_string_to_string_iterator, mlxc_io_gguf, mlxc_node_namer
 use mlxf_c_graph_utils, only: mlxc_node_namer_new, mlxc_node_namer_free, mlxc_print_graph, mlxc_export_to_dot
 use mlxf_c_io,          only: mlxc_load, mlxc_save, mlxc_load_safetensors, mlxc_save_safetensors, mlxc_load_gguf, &
                               mlxc_save_gguf
@@ -16,18 +14,46 @@ use mlxf_c_map,         only: mlxc_map_string_to_array_new, mlxc_map_string_to_a
                               mlxc_map_string_to_string_free, mlxc_map_string_to_string_insert, &
                               mlxc_map_string_to_string_iterator_new, mlxc_map_string_to_string_iterator_next, &
                               mlxc_map_string_to_string_iterator_free
+use mlxf_c_signatures,  only: mlxc_load_op
 use mlxf_c_stream,      only: mlxc_stream_free
+use mlxf_c_types,       only: mlxc_stream, mlxc_vector_array, mlxc_map_string_to_array, mlxc_map_string_to_string, &
+                              mlxc_map_string_to_string_iterator, mlxc_io_gguf, mlxc_node_namer
 use mlxf_c_vector,      only: mlxc_vector_array_new, mlxc_vector_array_free
 use mlxf_defs,          only: MLXF_MAP_END
-use mlxf_array,         only: mlx_array, mlx_is_live, mlxf_handle, mlxf_load_op, mlxf_map_arrays, mlxf_gguf_arrays, &
-                              mlxf_cpu_stream, mlxf_vector_export
+use mlxf_array,         only: mlx_array, mlx_is_live, mlxf_handle, mlxf_vector_export
 use mlxf_device,        only: mlxf_require_device
 use mlxf_error,         only: mlxf_check, mlxf_report
 use mlxf_libc,          only: c_fopen, c_fclose, c_dup, c_fdopen, c_string_copy
+use mlxf_calls,         only: mlxf_cpu_stream
 implicit none
 public :: mlx_save, mlx_load, mlx_save_safetensors, mlx_load_safetensors, mlx_save_gguf, mlx_load_gguf, mlx_print_graph, &
     &mlx_export_to_dot
 private
+
+! the signature helpers of the io procedures, implemented in mlxf_io_calls
+interface
+    ! int f(mlx_array* res, const char* file, const mlx_stream s)
+    module subroutine mlxf_load_op( r, f, file, proc, status )
+        type(mlx_array),   intent(inout) :: r
+        procedure(mlxc_load_op)          :: f
+        character(len=*),  intent(in)    :: file, proc
+        integer, optional, intent(out)   :: status
+    end subroutine mlxf_load_op
+
+    module subroutine mlxf_map_arrays( names, arrays, m, status )
+        character(len=:),               allocatable, intent(out) :: names(:)
+        type(mlx_array),                allocatable, intent(out) :: arrays(:)
+        type(mlxc_map_string_to_array), intent(in)               :: m
+        integer,                        intent(out)              :: status
+    end subroutine mlxf_map_arrays
+
+    module subroutine mlxf_gguf_arrays( names, arrays, g, status )
+        character(len=:),   allocatable, intent(out) :: names(:)
+        type(mlx_array),    allocatable, intent(out) :: arrays(:)
+        type(mlxc_io_gguf), intent(in)               :: g
+        integer,            intent(out)              :: status
+    end subroutine mlxf_gguf_arrays
+end interface
 
 contains
 

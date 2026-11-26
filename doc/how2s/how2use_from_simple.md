@@ -72,14 +72,14 @@ target from the existing SIMPLE build. This guide establishes the generic packag
 
 ## The shape an integration takes
 
-The toys under `src/test/` model the file layout a SIMPLE class has once it can run on MLX
+The toys under `src/test/toys/` model the file layout a SIMPLE class has once it can run on MLX
 ([toy example policy](../policies/toy_example_policy.md), section 8): host files that import no MLX name, a glue
 submodule `<unit>_mlx` beside each host unit that crosses to the device (its body under `#ifdef USE_MLX`, stubs
 under `#else`), device modules behind one opaque component, and a backend chosen at `new`. The tables below are
 the record an integration reads: what each toy file stands for in SIMPLE (read at `d354efee2`), and what each
 mirrored host procedure gained. `scripts/toy_seam.txt` and `scripts/toy_mirror.txt` are the checked lists.
 
-| Toy file (`src/test/`) | Class | Stands for in SIMPLE |
+| Toy file (`src/test/toys/`) | Class | Stands for in SIMPLE |
 | --- | --- | --- |
 | `mlxf_toy_device_work.f90` | host | a new module: the abstract type a class holds its device state as |
 | `mlxf_toy_polarft_calc.f90` | host | `src/main/pftc/simple_polarft_calc.f90`, which gains the component `ws(:)`, the member `l_mlx` and the "MLX" interface block |

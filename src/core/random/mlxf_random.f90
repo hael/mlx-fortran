@@ -6,18 +6,21 @@
 module mlxf_random
 use, intrinsic :: iso_c_binding,   only: c_int64_t
 use, intrinsic :: iso_fortran_env, only: int32, int64, real32
-use mlxf_c_random, only: mlxc_random_seed, mlxc_random_key, mlxc_random_split, mlxc_random_split_num, mlxc_random_bits, &
-                         mlxc_random_uniform, mlxc_random_normal, mlxc_random_normal_broadcast, mlxc_random_laplace, &
-                         mlxc_random_gumbel, mlxc_random_truncated_normal, mlxc_random_randint, mlxc_random_bernoulli, &
-                         mlxc_random_multivariate_normal, mlxc_random_categorical, mlxc_random_categorical_num_samples, &
-                         mlxc_random_categorical_shape, mlxc_random_permutation, mlxc_random_permutation_arange
-use mlxf_defs,     only: MLX_DTYPES, mlxf_random_spec
-use mlxf_array,    only: mlx_array, mlx_from, mlx_is_live, mlxf_check_dtype, mlxf_one_based, mlxf_int_op, mlxf_pair_op, &
-                         mlxf_random_key_op, mlxf_random_shape_op, mlxf_random_float_op, mlxf_random_int_op, &
-                         mlxf_random_array_op, mlxf_random_axis_op, mlxf_random_axis_shape_op, mlxf_random_axis_int_op, &
-                         mlxf_random_binary_op, mlxf_random_broadcast_op
-use mlxf_device,   only: mlxf_require_device
-use mlxf_error,    only: mlxf_check, mlxf_fail
+use mlxf_c_random,     only: mlxc_random_seed, mlxc_random_key, mlxc_random_split, mlxc_random_split_num, &
+                             mlxc_random_bits, mlxc_random_uniform, mlxc_random_normal, mlxc_random_normal_broadcast, &
+                             mlxc_random_laplace, mlxc_random_gumbel, mlxc_random_truncated_normal, &
+                             mlxc_random_randint, mlxc_random_bernoulli, mlxc_random_multivariate_normal, &
+                             mlxc_random_categorical, mlxc_random_categorical_num_samples, &
+                             mlxc_random_categorical_shape, mlxc_random_permutation, mlxc_random_permutation_arange
+use mlxf_c_signatures, only: mlxc_pair_op, mlxc_random_array_op, mlxc_random_axis_int_op, mlxc_random_axis_op, &
+                             mlxc_random_axis_shape_op, mlxc_random_binary_op, mlxc_random_broadcast_op, &
+                             mlxc_random_float_op, mlxc_random_int_op, mlxc_random_key_op, mlxc_random_shape_op
+use mlxf_defs,         only: MLX_DTYPES, mlxf_random_spec
+use mlxf_array,        only: mlx_array, mlx_is_live
+use mlxf_device,       only: mlxf_require_device
+use mlxf_error,        only: mlxf_check, mlxf_fail
+use mlxf_calls,        only: mlxf_check_dtype, mlxf_int_op, mlxf_one_based
+use mlxf_transfer,     only: mlx_from
 implicit none
 public :: mlx_random_seed, mlx_random_key, mlx_random_split, mlx_random_bits, mlx_random_uniform, mlx_random_normal, &
     &mlx_random_laplace, mlx_random_gumbel, mlx_random_truncated_normal, mlx_random_randint, mlx_random_bernoulli, &
@@ -43,6 +46,112 @@ end interface mlx_random_normal
 interface mlx_random_permutation
     module procedure random_permutation_array, random_permutation_count
 end interface mlx_random_permutation
+
+! the signature helpers of the random procedures, implemented in mlxf_random_calls
+interface
+    ! int f(mlx_array* res_0, mlx_array* res_1, const mlx_array a, const mlx_stream s)
+    module subroutine mlxf_pair_op( r, f, a, proc )
+        type(mlx_array),  intent(inout) :: r(2)
+        procedure(mlxc_pair_op)         :: f
+        type(mlx_array),  intent(in)    :: a
+        character(len=*), intent(in)    :: proc
+    end subroutine mlxf_pair_op
+
+    ! int f(mlx_array* res, uint64_t seed)
+    module subroutine mlxf_random_key_op( r, f, seed, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_random_key_op)   :: f
+        integer(int64),   intent(in)    :: seed
+        character(len=*), intent(in)    :: proc
+    end subroutine mlxf_random_key_op
+
+    ! int f(mlx_array* res, const int* shape, size_t shape_num, int number, const mlx_array key, const mlx_stream s)
+    module subroutine mlxf_random_shape_op( r, f, a, option, proc )
+        type(mlx_array),        intent(inout) :: r
+        procedure(mlxc_random_shape_op)       :: f
+        type(mlx_array),        intent(in)    :: a(1)
+        type(mlxf_random_spec), intent(in)    :: option
+        character(len=*),       intent(in)    :: proc
+    end subroutine mlxf_random_shape_op
+
+    ! int f(mlx_array* res, const int* shape, size_t shape_num, mlx_dtype dtype, float loc, float scale,
+    ! const mlx_array key, const mlx_stream s)
+    module subroutine mlxf_random_float_op( r, f, a, option, proc )
+        type(mlx_array),        intent(inout) :: r
+        procedure(mlxc_random_float_op)       :: f
+        type(mlx_array),        intent(in)    :: a(1)
+        type(mlxf_random_spec), intent(in)    :: option
+        character(len=*),       intent(in)    :: proc
+    end subroutine mlxf_random_float_op
+
+    ! int f(mlx_array* res, int x, const mlx_array key, const mlx_stream s)
+    module subroutine mlxf_random_int_op( r, f, a, option, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_random_int_op)   :: f
+        type(mlx_array),  intent(in)    :: a(1)
+        integer,          intent(in)    :: option
+        character(len=*), intent(in)    :: proc
+    end subroutine mlxf_random_int_op
+
+    ! int f(mlx_array* res, const mlx_array p, const int* shape, size_t shape_num, const mlx_array key,
+    ! const mlx_stream s)
+    module subroutine mlxf_random_array_op( r, f, a, option, proc )
+        type(mlx_array),        intent(inout) :: r
+        procedure(mlxc_random_array_op)       :: f
+        type(mlx_array),        intent(in)    :: a(2)
+        type(mlxf_random_spec), intent(in)    :: option
+        character(len=*),       intent(in)    :: proc
+    end subroutine mlxf_random_array_op
+
+    ! int f(mlx_array* res, const mlx_array x, int axis, const mlx_array key, const mlx_stream s)
+    module subroutine mlxf_random_axis_op( r, f, a, option, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_random_axis_op)  :: f
+        type(mlx_array),  intent(in)    :: a(2)
+        integer,          intent(in)    :: option
+        character(len=*), intent(in)    :: proc
+    end subroutine mlxf_random_axis_op
+
+    ! int f(mlx_array* res, const mlx_array logits, int axis, const int* shape, size_t shape_num,
+    ! const mlx_array key, const mlx_stream s)
+    module subroutine mlxf_random_axis_shape_op( r, f, a, option, proc )
+        type(mlx_array),        intent(inout) :: r
+        procedure(mlxc_random_axis_shape_op)  :: f
+        type(mlx_array),        intent(in)    :: a(2)
+        type(mlxf_random_spec), intent(in)    :: option
+        character(len=*),       intent(in)    :: proc
+    end subroutine mlxf_random_axis_shape_op
+
+    ! int f(mlx_array* res, const mlx_array logits, int axis, int num_samples, const mlx_array key,
+    ! const mlx_stream s)
+    module subroutine mlxf_random_axis_int_op( r, f, a, option, proc )
+        type(mlx_array),        intent(inout) :: r
+        procedure(mlxc_random_axis_int_op)    :: f
+        type(mlx_array),        intent(in)    :: a(2)
+        type(mlxf_random_spec), intent(in)    :: option
+        character(len=*),       intent(in)    :: proc
+    end subroutine mlxf_random_axis_int_op
+
+    ! int f(mlx_array* res, const mlx_array a, const mlx_array b, const int* shape, size_t shape_num,
+    ! mlx_dtype dtype, const mlx_array key, const mlx_stream s)
+    module subroutine mlxf_random_binary_op( r, f, a, option, proc )
+        type(mlx_array),        intent(inout) :: r
+        procedure(mlxc_random_binary_op)      :: f
+        type(mlx_array),        intent(in)    :: a(3)
+        type(mlxf_random_spec), intent(in)    :: option
+        character(len=*),       intent(in)    :: proc
+    end subroutine mlxf_random_binary_op
+
+    ! int f(mlx_array* res, const int* shape, size_t shape_num, mlx_dtype dtype, const mlx_array loc,
+    ! const mlx_array scale, const mlx_array key, const mlx_stream s)
+    module subroutine mlxf_random_broadcast_op( r, f, a, option, proc )
+        type(mlx_array),        intent(inout) :: r
+        procedure(mlxc_random_broadcast_op)   :: f
+        type(mlx_array),        intent(in)    :: a(3)
+        type(mlxf_random_spec), intent(in)    :: option
+        character(len=*),       intent(in)    :: proc
+    end subroutine mlxf_random_broadcast_op
+end interface
 
 contains
 

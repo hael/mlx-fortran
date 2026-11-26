@@ -7,8 +7,8 @@
 - Homebrew: `brew install gcc cmake` (GFortran 14 or newer; the scripts pick the newest `gfortran-1x`).
   Tested: GNU Fortran 16.2.0, the whole tree; 14.4.0 (`brew install gcc@14`) builds the library without a
   warning and passes the installed-consumer check, but not the test executable (a `-Wuninitialized` false
-  positive in `src/test/mlxf_bench_polar_table.f90` and a submodule's own procedures it does not link in
-  `src/test/mlxf_toy_reconstructor_pcg_tester_solve.f90`), so the CI's oldest leg is 15 (`gcc@15`).
+  positive in `src/test/bench/mlxf_bench_polar_table.f90` and a submodule's own procedures it does not link in
+  `src/test/toys/recon/mlxf_toy_reconstructor_pcg_tester_solve.f90`), so the CI's oldest leg is 15 (`gcc@15`).
 - `pkg-config` (`brew install pkgconf`) for `scripts/check_install.sh`.
 
 ## 2. MLX and mlx-c

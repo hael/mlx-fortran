@@ -76,7 +76,7 @@ is imported is how Fortran is written, built, tested, checked, documented and ha
   rejection). A named constant, a vocabulary or a behaviourless record that another module imports lives in
   `src/defs/`; one used only inside its module stays there, and a move happens on export, never in
   anticipation. One defs module, `mlxf_defs`, while the library is one bounded context; a test constant that
-  several test modules share goes to `src/test/mlxf_test_defs.f90` when the first one appears. **Adopt
+  several test modules share goes to `src/test/framework/mlxf_test_defs.f90` when the first one appears. **Adopt
   (XEMA): defs modules are public by default** (no visibility statement), **adapted** for an installed
   library: every name a defs module imports (the `MLXC_*` codes its vocabularies are built from) is listed in
   a `private ::` statement, so that its `.mod` re-exports nothing. Defs modules hold no procedures and import

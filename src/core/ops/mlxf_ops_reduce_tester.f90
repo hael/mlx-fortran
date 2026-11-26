@@ -42,6 +42,7 @@ abstract interface
         type(reduce_form), intent(in) :: form
         type(mlx_array) :: r
     end function array_reduce
+
     ! the oracle of the elements x a function takes together: one value, or one per element for a scan
     subroutine block_oracle( x, y )
         import :: real64

@@ -50,44 +50,55 @@ interface
     module subroutine test_solve_small( fx )
         type(recon_fixture), intent(in) :: fx
     end subroutine test_solve_small
+
     module subroutine test_solve_n32( fx )
         type(recon_fixture), intent(in) :: fx
     end subroutine test_solve_n32
+
     module subroutine test_repeatability( fx )
         type(recon_fixture), intent(in) :: fx
     end subroutine test_repeatability
+
     module subroutine test_history_controls( fx )
         type(recon_fixture), intent(in) :: fx
     end subroutine test_history_controls
+
     module function tol( name ) result(t)
         character(len=*), intent(in) :: name
         real(real64) :: t
     end function tol
+
     module subroutine make_fixture( n, mskrad, seed, fx )
         integer,             intent(in)    :: n, seed
         real(real64),        intent(in)    :: mskrad
         type(recon_fixture), intent(inout) :: fx
     end subroutine make_fixture
+
     module subroutine assemble( fx, rec )
         type(recon_fixture),     intent(in)    :: fx
         type(reconstructor_pcg), intent(inout) :: rec
     end subroutine assemble
+
     module function fixed_volume( n, k ) result(v)
         integer, intent(in) :: n, k
         real(real32) :: v(n, n, n)
     end function fixed_volume
+
     module function rel2( a, ref ) result(e)
         real(real64), intent(in) :: a(:), ref(:)
         real(real64) :: e
     end function rel2
+
     module subroutine report( label, fx, err, limit )
         character(len=*),    intent(in) :: label
         type(recon_fixture), intent(in) :: fx
         real(real64),        intent(in) :: err, limit
     end subroutine report
+
     module function device_name_now() result(name)
         character(len=:), allocatable :: name
     end function device_name_now
+
     ! the device forms of the operator, by the operator the reconstructor hands out (get_pcg_operator): the
     ! product H x (P H P with a support), the preconditioner's product and the device half of the inner product
     ! (the partial sums of the lines), each on device vectors and unevaluated
@@ -96,11 +107,13 @@ interface
         type(mlx_array),                 intent(in)    :: x
         type(mlx_array) :: y
     end function device_apply
+
     module function device_precond( rec, r ) result(z)
         type(reconstructor_pcg), target, intent(inout) :: rec
         type(mlx_array),                 intent(in)    :: r
         type(mlx_array) :: z
     end function device_precond
+
     module function device_dot( rec, a, b ) result(d)
         type(reconstructor_pcg), target, intent(inout) :: rec
         type(mlx_array),                 intent(in)    :: a, b

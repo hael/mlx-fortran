@@ -58,6 +58,7 @@ use mlxf_bench_polar_table,            only: run_bench_polar_table
 use mlxf_bench_recon_pcg,              only: run_bench_recon_pcg
 use mlxf_bench_projector,              only: run_bench_projector
 use mlxf_bench_insert_probe,           only: run_bench_insert_probe
+use mlxf_bench_blas,                   only: run_bench_blas
 use mlxf_test_utils,                   only: begin_test_suite, end_test_suite
 implicit none
 private
@@ -72,8 +73,8 @@ end interface
 character(len=*), parameter :: AREAS(12) = [character(len=16) :: 'core', 'array', 'ops', 'linalg', 'fft', 'compile', &
     &'transforms', 'fast', 'random', 'io', 'distributed', 'kernels']
 ! the measure-only benchmarks, run by hand (never by CTest): mlxf_test_exec test=bench_<x> suite=<mode>
-character(len=*), parameter :: BENCHES(4) = [character(len=32) :: 'polar_table', 'recon_pcg', 'projector', &
-    &'insert_probe']
+character(len=*), parameter :: BENCHES(5) = [character(len=32) :: 'polar_table', 'recon_pcg', 'projector', &
+    &'insert_probe', 'blas']
 ! sub-suites an area runs only when suite= names them (too costly for the fast gate)
 character(len=*), parameter :: NAMED_ONLY(4) = [character(len=32) :: 'recovery_half', 'polar_shiftmap_accuracy', &
     &'reconstructor_pcg_n32', 'distributed_ring']
@@ -231,6 +232,8 @@ contains
                 call run_bench_projector(mode, found)
             case('insert_probe')
                 call run_bench_insert_probe(mode, found)
+            case('blas')
+                call run_bench_blas(mode, found)
         end select
     end subroutine run_bench
 

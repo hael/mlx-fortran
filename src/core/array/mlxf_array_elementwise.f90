@@ -1,93 +1,12 @@
-!@descr: unary and binary signature helpers, weak scalars, arithmetic, comparisons, boolean operators and exp
+!@descr: the operators of mlx_array: arithmetic, powers, comparisons, boolean operators, unary signs, and exp
 submodule (mlxf_array) mlxf_array_elementwise
-use, intrinsic :: iso_c_binding, only: c_float
-use mlxf_c_types,  only: MLXC_FLOAT64, MLXC_COMPLEX64, MLXC_FLOAT16, MLXC_BFLOAT16
-use mlxf_c_array,  only: mlxc_array_free, mlxc_array_new_float32, mlxc_array_new_float64, mlxc_array_new_complex, &
-                         mlxc_array_dtype, mlxc_array_new
-use mlxf_c_ops,    only: mlxc_add, mlxc_subtract, mlxc_multiply, mlxc_divide, mlxc_less, mlxc_less_equal, mlxc_greater, &
-                         mlxc_greater_equal, mlxc_equal, mlxc_not_equal, mlxc_logical_and, mlxc_logical_or, &
-                         mlxc_negative, mlxc_logical_not, mlxc_exp, mlxc_astype
-use mlxf_c_stream, only: mlxc_stream_free
-use mlxf_error,    only: mlxf_check
-use mlxf_device,   only: mlxf_require_device, mlxf_default_stream
+use mlxf_c_ops, only: mlxc_add, mlxc_subtract, mlxc_multiply, mlxc_divide, mlxc_less, mlxc_less_equal, mlxc_greater, &
+                      mlxc_greater_equal, mlxc_equal, mlxc_not_equal, mlxc_logical_and, mlxc_logical_or, mlxc_negative, &
+                      mlxc_logical_not, mlxc_exp, mlxc_logical_xor, mlxc_positive, mlxc_power
+use mlxf_calls, only: mlxf_binary, mlxf_unary, mlxf_weak_scalar
 implicit none
 
 contains
-
-    ! r = f(a) on the default device, for every int f(mlx_array* res, const mlx_array a, const mlx_stream s)
-    module subroutine mlxf_unary( r, f, a, proc )
-        type(mlx_array),  intent(inout) :: r
-        procedure(mlxc_unary_op)        :: f
-        type(mlx_array),  intent(in)    :: a
-        character(len=*), intent(in)    :: proc
-        type(mlxc_array)  :: res, ha
-        type(mlxc_stream) :: s
-        integer(c_int)    :: ierr
-        call mlxf_require_device(proc)
-        ha   = mlxf_handle(a, proc)
-        res  = mlxc_array_new()
-        s    = mlxf_default_stream(proc)
-        ierr = f(res, ha, s)
-        call mlxf_check(mlxc_stream_free(s), proc)
-        if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
-        call mlxf_check(ierr, proc)
-        call adopt(r, res, proc)
-    end subroutine mlxf_unary
-
-    ! r = f(a, b) on the default device, for every int f(mlx_array* res, const mlx_array a, const mlx_array b,
-    ! const mlx_stream s)
-    module subroutine mlxf_binary( r, f, a, b, proc )
-        type(mlx_array),  intent(inout) :: r
-        procedure(mlxc_binary_op)       :: f
-        type(mlx_array),  intent(in)    :: a, b
-        character(len=*), intent(in)    :: proc
-        type(mlxc_array)  :: res, ha, hb
-        type(mlxc_stream) :: s
-        integer(c_int)    :: ierr
-        call mlxf_require_device(proc)
-        ha   = mlxf_handle(a, proc)
-        hb   = mlxf_handle(b, proc)
-        res  = mlxc_array_new()
-        s    = mlxf_default_stream(proc)
-        ierr = f(res, ha, hb, s)
-        call mlxf_check(mlxc_stream_free(s), proc)
-        if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
-        call mlxf_check(ierr, proc)
-        call adopt(r, res, proc)
-    end subroutine mlxf_binary
-
-    ! a Fortran scalar as a 0-d array of a's kind: weak, so it never changes the result's kind (float32
-    ! with integer and boolean arrays). A 0-d array is not weak in MLX: a float32 one would promote a half
-    ! array to float32, so a half array's scalar is made in its own dtype (rounded through float32)
-    module subroutine mlxf_weak_scalar( r, a, x, proc )
-        type(mlx_array),  intent(inout) :: r
-        type(mlx_array),  intent(in)    :: a
-        real(real64),     intent(in)    :: x
-        character(len=*), intent(in)    :: proc
-        type(mlxc_array)  :: h, res
-        type(mlxc_stream) :: s
-        integer(c_int)    :: dtype, ierr
-        call mlxf_require_device(proc)
-        dtype = mlxc_array_dtype(mlxf_handle(a, proc))
-        select case( dtype )
-            case( MLXC_FLOAT64 )
-                call adopt(r, mlxc_array_new_float64(real(x, c_double)), proc)
-            case( MLXC_COMPLEX64 )
-                call adopt(r, mlxc_array_new_complex(real(x, c_float), 0._c_float), proc)
-            case( MLXC_FLOAT16, MLXC_BFLOAT16 )
-                h = mlxc_array_new_float32(real(x, c_float))
-                res = mlxc_array_new()
-                s = mlxf_default_stream(proc)
-                ierr = mlxc_astype(res, h, dtype, s)
-                call mlxf_check(mlxc_stream_free(s), proc)
-                call mlxf_check(mlxc_array_free(h), proc)
-                if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
-                call mlxf_check(ierr, proc)
-                call adopt(r, res, proc)
-            case default
-                call adopt(r, mlxc_array_new_float32(real(x, c_float)), proc)
-        end select
-    end subroutine mlxf_weak_scalar
 
     module function add_aa( lhs, rhs ) result(r)
         class(mlx_array), intent(in) :: lhs, rhs
@@ -504,5 +423,64 @@ contains
         type(mlx_array) :: r
         call mlxf_unary(r, mlxc_exp, a, 'exp')
     end function exp_array
+
+    ! unary plus: a new node with a's values
+    module function pos_array( a ) result(r)
+        class(mlx_array), intent(in) :: a
+        type(mlx_array) :: r
+        call mlxf_unary(r, mlxc_positive, a, 'operator(+)')
+    end function pos_array
+
+    ! lhs**rhs elementwise; a scalar operand is weak and takes the array's kind
+    module function pow_aa( lhs, rhs ) result(r)
+        class(mlx_array), intent(in) :: lhs, rhs
+        type(mlx_array) :: r
+        call mlxf_binary(r, mlxc_power, lhs, rhs, 'operator(**)')
+    end function pow_aa
+
+    module function pow_as( lhs, rhs ) result(r)
+        class(mlx_array), intent(in) :: lhs
+        real(real32),     intent(in) :: rhs
+        type(mlx_array) :: r, s
+        call mlxf_weak_scalar(s, lhs, real(rhs, real64), 'operator(**)')
+        call mlxf_binary(r, mlxc_power, lhs, s, 'operator(**)')
+    end function pow_as
+
+    module function pow_sa( lhs, rhs ) result(r)
+        real(real32),     intent(in) :: lhs
+        class(mlx_array), intent(in) :: rhs
+        type(mlx_array) :: r, s
+        call mlxf_weak_scalar(s, rhs, real(lhs, real64), 'operator(**)')
+        call mlxf_binary(r, mlxc_power, s, rhs, 'operator(**)')
+    end function pow_sa
+
+    module function pow_ad( lhs, rhs ) result(r)
+        class(mlx_array), intent(in) :: lhs
+        real(real64),     intent(in) :: rhs
+        type(mlx_array) :: r, s
+        call mlxf_weak_scalar(s, lhs, rhs, 'operator(**)')
+        call mlxf_binary(r, mlxc_power, lhs, s, 'operator(**)')
+    end function pow_ad
+
+    module function pow_da( lhs, rhs ) result(r)
+        real(real64),     intent(in) :: lhs
+        class(mlx_array), intent(in) :: rhs
+        type(mlx_array) :: r, s
+        call mlxf_weak_scalar(s, rhs, lhs, 'operator(**)')
+        call mlxf_binary(r, mlxc_power, s, rhs, 'operator(**)')
+    end function pow_da
+
+    ! .eqv. and .neqv. of boolean arrays
+    module function eqv_aa( lhs, rhs ) result(r)
+        class(mlx_array), intent(in) :: lhs, rhs
+        type(mlx_array) :: r
+        call mlxf_binary(r, mlxc_equal, lhs, rhs, 'operator(.eqv.)')
+    end function eqv_aa
+
+    module function neqv_aa( lhs, rhs ) result(r)
+        class(mlx_array), intent(in) :: lhs, rhs
+        type(mlx_array) :: r
+        call mlxf_binary(r, mlxc_logical_xor, lhs, rhs, 'operator(.neqv.)')
+    end function neqv_aa
 
 end submodule mlxf_array_elementwise

@@ -25,16 +25,19 @@ abstract interface
         type(mlx_array), intent(in) :: a
         type(mlx_array) :: r
     end function array_unary
+
     function real_unary( x ) result(y)
         import :: real64
         real(real64), intent(in) :: x
         real(real64) :: y
     end function real_unary
+
     function array_binary( a, b ) result(r)
         import :: mlx_array
         type(mlx_array), intent(in) :: a, b
         type(mlx_array) :: r
     end function array_binary
+
     function real_binary( x, y ) result(z)
         import :: real64
         real(real64), intent(in) :: x, y

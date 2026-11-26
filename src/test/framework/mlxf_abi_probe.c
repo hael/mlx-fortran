@@ -1,4 +1,4 @@
-/* src/test/mlxf_abi_probe.c -- the ABI probe's echo functions (src/test/mlxf_abi_probe.h), compiled by Apple's
+/* src/test/framework/mlxf_abi_probe.c -- the ABI probe's echo functions (src/test/framework/mlxf_abi_probe.h), compiled by Apple's
  * clang, the compiler of mlx-c, into an object of mlxf_test_exec (test/CMakeLists.txt). The struct and enumerator
  * tables are written here from mlx-c's headers with C's own sizeof, _Alignof and offsetof, independently of the
  * generator; a name the generated layer has and these tables lack makes the probe fail until it is added.

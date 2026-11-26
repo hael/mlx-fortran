@@ -1,12 +1,12 @@
 !@descr: signature-class helpers of the fused layers: normalisations with optional weights, rotary embeddings, attention
-! An operand mlx-c may be given as null is an empty handle here (optional_handle). The layers act along MLX's
+! An operand mlx-c may be given as null is an empty handle here (mlxf_optional_handle). The layers act along MLX's
 ! last axes, which are Fortran's first dimensions, so nothing is translated but the options' types.
-submodule(mlxf_array) mlxf_array_fast
-use, intrinsic :: iso_c_binding, only: c_null_char, c_null_ptr, c_associated
-use mlxf_c_array,  only: mlxc_array_new, mlxc_array_free
-use mlxf_c_stream, only: mlxc_stream_free
-use mlxf_device,   only: mlxf_require_device, mlxf_default_stream
-use mlxf_error,    only: mlxf_check
+submodule(mlxf_fast) mlxf_fast_calls
+use, intrinsic :: iso_c_binding, only: c_float_kind => c_float
+use mlxf_c_array, only: mlxc_array_new, mlxc_array_free
+use mlxf_c_types, only: mlxc_array, mlxc_optional_float
+use mlxf_calls,   only: mlxf_optional_handle
+use mlxf_array,   only: mlxf_adopt, mlxf_handle
 implicit none
 
 contains
@@ -24,8 +24,8 @@ contains
         integer(c_int)    :: ierr
         call mlxf_require_device(proc)
         hx = mlxf_handle(a(1), proc)
-        hw = optional_handle(a(2), proc)
-        hb = optional_handle(a(3), proc)
+        hw = mlxf_optional_handle(a(2), proc)
+        hb = mlxf_optional_handle(a(3), proc)
         res = mlxc_array_new()
         s = mlxf_default_stream(proc)
         ierr = f(res, hx, hw, hb, real(option, c_float_kind), s)
@@ -45,7 +45,7 @@ contains
         integer(c_int)    :: ierr
         call mlxf_require_device(proc)
         hx = mlxf_handle(a(1), proc)
-        hw = optional_handle(a(2), proc)
+        hw = mlxf_optional_handle(a(2), proc)
         res = mlxc_array_new()
         s = mlxf_default_stream(proc)
         ierr = f(res, hx, hw, real(option, c_float_kind), s)
@@ -67,7 +67,7 @@ contains
         integer(c_int)            :: ierr
         call mlxf_require_device(proc)
         hx = mlxf_handle(a(1), proc)
-        hf = optional_handle(a(2), proc)
+        hf = mlxf_optional_handle(a(2), proc)
         base = rope_base(option, hf)
         res = mlxc_array_new()
         s = mlxf_default_stream(proc)
@@ -92,7 +92,7 @@ contains
         call mlxf_require_device(proc)
         hx = mlxf_handle(a(1), proc)
         ho = mlxf_handle(a(2), proc)
-        hf = optional_handle(a(3), proc)
+        hf = mlxf_optional_handle(a(3), proc)
         base = rope_base(option, hf)
         res = mlxc_array_new()
         s = mlxf_default_stream(proc)
@@ -121,7 +121,7 @@ contains
         hq = mlxf_handle(a(1), proc)
         hk = mlxf_handle(a(2), proc)
         hv = mlxf_handle(a(3), proc)
-        hm = optional_handle(a(4), proc)
+        hm = mlxf_optional_handle(a(4), proc)
         none%ctx = c_null_ptr
         mode = ''
         if( c_associated(hm%ctx) ) mode = 'array'
@@ -154,7 +154,7 @@ contains
         call mlxf_check(mlxc_stream_free(s), proc)
         if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
         call mlxf_check(ierr, proc)
-        call adopt(r, res, proc)
+        call mlxf_adopt(r, res, proc)
     end subroutine layer_done
 
-end submodule mlxf_array_fast
+end submodule mlxf_fast_calls

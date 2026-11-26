@@ -10,7 +10,8 @@ use mlxf,            only: mlx_array, mlx_function, mlx_compile, MLX_DEVICES, ML
                            mlx_default_device, mlx_set_default_device, exp, sum, sqrt, reshape, transpose, matmul, &
                            mlx_rfft, mlx_irfft
 use mlxf_registry,   only: registry_stale_releases
-use mlxf_array,      only: mlxf_handle, mlxf_unary
+use mlxf_array,      only: mlxf_handle
+use mlxf_calls,      only: mlxf_unary
 use mlxf_test_utils, only: assert_true, assert_int, bits_equal, test_devices, device_name, set_fixed_seed
 implicit none
 private

@@ -142,6 +142,14 @@ integer,      parameter :: OSMPL_PAD_FAC = 2
 real(real32), parameter :: KBALPHA       = real(OSMPL_PAD_FAC, real32)
 integer,      parameter :: MAXIMGBATCHSZ = 500
 
+! SIMPLE's polar block product (simple_polarft_block: cgemm('C', 'N', PFTC_BLOCK_NB, PFTC_BLOCK_NR, 2 nk)) at the
+! M5 cases' geometry (pftsz 182, k 2 to 62): the block of 16 particles' bins, the tile of 32 references, the 2 nk
+! rows and the pftsz + 1 rotations it is repeated over, restated for the BLAS crossover bench
+integer, parameter :: BLAS_POLAR_NB  = 16
+integer, parameter :: BLAS_POLAR_NR  = 32
+integer, parameter :: BLAS_POLAR_N2K = 122
+integer, parameter :: BLAS_POLAR_N1  = 183
+
 ! the forms of the polar projection's gather: the graph of library operations, the reference, the CPU path and the
 ! default; and the fused Metal kernel, GPU only
 type :: projector_forms

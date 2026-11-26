@@ -41,7 +41,7 @@ admission rules; `doc/architecture_principles.md`, section 7).
   OpenMP region), the test is a member of a guard group run by `mlxf_test_exec expect_aborts <group>`: each
   member in its own child process (`mlxf_test_exec guard=<member>`), accepted only with
   `MLXF_HARD_ERROR_STATUS`. Never a raw `WILL_FAIL`. A member is a row of the `GUARDS` table and a `case` of
-  `run_guard` in `src/test/mlxf_test_registry.f90`.
+  `run_guard` in `src/test/framework/mlxf_test_registry.f90`.
 - The intended stop is the last statement the child can reach, its fixture is proven by a passing sibling,
   and the verbose output is read once to confirm it dies at that guard.
 - Everything a checked procedure reports through `status` is tested in-process, not by aborting.
@@ -76,7 +76,7 @@ admission rules; `doc/architecture_principles.md`, section 7).
   `ctorexpr`), at most five dummy
   arguments (rule `arity`); no test pins a compiler defect (a compiler that fixes it must not fail the
   build): accept the conforming result too, and test a diagnosis through a bypass every compiler takes.
-- Register it with a `run_suite` row in `src/test/mlxf_test_registry.f90`; a new area also needs its
+- Register it with a `run_suite` row in `src/test/framework/mlxf_test_registry.f90`; a new area also needs its
   entry in `AREAS`, a `case` branch, the CTest list in `test/CMakeLists.txt` and the budget.
 - An import three or more tests share sits at module scope; one a single test needs stays inside that test.
 

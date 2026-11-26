@@ -16,7 +16,8 @@ What it does, and nothing else:
     parentheses, the keyword-argument form, is left as written);
   - `;` is followed by one space; `.not.` is followed by one space; a whitespace-only line is emptied;
   - a procedure statement's dummy list has a blank inside each parenthesis: `name( a, b )`;
-  - procedures under `contains` (not interface bodies) are separated by one blank line, added where none is;
+  - procedures under `contains` are separated by one blank line, added where none is, and so are the bodies
+    inside an `interface ... end interface` block (none before its `end interface`);
     a module-level `contains` has a blank line on each side, and a module-level `end type` or `end interface`
     one after it (except a type followed by a constant of that type);
   - a run of declarations at one indent has its attribute column and its `::`
@@ -370,20 +371,25 @@ AFTER_PROC = re.compile(r'^\s*(end\s*(module|submodule|program)\b|contains\b|#)'
 
 
 def separate_procedures(lines):
-    """one blank line after each procedure under contains that another statement or comment follows"""
-    out, in_interface = [], False
+    """one blank line after each procedure under contains, and after each interface body inside an interface
+    block, that another statement or comment of the same scope follows"""
+    out, depth = [], 0
     for k, line in enumerate(lines):
         out.append(line)
         flat = ''.join(t for is_s, t in split_code(line)[0] if not is_s)
         if INTERFACE.match(flat):
-            in_interface = True
+            depth += 1
         elif END_INTERFACE.match(flat):
-            in_interface = False
-        if in_interface or not END_PROC.match(flat.rstrip()) or k + 1 >= len(lines):
+            depth = max(0, depth - 1)
+        if not END_PROC.match(flat.rstrip()) or k + 1 >= len(lines):
             continue
         following = lines[k + 1]
-        if following.strip() and not AFTER_PROC.match(following):
-            out.append('')
+        if not following.strip() or AFTER_PROC.match(following):
+            continue
+        # the last body of an interface block is followed by its end interface, never a blank line
+        if depth and END_INTERFACE.match(following):
+            continue
+        out.append('')
     return out
 
 

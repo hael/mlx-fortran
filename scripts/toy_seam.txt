@@ -1,6 +1,6 @@
 # toy_seam.txt -- the seam ledger of the toys (doc/policies/toy_example_policy.md, "The integration shape").
 #
-# One line per mlxf_toy_* file of src/test that is not a tester: the file's stem and its class.
+# One line per mlxf_toy_* file of src/test/toys that is not a tester: the file's stem and its class.
 #     host     a parent, a host submodule or a driver: it imports no MLX name (not mlxf, a generated module or a
 #              device module) and compiles without the library
 #     glue     a submodule of a toy class named <host unit>_mlx, the only files of the class that import mlxf or a

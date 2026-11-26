@@ -3,7 +3,7 @@
 
 Three lists must agree, or a tester never runs and nothing reports it:
   - the areas of the CTest entries (set(MLXF_TEST_AREAS ...) in test/CMakeLists.txt),
-  - the areas of the registry (the AREAS table and the case() branches of src/test/mlxf_test_registry.f90),
+  - the areas of the registry (the AREAS table and the case() branches of src/test/framework/mlxf_test_registry.f90),
   - the tester entries: every run_all_<x>_tests a *_tester.f90 under src/ defines is called by exactly one
     run_suite row, and every row calls an entry that exists. Sub-suite names are unique within an area
     and at most 32 characters. Every name of the registry's NAMED_ONLY table (sub-suites run only when
@@ -52,7 +52,7 @@ def main():
     if not cmake_areas:
         problems.append("test/CMakeLists.txt: no set(MLXF_TEST_AREAS ...)")
 
-    reg_path = os.path.join(root, "src", "test", "mlxf_test_registry.f90")
+    reg_path = os.path.join(root, "src", "test", "framework", "mlxf_test_registry.f90")
     reg = code(reg_path)
     m = TABLE_RE.search("".join(reg))
     table_areas = re.findall(r"'(\w+)'", m.group(1)) if m else []

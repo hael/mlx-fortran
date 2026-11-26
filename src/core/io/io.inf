@@ -1,1 +1,1 @@
-arrays in files (npy, safetensors, GGUF), the text of a graph, and their round-trip tests
+!@descr: arrays in files (npy, safetensors, GGUF), the text of a graph, and their round-trip tests

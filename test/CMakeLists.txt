@@ -5,19 +5,19 @@
 # CTest entries. Its modules go to their own directory, so installing the library never installs one.
 #
 # Checks are free, processes are budgeted (XEMA): a CTest entry is an isolation unit, not an assertion.
-# Checks grow inside the existing area suites (src/test/mlxf_test_registry.f90); a new entry needs a
+# Checks grow inside the existing area suites (src/test/framework/mlxf_test_registry.f90); a new entry needs a
 # reason in its registration comment and raises MLXF_CTEST_BUDGET below, which configuration holds to the
 # registered count. The budget changes only with an owner decision or a plan that names the entry.
 # scripts/check_test_registry.py holds the areas here and in the registry to each other. The fast label as
 # a whole stays under 60 s of real time (scripts/run_fast_gate.sh); an entry above 0.5 s in Release says
 # why in its registration comment.
 
-# The ABI probe (unit_core, sub-suite abi): the interfaces of src/test/mlxf_abi_probe.h, generated with the library's
+# The ABI probe (unit_core, sub-suite abi): the interfaces of src/test/framework/mlxf_abi_probe.h, generated with the library's
 # mapping table into gen_test/ (never the library's gen/), and its echo functions compiled by Apple's clang, the
 # compiler of mlx-c, as an object of this executable: CMake's C compiler is GCC, whose ABI agrees with GNU Fortran's
 # by construction. Elsewhere than macOS the C compiler of the build stands in for Apple's clang.
-set(_probe_header "${PROJECT_SOURCE_DIR}/src/test/mlxf_abi_probe.h")
-set(_probe_c      "${PROJECT_SOURCE_DIR}/src/test/mlxf_abi_probe.c")
+set(_probe_header "${PROJECT_SOURCE_DIR}/src/test/framework/mlxf_abi_probe.h")
+set(_probe_c      "${PROJECT_SOURCE_DIR}/src/test/framework/mlxf_abi_probe.c")
 set(_probe_dir    "${PROJECT_BINARY_DIR}/gen_test")
 set(_probe_f90    "${_probe_dir}/mlxf_c_abi_probe.f90")
 set(_probe_obj    "${_probe_dir}/mlxf_abi_probe.o")
@@ -62,10 +62,22 @@ target_link_libraries(mlxf_test_exec PRIVATE mlxf mlxf_build_flags)
 if(MLXF_REQUIRE_GPU)
     target_compile_definitions(mlxf_test_exec PRIVATE MLXF_REQUIRE_GPU)
 endif()
-# USE_MLX: the glue submodules of the toys (src/test/mlxf_toy_*_mlx.f90) hold their bodies under it and stubs
+# USE_MLX: the glue submodules of the toys (src/test/toys/*/mlxf_toy_*_mlx.f90) hold their bodies under it and stubs
 # beside them, as SIMPLE holds a device body under USE_OPENMP_OFFLOAD. This executable always has MLX; the project
 # test/offstate compiles the same files without the definition and without the library.
 target_compile_definitions(mlxf_test_exec PRIVATE USE_MLX)
+# The BLAS crossover bench (test=bench_blas) times the host's sgemm and cgemm through CBLAS. On macOS the system's
+# BLAS is Accelerate, linked to this executable only, never to the library; elsewhere, or when it is not found,
+# MLXF_HAVE_BLAS stays undefined and the bench's host route is Fortran's matmul.
+if(APPLE)
+    set(BLA_VENDOR Apple)
+    find_package(BLAS QUIET)
+    if(BLAS_FOUND)
+        # as a link flag: the framework's path as a library would add -F, a C option, to the Fortran compiles
+        target_link_libraries(mlxf_test_exec PRIVATE "-framework Accelerate")
+        target_compile_definitions(mlxf_test_exec PRIVATE MLXF_HAVE_BLAS)
+    endif()
+endif()
 install(TARGETS mlxf_test_exec RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
 set(MLXF_TEST_RUNS_DIR "${PROJECT_BINARY_DIR}/test_runs")

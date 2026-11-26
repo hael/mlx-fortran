@@ -100,7 +100,7 @@ points of section 7 the same day.
 
 Milestone 1's kernels predated this policy: they modelled a GPU workspace beside SIMPLE's calculator, under
 their own names (`polar_table`, `score`, `prepare_maps`, `score_maps`). The roadmap's rank 0b refactored them
-(run `mlxf_toy_arch`, 2026-11-24): the polar toy is now `polarft_calc` (`src/test/mlxf_toy_polarft_calc.f90`
+(run `mlxf_toy_arch`, 2026-11-24): the polar toy is now `polarft_calc` (`src/test/toys/polar/mlxf_toy_polarft_calc.f90`
 with its submodules `_core`, `_memo`, `_block`, `_shiftmap`), its GPU workspace `polarft_workspace`
 (`mlxf_toy_polarft_workspace.f90` and its submodules) and the driver `eul_prob_tab`
 (`mlxf_toy_eul_prob_tab.f90`). No code is exempt any more: the ledger `scripts/toy_mirror.txt` lists every

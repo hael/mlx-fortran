@@ -1,8 +1,8 @@
-/* src/test/mlxf_abi_probe.h -- the ABI probe of the generated bind(c) layer: echo functions in mlx-c's own types.
+/* src/test/framework/mlxf_abi_probe.h -- the ABI probe of the generated bind(c) layer: echo functions in mlx-c's own types.
  *
  * scripts/gen_mlxc_bindings.py --probe writes the Fortran interfaces of these prototypes with the mapping table
- * that writes the library's (build/gen_test/mlxf_c_abi_probe.f90); src/test/mlxf_abi_probe.c implements them,
- * compiled by Apple's clang, the compiler of mlx-c; src/test/mlxf_abi_tester.f90 calls them (unit_core, suite abi).
+ * that writes the library's (build/gen_test/mlxf_c_abi_probe.f90); src/test/framework/mlxf_abi_probe.c implements them,
+ * compiled by Apple's clang, the compiler of mlx-c; src/test/framework/mlxf_abi_tester.f90 calls them (unit_core, suite abi).
  * Each function returns what it received, so a Fortran interface whose type or passing mode differs from C's reads
  * back something else. Every class of argument and result of the generated layer appears at least once; int, bool,
  * float, double and the three optional pairs both in a register and on the stack (after eight integer and eight

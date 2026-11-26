@@ -63,7 +63,7 @@ contains
     ! makes a the owner of a new MLX object h (count 1); h with a null ctx is the failure of the call made it.
     ! A failure stops, or with status returns it, a empty and h still the caller's to free (the closure
     ! trampolines take that path, since they must not stop)
-    module subroutine adopt( a, h, proc, status )
+    module subroutine mlxf_adopt( a, h, proc, status )
         type(mlx_array),   intent(inout) :: a
         type(mlxc_array),  intent(in)    :: h
         character(len=*),  intent(in)    :: proc
@@ -79,7 +79,7 @@ contains
         if( serial == 0_int64 ) return
         a%h      = h
         a%serial = serial
-    end subroutine adopt
+    end subroutine mlxf_adopt
 
     ! the MLX handle of a live array: stops on an empty array or a stale copy. A check, not an entry: every
     ! caller has entered (the static rule entry holds each public procedure to it)
@@ -99,6 +99,12 @@ contains
         mlx_is_live = .false.
         if( c_associated(a%h%ctx) ) mlx_is_live = registry_is_live(key_of(a%h), a%serial)
     end function mlx_is_live
+
+    ! whether a holds no MLX object (declared, never assigned, or killed); a stale copy is not empty
+    module pure logical function mlxf_is_empty( a )
+        class(mlx_array), intent(in) :: a
+        mlxf_is_empty = .not. c_associated(a%h%ctx)
+    end function mlxf_is_empty
 
     module function array_shape( self ) result(s)
         class(mlx_array), intent(in) :: self

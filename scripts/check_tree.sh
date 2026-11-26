@@ -5,7 +5,9 @@
 #     scripts/check_tree.sh [PYTHON]        (default: python3)
 #
 # Runs, and fails on the first that fails:
-#   check_descr.py              one leading !@descr: line and at most one module or submodule per file
+#   check_descr.py              one leading !@descr: line and at most one module or submodule per file; a
+#                               described <dir>.inf in every source directory
+#   generate_codeoverview.py    --check: doc/code_base_map.md matches the !@descr: lines and the .inf files
 #   check_rules.py              the rules reading can check (layout, inf, surface, cbind, libc, reexport,
 #                               cbstop, prints, state, arity, ctorcall, ctorexpr, entry, defs, findpkg, parity, mirror,
 #                               nanmax, cmakeroot, fortlsoff, devquery, docex, cbsig, handle), with ledgers
@@ -36,6 +38,7 @@ run() {
     rm -f "$tmp"
 }
 run scripts/check_descr.py "$ROOT"
+run scripts/generate_codeoverview.py --check
 run scripts/check_rules.py
 run scripts/check_test_registry.py "$ROOT"
 run scripts/check_guide_imports.py "$ROOT"

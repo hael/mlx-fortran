@@ -1,1 +1,1 @@
-!@descr: the hand-written Fortran layer: mlxf with runtime/, array/, ops/, linalg/, fft/ and compile/ capability folders
+!@descr: the hand-written Fortran layer: mlxf with the capability folders runtime/, array/, ops/, linalg/, fft/, compile/, transforms/, random/, fast/, io/ and distributed/

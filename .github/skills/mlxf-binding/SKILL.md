@@ -32,18 +32,19 @@ its one mapping table.
 - `int f(mlx_array* res, const mlx_array a, const mlx_stream s)`: `call mlxf_unary(r, mlxc_<name>, a, proc)`.
 - `int f(mlx_array* res, const mlx_array a, const mlx_array b, const mlx_stream s)`:
   `call mlxf_binary(r, mlxc_<name>, a, b, proc)`.
-- Added classes in `mlxf_array_operations`: `mlxf_int_op` (dtype/integer), `mlxf_vector_op` (shape or
+- Added classes in `mlxf_calls` and the family modules: `mlxf_int_op` (dtype/integer), `mlxf_vector_op` (shape or
   axes), `mlxf_reduce_op` (dimension, removes it), `mlxf_scan_op` (inclusive forward scan),
   `mlxf_ternary_op` (three operands), `mlxf_take_op`, `mlxf_concat_op`, `mlxf_slice_op`,
   `mlxf_zeros_op`, `mlxf_range_op`, and `mlxf_fft_op` / `mlxf_fft2_op`. Multi-option requests use
   the behaviourless records in `mlxf_defs`; these helpers all perform entry, validation and adoption.
   The FFT wrappers resolve omitted lengths before calling mlx-c, whose C entry requires explicit lengths.
   `mlxf_weak_scalar` accepts real64; real32 public operands widen into it without losing their original rounding.
-- A new class (an axis argument, an output vector, ...) gets **one** new helper beside these in the
-  `mlxf_array` family (interface in the parent, implementation in the submodule of its capability), taking the generated procedure as a procedure argument whose abstract interface is
-  `bind(c)` with the generated intents; every wrapper of that class uses it, and it is added to
+- A new class (an axis argument, an output vector, ...) is a line of `scripts/mlxc_signatures.txt` (its name and
+  one mlx-c function with the signature); its abstract interface is generated into `mlxf_c_signatures`, so it is
+  `bind(c)` with the generated intents by construction. It gets **one** new helper, in the family module that calls
+  it, or in `mlxf_calls` when two families do, taking the generated procedure as a procedure argument; every wrapper of that class uses it, and it is added to
   `ENTRY_HELPERS` of `check_rules.py`. The helpers enter, validate the operands (`mlxf_handle`: empty or stale arrays stop), check that a device can allocate, take the default
-  stream, check the status and register the result (`adopt`).
+  stream, check the status and register the result (`mlxf_adopt`).
 - **Enter first.** The first executable statement of every public procedure is the entry:
   `call mlxf_enter('<public name>')`, `call mlxf_require_device(proc)` for one that allocates, or a call
   of a helper that opens with one (rule `entry`). Nothing touches an operand before it: an empty input still
@@ -77,7 +78,7 @@ Add the name to the module's `public ::` block, then to `src/core/mlxf.f90`'s `u
 
 ## 7. Test it on both devices
 
-In the area's tester (`mlxf_<module>_tester.f90`, a `run_suite` row of `src/test/mlxf_test_registry.f90`):
+In the area's tester (`mlxf_<module>_tester.f90`, a `run_suite` row of `src/test/framework/mlxf_test_registry.f90`):
 for each device of `test_devices(devs)` (`mlx_set_default_device`), against a plain Fortran evaluation in
 double precision with the tolerance of the plan's section 6, asserting the convention it translates
 (dimension numbering, index base, sign, normalisation). float64 on the CPU device only. Never a function

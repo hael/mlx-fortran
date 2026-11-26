@@ -27,7 +27,7 @@ contains
                 call mlxf_check(mlxc_array_free(h), 'closure vector import cleanup', status=cleanup)
                 return
             endif
-            call adopt(arrays(i), h, 'closure vector import', status)
+            call mlxf_adopt(arrays(i), h, 'closure vector import', status)
             if( status /= 0 )then
                 call mlxf_check(mlxc_array_free(h), 'closure vector import cleanup', status=cleanup)
                 return

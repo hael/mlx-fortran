@@ -1,0 +1,1 @@
+!@descr: the sources of the library and of its test executable: defs/ (shared constants and vocabularies), core/ (the hand-written Fortran layer), test/ (test-only code)

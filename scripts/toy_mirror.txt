@@ -1,7 +1,7 @@
 # toy_mirror.txt -- the mirror ledger of the toys (doc/policies/toy_example_policy.md, section 4).
 #
 # One line per public type, per public type-bound procedure and per public module procedure of every toy module
-# (mlxf_toy_<stem>, src/test; a tester's entries are the registry's):
+# (mlxf_toy_<stem>, src/test/toys; a tester's entries are the registry's):
 #     <toy module> <name> <SIMPLE module> <name>      mirrored: the name is SIMPLE's, and so is the dummy list
 #     <toy module> <name> addition <reason>           no counterpart in SIMPLE: named for what it does
 # A name is a type T, a binding T%binding or a procedure. Rule `mirror` of scripts/check_rules.py holds the ledger

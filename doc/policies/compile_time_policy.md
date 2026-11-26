@@ -40,3 +40,30 @@ SIMPLE fast.
 
 Claim a compile-time gain only from a like-for-like comparison of two clean builds on one machine
 (same compiler, build type, test setting and job count), as SIMPLE's policy describes.
+
+## The module map of the library
+
+The library's modules, in the order the build needs them; a submodule follows its module and is no build-order
+edge for anything else, so editing an implementation recompiles only its own file. `doc/code_base_map.md` has every
+file with its description (`scripts/generate_codeoverview.py`).
+
+- **Generated** (`build/gen/`): `mlxf_c_types`, one `mlxf_c_<header>` per mlx-c header, and `mlxf_c_signatures`,
+  the C signature classes of `scripts/mlxc_signatures.txt` as abstract interfaces.
+- **Definitions** (`src/defs/`): `mlxf_defs`.
+- **Runtime** (`src/core/runtime/`): `mlxf_libc`, `mlxf_error`, `mlxf_registry`, `mlxf_device`, `mlxf_stream`,
+  `mlxf_memory`, `mlxf_version`.
+- **The type** (`src/core/array/`): `mlxf_array` (the type, its lifetime, evaluation, operators and closure
+  vectors; submodules `_lifetime`, `_evaluation`, `_elementwise`, `_closure`), then `mlxf_transfer` (the data
+  movement generics; submodules `mlxf_transfer_copy`, `mlxf_transfer_borrow`) and `mlxf_calls` (the signature
+  helpers several families share; submodules `mlxf_calls_elementwise`, `_shaped`, `_checks`).
+- **Operations** (`src/core/ops/`): one module per concern, `mlxf_ops_elementwise`, `_math`, `_logic`, `_shape`
+  (its helpers in the submodule `mlxf_ops_shape_calls`), `_index`, `_reduce`, `_create`, `_sort`; `_logic` and
+  `_reduce` import `_elementwise`, `_reduce`, `_index` and `_sort` import `_shape`.
+- **Families** (`src/core/<family>/`): `mlxf_linalg`, `mlxf_linalg_matrix`, `mlxf_conv`, `mlxf_fft`,
+  `mlxf_compile`, `mlxf_export`, `mlxf_transforms`, `mlxf_random`, `mlxf_fast`, `mlxf_io`, `mlxf_distributed`; the
+  last four keep their signature helpers in a submodule `mlxf_<family>_calls`. A helper one family calls is
+  private to that family.
+- **The user module**: `mlxf`, which imports them all and is the only module installed.
+
+A library module or submodule file has at most 1,000 lines (`scripts/check_rules.py`, rule `size`, with
+`SIZE_LEDGER` for argued exceptions); a module that would grow past it moves bodies into submodules by concern.

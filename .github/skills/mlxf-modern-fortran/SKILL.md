@@ -14,7 +14,7 @@ holds is `doc/architecture_principles.md`; `scripts/check_tree.sh` checks what r
   only bodies under `contains` are indented, by four; inside a derived type `contains` is indented by two.
 - Separate implementation procedures under `contains` with one blank line; put one on each side of a
   module-level `contains` and after a module-level type or interface block. Keep a type's following
-  constant declaration together with that type. Do not insert procedure separators between interface bodies.
+  constant declaration together with that type. Separate the bodies of an interface block with one blank line (the formatter adds it).
 - Pad the dummy list in **subroutine/function declarations**, including interface bodies:
   `subroutine apply( self, inputs, outputs, status )` and `function make( x ) result(r)`.
   Calls keep their own form: `call apply(self, inputs, outputs, status=st)`; empty lists stay `()`.
@@ -53,7 +53,7 @@ holds is `doc/architecture_principles.md`; `scripts/check_tree.sh` checks what r
   operations, FFTs, ...) holds a capability's modules and their testers; a new folder gets an `.inf`, never
   a CMake target. A type with a large implementation is one parent module (the type, its generics, the
   interface of every procedure) and implementation submodules `<module>_<part>` by concern (XEMA's search
-  engine; `mlxf_array`: lifetime, transfer, borrow, evaluation, elementwise). A helper one submodule needs
+  engine; `mlxf_array`: lifetime, evaluation, elementwise, closure; `mlxf_transfer`: copy, borrow). A helper one submodule needs
   is a plain procedure local to it; one two submodules need is a separate module procedure with its
   interface in the parent.
 - `use ..., only:` always (test programs too); `implicit none` always.
@@ -70,7 +70,7 @@ holds is `doc/architecture_principles.md`; `scripts/check_tree.sh` checks what r
   default, lists every name it imports in a `private ::` statement, holds no procedures and imports only the
   generated layer. Import a constant from `mlxf_defs`, never through a module that re-exports it (test code
   imports it through `mlxf`, as users do). A test constant or record shared by test modules goes to
-  `src/test/mlxf_test_defs.f90`. `check_rules.py`, rule `defs` (constants and behaviourless types).
+  `src/test/framework/mlxf_test_defs.f90`. `check_rules.py`, rule `defs` (constants and behaviourless types).
 - **Where a type or constant lives**, in short (the register, section 2, has the reasons):
   - a class, with type-bound procedures or private components, stays in the module that implements it;
   - a behaviourless record that another module builds or reads goes to defs;
@@ -199,7 +199,7 @@ The tree builds with zero warnings in Debug and Release; fix the code, never sil
 - Writing or editing a test: [references/testing.md](references/testing.md).
 - A tester is `mlxf_<thing>_tester.f90` beside the module it tests, exporting only `run_all_<thing>_tests`
   (and the entry of a named-only sub-suite it owns, `NAMED_ONLY` in the registry), run from a row of
-  `src/test/mlxf_test_registry.f90`; `scripts/check_test_registry.py` holds rows, testers
+  `src/test/framework/mlxf_test_registry.f90`; `scripts/check_test_registry.py` holds rows, testers
   and CTest areas to each other.
 
 ## Building

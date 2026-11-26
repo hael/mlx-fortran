@@ -36,6 +36,7 @@ abstract interface
         type(mlx_array), allocatable, intent(out) :: vjps(:)
         integer,         intent(out)              :: status
     end subroutine vjp_callback
+
     ! the Jacobian-vector product a custom function substitutes: from the inputs, the tangents, and the one-based
     ! positions of the inputs the tangents belong to, one array per output
     subroutine jvp_callback( primals, tangents, argnums, jvps, status )

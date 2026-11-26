@@ -2,24 +2,17 @@
 ! A sampler's last array is its key. An empty handle there is no key: mlx-c then receives a null array and MLX
 ! draws from its global key. Shapes arrive in Fortran order and are reversed; a dimension is translated to
 ! MLX's axis here.
-submodule(mlxf_array) mlxf_array_random
-use, intrinsic :: iso_c_binding, only: c_associated, c_null_ptr
+submodule(mlxf_random) mlxf_random_calls
+use, intrinsic :: iso_c_binding, only: c_int, c_size_t
 use mlxf_c_array,  only: mlxc_array_new, mlxc_array_free
 use mlxf_c_stream, only: mlxc_stream_free
-use mlxf_device,   only: mlxf_require_device, mlxf_default_stream
-use mlxf_error,    only: mlxf_check
+use mlxf_c_types,  only: mlxc_array, mlxc_stream
+use mlxf_device,   only: mlxf_default_stream
+use mlxf_calls,    only: mlxf_check_dim, mlxf_cpu_stream, mlxf_optional_handle
+use mlxf_array,    only: mlxf_adopt, mlxf_handle
 implicit none
 
 contains
-
-    ! the handle of an operand mlx-c may be given as null: null for an empty array, validated otherwise
-    module function optional_handle( a, proc ) result(h)
-        type(mlx_array),  intent(in) :: a
-        character(len=*), intent(in) :: proc
-        type(mlxc_array) :: h
-        h%ctx = c_null_ptr
-        if( c_associated(a%h%ctx) ) h = mlxf_handle(a, proc)
-    end function optional_handle
 
     ! the two results of f(a), in MLX's order, on the default device, for every int f(mlx_array* res_0,
     ! mlx_array* res_1, const mlx_array a, const mlx_stream s)
@@ -44,8 +37,8 @@ contains
             call mlxf_check(mlxc_array_free(res(2)), proc)
         endif
         call mlxf_check(ierr, proc)
-        call adopt(r(1), res(1), proc)
-        call adopt(r(2), res(2), proc)
+        call mlxf_adopt(r(1), res(1), proc)
+        call mlxf_adopt(r(2), res(2), proc)
     end subroutine mlxf_pair_op
 
     ! r = f(seed) for every int f(mlx_array* res, uint64_t seed); the seed's 64 bits go to MLX as they are
@@ -61,7 +54,7 @@ contains
         ierr = f(res, int(seed, c_int64_t))
         if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
         call mlxf_check(ierr, proc)
-        call adopt(r, res, proc)
+        call mlxf_adopt(r, res, proc)
     end subroutine mlxf_random_key_op
 
     ! r = f(shape, option%number) with the key a(1), for every int f(mlx_array* res, const int* shape,
@@ -76,7 +69,7 @@ contains
         type(mlxc_stream) :: s
         integer(c_int)    :: ierr
         call mlxf_require_device(proc)
-        hk = optional_handle(a(1), proc)
+        hk = mlxf_optional_handle(a(1), proc)
         res = mlxc_array_new()
         s = mlxf_default_stream(proc)
         ierr = f(res, mlx_shape(option), int(size(option%shape), c_size_t), int(option%number, c_int), hk, s)
@@ -96,7 +89,7 @@ contains
         integer(c_int)    :: ierr
         call mlxf_require_device(proc)
         call mlxf_check_dtype(option%dtype, proc)
-        hk = optional_handle(a(1), proc)
+        hk = mlxf_optional_handle(a(1), proc)
         res = mlxc_array_new()
         s = mlxf_default_stream(proc)
         ierr = f(res, mlx_shape(option), int(size(option%shape), c_size_t), int(option%dtype, c_int), option%loc, &
@@ -115,7 +108,7 @@ contains
         type(mlxc_stream) :: s
         integer(c_int)    :: ierr
         call mlxf_require_device(proc)
-        hk = optional_handle(a(1), proc)
+        hk = mlxf_optional_handle(a(1), proc)
         res = mlxc_array_new()
         s = mlxf_default_stream(proc)
         ierr = f(res, int(option, c_int), hk, s)
@@ -135,7 +128,7 @@ contains
         integer(c_int)    :: ierr
         call mlxf_require_device(proc)
         ha = mlxf_handle(a(1), proc)
-        hk = optional_handle(a(2), proc)
+        hk = mlxf_optional_handle(a(2), proc)
         res = mlxc_array_new()
         s = mlxf_default_stream(proc)
         ierr = f(res, ha, mlx_shape(option), int(size(option%shape), c_size_t), hk, s)
@@ -155,8 +148,8 @@ contains
         integer(c_int)    :: ierr
         call mlxf_require_device(proc)
         ha = mlxf_handle(a(1), proc)
-        call check_dim(a(1), option, proc)
-        hk = optional_handle(a(2), proc)
+        call mlxf_check_dim(a(1), option, proc)
+        hk = mlxf_optional_handle(a(2), proc)
         res = mlxc_array_new()
         s = mlxf_default_stream(proc)
         ierr = f(res, ha, int(a(1)%ndim()-option, c_int), hk, s)
@@ -176,8 +169,8 @@ contains
         integer(c_int)    :: ierr
         call mlxf_require_device(proc)
         ha = mlxf_handle(a(1), proc)
-        call check_dim(a(1), option%dim, proc)
-        hk = optional_handle(a(2), proc)
+        call mlxf_check_dim(a(1), option%dim, proc)
+        hk = mlxf_optional_handle(a(2), proc)
         res = mlxc_array_new()
         s = mlxf_default_stream(proc)
         ierr = f(res, ha, int(a(1)%ndim()-option%dim, c_int), mlx_shape(option), int(size(option%shape), c_size_t), hk, s)
@@ -197,8 +190,8 @@ contains
         integer(c_int)    :: ierr
         call mlxf_require_device(proc)
         ha = mlxf_handle(a(1), proc)
-        call check_dim(a(1), option%dim, proc)
-        hk = optional_handle(a(2), proc)
+        call mlxf_check_dim(a(1), option%dim, proc)
+        hk = mlxf_optional_handle(a(2), proc)
         res = mlxc_array_new()
         s = mlxf_default_stream(proc)
         ierr = f(res, ha, int(a(1)%ndim()-option%dim, c_int), int(option%number, c_int), hk, s)
@@ -221,10 +214,10 @@ contains
         call mlxf_check_dtype(option%dtype, proc)
         ha = mlxf_handle(a(1), proc)
         hb = mlxf_handle(a(2), proc)
-        hk = optional_handle(a(3), proc)
+        hk = mlxf_optional_handle(a(3), proc)
         res = mlxc_array_new()
         if( option%on_cpu )then
-            s = cpu_stream(proc)
+            s = mlxf_cpu_stream(proc)
         else
             s = mlxf_default_stream(proc)
         endif
@@ -246,9 +239,9 @@ contains
         integer(c_int)    :: ierr
         call mlxf_require_device(proc)
         call mlxf_check_dtype(option%dtype, proc)
-        hloc = optional_handle(a(1), proc)
-        hscale = optional_handle(a(2), proc)
-        hk = optional_handle(a(3), proc)
+        hloc = mlxf_optional_handle(a(1), proc)
+        hscale = mlxf_optional_handle(a(2), proc)
+        hk = mlxf_optional_handle(a(3), proc)
         res = mlxc_array_new()
         s = mlxf_default_stream(proc)
         ierr = f(res, mlx_shape(option), int(size(option%shape), c_size_t), int(option%dtype, c_int), hloc, hscale, hk, s)
@@ -272,7 +265,7 @@ contains
         call mlxf_check(mlxc_stream_free(s), proc)
         if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
         call mlxf_check(ierr, proc)
-        call adopt(r, res, proc)
+        call mlxf_adopt(r, res, proc)
     end subroutine finish
 
-end submodule mlxf_array_random
+end submodule mlxf_random_calls

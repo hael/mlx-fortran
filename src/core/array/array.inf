@@ -1,1 +1,1 @@
-!@descr: the mlx_array type: its interface module and the submodules of its lifetime, transfer, borrowing, evaluation and operations
+!@descr: the mlx_array type (lifetime, evaluation, operators, closure vectors), the data movement of mlxf_transfer, and mlxf_calls, the signature helpers several families share

@@ -1,6 +1,6 @@
 !@descr: the ABI probe: every argument and result class of the generated bind(c) layer echoed by C, and the C layouts
 ! The probe's interfaces are generated with the library's mapping table (scripts/gen_mlxc_bindings.py --probe) and
-! its functions compiled by Apple's clang (src/test/mlxf_abi_probe.c): a type or passing mode the table maps
+! its functions compiled by Apple's clang (src/test/framework/mlxf_abi_probe.c): a type or passing mode the table maps
 ! differently from C reads back something else. The structs' sizes, alignments and field offsets and the
 ! enumerators' values are compared with C's by name. No MLX call: it runs in every session.
 module mlxf_abi_tester
@@ -265,7 +265,7 @@ contains
             call mlxf_abi_struct_layout(k, name, size, align, fields)
             st = mlxc_abiprobe_struct_layout(trim(name)//c_null_char, csize, calign, c(1), c(2), c(3), c(4))
             if( st /= 0 )then
-                call assert_true(.false., trim(name)//': C knows the struct (add it to src/test/mlxf_abi_probe.c)')
+                call assert_true(.false., trim(name)//': C knows the struct (add it to src/test/framework/mlxf_abi_probe.c)')
                 cycle
             endif
             call assert_true(size == csize .and. align == calign .and. all(fields == c), &

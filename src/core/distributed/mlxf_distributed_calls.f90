@@ -2,11 +2,13 @@
 ! A group handle with a null context is MLX's default group. Ranks arrive as MLX wants them, zero-based. MLX
 ! exchanges on the CPU only (Metal has no implementation), so the nodes are built on the CPU's default stream
 ! whatever the default device.
-submodule(mlxf_array) mlxf_array_distributed
+submodule(mlxf_distributed) mlxf_distributed_calls
+use, intrinsic :: iso_c_binding, only: c_size_t
 use mlxf_c_array,  only: mlxc_array_new, mlxc_array_free
 use mlxf_c_stream, only: mlxc_stream_free
-use mlxf_device,   only: mlxf_require_device
-use mlxf_error,    only: mlxf_check
+use mlxf_c_types,  only: mlxc_array, mlxc_stream
+use mlxf_calls,    only: mlxf_check_dtype, mlxf_cpu_stream
+use mlxf_array,    only: mlxf_adopt, mlxf_handle
 implicit none
 
 contains
@@ -25,7 +27,7 @@ contains
         call mlxf_require_device(option%proc)
         ha = mlxf_handle(a, option%proc)
         res = mlxc_array_new()
-        s = cpu_stream(option%proc)
+        s = mlxf_cpu_stream(option%proc)
         ierr = f(res, ha, option%group, s)
         call mlxf_check(mlxc_stream_free(s), option%proc)
         call group_done(r, res, ierr, option, status)
@@ -45,7 +47,7 @@ contains
         call mlxf_require_device(option%proc)
         ha = mlxf_handle(a, option%proc)
         res = mlxc_array_new()
-        s = cpu_stream(option%proc)
+        s = mlxf_cpu_stream(option%proc)
         ierr = f(res, ha, int(option%peer, c_int), option%group, s)
         call mlxf_check(mlxc_stream_free(s), option%proc)
         call group_done(r, res, ierr, option, status)
@@ -65,7 +67,7 @@ contains
         call mlxf_require_device(option%proc)
         call mlxf_check_dtype(option%dtype, option%proc)
         res = mlxc_array_new()
-        s = cpu_stream(option%proc)
+        s = mlxf_cpu_stream(option%proc)
         ierr = f(res, int(option%shape(size(option%shape):1:-1), c_int), int(size(option%shape), c_size_t), &
             &int(option%dtype, c_int), int(option%peer, c_int), option%group, s)
         call mlxf_check(mlxc_stream_free(s), option%proc)
@@ -85,7 +87,7 @@ contains
             call mlxf_check(ierr, option%proc, status)
             return
         endif
-        call adopt(r, res, option%proc, status)
+        call mlxf_adopt(r, res, option%proc, status)
     end subroutine group_done
 
-end submodule mlxf_array_distributed
+end submodule mlxf_distributed_calls

@@ -12,6 +12,13 @@ One test executable, `mlxf_test_exec`, built by every compile script unless it i
 `*_tester.f90`); the library `mlxf` never contains them. Every test is reached through
 `mlxf_test_exec test=<name> [suite=<sub-suite>]`; `test=list` lists what exists.
 
+The test-only tree, `src/test/`, has four folders, each with its `.inf`: `framework/` (the assertions and the
+summary, the suite registry, the test definitions, the NaN-safe reductions, the ABI probe of the generated layer),
+`toys/` (the opaque device state and the seam tester, and one folder per toy: `polar/`, `projector/`, `recon/`),
+`oracles/` (the independent double-precision references the toys and benchmarks are judged against) and `bench/`
+(the benchmarks). Module names do not carry the folder; a library module's tester stays beside it under
+`src/core/`. No Fortran or C file sits at the top of `src/test/`.
+
 | label | entries | when | what |
 | --- | --- | --- | --- |
 | `fast` | one `unit_<area>` per area, and the guard groups | every compile script, between build and install | unit tests: hermetic, in-process (guard groups: one child per member), one thread, seconds |
@@ -29,14 +36,14 @@ One test executable, `mlxf_test_exec`, built by every compile script unless it i
 `MLXF_CTEST_BUDGET` in `test/CMakeLists.txt` must equal the registered count or configuration fails; it
 changes only with an owner decision or a plan that names the new entry, recorded in `doc/history/`.
 
-`unit_core`'s sub-suite `abi` is the ABI probe of the generated layer: the interfaces of `src/test/mlxf_abi_probe.h`
+`unit_core`'s sub-suite `abi` is the ABI probe of the generated layer: the interfaces of `src/test/framework/mlxf_abi_probe.h`
 are generated with the library's mapping table (`scripts/gen_mlxc_bindings.py --probe`, into `build/gen_test/`) and
 its echo functions are compiled by Apple's clang (`xcrun clang`, the compiler of mlx-c; CMake's C compiler is GCC)
 into an object of `mlxf_test_exec`. Each of the 35 classes of argument and result is echoed at least once; `int`,
 `bool`, `float`, `double` and the three optional pairs both in a register and on the stack; the size, alignment,
 field offsets and field sizes of the 36 structs and the values of the 23 enumerators are compared with C's by name.
 It calls no MLX function and runs in every session. A struct or enumerator that mlx-c adds fails it until the C
-tables of `src/test/mlxf_abi_probe.c` list it.
+tables of `src/test/framework/mlxf_abi_probe.c` list it.
 
 The current process budget is **13**, the most the parity plan's decision 21 allows: areas `core`, `array`, `ops`,
 `linalg`, `fft`, `compile`, `transforms`, `fast`, `random`, `io`, `distributed`, `kernels`, plus the `object_contracts`
@@ -48,7 +55,7 @@ together, a normal draw whose array mean does not broadcast to its shape, a grad
 compile mode outside `MLX_COMPILE_MODES`, a causal attention given a mask, a rotary embedding given one offset for two
 batches, a normalisation given an empty weight, the fused attention kernel demanded on the CPU device and a message sent to
 rank 0). Error reductions in test code go through
-`nan_maxval` (`src/test/mlxf_test_reduce.f90`, rule `nanmax`), which turns any NaN into +infinity. The `fast` area (the parity
+`nan_maxval` (`src/test/framework/mlxf_test_reduce.f90`, rule `nanmax`), which turns any NaN into +infinity. The `fast` area (the parity
 plan's decision 21) runs custom Metal kernels on the GPU against exact Fortran references and checks their
 refusal on the CPU device; it provokes a Metal compilation failure on purpose, which is why it has a process of
 its own. Its sub-suite `fast_layers` checks `mlx_layer_norm`, `mlx_rms_norm`, `mlx_rope`,
@@ -79,9 +86,9 @@ active memory, live handles and stale releases. The compile area checks byte ide
 representable compiled/uncompiled arithmetic on each device, shapeless trace reuse and callback error
 recovery; the array area also runs 10,000 compiled calls and verifies complete closure teardown.
 The kernels area holds test-only models of SIMPLE's pipelines written against `mlxf` as a user writes
-(`src/test/mlxf_kernel_<x>.f90`; the toy example policy rules the form of new ones and of their refactoring); its sub-suite `polar_table` checks the polar table's scoring workspace
+(`src/test/toys/`; the toy example policy rules the form of new ones and of their refactoring); its sub-suite `polar_table` checks the polar table's scoring workspace
 on a seeded fixture against a double-precision ring oracle, on both devices, with row bounds calibrated
-on the CPU device and frozen in `src/test/mlxf_test_defs.f90` before the first GPU run; the draw on the
+on the CPU device and frozen in `src/test/framework/mlxf_test_defs.f90` before the first GPU run; the draw on the
 device's own rows, refusals of mismatched blocks, schedule identity and the workspace's lifecycle. Its
 sub-suite `polar_shiftmap` checks the workspace's shift maps on analytic fixtures against a direct
 double-precision residual at every cell, with caps confirmed on the CPU device and frozen there before the
@@ -130,7 +137,7 @@ seeds 1, 2 and 3, and the refusals; it writes the table as lines `polarft_host .
 `scripts/check_toy_offstate.sh` builds `test/offstate/` (the toys' host files and glue stubs without `USE_MLX`
 and without the library) in Debug and Release, runs its program and, with `--exec`, holds its table to the lines
 of `unit_kernels suite=polarft_host` byte for byte; the release gate runs it, and it is not a CTest entry.
-Constants several test modules share live in `src/test/mlxf_test_defs.f90`, a defs module (rule `defs`).
+Constants several test modules share live in `src/test/framework/mlxf_test_defs.f90`, a defs module (rule `defs`).
 
 **Benchmarks** are `mlxf_test_exec test=bench_<x> suite=<mode> [key=value ...]`, listed in the registry's
 `BENCHES` table and reached through `run_bench` (`check_test_registry.py` holds the two to each other). They
@@ -138,7 +145,7 @@ run by hand, never in CTest, and append rows to `./bench_<x>*.tsv` in the workin
 measures asserts nothing. A mode that judges, such as `bench_polar_table suite=accuracy` (the polar table's
 64,000-pair block against its DFT-matrix oracle, at SIMPLE's sizes), uses the assertions of `mlxf_test_utils`
 and fails the process like a test. Its bounds are calibrated on the CPU device and frozen in
-`src/test/mlxf_test_defs.f90` before its first GPU run. `bench_polar_table suite=shiftmap` measures the shift
+`src/test/framework/mlxf_test_defs.f90` before its first GPU run. `bench_polar_table suite=shiftmap` measures the shift
 maps on SIMPLE's grid (read from a key = value file of SIMPLE's rows) with SIMPLE's column names.
 `bench_projector` times the reprojection of one state at SIMPLE's bench (`suite=time`: the canonical driver to the
 evaluated banks; `suite=chain`: on to the reference bins on `route=host|device` and a dense score) and judges 16
@@ -150,7 +157,10 @@ histories in hexadecimal for comparing two invocations; `suite=profile` the stag
 transforms' share, the cost of a wait, the inner products' forms and the drift; `suite=accuracy` the device against
 the oracle at bench size (it asserts). A key a suite does not read stops it.
 `bench_insert_probe suite=probe` measures an atomic gridding insertion
-against the gridding oracle (the protected-update probe of the roadmap's decision 14). `scripts/run_parts.sh`
+against the gridding oracle (the protected-update probe of the roadmap's decision 14). `bench_blas
+suite=crossover [nmax=]` times `sgemm` and `cgemm` through the system's CBLAS (Accelerate, linked to the test
+executable on macOS only) against `matmul` on MLX's CPU and GPU devices, with and without the transfer from and
+to Fortran arrays, and prints the first size at which MLX wins (`doc/how2s/how2replace_blas.md`). `scripts/run_parts.sh`
 starts any of them (`RUN_PARTS_BENCH`, `RUN_PARTS_SUITE`, `RUN_PARTS_UNIT`).
 `tail=graph` or `tail=metal` selects the tail's form in `accuracy`, `time` and `profile`; `suite=time` reads
 `passes=` (default 3) and writes the passes and their median; `scripts/run_parts.sh` sums its parts' median
@@ -176,7 +186,7 @@ by the owner; running either accuracy suite is correctness validation, not a thr
   before the test is used as a gate. A tolerance widened until a test passed is a finding.
 - It asserts conventions: memory order, index base, dimension numbering, FFT sign and normalisation.
 - Storage identity is compared with `bits_equal` (transfer-based), never `==` on reals.
-- An error is reduced with `nan_maxval` or `nan_max` (`src/test/mlxf_test_reduce.f90`, rule `nanmax`), never
+- An error is reduced with `nan_maxval` or `nan_max` (`src/test/framework/mlxf_test_reduce.f90`, rule `nanmax`), never
   `maxval(abs(...))` or `x = max(x, abs(...))`, which may skip a NaN; a history is finite before it is compared.
 - Two samples of the active memory are compared only after `mlx_synchronize()`: the device releases a buffer
   when the work that used it completes, so a sample taken while the stream is busy counts buffers in flight.
@@ -194,7 +204,7 @@ by the owner; running either accuracy suite is correctness validation, not a thr
   any non-zero exit, a broken fixture or a runtime check included. One guard group is one CTest entry.
 - The intended stop is the last statement the child can reach, and its fixture is proven by a passing
   sibling. Errors a checked procedure reports through `status` are tested in-process.
-- A member is a row of the `GUARDS` table and a `case` of `run_guard` in `src/test/mlxf_test_registry.f90`;
+- A member is a row of the `GUARDS` table and a `case` of `run_guard` in `src/test/framework/mlxf_test_registry.f90`;
   the child is `mlxf_test_exec guard=<member>`, and `mlxf_test_exec expect_abort <member>` runs one member as
   the group does. The group `object_contracts` holds the stops of the binding contract (an operation on an
   empty array, a stale handle used, a call inside an OpenMP region, a float64 operation built on the GPU, and
@@ -242,7 +252,7 @@ by the owner; running either accuracy suite is correctness validation, not a thr
 ## 5. Where a test goes
 
 - In the area of the code it tests, as a sub-suite (a `run_suite` row of
-  `src/test/mlxf_test_registry.f90`). A new area is a row in `AREAS`, a `case` branch, an entry of
+  `src/test/framework/mlxf_test_registry.f90`). A new area is a row in `AREAS`, a `case` branch, an entry of
   `MLXF_TEST_AREAS` in `test/CMakeLists.txt` and a budget raise, kept in step by
   `scripts/check_test_registry.py`.
 - Fast tier only if it is hermetic (no network, no user file, no dependence on core count, load or

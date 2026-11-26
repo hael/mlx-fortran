@@ -7,28 +7,29 @@
 module mlxf_fast
 use, intrinsic :: iso_c_binding,   only: c_int, c_bool, c_size_t, c_intptr_t, c_null_ptr, c_null_char, c_associated
 use, intrinsic :: iso_fortran_env, only: int64, real32
-use mlxf_c_types,  only: mlxc_fast_metal_kernel, mlxc_fast_metal_kernel_config, mlxc_vector_array, mlxc_vector_string, &
-                         mlxc_stream
-use mlxf_c_fast,   only: mlxc_fast_metal_kernel_new, mlxc_fast_metal_kernel_free, mlxc_fast_metal_kernel_apply, &
-                         mlxc_fast_metal_kernel_config_new, mlxc_fast_metal_kernel_config_free, &
-                         mlxc_fast_metal_kernel_config_add_output_arg, mlxc_fast_metal_kernel_config_set_grid, &
-                         mlxc_fast_metal_kernel_config_set_thread_group, mlxc_fast_metal_kernel_config_set_init_value, &
-                         mlxc_fast_metal_kernel_config_set_verbose, &
-                         mlxc_fast_metal_kernel_config_add_template_arg_dtype, &
-                         mlxc_fast_metal_kernel_config_add_template_arg_int, &
-                         mlxc_fast_metal_kernel_config_add_template_arg_bool, mlxc_fast_layer_norm, mlxc_fast_rms_norm, &
-                         mlxc_fast_rope, mlxc_fast_rope_dynamic, mlxc_fast_scaled_dot_product_attention, &
-                         mlxc_fast_cross_entropy
-use mlxf_c_stream, only: mlxc_stream_free
-use mlxf_c_vector, only: mlxc_vector_array_new, mlxc_vector_array_free, mlxc_vector_string_new, &
-                         mlxc_vector_string_append_value, mlxc_vector_string_free
-use mlxf_defs,     only: mlx_metal_kernel_spec, MLX_DTYPES, mlx_rope_spec, mlx_attention_spec
-use mlxf_array,    only: mlx_array, mlx_is_live, mlxf_vector_import, mlxf_vector_export, mlxf_check_dtype, &
-                         mlxf_layer_norm_op, mlxf_rms_norm_op, mlxf_rope_op, mlxf_rope_dynamic_op, mlxf_attention_op, &
-                         mlxf_binary, mlxf_zero_based
-use mlxf_device,   only: mlxf_enter, mlxf_require_device, mlxf_default_stream
-use mlxf_error,    only: mlxf_check, mlxf_fail, mlxf_report, mlxf_guard_thread
-use mlxf_registry, only: registry_add, registry_retain, registry_release, registry_is_live
+use mlxf_c_fast,       only: mlxc_fast_metal_kernel_new, mlxc_fast_metal_kernel_free, mlxc_fast_metal_kernel_apply, &
+                             mlxc_fast_metal_kernel_config_new, mlxc_fast_metal_kernel_config_free, &
+                             mlxc_fast_metal_kernel_config_add_output_arg, mlxc_fast_metal_kernel_config_set_grid, &
+                             mlxc_fast_metal_kernel_config_set_thread_group, &
+                             mlxc_fast_metal_kernel_config_set_init_value, mlxc_fast_metal_kernel_config_set_verbose, &
+                             mlxc_fast_metal_kernel_config_add_template_arg_dtype, &
+                             mlxc_fast_metal_kernel_config_add_template_arg_int, &
+                             mlxc_fast_metal_kernel_config_add_template_arg_bool, mlxc_fast_layer_norm, &
+                             mlxc_fast_rms_norm, mlxc_fast_rope, mlxc_fast_rope_dynamic, &
+                             mlxc_fast_scaled_dot_product_attention, mlxc_fast_cross_entropy
+use mlxf_c_signatures, only: mlxc_attention_op, mlxc_layer_norm_op, mlxc_rms_norm_op, mlxc_rope_dynamic_op, &
+                             mlxc_rope_op
+use mlxf_c_stream,     only: mlxc_stream_free
+use mlxf_c_types,      only: mlxc_fast_metal_kernel, mlxc_fast_metal_kernel_config, mlxc_vector_array, &
+                             mlxc_vector_string, mlxc_stream
+use mlxf_c_vector,     only: mlxc_vector_array_new, mlxc_vector_array_free, mlxc_vector_string_new, &
+                             mlxc_vector_string_append_value, mlxc_vector_string_free
+use mlxf_defs,         only: mlx_metal_kernel_spec, MLX_DTYPES, mlx_rope_spec, mlx_attention_spec
+use mlxf_array,        only: mlx_array, mlx_is_live, mlxf_vector_import, mlxf_vector_export
+use mlxf_device,       only: mlxf_enter, mlxf_require_device, mlxf_default_stream
+use mlxf_error,        only: mlxf_check, mlxf_fail, mlxf_report, mlxf_guard_thread
+use mlxf_registry,     only: registry_add, registry_retain, registry_release, registry_is_live
+use mlxf_calls,        only: mlxf_binary, mlxf_check_dtype, mlxf_zero_based
 implicit none
 public :: mlx_metal_kernel, mlx_layer_norm, mlx_rms_norm, mlx_rope, mlx_scaled_dot_product_attention, mlx_cross_entropy
 private
@@ -53,6 +54,58 @@ end type mlx_metal_kernel
 interface mlx_metal_kernel
     module procedure metal_kernel_from_spec
 end interface mlx_metal_kernel
+
+! the signature helpers of the fast procedures, implemented in mlxf_fast_calls
+interface
+    ! int f(mlx_array* res, const mlx_array x, const mlx_array weight, const mlx_array bias, float eps,
+    ! const mlx_stream s)
+    module subroutine mlxf_layer_norm_op( r, f, a, option, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_layer_norm_op)   :: f
+        type(mlx_array),  intent(in)    :: a(3)
+        real(real32),     intent(in)    :: option
+        character(len=*), intent(in)    :: proc
+    end subroutine mlxf_layer_norm_op
+
+    ! int f(mlx_array* res, const mlx_array x, const mlx_array weight, float eps, const mlx_stream s)
+    module subroutine mlxf_rms_norm_op( r, f, a, option, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_rms_norm_op)     :: f
+        type(mlx_array),  intent(in)    :: a(2)
+        real(real32),     intent(in)    :: option
+        character(len=*), intent(in)    :: proc
+    end subroutine mlxf_rms_norm_op
+
+    ! int f(mlx_array* res, const mlx_array x, int dims, bool traditional, mlx_optional_float base, float scale,
+    ! int offset, const mlx_array freqs, const mlx_stream s)
+    module subroutine mlxf_rope_op( r, f, a, option, proc )
+        type(mlx_array),     intent(inout) :: r
+        procedure(mlxc_rope_op)            :: f
+        type(mlx_array),     intent(in)    :: a(2)
+        type(mlx_rope_spec), intent(in)    :: option
+        character(len=*),    intent(in)    :: proc
+    end subroutine mlxf_rope_op
+
+    ! int f(mlx_array* res, const mlx_array x, int dims, bool traditional, mlx_optional_float base, float scale,
+    ! const mlx_array offset, const mlx_array freqs, const mlx_stream s)
+    module subroutine mlxf_rope_dynamic_op( r, f, a, option, proc )
+        type(mlx_array),     intent(inout) :: r
+        procedure(mlxc_rope_dynamic_op)    :: f
+        type(mlx_array),     intent(in)    :: a(3)
+        type(mlx_rope_spec), intent(in)    :: option
+        character(len=*),    intent(in)    :: proc
+    end subroutine mlxf_rope_dynamic_op
+
+    ! int f(mlx_array* res, const mlx_array queries, const mlx_array keys, const mlx_array values, float scale,
+    ! const char* mask_mode, const mlx_array mask_arr, const mlx_array sinks, bool force_fused, const mlx_stream s)
+    module subroutine mlxf_attention_op( r, f, a, option, proc )
+        type(mlx_array),          intent(inout) :: r
+        procedure(mlxc_attention_op)            :: f
+        type(mlx_array),          intent(in)    :: a(4)
+        type(mlx_attention_spec), intent(in)    :: option
+        character(len=*),         intent(in)    :: proc
+    end subroutine mlxf_attention_op
+end interface
 
 contains
 

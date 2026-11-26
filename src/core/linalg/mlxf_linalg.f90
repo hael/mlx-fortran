@@ -5,16 +5,22 @@
 ! before b's. A selection of matrices, a mask, a segment, a dimension and a subscript are given as Fortran reads
 ! them.
 module mlxf_linalg
+use, intrinsic :: iso_c_binding,   only: c_bool, c_int, c_null_char, c_size_t, c_float_kind => c_float
 use, intrinsic :: iso_fortran_env, only: real32
-use mlxf_c_linalg, only: mlxc_linalg_cross
-use mlxf_c_ops,    only: mlxc_matmul, mlxc_gather_mm, mlxc_block_masked_mm, mlxc_segmented_mm, mlxc_addmm, mlxc_einsum, &
-                         mlxc_hadamard_transform, mlxc_inner, mlxc_kron, mlxc_outer, mlxc_tensordot, &
-                         mlxc_tensordot_axis, mlxc_vecdot
-use mlxf_array,    only: mlx_array, mlx_is_live, mlxf_binary, mlxf_ternary_op, mlxf_gather_mm_op, mlxf_masked_mm_op, &
-                         mlxf_zero_based, mlxf_axes_of, mlxf_binary_axis_op, mlxf_optional_float_op, mlxf_addmm_op, &
-                         mlxf_einsum_op, mlxf_tensordot_op
-use mlxf_device,   only: mlxf_enter
-use mlxf_error,    only: mlxf_fail
+use mlxf_c_array,      only: mlxc_array_free, mlxc_array_new
+use mlxf_c_linalg,     only: mlxc_linalg_cross
+use mlxf_c_ops,        only: mlxc_matmul, mlxc_gather_mm, mlxc_block_masked_mm, mlxc_segmented_mm, mlxc_addmm, &
+                             mlxc_einsum, mlxc_hadamard_transform, mlxc_inner, mlxc_kron, mlxc_outer, mlxc_tensordot, &
+                             mlxc_tensordot_axis, mlxc_vecdot
+use mlxf_c_signatures, only: mlxc_addmm_op, mlxc_einsum_op, mlxc_gather_mm_op, mlxc_masked_mm_op, &
+                             mlxc_optional_float_op, mlxc_take_op, mlxc_tensordot_op
+use mlxf_c_stream,     only: mlxc_stream_free
+use mlxf_c_types,      only: mlxc_array, mlxc_optional_float, mlxc_stream, mlxc_vector_array
+use mlxf_c_vector,     only: mlxc_vector_array_free
+use mlxf_array,        only: mlx_array, mlx_is_live, mlxf_handle, mlxf_is_empty, mlxf_vector_of, mlxf_adopt
+use mlxf_device,       only: mlxf_enter, mlxf_default_stream, mlxf_require_device
+use mlxf_error,        only: mlxf_fail, mlxf_check
+use mlxf_calls,        only: mlxf_axes_of, mlxf_binary, mlxf_ternary_op, mlxf_zero_based
 implicit none
 public :: matmul, mlx_gather_mm, mlx_block_masked_mm, mlx_segmented_mm, mlx_addmm, mlx_inner, mlx_outer, mlx_kron
 public :: mlx_vecdot, mlx_cross, mlx_tensordot, mlx_einsum, mlx_hadamard_transform
@@ -293,5 +299,191 @@ contains
         type(mlx_array) :: r
         call mlxf_optional_float_op(r, mlxc_hadamard_transform, a, 'mlx_hadamard_transform', option=scale)
     end function mlx_hadamard_transform
+
+    ! r = f(a(1), a(2)) with the matrices of each operand chosen by the 0-based index arrays a(3) and a(4), an
+    ! empty one being none, for every int f(mlx_array* res, const mlx_array a, const mlx_array b,
+    ! const mlx_array lhs_indices, const mlx_array rhs_indices, bool sorted_indices, const mlx_stream s)
+    subroutine mlxf_gather_mm_op( r, f, a, option, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_gather_mm_op)    :: f
+        type(mlx_array),  intent(in)    :: a(4)
+        logical,          intent(in)    :: option
+        character(len=*), intent(in)    :: proc
+        type(mlxc_array)  :: h(4)
+        type(mlxc_array)  :: res
+        type(mlxc_stream) :: s
+        integer(c_int)    :: ierr
+        integer           :: i
+        call mlxf_require_device(proc)
+        do i = 1, 4
+            if( i <= 2 .or. .not. mlxf_is_empty(a(i)) ) h(i) = mlxf_handle(a(i), proc)
+        end do
+        res = mlxc_array_new()
+        s = mlxf_default_stream(proc)
+        ierr = f(res, h(1), h(2), h(3), h(4), logical(option, c_bool), s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call mlxf_adopt(r, res, proc)
+    end subroutine mlxf_gather_mm_op
+
+    ! r = f(a(1), a(2)) with blocks of option rows and columns masked: a(3) masks the result, a(4) and a(5) the
+    ! operands, an empty one being none, for every int f(mlx_array* res, const mlx_array a, const mlx_array b,
+    ! int block_size, const mlx_array mask_out, const mlx_array mask_lhs, const mlx_array mask_rhs, const mlx_stream s)
+    subroutine mlxf_masked_mm_op( r, f, a, option, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_masked_mm_op)    :: f
+        type(mlx_array),  intent(in)    :: a(5)
+        integer,          intent(in)    :: option
+        character(len=*), intent(in)    :: proc
+        type(mlxc_array)  :: h(5)
+        type(mlxc_array)  :: res
+        type(mlxc_stream) :: s
+        integer(c_int)    :: ierr
+        integer           :: i
+        call mlxf_require_device(proc)
+        do i = 1, 5
+            if( i <= 2 .or. .not. mlxf_is_empty(a(i)) ) h(i) = mlxf_handle(a(i), proc)
+        end do
+        res = mlxc_array_new()
+        s = mlxf_default_stream(proc)
+        ierr = f(res, h(1), h(2), int(option, c_int), h(3), h(4), h(5), s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call mlxf_adopt(r, res, proc)
+    end subroutine mlxf_masked_mm_op
+
+    ! r = f(a(1), a(2), option) for a function of mlxc_take_op's signature whose integer goes to MLX as given: an axis
+    ! already translated (a negative one counts from the last, so that it serves operands of different ranks) or a count
+    subroutine mlxf_binary_axis_op( r, f, a, option, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_take_op)         :: f
+        type(mlx_array),  intent(in)    :: a(2)
+        integer,          intent(in)    :: option
+        character(len=*), intent(in)    :: proc
+        type(mlxc_array)  :: h(2)
+        type(mlxc_array)  :: res
+        type(mlxc_stream) :: s
+        integer(c_int)    :: ierr
+        call mlxf_require_device(proc)
+        h(1) = mlxf_handle(a(1), proc)
+        h(2) = mlxf_handle(a(2), proc)
+        res = mlxc_array_new()
+        s = mlxf_default_stream(proc)
+        ierr = f(res, h(1), h(2), int(option, c_int), s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call mlxf_adopt(r, res, proc)
+    end subroutine mlxf_binary_axis_op
+
+    ! r = f(a, option), an absent option being MLX's default, for every int f(mlx_array* res, const mlx_array a,
+    ! mlx_optional_float scale, const mlx_stream s)
+    subroutine mlxf_optional_float_op( r, f, a, proc, option )
+        type(mlx_array),  intent(inout)        :: r
+        procedure(mlxc_optional_float_op)      :: f
+        type(mlx_array),  intent(in)           :: a
+        character(len=*), intent(in)           :: proc
+        real(real32),     optional, intent(in) :: option
+        type(mlxc_array)          :: ha
+        type(mlxc_optional_float) :: scale
+        type(mlxc_array)          :: res
+        type(mlxc_stream)         :: s
+        integer(c_int)            :: ierr
+        call mlxf_require_device(proc)
+        ha = mlxf_handle(a, proc)
+        scale%value = 0
+        scale%has_value = present(option)
+        if( present(option) ) scale%value = real(option, c_float_kind)
+        res = mlxc_array_new()
+        s = mlxf_default_stream(proc)
+        ierr = f(res, ha, scale, s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call mlxf_adopt(r, res, proc)
+    end subroutine mlxf_optional_float_op
+
+    ! r = option(1)*(a(2) times a(3)) + option(2)*a(1), a matrix product in MLX's view, for every int f(mlx_array* res,
+    ! const mlx_array c, const mlx_array a, const mlx_array b, float alpha, float beta, const mlx_stream s)
+    subroutine mlxf_addmm_op( r, f, a, option, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_addmm_op)        :: f
+        type(mlx_array),  intent(in)    :: a(3)
+        real(real32),     intent(in)    :: option(2)
+        character(len=*), intent(in)    :: proc
+        type(mlxc_array)  :: h(3)
+        type(mlxc_array)  :: res
+        type(mlxc_stream) :: s
+        integer(c_int)    :: ierr
+        integer           :: i
+        call mlxf_require_device(proc)
+        do i = 1, 3
+            h(i) = mlxf_handle(a(i), proc)
+        end do
+        res = mlxc_array_new()
+        s = mlxf_default_stream(proc)
+        ierr = f(res, h(1), h(2), h(3), real(option(1), c_float_kind), real(option(2), c_float_kind), s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call mlxf_adopt(r, res, proc)
+    end subroutine mlxf_addmm_op
+
+    ! r = f(option, a), the subscripts already in MLX's axis order, for every int f(mlx_array* res,
+    ! const char* subscripts, const mlx_vector_array operands, const mlx_stream s)
+    subroutine mlxf_einsum_op( r, f, a, option, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_einsum_op)       :: f
+        type(mlx_array),  intent(in)    :: a(:)
+        character(len=*), intent(in)    :: option
+        character(len=*), intent(in)    :: proc
+        type(mlxc_vector_array) :: v
+        type(mlxc_array)        :: res
+        type(mlxc_stream)       :: s
+        integer(c_int)          :: ierr
+        call mlxf_require_device(proc)
+        if( size(a) == 0 ) call mlxf_fail(proc, 'empty list')
+        v = mlxf_vector_of(a, proc)
+        res = mlxc_array_new()
+        s = mlxf_default_stream(proc)
+        ierr = f(res, trim(option)//c_null_char, v, s)
+        call mlxf_check(mlxc_vector_array_free(v), proc)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call mlxf_adopt(r, res, proc)
+    end subroutine mlxf_einsum_op
+
+    ! r = f(a(1), a(2)) contracting the axes option(:, 1) of a(1) with the axes option(:, 2) of a(2), as MLX takes them,
+    ! for every int f(mlx_array* res, const mlx_array a, const mlx_array b, const int* axes_a, size_t axes_a_num,
+    ! const int* axes_b, size_t axes_b_num, const mlx_stream s)
+    subroutine mlxf_tensordot_op( r, f, a, option, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_tensordot_op)    :: f
+        type(mlx_array),  intent(in)    :: a(2)
+        integer,          intent(in)    :: option(:,:)
+        character(len=*), intent(in)    :: proc
+        type(mlxc_array)            :: h(2)
+        type(mlxc_array)            :: res
+        type(mlxc_stream)           :: s
+        integer(c_int)              :: ierr
+        integer(c_int), allocatable :: axes(:,:)
+        integer(c_size_t)           :: n
+        call mlxf_require_device(proc)
+        if( size(option, 2) /= 2 ) call mlxf_fail(proc, 'two lists of axes are needed')
+        h(1) = mlxf_handle(a(1), proc)
+        h(2) = mlxf_handle(a(2), proc)
+        axes = int(option, c_int)
+        n = int(size(axes, 1), c_size_t)
+        res = mlxc_array_new()
+        s = mlxf_default_stream(proc)
+        ierr = f(res, h(1), h(2), axes(:, 1), n, axes(:, 2), n, s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call mlxf_adopt(r, res, proc)
+    end subroutine mlxf_tensordot_op
 
 end module mlxf_linalg

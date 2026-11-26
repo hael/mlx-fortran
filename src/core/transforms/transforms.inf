@@ -1,1 +1,1 @@
-function transforms (gradients, vjp, jvp, custom rules) against closed-form derivatives on both devices
+!@descr: function transforms (gradients, vjp, jvp, custom rules) against closed-form derivatives on both devices

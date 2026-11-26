@@ -1,30 +1,104 @@
 !@descr: reductions, scans, softmax and extremum positions through the array signature helpers
 ! A reduction takes one dimension (dim), a list (dims) or neither (every dimension); keepdims keeps the reduced
 ! dimensions with extent 1. Positions are 1-based int32, and the position in a whole array is its subscripts.
-submodule(mlxf_ops) mlxf_ops_reduce
-use, intrinsic :: iso_fortran_env, only: int64
-use mlxf_c_ops,  only: mlxc_add, mlxc_argmax, mlxc_argmax_axis, mlxc_argmin, mlxc_argmin_axis, mlxc_floor_divide, &
-                       mlxc_remainder, mlxc_softmax, mlxc_softmax_axes, mlxc_softmax_axis, mlxc_stack, mlxc_all, &
-                       mlxc_all_axes, mlxc_all_axis, mlxc_any, mlxc_any_axes, mlxc_any_axis, mlxc_count_nonzero, &
-                       mlxc_count_nonzero_axes, mlxc_count_nonzero_axis, mlxc_cummax, mlxc_cummax_axis, mlxc_cummin, &
-                       mlxc_cummin_axis, mlxc_cumprod, mlxc_cumprod_axis, mlxc_cumsum, mlxc_cumsum_axis, &
-                       mlxc_logcumsumexp, mlxc_logcumsumexp_axis, mlxc_logsumexp, mlxc_logsumexp_axes, &
-                       mlxc_logsumexp_axis, mlxc_max, mlxc_max_axes, mlxc_max_axis, mlxc_mean, mlxc_mean_axes, &
-                       mlxc_mean_axis, mlxc_median, mlxc_median_axes, mlxc_median_axis, mlxc_min, mlxc_min_axes, &
-                       mlxc_min_axis, mlxc_prod, mlxc_prod_axes, mlxc_prod_axis, mlxc_std, mlxc_std_axes, &
-                       mlxc_std_axis, mlxc_sum, mlxc_sum_axes, mlxc_sum_axis, mlxc_var, mlxc_var_axes, mlxc_var_axis
-use mlxf_defs,   only: MLX_DTYPES, mlxf_reduce_spec, mlxf_scan_spec
-use mlxf_array,  only: mlx_from, mlxf_binary, mlxf_one_based, mlxf_list_op, mlxf_reduce_all_op, mlxf_reduce_dims_op, &
-                       mlxf_reduce_op, mlxf_scan_all_op, mlxf_scan_op, mlxf_scan_plain_all_op, mlxf_scan_plain_op, &
-                       mlxf_var_all_op, mlxf_var_dims_op, mlxf_var_op
-use mlxf_device, only: mlxf_enter
-use mlxf_error,  only: mlxf_fail
+module mlxf_ops_reduce
+use, intrinsic :: iso_c_binding,   only: c_bool, c_int, c_size_t
+use, intrinsic :: iso_fortran_env, only: int64, int32
+use mlxf_c_array,         only: mlxc_array_new, mlxc_array_free
+use mlxf_c_ops,           only: mlxc_add, mlxc_floor_divide, mlxc_remainder, mlxc_stack, mlxc_argmax, mlxc_argmax_axis, &
+                                mlxc_argmin, mlxc_argmin_axis, mlxc_softmax, mlxc_softmax_axes, mlxc_softmax_axis, &
+                                mlxc_all, mlxc_all_axes, mlxc_all_axis, mlxc_any, mlxc_any_axes, mlxc_any_axis, &
+                                mlxc_count_nonzero, mlxc_count_nonzero_axes, mlxc_count_nonzero_axis, mlxc_cummax, &
+                                mlxc_cummax_axis, mlxc_cummin, mlxc_cummin_axis, mlxc_cumprod, mlxc_cumprod_axis, &
+                                mlxc_cumsum, mlxc_cumsum_axis, mlxc_logcumsumexp, mlxc_logcumsumexp_axis, &
+                                mlxc_logsumexp, mlxc_logsumexp_axes, mlxc_logsumexp_axis, mlxc_max, mlxc_max_axes, &
+                                mlxc_max_axis, mlxc_mean, mlxc_mean_axes, mlxc_mean_axis, mlxc_median, &
+                                mlxc_median_axes, mlxc_median_axis, mlxc_min, mlxc_min_axes, mlxc_min_axis, mlxc_prod, &
+                                mlxc_prod_axes, mlxc_prod_axis, mlxc_std, mlxc_std_axes, mlxc_std_axis, mlxc_sum, &
+                                mlxc_sum_axes, mlxc_sum_axis, mlxc_var, mlxc_var_axes, mlxc_var_axis
+use mlxf_c_signatures,    only: mlxc_reduce_op, mlxc_scan_all_op, mlxc_scan_op, mlxc_scan_plain_all_op, &
+                                mlxc_scan_plain_op, mlxc_var_all_op, mlxc_var_dims_op, mlxc_var_op
+use mlxf_c_stream,        only: mlxc_stream_free
+use mlxf_c_types,         only: mlxc_array, mlxc_stream, mlxc_optional_dtype
+use mlxf_defs,            only: MLX_DTYPES, mlxf_reduce_spec, mlxf_scan_spec
+use mlxf_error,           only: mlxf_fail, mlxf_check
+use mlxf_device,          only: mlxf_enter, mlxf_require_device, mlxf_default_stream
+use mlxf_array,           only: mlx_array, mlxf_handle, mlxf_adopt
+use mlxf_ops_elementwise, only: mlx_astype
+use mlxf_ops_shape,       only: mlx_zeros
+use mlxf_calls,           only: mlxf_check_dim, mlxf_axes_of, mlxf_binary, mlxf_list_op, mlxf_one_based, &
+                                mlxf_reduce_all_op, mlxf_reduce_dims_op
+use mlxf_transfer,        only: mlx_from
 implicit none
+
+public :: sum, minval, mlx_logsumexp, mlx_cumsum, minloc, product, maxval, all, any, count, maxloc, mlx_mean, &
+    &mlx_median, mlx_var, mlx_std, mlx_cumprod, mlx_cummax, mlx_cummin, mlx_logcumsumexp, mlx_softmax
+private
+
+interface sum
+    module procedure sum_array, sum_dims
+end interface sum
+
+interface product
+    module procedure product_array, product_dims
+end interface product
+
+interface maxval
+    module procedure maxval_array, maxval_dims
+end interface maxval
+
+interface minval
+    module procedure minval_array, minval_dims
+end interface minval
+
+interface all
+    module procedure all_array, all_dims
+end interface all
+
+interface any
+    module procedure any_array, any_dims
+end interface any
+
+interface count
+    module procedure count_array, count_dims
+end interface count
+
+interface mlx_mean
+    module procedure mean_array, mean_dims
+end interface mlx_mean
+
+interface mlx_median
+    module procedure median_array, median_dims
+end interface mlx_median
+
+interface mlx_logsumexp
+    module procedure logsumexp_array, logsumexp_dims
+end interface mlx_logsumexp
+
+interface mlx_var
+    module procedure var_array, var_dims
+end interface mlx_var
+
+interface mlx_std
+    module procedure std_array, std_dims
+end interface mlx_std
+
+interface minloc
+    module procedure minloc_array, minloc_all
+end interface minloc
+
+interface maxloc
+    module procedure maxloc_array, maxloc_all
+end interface maxloc
+
+interface mlx_softmax
+    module procedure softmax_array, softmax_dims
+end interface mlx_softmax
 
 contains
 
     ! Fortran's sum: along dim, or over every dimension without it
-    module function sum_array( a, dim, keepdims ) result(r)
+    function sum_array( a, dim, keepdims ) result(r)
         type(mlx_array), intent(in)           :: a
         integer,         optional, intent(in) :: dim
         logical,         optional, intent(in) :: keepdims
@@ -38,7 +112,7 @@ contains
     end function sum_array
 
     ! sum over the dimensions dims
-    module function sum_dims( a, dims, keepdims ) result(r)
+    function sum_dims( a, dims, keepdims ) result(r)
         type(mlx_array), intent(in)           :: a
         integer,         intent(in)           :: dims(:)
         logical,         optional, intent(in) :: keepdims
@@ -48,7 +122,7 @@ contains
     end function sum_dims
 
     ! Fortran's product: along dim, or over every dimension without it
-    module function product_array( a, dim, keepdims ) result(r)
+    function product_array( a, dim, keepdims ) result(r)
         type(mlx_array), intent(in)           :: a
         integer,         optional, intent(in) :: dim
         logical,         optional, intent(in) :: keepdims
@@ -62,7 +136,7 @@ contains
     end function product_array
 
     ! product over the dimensions dims
-    module function product_dims( a, dims, keepdims ) result(r)
+    function product_dims( a, dims, keepdims ) result(r)
         type(mlx_array), intent(in)           :: a
         integer,         intent(in)           :: dims(:)
         logical,         optional, intent(in) :: keepdims
@@ -72,7 +146,7 @@ contains
     end function product_dims
 
     ! Fortran's maxval: along dim, or over every dimension without it
-    module function maxval_array( a, dim, keepdims ) result(r)
+    function maxval_array( a, dim, keepdims ) result(r)
         type(mlx_array), intent(in)           :: a
         integer,         optional, intent(in) :: dim
         logical,         optional, intent(in) :: keepdims
@@ -86,7 +160,7 @@ contains
     end function maxval_array
 
     ! maxval over the dimensions dims
-    module function maxval_dims( a, dims, keepdims ) result(r)
+    function maxval_dims( a, dims, keepdims ) result(r)
         type(mlx_array), intent(in)           :: a
         integer,         intent(in)           :: dims(:)
         logical,         optional, intent(in) :: keepdims
@@ -96,7 +170,7 @@ contains
     end function maxval_dims
 
     ! Fortran's minval: along dim, or over every dimension without it
-    module function minval_array( a, dim, keepdims ) result(r)
+    function minval_array( a, dim, keepdims ) result(r)
         type(mlx_array), intent(in)           :: a
         integer,         optional, intent(in) :: dim
         logical,         optional, intent(in) :: keepdims
@@ -110,7 +184,7 @@ contains
     end function minval_array
 
     ! minval over the dimensions dims
-    module function minval_dims( a, dims, keepdims ) result(r)
+    function minval_dims( a, dims, keepdims ) result(r)
         type(mlx_array), intent(in)           :: a
         integer,         intent(in)           :: dims(:)
         logical,         optional, intent(in) :: keepdims
@@ -120,7 +194,7 @@ contains
     end function minval_dims
 
     ! Fortran's all, a nonzero element counting as true: along dim, or over every dimension without it
-    module function all_array( a, dim, keepdims ) result(r)
+    function all_array( a, dim, keepdims ) result(r)
         type(mlx_array), intent(in)           :: a
         integer,         optional, intent(in) :: dim
         logical,         optional, intent(in) :: keepdims
@@ -134,7 +208,7 @@ contains
     end function all_array
 
     ! all over the dimensions dims
-    module function all_dims( a, dims, keepdims ) result(r)
+    function all_dims( a, dims, keepdims ) result(r)
         type(mlx_array), intent(in)           :: a
         integer,         intent(in)           :: dims(:)
         logical,         optional, intent(in) :: keepdims
@@ -144,7 +218,7 @@ contains
     end function all_dims
 
     ! Fortran's any, a nonzero element counting as true: along dim, or over every dimension without it
-    module function any_array( a, dim, keepdims ) result(r)
+    function any_array( a, dim, keepdims ) result(r)
         type(mlx_array), intent(in)           :: a
         integer,         optional, intent(in) :: dim
         logical,         optional, intent(in) :: keepdims
@@ -158,7 +232,7 @@ contains
     end function any_array
 
     ! any over the dimensions dims
-    module function any_dims( a, dims, keepdims ) result(r)
+    function any_dims( a, dims, keepdims ) result(r)
         type(mlx_array), intent(in)           :: a
         integer,         intent(in)           :: dims(:)
         logical,         optional, intent(in) :: keepdims
@@ -168,7 +242,7 @@ contains
     end function any_dims
 
     ! Fortran's count of the true (nonzero) elements, int32: along dim, or over every dimension without it
-    module function count_array( a, dim, keepdims ) result(r)
+    function count_array( a, dim, keepdims ) result(r)
         type(mlx_array), intent(in)           :: a
         integer,         optional, intent(in) :: dim
         logical,         optional, intent(in) :: keepdims
@@ -182,7 +256,7 @@ contains
     end function count_array
 
     ! count over the dimensions dims
-    module function count_dims( a, dims, keepdims ) result(r)
+    function count_dims( a, dims, keepdims ) result(r)
         type(mlx_array), intent(in)           :: a
         integer,         intent(in)           :: dims(:)
         logical,         optional, intent(in) :: keepdims
@@ -192,7 +266,7 @@ contains
     end function count_dims
 
     ! the arithmetic mean: along dim, or over every dimension without it
-    module function mean_array( a, dim, keepdims ) result(r)
+    function mean_array( a, dim, keepdims ) result(r)
         type(mlx_array), intent(in)           :: a
         integer,         optional, intent(in) :: dim
         logical,         optional, intent(in) :: keepdims
@@ -206,7 +280,7 @@ contains
     end function mean_array
 
     ! mlx_mean over the dimensions dims
-    module function mean_dims( a, dims, keepdims ) result(r)
+    function mean_dims( a, dims, keepdims ) result(r)
         type(mlx_array), intent(in)           :: a
         integer,         intent(in)           :: dims(:)
         logical,         optional, intent(in) :: keepdims
@@ -216,7 +290,7 @@ contains
     end function mean_dims
 
     ! the median, the mean of the two middle elements of an even count: along dim, or over every dimension without it
-    module function median_array( a, dim, keepdims ) result(r)
+    function median_array( a, dim, keepdims ) result(r)
         type(mlx_array), intent(in)           :: a
         integer,         optional, intent(in) :: dim
         logical,         optional, intent(in) :: keepdims
@@ -230,7 +304,7 @@ contains
     end function median_array
 
     ! mlx_median over the dimensions dims
-    module function median_dims( a, dims, keepdims ) result(r)
+    function median_dims( a, dims, keepdims ) result(r)
         type(mlx_array), intent(in)           :: a
         integer,         intent(in)           :: dims(:)
         logical,         optional, intent(in) :: keepdims
@@ -240,7 +314,7 @@ contains
     end function median_dims
 
     ! log(sum(exp(a))), computed stably by MLX: along dim, or over every dimension without it
-    module function logsumexp_array( a, dim, keepdims ) result(r)
+    function logsumexp_array( a, dim, keepdims ) result(r)
         type(mlx_array), intent(in)           :: a
         integer,         optional, intent(in) :: dim
         logical,         optional, intent(in) :: keepdims
@@ -254,7 +328,7 @@ contains
     end function logsumexp_array
 
     ! mlx_logsumexp over the dimensions dims
-    module function logsumexp_dims( a, dims, keepdims ) result(r)
+    function logsumexp_dims( a, dims, keepdims ) result(r)
         type(mlx_array), intent(in)           :: a
         integer,         intent(in)           :: dims(:)
         logical,         optional, intent(in) :: keepdims
@@ -264,7 +338,7 @@ contains
     end function logsumexp_dims
 
     ! the variance, its divisor the count less ddof (0 by default): along dim, or over every dimension without it
-    module function var_array( a, dim, keepdims, ddof ) result(r)
+    function var_array( a, dim, keepdims, ddof ) result(r)
         type(mlx_array), intent(in)           :: a
         integer,         optional, intent(in) :: dim
         logical,         optional, intent(in) :: keepdims
@@ -279,7 +353,7 @@ contains
     end function var_array
 
     ! mlx_var over the dimensions dims
-    module function var_dims( a, dims, keepdims, ddof ) result(r)
+    function var_dims( a, dims, keepdims, ddof ) result(r)
         type(mlx_array), intent(in)           :: a
         integer,         intent(in)           :: dims(:)
         logical,         optional, intent(in) :: keepdims
@@ -290,7 +364,7 @@ contains
     end function var_dims
 
     ! the standard deviation, the square root of mlx_var: along dim, or over every dimension without it
-    module function std_array( a, dim, keepdims, ddof ) result(r)
+    function std_array( a, dim, keepdims, ddof ) result(r)
         type(mlx_array), intent(in)           :: a
         integer,         optional, intent(in) :: dim
         logical,         optional, intent(in) :: keepdims
@@ -305,7 +379,7 @@ contains
     end function std_array
 
     ! mlx_std over the dimensions dims
-    module function std_dims( a, dims, keepdims, ddof ) result(r)
+    function std_dims( a, dims, keepdims, ddof ) result(r)
         type(mlx_array), intent(in)           :: a
         integer,         intent(in)           :: dims(:)
         logical,         optional, intent(in) :: keepdims
@@ -317,7 +391,7 @@ contains
 
     ! the running sum along dim; without dim, of the elements in array element order, rank 1.
     ! reverse scans from the last element; an exclusive scan leaves each element out of its own result
-    module function mlx_cumsum( a, dim, reverse, inclusive ) result(r)
+    function mlx_cumsum( a, dim, reverse, inclusive ) result(r)
         type(mlx_array), intent(in)           :: a
         integer,         optional, intent(in) :: dim
         logical,         optional, intent(in) :: reverse, inclusive
@@ -332,7 +406,7 @@ contains
 
     ! the running product along dim; without dim, of the elements in array element order, rank 1.
     ! reverse scans from the last element; an exclusive scan leaves each element out of its own result
-    module function mlx_cumprod( a, dim, reverse, inclusive ) result(r)
+    function mlx_cumprod( a, dim, reverse, inclusive ) result(r)
         type(mlx_array), intent(in)           :: a
         integer,         optional, intent(in) :: dim
         logical,         optional, intent(in) :: reverse, inclusive
@@ -347,7 +421,7 @@ contains
 
     ! the running maximum along dim; without dim, of the elements in array element order, rank 1.
     ! reverse scans from the last element; an exclusive scan leaves each element out of its own result
-    module function mlx_cummax( a, dim, reverse, inclusive ) result(r)
+    function mlx_cummax( a, dim, reverse, inclusive ) result(r)
         type(mlx_array), intent(in)           :: a
         integer,         optional, intent(in) :: dim
         logical,         optional, intent(in) :: reverse, inclusive
@@ -362,7 +436,7 @@ contains
 
     ! the running minimum along dim; without dim, of the elements in array element order, rank 1.
     ! reverse scans from the last element; an exclusive scan leaves each element out of its own result
-    module function mlx_cummin( a, dim, reverse, inclusive ) result(r)
+    function mlx_cummin( a, dim, reverse, inclusive ) result(r)
         type(mlx_array), intent(in)           :: a
         integer,         optional, intent(in) :: dim
         logical,         optional, intent(in) :: reverse, inclusive
@@ -377,7 +451,7 @@ contains
 
     ! the running log(sum(exp(a))) (MLX's stable form) along dim; without dim, of the elements in array element order, rank 1.
     ! reverse scans from the last element; an exclusive scan leaves each element out of its own result
-    module function mlx_logcumsumexp( a, dim, reverse, inclusive ) result(r)
+    function mlx_logcumsumexp( a, dim, reverse, inclusive ) result(r)
         type(mlx_array), intent(in)           :: a
         integer,         optional, intent(in) :: dim
         logical,         optional, intent(in) :: reverse, inclusive
@@ -391,7 +465,7 @@ contains
     end function mlx_logcumsumexp
 
     ! the softmax along dim, dimension 1 when it is absent; precise computes it in a more stable, slower form
-    module function softmax_array( a, dim, precise ) result(r)
+    function softmax_array( a, dim, precise ) result(r)
         type(mlx_array), intent(in)           :: a
         integer,         optional, intent(in) :: dim
         logical,         optional, intent(in) :: precise
@@ -407,7 +481,7 @@ contains
     end function softmax_array
 
     ! the softmax over the dimensions dims jointly
-    module function softmax_dims( a, dims, precise ) result(r)
+    function softmax_dims( a, dims, precise ) result(r)
         type(mlx_array), intent(in)           :: a
         integer,         intent(in)           :: dims(:)
         logical,         optional, intent(in) :: precise
@@ -417,7 +491,7 @@ contains
     end function softmax_dims
 
     ! Fortran's maxloc(a, dim): 1-based int32 positions, the first on ties
-    module function maxloc_array( a, dim, keepdims ) result(r)
+    function maxloc_array( a, dim, keepdims ) result(r)
         type(mlx_array), intent(in)           :: a
         integer,         intent(in)           :: dim
         logical,         optional, intent(in) :: keepdims
@@ -427,7 +501,7 @@ contains
     end function maxloc_array
 
     ! Fortran's maxloc(a): the subscripts of the first maximum in array element order, a rank-1 int32 array
-    module function maxloc_all( a ) result(r)
+    function maxloc_all( a ) result(r)
         type(mlx_array), intent(in) :: a
         type(mlx_array) :: r
         call mlxf_enter('maxloc')
@@ -435,7 +509,7 @@ contains
     end function maxloc_all
 
     ! Fortran's minloc(a, dim): 1-based int32 positions, the first on ties
-    module function minloc_array( a, dim, keepdims ) result(r)
+    function minloc_array( a, dim, keepdims ) result(r)
         type(mlx_array), intent(in)           :: a
         integer,         intent(in)           :: dim
         logical,         optional, intent(in) :: keepdims
@@ -445,7 +519,7 @@ contains
     end function minloc_array
 
     ! Fortran's minloc(a): the subscripts of the first minimum in array element order, a rank-1 int32 array
-    module function minloc_all( a ) result(r)
+    function minloc_all( a ) result(r)
         type(mlx_array), intent(in) :: a
         type(mlx_array) :: r
         call mlxf_enter('minloc')
@@ -535,4 +609,202 @@ contains
         if( present(inclusive) ) spec%inclusive = inclusive
     end function scan_spec
 
-end submodule mlxf_ops_reduce
+    ! r = f(a) along Fortran dimension option%dim (MLX axis rank - dim), which the result loses unless
+    ! option%keepdims, for every int f(mlx_array* res, const mlx_array a, int axis, bool keepdims, const mlx_stream s)
+    subroutine mlxf_reduce_op( r, f, a, option, proc )
+        type(mlx_array),        intent(inout) :: r
+        procedure(mlxc_reduce_op)             :: f
+        type(mlx_array),        intent(in)    :: a
+        type(mlxf_reduce_spec), intent(in)    :: option
+        character(len=*),       intent(in)    :: proc
+        type(mlxc_array)  :: ha
+        type(mlxc_array)  :: res
+        type(mlxc_stream) :: s
+        integer(c_int)    :: ierr
+        call mlxf_require_device(proc)
+        ha = mlxf_handle(a, proc)
+        call mlxf_check_dim(a, option%dim, proc)
+        res = mlxc_array_new()
+        s = mlxf_default_stream(proc)
+        ierr = f(res, ha, int(a%ndim()-option%dim, c_int), logical(option%keepdims, c_bool), s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call mlxf_adopt(r, res, proc)
+    end subroutine mlxf_reduce_op
+
+    ! the scan of a along Fortran dimension option%dim, in its dtype, reversed or exclusive as option says, for every
+    ! int f(mlx_array* res, const mlx_array a, int axis, bool reverse, bool inclusive, mlx_optional_dtype
+    ! dtype, const mlx_stream s)
+    subroutine mlxf_scan_op( r, f, a, option, proc )
+        type(mlx_array),      intent(inout) :: r
+        procedure(mlxc_scan_op)             :: f
+        type(mlx_array),      intent(in)    :: a
+        type(mlxf_scan_spec), intent(in)    :: option
+        character(len=*),     intent(in)    :: proc
+        type(mlxc_array)          :: ha
+        type(mlxc_optional_dtype) :: dtype
+        type(mlxc_array)          :: res
+        type(mlxc_stream)         :: s
+        integer(c_int)            :: ierr
+        call mlxf_require_device(proc)
+        ha = mlxf_handle(a, proc)
+        call mlxf_check_dim(a, option%dim, proc)
+        dtype%has_value = .false._c_bool
+        dtype%value = 0_c_int
+        res = mlxc_array_new()
+        s = mlxf_default_stream(proc)
+        ierr = f(res, ha, int(a%ndim()-option%dim, c_int), logical(option%reverse, c_bool), logical(option%inclusive, c_bool), dtype, s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call mlxf_adopt(r, res, proc)
+    end subroutine mlxf_scan_op
+
+    ! r = f(a) over every dimension with option%ddof delta degrees of freedom, for every
+    ! int f(mlx_array* res, const mlx_array a, bool keepdims, int ddof, const mlx_stream s)
+    subroutine mlxf_var_all_op( r, f, a, option, proc )
+        type(mlx_array),        intent(inout) :: r
+        procedure(mlxc_var_all_op)            :: f
+        type(mlx_array),        intent(in)    :: a
+        type(mlxf_reduce_spec), intent(in)    :: option
+        character(len=*),       intent(in)    :: proc
+        type(mlxc_array)  :: ha
+        type(mlxc_array)  :: res
+        type(mlxc_stream) :: s
+        integer(c_int)    :: ierr
+        call mlxf_require_device(proc)
+        ha = mlxf_handle(a, proc)
+        res = mlxc_array_new()
+        s = mlxf_default_stream(proc)
+        ierr = f(res, ha, logical(option%keepdims, c_bool), int(option%ddof, c_int), s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call mlxf_adopt(r, res, proc)
+    end subroutine mlxf_var_all_op
+
+    ! r = f(a) along Fortran dimension option%dim with option%ddof delta degrees of freedom, for every
+    ! int f(mlx_array* res, const mlx_array a, int axis, bool keepdims, int ddof, const mlx_stream s)
+    subroutine mlxf_var_op( r, f, a, option, proc )
+        type(mlx_array),        intent(inout) :: r
+        procedure(mlxc_var_op)                :: f
+        type(mlx_array),        intent(in)    :: a
+        type(mlxf_reduce_spec), intent(in)    :: option
+        character(len=*),       intent(in)    :: proc
+        type(mlxc_array)  :: ha
+        type(mlxc_array)  :: res
+        type(mlxc_stream) :: s
+        integer(c_int)    :: ierr
+        call mlxf_require_device(proc)
+        ha = mlxf_handle(a, proc)
+        call mlxf_check_dim(a, option%dim, proc)
+        res = mlxc_array_new()
+        s = mlxf_default_stream(proc)
+        ierr = f(res, ha, int(a%ndim()-option%dim, c_int), logical(option%keepdims, c_bool), int(option%ddof, c_int), s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call mlxf_adopt(r, res, proc)
+    end subroutine mlxf_var_op
+
+    ! r = f(a) over the Fortran dimensions option%dims with option%ddof delta degrees of freedom, for every
+    ! int f(mlx_array* res, const mlx_array a, const int* axes, size_t axes_num, bool keepdims, int ddof,
+    ! const mlx_stream s)
+    subroutine mlxf_var_dims_op( r, f, a, option, proc )
+        type(mlx_array),        intent(inout) :: r
+        procedure(mlxc_var_dims_op)           :: f
+        type(mlx_array),        intent(in)    :: a
+        type(mlxf_reduce_spec), intent(in)    :: option
+        character(len=*),       intent(in)    :: proc
+        type(mlxc_array)            :: ha
+        type(mlxc_array)            :: res
+        type(mlxc_stream)           :: s
+        integer(c_int)              :: ierr
+        integer(c_int), allocatable :: axes(:)
+        call mlxf_require_device(proc)
+        ha = mlxf_handle(a, proc)
+        axes = mlxf_axes_of(a, option%dims, proc)
+        res = mlxc_array_new()
+        s = mlxf_default_stream(proc)
+        ierr = f(res, ha, axes, int(size(axes), c_size_t), logical(option%keepdims, c_bool), int(option%ddof, c_int), s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call mlxf_adopt(r, res, proc)
+    end subroutine mlxf_var_dims_op
+
+    ! the scan of a in array element order, a rank-1 result in a's dtype, for every int f(mlx_array* res,
+    ! const mlx_array a, bool reverse, bool inclusive, mlx_optional_dtype dtype, const mlx_stream s)
+    subroutine mlxf_scan_all_op( r, f, a, option, proc )
+        type(mlx_array),      intent(inout) :: r
+        procedure(mlxc_scan_all_op)         :: f
+        type(mlx_array),      intent(in)    :: a
+        type(mlxf_scan_spec), intent(in)    :: option
+        character(len=*),     intent(in)    :: proc
+        type(mlxc_array)          :: ha
+        type(mlxc_array)          :: res
+        type(mlxc_stream)         :: s
+        integer(c_int)            :: ierr
+        type(mlxc_optional_dtype) :: dtype
+        call mlxf_require_device(proc)
+        ha = mlxf_handle(a, proc)
+        dtype%has_value = .false._c_bool
+        dtype%value = 0_c_int
+        res = mlxc_array_new()
+        s = mlxf_default_stream(proc)
+        ierr = f(res, ha, logical(option%reverse, c_bool), logical(option%inclusive, c_bool), dtype, s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call mlxf_adopt(r, res, proc)
+    end subroutine mlxf_scan_all_op
+
+    ! the scan of a along Fortran dimension option%dim, for every int f(mlx_array* res, const mlx_array a,
+    ! int axis, bool reverse, bool inclusive, const mlx_stream s)
+    subroutine mlxf_scan_plain_op( r, f, a, option, proc )
+        type(mlx_array),      intent(inout) :: r
+        procedure(mlxc_scan_plain_op)       :: f
+        type(mlx_array),      intent(in)    :: a
+        type(mlxf_scan_spec), intent(in)    :: option
+        character(len=*),     intent(in)    :: proc
+        type(mlxc_array)  :: ha
+        type(mlxc_array)  :: res
+        type(mlxc_stream) :: s
+        integer(c_int)    :: ierr
+        call mlxf_require_device(proc)
+        ha = mlxf_handle(a, proc)
+        call mlxf_check_dim(a, option%dim, proc)
+        res = mlxc_array_new()
+        s = mlxf_default_stream(proc)
+        ierr = f(res, ha, int(a%ndim()-option%dim, c_int), logical(option%reverse, c_bool), logical(option%inclusive, c_bool), s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call mlxf_adopt(r, res, proc)
+    end subroutine mlxf_scan_plain_op
+
+    ! the scan of a in array element order, a rank-1 result, for every int f(mlx_array* res,
+    ! const mlx_array a, bool reverse, bool inclusive, const mlx_stream s)
+    subroutine mlxf_scan_plain_all_op( r, f, a, option, proc )
+        type(mlx_array),      intent(inout) :: r
+        procedure(mlxc_scan_plain_all_op)   :: f
+        type(mlx_array),      intent(in)    :: a
+        type(mlxf_scan_spec), intent(in)    :: option
+        character(len=*),     intent(in)    :: proc
+        type(mlxc_array)  :: ha
+        type(mlxc_array)  :: res
+        type(mlxc_stream) :: s
+        integer(c_int)    :: ierr
+        call mlxf_require_device(proc)
+        ha = mlxf_handle(a, proc)
+        res = mlxc_array_new()
+        s = mlxf_default_stream(proc)
+        ierr = f(res, ha, logical(option%reverse, c_bool), logical(option%inclusive, c_bool), s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call mlxf_adopt(r, res, proc)
+    end subroutine mlxf_scan_plain_all_op
+
+end module mlxf_ops_reduce

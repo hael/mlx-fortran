@@ -1,1 +1,1 @@
-!@descr: fast: custom Metal kernels behind a counted handle, and their GPU tests
+!@descr: fast: fused layers (normalisations, rotary embeddings, attention, cross entropy) and custom Metal kernels behind a counted handle, and their tests

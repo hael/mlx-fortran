@@ -1,1 +1,1 @@
-ops operations and their two-device tests
+!@descr: the operations in Fortran conventions, one module per concern (elementwise, math, logic, shape, index, reduce, create, sort), and their two-device tests

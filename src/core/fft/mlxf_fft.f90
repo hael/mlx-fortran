@@ -1,14 +1,20 @@
 !@descr: real and complex Fourier transforms along Fortran dimensions, their shifts and their frequencies
 module mlxf_fft
-use, intrinsic :: iso_c_binding,   only: c_double
+use, intrinsic :: iso_c_binding,   only: c_double, c_int, c_size_t
 use, intrinsic :: iso_fortran_env, only: real64
-use mlxf_c_fft,  only: mlxc_fft_fft, mlxc_fft_ifft, mlxc_fft_rfft, mlxc_fft_irfft, mlxc_fft_fft2, mlxc_fft_ifft2, &
-                       mlxc_fft_fftn, mlxc_fft_ifftn, mlxc_fft_rfft2, mlxc_fft_irfft2, mlxc_fft_rfftn, mlxc_fft_irfftn, &
-                       mlxc_fft_fftshift, mlxc_fft_ifftshift, mlxc_fft_fftfreq, mlxc_fft_rfftfreq
-use mlxf_defs,   only: mlxf_fft_spec, mlxf_fftn_spec
-use mlxf_array,  only: mlx_array, mlxf_fft_op, mlxf_fftn_op, mlxf_freq_op, mlxf_vector_op, mlxf_axes_of
-use mlxf_device, only: mlxf_enter
-use mlxf_error,  only: mlxf_fail
+use mlxf_c_array,      only: mlxc_array_free, mlxc_array_new
+use mlxf_c_fft,        only: mlxc_fft_fft, mlxc_fft_ifft, mlxc_fft_rfft, mlxc_fft_irfft, mlxc_fft_fft2, mlxc_fft_ifft2, &
+                             mlxc_fft_fftn, mlxc_fft_ifftn, mlxc_fft_rfft2, mlxc_fft_irfft2, mlxc_fft_rfftn, &
+                             mlxc_fft_irfftn, mlxc_fft_fftshift, mlxc_fft_ifftshift, mlxc_fft_fftfreq, &
+                             mlxc_fft_rfftfreq
+use mlxf_c_signatures, only: mlxc_fft_op, mlxc_fftn_op, mlxc_freq_op
+use mlxf_c_stream,     only: mlxc_stream_free
+use mlxf_c_types,      only: mlxc_array, mlxc_stream
+use mlxf_defs,         only: mlxf_fft_spec, mlxf_fftn_spec, MLX_FFT_NORMS
+use mlxf_array,        only: mlx_array, mlxf_handle, mlxf_adopt
+use mlxf_device,       only: mlxf_enter, mlxf_default_stream, mlxf_require_device
+use mlxf_error,        only: mlxf_fail, mlxf_check
+use mlxf_calls,        only: mlxf_check_dim, mlxf_axes_of, mlxf_vector_op
 implicit none
 public :: mlx_fft, mlx_ifft, mlx_rfft, mlx_irfft, mlx_fft2, mlx_ifft2, mlx_fftn, mlx_ifftn, mlx_rfft2, mlx_irfft2, &
     &mlx_rfftn, mlx_irfftn, mlx_fftshift, mlx_ifftshift, mlx_fftfreq, mlx_rfftfreq
@@ -318,5 +324,88 @@ contains
             axes = [(i, i=0, a%ndim()-1)]
         endif
     end function shift_axes
+
+    ! r = f(a) of length option%n(1) along Fortran dimension option%dims(1), for every int f(mlx_array* res,
+    ! const mlx_array a, int n, int axis, mlx_fft_norm norm, const mlx_stream s); the norm is checked first
+    subroutine mlxf_fft_op( r, f, a, option, proc )
+        type(mlx_array),     intent(inout) :: r
+        procedure(mlxc_fft_op)             :: f
+        type(mlx_array),     intent(in)    :: a
+        type(mlxf_fft_spec), intent(in)    :: option
+        character(len=*),    intent(in)    :: proc
+        type(mlxc_array)  :: ha
+        type(mlxc_array)  :: res
+        type(mlxc_stream) :: s
+        integer(c_int)    :: ierr
+        call mlxf_require_device(proc)
+        call check_fft_norm(option%norm, proc)
+        ha = mlxf_handle(a, proc)
+        call mlxf_check_dim(a, option%dims(1), proc)
+        res = mlxc_array_new()
+        s = mlxf_default_stream(proc)
+        ierr = f(res, ha, int(option%n(1), c_int), int(a%ndim()-option%dims(1), c_int), int(option%norm, c_int), s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call mlxf_adopt(r, res, proc)
+    end subroutine mlxf_fft_op
+
+    ! r = f(a) over the Fortran dimensions option%dims with the lengths option%n, in the order given (MLX halves a
+    ! real transform along the last), for every int f(mlx_array* res, const mlx_array a, const int* n, size_t n_num,
+    ! const int* axes, size_t axes_num, mlx_fft_norm norm, const mlx_stream s); the norm is checked first
+    subroutine mlxf_fftn_op( r, f, a, option, proc )
+        type(mlx_array),      intent(inout) :: r
+        procedure(mlxc_fftn_op)             :: f
+        type(mlx_array),      intent(in)    :: a
+        type(mlxf_fftn_spec), intent(in)    :: option
+        character(len=*),     intent(in)    :: proc
+        type(mlxc_array)            :: ha
+        integer(c_int), allocatable :: axes(:)
+        integer(c_size_t)           :: n
+        type(mlxc_array)            :: res
+        type(mlxc_stream)           :: s
+        integer(c_int)              :: ierr
+        call mlxf_require_device(proc)
+        call check_fft_norm(option%norm, proc)
+        ha = mlxf_handle(a, proc)
+        if( size(option%n) /= size(option%dims) ) call mlxf_fail(proc, 'one length per transformed dimension is needed')
+        axes = mlxf_axes_of(a, option%dims, proc)
+        n = int(size(axes), c_size_t)
+        res = mlxc_array_new()
+        s = mlxf_default_stream(proc)
+        ierr = f(res, ha, int(option%n, c_int), n, axes, n, int(option%norm, c_int), s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call mlxf_adopt(r, res, proc)
+    end subroutine mlxf_fftn_op
+
+    ! r = f(n, d) for every int f(mlx_array* res, int n, double d, const mlx_stream s)
+    subroutine mlxf_freq_op( r, f, n, d, proc )
+        type(mlx_array),  intent(inout) :: r
+        procedure(mlxc_freq_op)         :: f
+        integer,          intent(in)    :: n
+        real(c_double),   intent(in)    :: d
+        character(len=*), intent(in)    :: proc
+        type(mlxc_array)  :: res
+        type(mlxc_stream) :: s
+        integer(c_int)    :: ierr
+        call mlxf_require_device(proc)
+        res = mlxc_array_new()
+        s = mlxf_default_stream(proc)
+        ierr = f(res, int(n, c_int), d, s)
+        call mlxf_check(mlxc_stream_free(s), proc)
+        if( ierr /= 0 ) call mlxf_check(mlxc_array_free(res), proc)
+        call mlxf_check(ierr, proc)
+        call mlxf_adopt(r, res, proc)
+    end subroutine mlxf_freq_op
+
+    ! a normalisation outside MLX_FFT_NORMS stops before it reaches mlx-c as an enum value
+    subroutine check_fft_norm( norm, proc )
+        integer,          intent(in) :: norm
+        character(len=*), intent(in) :: proc
+        if( all(norm /= [MLX_FFT_NORMS%backward, MLX_FFT_NORMS%forward, MLX_FFT_NORMS%ortho]) ) &
+            &call mlxf_fail(proc, 'normalization must be a member of MLX_FFT_NORMS')
+    end subroutine check_fft_norm
 
 end module mlxf_fft

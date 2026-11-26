@@ -184,6 +184,7 @@ interface
         real(c_double) :: loadavg(*)
         integer(c_int), value :: nelem
     end function getloadavg
+
     integer(c_int) function usleep( useconds ) bind(c, name='usleep')
         import :: c_int
         integer(c_int), value :: useconds

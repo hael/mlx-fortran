@@ -16,6 +16,13 @@ Rules:
              physical line; no typed character constructor of non-literal elements passed straight as an
              argument (gfortran 15 corrupts the heap; assign it to a local first)
   inf        every directory holding Fortran has a non-empty <dir>.inf
+  size       a library module or submodule file (src/core, src/defs; a tester excepted) has at most MAX_LINES
+             lines; SIZE_LEDGER names the files above it, with their count and the reason (a ratchet: lower the
+             entry as the file shrinks, delete it below the limit)
+  publist    a public :: statement continued over several lines is packed: no physical line of it but its
+             last holds a single name (names fill a line to the 120-column limit; a comment line naming the
+             group that follows may stand inside the continuation). PUBLIST_LEDGER names the files not
+             packed yet, with their count of single-name lines
   surface    every library module (src/core) restricts its interface: one `public ::` block and a bare
              `private`, and no `public` attribute on a declaration (installed .mod files make every public
              name API)
@@ -62,7 +69,7 @@ Rules:
              private component) that another module imports is declared in src/defs, unless DEFS_EXCEPTIONS
              claims it with a reason; one used only inside its module stays there; a class (type-bound
              procedures or private components) stays with its module. Test code shares its constants and
-             records through src/test/mlxf_test_defs.f90, a defs module of the same form. A defs
+             records through src/test/framework/mlxf_test_defs.f90, a defs module of the same form. A defs
              module holds constants and behaviourless types only (no contains), imports only the generated
              layer and the intrinsic modules, writes no public statement or
              attribute and no bare private (public by default, as XEMA's defs modules), and lists every name
@@ -83,7 +90,7 @@ Rules:
              lower it in the same change)
   mirror     scripts/toy_mirror.txt, the mirror ledger (doc/policies/toy_example_policy.md), has one line per
              public type, per public type-bound procedure and per public module procedure of every toy module (a
-             module mlxf_toy_<stem> under src/test): the toy's module and name (T, T%binding or the procedure),
+             module mlxf_toy_<stem> under src/test/toys): the toy's module and name (T, T%binding or the procedure),
              then SIMPLE's module and name, or `addition` and a reason (a tester's entries, *_tester, are the
              registry's, not the toy's, and need no line). A type, binding or procedure without a line fails; so
              does a line that names
@@ -93,7 +100,7 @@ Rules:
              half of a miniature whose host half keeps the stem), an addition without a reason, and a
              ledger whose header does not record the SIMPLE commit that was read
   seam       scripts/toy_seam.txt, the seam ledger (doc/policies/toy_example_policy.md), has one line per
-             mlxf_toy_* file of src/test that is not a tester: its stem and its class, host, glue, device or
+             mlxf_toy_* file of src/test/toys that is not a tester: its stem and its class, host, glue, device or
              pending. A file without a line fails, and so does a line without a file or with another class. A
              host file imports no MLX name (mlxf, a generated mlxf_c_* module or a module the ledger classes as
              device) and does not name USE_MLX: it compiles without the library. A glue file is a submodule named
@@ -102,7 +109,7 @@ Rules:
              (mlxf_toy_device_work, the opaque type the workspaces extend, excepted; and a device module
              <stem>_mlx may import <stem>, its own host half, whose records it fills). The count of pending
              lines equals SEAM_PENDING (a ratchet: lower it in the same change)
-  nanmax     test code (src/test, test/, *_tester.f90) reduces with nan_maxval (src/test/mlxf_test_reduce.f90),
+  nanmax     test code (src/test, test/, *_tester.f90) reduces with nan_maxval (src/test/framework/mlxf_test_reduce.f90),
              never maxval(abs(...)): maxval may skip a NaN among finite values, so an error reduced with it
              passes a corrupt element. A reduction along a dimension (dim=) builds a reference array and is
              left alone. The scalar accumulation `x = max(x, abs(...))` (an assignment whose right side opens
@@ -145,7 +152,7 @@ TOPS = ('src', 'test')
 CORE = 'src/core/'
 DEFS = 'src/defs/'
 # the defs module of test code: the constants several test modules share, under the same form
-TEST_DEFS = 'src/test/mlxf_test_defs.f90'
+TEST_DEFS = 'src/test/framework/mlxf_test_defs.f90'
 
 CBIND_LEDGER = {}
 # testers of the library that still accumulate an error with scalar max (rule nanmax); may only shrink
@@ -159,9 +166,14 @@ STATE_LEDGER = {
     'src/core/runtime/mlxf_device.f90': (1, 'the initialisation flag: error handler installed, and whether MLX can allocate'),
     'src/core/runtime/mlxf_error.f90': (1, 'the last error: MLX reports it through a C callback, read by mlx_last_error'),
     'src/core/runtime/mlxf_registry.f90': (1, 'the handle registry: one table of the live MLX objects, serials and counts'),
-    'src/test/mlxf_test_utils.f90': (5, 'the assertion totals and the suite and failure records of the test library'),
+    'src/test/framework/mlxf_test_utils.f90': (5, 'the assertion totals and the suite and failure records of the test library'),
 }
 MAX_DUMMIES = 5
+# the largest library file (rule size), and the files above it with their line count; may only shrink
+MAX_LINES = 1000
+SIZE_LEDGER = {}
+# public blocks not packed yet (rule publist), count of single-name lines; may only shrink
+PUBLIST_LEDGER = {}
 # test code that asks MLX for the GPU count itself (rule devquery); may only shrink
 DEVQUERY_LEDGER = {
     'src/core/runtime/mlxf_device_tester.f90': (2, 'tests mlx_device_count itself: a stable, non-negative count'),
@@ -208,7 +220,7 @@ SEAM_OPAQUE = 'mlxf_toy_device_work'
 SEAM_SUFFIX = '_mlx'
 SEAM_DEFINE = 'USE_MLX'
 GENERATED_C = re.compile(r'^mlxf_c_\w+$')
-TOY_DIR = 'src/test/'
+TOY_DIR = 'src/test/toys/'
 TOY_PREFIX = 'mlxf_toy_'
 SIMPLE_PREFIX = 'simple_'
 MIRROR_COMMIT = re.compile(r'^#.*\bSIMPLE\b.*\bcommit\s+[0-9a-f]{7,40}\b', re.I)
@@ -353,6 +365,29 @@ def check_ctor(rel, codes, out):
             if depth > 0:
                 out.append('%s:%d: layout: a typed character constructor of non-literal elements passed as an '
                            'argument (assign it to a local first)' % (rel, n))
+
+
+PUBLIC_HEAD = re.compile(r'^\s*public\s*::', re.I)
+
+
+def publist_singles(codes):
+    """the physical lines, but the last, of a continued public :: statement that hold a single name"""
+    singles, inside = [], False
+    for n, code in enumerate(codes, 1):
+        part = code.strip()
+        if not inside:
+            if not PUBLIC_HEAD.match(part) or not part.endswith('&'):
+                continue
+            inside, part = True, re.sub(r'^public\s*::', '', part, flags=re.I)
+        elif not part or part.startswith('#'):
+            continue
+        last = not part.endswith('&')
+        names = [x for x in part.strip('&').split(',') if x.strip().strip('&').strip()]
+        if not last and len(names) == 1:
+            singles.append(n)
+        if last:
+            inside = False
+    return singles
 
 
 def check_inf(root, files, out):
@@ -1048,7 +1083,7 @@ def cmake_files(root):
 NANMAX = re.compile(r'(?<![\w%])maxval\s*\(\s*abs\s*\(', re.I)
 # an assignment whose right side opens with max( and holds an abs(: the scalar accumulation of an error
 NANMAX_SCALAR = re.compile(r'=\s*max\s*\(.*(?<![\w%])abs\s*\(', re.I)
-NANMAX_HOME = 'src/test/mlxf_test_reduce.f90'
+NANMAX_HOME = 'src/test/framework/mlxf_test_reduce.f90'
 TOP_DIRS = re.compile(r'\$\{CMAKE_(SOURCE|BINARY)_DIR\}')
 
 
@@ -1117,7 +1152,7 @@ def check_fortlsoff(root, out):
 
 GPU_COUNT = re.compile(r'\bmlx_device_count\s*\(\s*MLX_DEVICES\s*%\s*gpu\s*\)', re.I)
 METAL_QUERY = re.compile(r'\bmlx_metal_is_available\s*\(', re.I)
-TEST_UTILS = 'src/test/mlxf_test_utils.f90'
+TEST_UTILS = 'src/test/framework/mlxf_test_utils.f90'
 CONSUMER_DIR = 'test/consumer/'
 
 
@@ -1185,7 +1220,7 @@ def check_docex(root, out):
                 out.append('%s:%d: docex: the block is not a verbatim run of the lines of %s' % (rel, first + 1, src))
     if not os.path.isfile(os.path.join(root, DOCEX_TABLE)):
         return out
-    guards = set(DOCEX_GUARD.findall(read(root, 'src/test/mlxf_test_registry.f90')))
+    guards = set(DOCEX_GUARD.findall(read(root, 'src/test/framework/mlxf_test_registry.f90')))
     blocks = {}
     if os.path.isfile(os.path.join(root, DOCEX_EXAMPLE)):
         for line in read(root, DOCEX_EXAMPLE).split('\n'):
@@ -1219,7 +1254,7 @@ CALLBACKS = {
     'src/core/runtime/mlxf_error.f90': {'record_mlx_error': (('msg', True), ('data', True))},
     'src/core/compile/mlxf_compile.f90': {'invoke_callback': (('res', False), ('input', True), ('payload', True)),
                                           'delete_payload': (('payload', True),)},
-    'src/core/array/mlxf_array_borrow.f90': {'release_buffer': (('rec', True),)},
+    'src/core/array/mlxf_transfer_borrow.f90': {'release_buffer': (('rec', True),)},
     'src/core/transforms/mlxf_transforms.f90': {
         'invoke_vjp': (('res', False), ('primals', True), ('cotangents', True), ('outputs', True), ('payload', True)),
         'invoke_jvp': (('res', False), ('primals', True), ('tangents', True), ('argnums', False), ('num', True),
@@ -1731,7 +1766,7 @@ def main():
     root = ROOT
     files = sources(root)
     out = []
-    cbind, libc, prints, state, nanmax = {}, {}, {}, {}, {}
+    cbind, libc, prints, state, nanmax, publist, sizes = {}, {}, {}, {}, {}, {}, {}
     api = public_names(root)
     tree_functions = set()
     for rel in files:
@@ -1751,6 +1786,13 @@ def main():
         check_ctorcall(rel, lines, api, out)
         check_ctorexpr(rel, lines, out, tree_functions)
         check_nanmax(rel, lines, out, nanmax)
+        n = len(publist_singles(codes))
+        if n:
+            publist[rel] = n
+        if (rel.startswith(CORE) or rel.startswith(DEFS)) and not rel.endswith('_tester.f90'):
+            n = len(lines) - (1 if lines and lines[-1] == '' else 0)
+            if n > MAX_LINES:
+                sizes[rel] = n
         n = sum(1 for r in raws if BIND_MLX.search(r))
         if n:
             cbind[rel] = n
@@ -1786,11 +1828,13 @@ def main():
     ledger_check('prints', prints, PRINT_LEDGER, out)
     ledger_check('state', state, STATE_LEDGER, out)
     ledger_check('nanmax', nanmax, NANMAX_LEDGER, out)
+    ledger_check('publist', publist, PUBLIST_LEDGER, out)
+    ledger_check('size', sizes, SIZE_LEDGER, out)
     if listing:
         print(__doc__)
         for name, ledger in (('cbind', CBIND_LEDGER), ('libc', LIBC_LEDGER), ('prints', PRINT_LEDGER),
                              ('state', STATE_LEDGER), ('devquery', DEVQUERY_LEDGER),
-                             ('nanmax', NANMAX_LEDGER)):
+                             ('nanmax', NANMAX_LEDGER), ('publist', PUBLIST_LEDGER), ('size', SIZE_LEDGER)):
             for rel, (n, why) in sorted(ledger.items()):
                 print('ledger %-7s %-50s %3d  %s' % (name, rel, n, why))
     for line in out:

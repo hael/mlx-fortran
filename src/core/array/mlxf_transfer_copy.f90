@@ -1,9 +1,6 @@
 !@descr: copies between Fortran arrays and mlx_arrays: mlx_from, mlx_to, mlx_to_alloc, mlx_item
-submodule (mlxf_array) mlxf_array_transfer
+submodule(mlxf_transfer) mlxf_transfer_copy
 use, intrinsic :: iso_c_binding, only: c_null_ptr, c_loc
-use mlxf_c_types,  only: MLXC_BOOL, MLXC_INT8, MLXC_INT16, MLXC_UINT8, MLXC_UINT16, MLXC_UINT32, MLXC_UINT64, &
-                         MLXC_FLOAT16, MLXC_BFLOAT16, MLXC_INT32, MLXC_INT64, MLXC_FLOAT32, MLXC_FLOAT64, &
-                         MLXC_COMPLEX64
 use mlxf_c_array,  only: mlxc_array_free, mlxc_array_new_data, mlxc_array_size, mlxc_array_dtype, mlxc_array_eval, &
                          mlxc_array_new, mlxc_array_item_float32, mlxc_array_item_float64, mlxc_array_item_complex64, &
                          mlxc_array_item_int8, mlxc_array_item_int16, mlxc_array_item_int32, mlxc_array_item_int64, &
@@ -12,9 +9,12 @@ use mlxf_c_array,  only: mlxc_array_free, mlxc_array_new_data, mlxc_array_size, 
                          mlxc_array_data_float64, mlxc_array_data_complex64, mlxc_internal_array_is_row_contiguous
 use mlxf_c_ops,    only: mlxc_contiguous
 use mlxf_c_stream, only: mlxc_stream_free
+use mlxf_c_types,  only: MLXC_BOOL, MLXC_INT8, MLXC_INT16, MLXC_UINT16, MLXC_UINT32, MLXC_UINT64, MLXC_FLOAT16, &
+                         MLXC_BFLOAT16, MLXC_INT32, MLXC_INT64, MLXC_FLOAT32, MLXC_FLOAT64, MLXC_COMPLEX64, mlxc_stream
 use mlxf_libc,     only: c_memcpy
 use mlxf_error,    only: mlxf_check, mlxf_fail, mlxf_report
 use mlxf_device,   only: mlxf_enter, mlxf_require_device, mlxf_default_stream
+use mlxf_array,    only: mlxf_adopt, mlxf_handle
 implicit none
 
 contains
@@ -33,7 +33,7 @@ contains
         if( n > MAX_RANK ) call mlxf_fail(proc, 'rank above 15')
         if( any(fshape > int(huge(1_c_int), int64)) ) call mlxf_fail(proc, 'a dimension above 2**31 - 1')
         cshape(1:n) = int(fshape(n:1:-1), c_int)
-        call adopt(a, mlxc_array_new_data(p, cshape, int(n, c_int), dtype), proc)
+        call mlxf_adopt(a, mlxc_array_new_data(p, cshape, int(n, c_int), dtype), proc)
     end subroutine new_from_data
 
     module function from_r32( x ) result(a)
@@ -979,4 +979,4 @@ contains
         end select
     end subroutine to_alloc_l
 
-end submodule mlxf_array_transfer
+end submodule mlxf_transfer_copy

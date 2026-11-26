@@ -1,16 +1,50 @@
 !@descr: elementwise operations through the array signature helpers
-submodule(mlxf_ops) mlxf_ops_elementwise
-use mlxf_c_ops,  only: mlxc_add, mlxc_astype, mlxc_conjugate, mlxc_imag, mlxc_maximum, mlxc_real, mlxc_sqrt, mlxc_view, &
-                       mlxc_where
-use mlxf_defs,   only: MLX_DTYPES
-use mlxf_array,  only: mlx_from, mlxf_binary, mlxf_dtype_op, mlxf_ternary_op, mlxf_unary, mlxf_weak_scalar
-use mlxf_device, only: mlxf_enter
+module mlxf_ops_elementwise
+use, intrinsic :: iso_fortran_env, only: real32, real64
+use mlxf_c_ops,    only: mlxc_add, mlxc_astype, mlxc_conjugate, mlxc_imag, mlxc_maximum, mlxc_real, mlxc_sqrt, &
+                         mlxc_view, mlxc_where
+use mlxf_defs,     only: MLX_DTYPES
+use mlxf_device,   only: mlxf_enter
+use mlxf_array,    only: mlx_array
+use mlxf_calls,    only: mlxf_binary, mlxf_dtype_op, mlxf_ternary_op, mlxf_unary, mlxf_weak_scalar
+use mlxf_transfer, only: mlx_from
 implicit none
+
+public :: real, aimag, conjg, sqrt, mlx_astype, mlx_bitcast, max, merge, cmplx
+private
+
+interface real
+    module procedure real_array
+end interface real
+
+interface aimag
+    module procedure aimag_array
+end interface aimag
+
+interface conjg
+    module procedure conjg_array
+end interface conjg
+
+interface sqrt
+    module procedure sqrt_array
+end interface sqrt
+
+interface max
+    module procedure max_array, max_ass, max_sas, max_asd, max_sad
+end interface max
+
+interface merge
+    module procedure merge_array
+end interface merge
+
+interface cmplx
+    module procedure cmplx_array
+end interface cmplx
 
 contains
 
     ! Fortran's real(a): the real part of a complex array, otherwise a float32 copy, as Fortran's default real
-    module function real_array( a ) result(r)
+    function real_array( a ) result(r)
         type(mlx_array), intent(in) :: a
         type(mlx_array) :: r
         call mlxf_enter('real')
@@ -22,28 +56,28 @@ contains
     end function real_array
 
     ! the imaginary part of a complex array
-    module function aimag_array( a ) result(r)
+    function aimag_array( a ) result(r)
         type(mlx_array), intent(in) :: a
         type(mlx_array) :: r
         call mlxf_unary(r, mlxc_imag, a, 'aimag')
     end function aimag_array
 
     ! the complex conjugate
-    module function conjg_array( a ) result(r)
+    function conjg_array( a ) result(r)
         type(mlx_array), intent(in) :: a
         type(mlx_array) :: r
         call mlxf_unary(r, mlxc_conjugate, a, 'conjg')
     end function conjg_array
 
     ! the elementwise square root
-    module function sqrt_array( a ) result(r)
+    function sqrt_array( a ) result(r)
         type(mlx_array), intent(in) :: a
         type(mlx_array) :: r
         call mlxf_unary(r, mlxc_sqrt, a, 'sqrt')
     end function sqrt_array
 
     ! a converted to dtype, one of MLX_DTYPES
-    module function mlx_astype( a, dtype ) result(r)
+    function mlx_astype( a, dtype ) result(r)
         type(mlx_array), intent(in) :: a
         integer,         intent(in) :: dtype
         type(mlx_array) :: r
@@ -53,7 +87,7 @@ contains
     ! a's bytes read as dtype, one of MLX_DTYPES (MLX's view; mlx_view is the Fortran pointer view): no value
     ! is converted. Where the item sizes differ, the first Fortran dimension scales by their ratio, so a float32
     ! (2 n, ...) array whose pairs along dimension 1 are (real, imaginary) reads as complex64 (n, ...)
-    module function mlx_bitcast( a, dtype ) result(r)
+    function mlx_bitcast( a, dtype ) result(r)
         type(mlx_array), intent(in) :: a
         integer,         intent(in) :: dtype
         type(mlx_array) :: r
@@ -61,13 +95,13 @@ contains
     end function mlx_bitcast
 
     ! Fortran's max(a, b) elementwise; a scalar operand is weak and takes the array's kind
-    module function max_array( a, b ) result(r)
+    function max_array( a, b ) result(r)
         type(mlx_array), intent(in) :: a, b
         type(mlx_array) :: r
         call mlxf_binary(r, mlxc_maximum, a, b, 'max')
     end function max_array
 
-    module function max_ass( a, b ) result(r)
+    function max_ass( a, b ) result(r)
         type(mlx_array), intent(in) :: a
         real(real32),    intent(in) :: b
         type(mlx_array) :: r
@@ -76,7 +110,7 @@ contains
         call mlxf_binary(r, mlxc_maximum, a, s, 'max')
     end function max_ass
 
-    module function max_sas( a, b ) result(r)
+    function max_sas( a, b ) result(r)
         type(mlx_array), intent(in) :: b
         real(real32),    intent(in) :: a
         type(mlx_array) :: r
@@ -85,7 +119,7 @@ contains
         call mlxf_binary(r, mlxc_maximum, b, s, 'max')
     end function max_sas
 
-    module function max_asd( a, b ) result(r)
+    function max_asd( a, b ) result(r)
         type(mlx_array), intent(in) :: a
         real(real64),    intent(in) :: b
         type(mlx_array) :: r
@@ -94,7 +128,7 @@ contains
         call mlxf_binary(r, mlxc_maximum, a, s, 'max')
     end function max_asd
 
-    module function max_sad( a, b ) result(r)
+    function max_sad( a, b ) result(r)
         type(mlx_array), intent(in) :: b
         real(real64),    intent(in) :: a
         type(mlx_array) :: r
@@ -104,14 +138,14 @@ contains
     end function max_sad
 
     ! Fortran's merge(tsource, fsource, mask) elementwise, mask a boolean array
-    module function merge_array( tsource, fsource, mask ) result(r)
+    function merge_array( tsource, fsource, mask ) result(r)
         type(mlx_array), intent(in) :: tsource, fsource, mask
         type(mlx_array) :: r
         call mlxf_ternary_op(r, mlxc_where, [mask, tsource, fsource], 'merge')
     end function merge_array
 
     ! Fortran's cmplx(x, y) as x + i y in complex64; a non-finite y spoils the real part too
-    module function cmplx_array( x, y ) result(r)
+    function cmplx_array( x, y ) result(r)
         type(mlx_array), intent(in) :: x, y
         type(mlx_array) :: r
         type(mlx_array) :: imaginary, z
@@ -121,4 +155,4 @@ contains
         call mlxf_binary(r, mlxc_add, x, z, 'cmplx')
     end function cmplx_array
 
-end submodule mlxf_ops_elementwise
+end module mlxf_ops_elementwise

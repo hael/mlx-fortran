@@ -2,6 +2,7 @@
 """gen_mlxc_bindings.py -- the private bind(c) layer of mlx-fortran, generated from the mlx-c headers linked.
 
 usage: scripts/gen_mlxc_bindings.py <dir holding mlx/c/*.h> <output dir> [--expect LIST] [--list-outputs]
+                                   [--signatures LEDGER]
        scripts/gen_mlxc_bindings.py <dir holding mlx/c/*.h> <output dir> --probe <probe header>
 
 Writes into <output dir>:
@@ -12,6 +13,10 @@ Writes into <output dir>:
                          mlx_vector_stream, vector.h uses stream.h's mlx_stream).
   mlxf_c_<header>.f90    per header with prototypes, the bind(c) interfaces mlxc_<x> bound to mlx_<x>
                          (mlx-c's internal _mlx_<x> become mlxc_internal_<x>).
+  mlxf_c_signatures.f90  the C signature classes of the library's helpers as abstract interfaces mlxc_<class>_op,
+                         one per line of scripts/mlxc_signatures.txt (or --signatures LEDGER): each has the
+                         characteristics of the mlx-c function its line names, read from the headers, so that a
+                         header changing a class fails the build where a helper is handed a function of it.
   mlxc_coverage.txt      the generated and the skipped names, sorted.
 It skips static declarations, preprocessor-excluded blocks (float16 and bfloat16 entry points; MSVC and C++
 branches), variadic functions and the functions taking mlx_io_vtable (a struct of function pointers passed by
@@ -19,7 +24,7 @@ value; IO is out of scope), and prints the skip list. It exits with 2 on a C typ
 map or a struct it does not know. With --expect LIST (the names scripts/list_mlxc_prototypes.py writes) it exits
 with 3 unless the generated and skipped names together equal LIST. --list-outputs prints the .f90 files it
 would write, one per line, and writes nothing.
-With --probe <header> (the ABI probe of the test build, src/test/mlxf_abi_probe.h) it reads mlx-c's headers for
+With --probe <header> (the ABI probe of the test build, src/test/framework/mlxf_abi_probe.h) it reads mlx-c's headers for
 their types only and writes nothing of the layer above: it writes <output dir>/mlxf_c_abi_probe.f90, the module
 mlxf_c_abi_probe with the bind(c) interfaces of the probe header's mlx_abiprobe_* prototypes, made by the same
 mapping table, and two procedures that report, by C name, the size, alignment and field offsets of every bind(c)
@@ -353,33 +358,42 @@ def types_module(model):
     return text.replace('@ISO@', iso_import('\n'.join(body)))
 
 
+def interface_body(model, name, ret, params, fn=None):
+    """(the interface body of prototype name, the mlxf_c_types names it uses); with fn, the abstract interface
+    of that name (bind(c) without a binding label) with the same characteristics"""
+    fret, used_types = map_return(model, ret)
+    used_types = set(used_types)
+    decls = []
+    for i, p in enumerate(params, 1):
+        decl, u, dname = map_param(model, p, i)
+        used_types |= u
+        if decl.endswith('intent(in)'):
+            dname_decl = dname + '(*)'
+        else:
+            dname_decl = dname
+        decls.append((decl, dname_decl, dname))
+    bind = 'bind(c)' if fn else 'bind(c, name=\'%s\')' % name
+    fn = fn or f_name(name)
+    args = ', '.join(d[2] for d in decls)
+    kind = 'function' if fret else 'subroutine'
+    head = '    %s %s(%s) %s' % (kind, fn, ' ' + args + ' ' if args else '', bind)
+    body = [head, '        import']
+    width = max([len(d[0]) for d in decls] + [len(fret or '')])
+    for decl, dd, _ in decls:
+        body.append('        %s :: %s' % (decl.ljust(width), dd))
+    if fret:
+        body.append('        %s :: %s' % (fret.ljust(width), fn))
+    body.append('    end %s %s' % (kind, fn))
+    return '\n'.join(body), used_types
+
+
 def header_module(model, header, protos, mod=None):
     mod = mod or 'mlxf_c_' + header[:-2]
     used_types, ifaces = set(), []
     for name, ret, params in protos:
-        fret, used = map_return(model, ret)
+        body, used = interface_body(model, name, ret, params)
         used_types |= used
-        decls = []
-        for i, p in enumerate(params, 1):
-            decl, u, dname = map_param(model, p, i)
-            used_types |= u
-            if decl.endswith('intent(in)'):
-                dname_decl = dname + '(*)'
-            else:
-                dname_decl = dname
-            decls.append((decl, dname_decl, dname))
-        fn = f_name(name)
-        args = ', '.join(d[2] for d in decls)
-        kind = 'function' if fret else 'subroutine'
-        head = '    %s %s(%s) bind(c, name=\'%s\')' % (kind, fn, ' ' + args + ' ' if args else '', name)
-        body = [head, '        import']
-        width = max([len(d[0]) for d in decls] + [len(fret or '')])
-        for decl, dd, _ in decls:
-            body.append('        %s :: %s' % (decl.ljust(width), dd))
-        if fret:
-            body.append('        %s :: %s' % (fret.ljust(width), fn))
-        body.append('    end %s %s' % (kind, fn))
-        ifaces.append('\n'.join(body))
+        ifaces.append(body)
     text_ifaces = '\n\n'.join(ifaces)
     lines = ['!@descr: generated from mlx-c\'s %s: bind(c) interfaces mlxc_<x> bound to mlx_<x>' % header,
              '! Do not edit: scripts/gen_mlxc_bindings.py writes this file at build time.',
@@ -391,6 +405,71 @@ def header_module(model, header, protos, mod=None):
         lines.append('use mlxf_c_types, only: ' + ', '.join(sorted(used_types)))
     lines += ['implicit none', '', 'interface', '', text_ifaces, '', 'end interface', '', 'end module ' + mod, '']
     return mod, '\n'.join(lines)
+
+
+SIGNATURES_MODULE = 'mlxf_c_signatures'
+SIGNATURES_LEDGER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'mlxc_signatures.txt')
+
+
+def read_signatures(path):
+    """[(class, mlx-c function)] of the ledger, in its order"""
+    out, seen = [], set()
+    with open(path) as f:
+        for k, line in enumerate(f, 1):
+            line = line.split('#', 1)[0].strip()
+            if not line:
+                continue
+            parts = line.split()
+            if len(parts) != 2 or not re.match(r'^mlxc_\w+_op$', parts[0]) or not parts[1].startswith('mlx_'):
+                raise GenError('%s:%d: not "<mlxc_<class>_op> <mlx-c function>": %s' % (path, k, line))
+            if parts[0].lower() in seen:
+                raise GenError('%s:%d: class %s listed twice' % (path, k, parts[0]))
+            seen.add(parts[0].lower())
+            out.append((parts[0], parts[1]))
+    return out
+
+
+def c_signature(ret, params, width=116):
+    """the comment lines '! <ret> f(<params>)' of a class, wrapped at commas"""
+    words = ['%s f(' % ret] + [p + (', ' if i < len(params) - 1 else ')') for i, p in enumerate(params)]
+    if not params:
+        words = ['%s f(void)' % ret]
+    lines, cur = [], '    ! '
+    for w in words:
+        if len(cur) + len(w.rstrip()) > width and cur.strip() != '!':
+            lines.append(cur.rstrip())
+            cur = '    ! '
+        cur += w
+    lines.append(cur.rstrip())
+    return lines
+
+
+def signatures_module(model, generated, ledger):
+    """the C signature classes of the library: per ledger line the abstract interface <class> with the
+    characteristics of the named mlx-c function's prototype, as the headers declare it"""
+    protos = {p[0]: p for p in generated}
+    used_types, ifaces = set(), []
+    for cls, cname in read_signatures(ledger):
+        if cname not in protos:
+            raise GenError('%s: %s names %s, which the headers do not declare or the layer skips'
+                           % (os.path.basename(ledger), cls, cname))
+        _, ret, params = protos[cname]
+        body, used = interface_body(model, cname, ret, params, fn=cls)
+        used_types |= used
+        ifaces.append('\n'.join(c_signature(ret, [' '.join(p.split()) for p in params]) + [body]))
+    text_ifaces = '\n\n'.join(ifaces)
+    lines = ['!@descr: generated from the mlx-c headers and scripts/mlxc_signatures.txt: the C signature classes as abstract interfaces',
+             '! Do not edit: scripts/gen_mlxc_bindings.py writes this file at build time. A class is the signature of',
+             '! the mlx-c function its ledger line names; a helper takes any function of the class as procedure(<class>).',
+             'module ' + SIGNATURES_MODULE]
+    iso = iso_import(text_ifaces)
+    if iso:
+        lines.append(iso)
+    if used_types:
+        lines.append('use mlxf_c_types, only: ' + ', '.join(sorted(used_types)))
+    lines += ['implicit none', '', 'abstract interface', '', text_ifaces, '', 'end interface', '',
+              'end module ' + SIGNATURES_MODULE, '']
+    return '\n'.join(lines)
 
 
 PROBE_MODULE = 'mlxf_c_abi_probe'
@@ -498,6 +577,10 @@ def main():
         args = [a for a in args if a != expect]
     if '--probe' in sys.argv:
         args = [a for a in args if a != sys.argv[sys.argv.index('--probe') + 1]]
+    ledger = SIGNATURES_LEDGER
+    if '--signatures' in sys.argv:
+        ledger = sys.argv[sys.argv.index('--signatures') + 1]
+        args = [a for a in args if a != ledger]
     if len(args) != 2:
         print(__doc__, file=sys.stderr)
         return 2
@@ -526,6 +609,7 @@ def main():
                 why = 'preprocessor-excluded (%s)' % w
         skipped.append((name, why))
     outputs = ['mlxf_c_types.f90'] + ['mlxf_c_%s.f90' % h[:-2] for h in sorted(by_header)]
+    outputs.append(SIGNATURES_MODULE + '.f90')
     if '--list-outputs' in sys.argv:
         for o in outputs:
             print(os.path.join(outdir, o))
@@ -536,6 +620,8 @@ def main():
         for h in sorted(by_header):
             mod, text = header_module(model, h, by_header[h])
             files[mod + '.f90'] = text
+        files[SIGNATURES_MODULE + '.f90'] = signatures_module(
+            model, [p for ps in by_header.values() for p in ps], ledger)
     except GenError as e:
         print('gen_mlxc_bindings: error: %s' % e, file=sys.stderr)
         return 2
@@ -547,8 +633,9 @@ def main():
     covered = sorted(set(generated) | set(n for n, _ in skipped))
     with open(os.path.join(outdir, 'mlxc_coverage.txt'), 'w') as f:
         f.write(''.join(n + '\n' for n in covered))
+    print('gen_mlxc_bindings: %d signature classes in %s' % (len(read_signatures(ledger)), SIGNATURES_MODULE))
     print('gen_mlxc_bindings: %d interfaces in %d modules, %d handle types, %d value structs, %d enumerations; '
-          'skipped %d:' % (len(generated), len(files) - 1, len(model.handles),
+          'skipped %d:' % (len(generated), len(files) - 2, len(model.handles),
                            len(model.structs) - len(KNOWN_UNMAPPED_STRUCTS), len(model.enums), len(skipped)))
     for n, why in sorted(skipped):
         print('    skipped %-40s %s' % (n, why))

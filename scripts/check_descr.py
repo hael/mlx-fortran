@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """check_descr.py -- every .f90 under src/ and test/ opens with one '!@descr:' line and holds at most
-one module or submodule unit (lifted from SIMPLE).
+one module or submodule unit (lifted from SIMPLE); every directory under src/, test/, scripts/ and
+doc/compiler_issues/ that holds a source file (.f90, .F90, .c, .h, .py, .sh), and every directory between it
+and that top directory, has <dir>/<dir>.inf whose first line is '!@descr: <text>' and which holds no other
+'!@descr:' line (the description scripts/generate_codeoverview.py puts in the code-base map).
 usage: scripts/check_descr.py [ROOT]
 """
 
@@ -10,6 +13,8 @@ import sys
 
 TARGET_DIRS = ["src", "test"]
 EXCLUDED_DIR = os.path.join("src", "extlibs")
+INF_DIRS = ["src", "test", "scripts", os.path.join("doc", "compiler_issues")]
+SOURCE_SUFFIXES = (".f90", ".F90", ".c", ".h", ".py", ".sh")
 MODULE_RE = re.compile(
     r"^\s*module\s+(?!procedure\b|subroutine\b|function\b)(\w+)", re.IGNORECASE
 )
@@ -69,6 +74,50 @@ def file_module_unit_count(filepath):
     return count
 
 
+def inf_problem(directory):
+    """
+    Returns None when <directory>/<name>.inf opens with a non-empty '!@descr:' line and holds no
+    second one, otherwise what is wrong.
+    """
+    inf = os.path.join(directory, os.path.basename(directory) + ".inf")
+    if not os.path.isfile(inf):
+        return "missing"
+    with open(inf, "r", encoding="utf-8", errors="ignore") as f:
+        lines = f.read().splitlines()
+    first = lines[0].strip() if lines else ""
+    if not first.startswith("!@descr:") or first[len("!@descr:"):].strip() == "":
+        return "its first line is not '!@descr: <text>'"
+    if sum(1 for line in lines if line.strip().startswith("!@descr:")) > 1:
+        return "more than one '!@descr:' line"
+    return None
+
+
+def find_inf_problems(base_dir):
+    """the directories holding a source file, and those between them and their top directory, whose .inf
+    is missing or carries no description"""
+    wanted = set()
+    for top in INF_DIRS:
+        top_path = os.path.join(base_dir, top)
+        if not os.path.isdir(top_path):
+            continue
+        for root, dirs, files in os.walk(top_path):
+            dirs[:] = [d for d in dirs if not d.startswith(".") and d != "__pycache__"
+                       and not is_excluded(os.path.join(root, d), base_dir)]
+            if any(f.endswith(SOURCE_SUFFIXES) for f in files):
+                d = root
+                while True:
+                    wanted.add(d)
+                    if os.path.samefile(d, top_path):
+                        break
+                    d = os.path.dirname(d)
+    problems = []
+    for d in sorted(wanted):
+        problem = inf_problem(d)
+        if problem:
+            problems.append("%s: %s" % (os.path.join(d, os.path.basename(d) + ".inf"), problem))
+    return problems
+
+
 def is_excluded(path, base_dir):
     """
     Returns True if path is inside the excluded directory.
@@ -115,6 +164,7 @@ if __name__ == "__main__":
     base_directory = sys.argv[1] if len(sys.argv) > 1 else "."
 
     results, multiline, multi_unit = find_missing_descr(base_directory)
+    inf_problems = find_inf_problems(base_directory)
 
     if results:
         print("Files missing a '!@descr:' header (or with an empty one):\n")
@@ -129,8 +179,13 @@ if __name__ == "__main__":
         print("Files with more than one module or submodule unit:\n")
         for path in multi_unit:
             print(path)
-    if results or multiline or multi_unit:
+    if inf_problems:
+        print("Directory descriptions missing or without a leading '!@descr: <text>' line:\n")
+        for problem in inf_problems:
+            print(problem)
+    if results or multiline or multi_unit or inf_problems:
         sys.exit(1)
     else:
-        print("All checked .f90 files have one leading '!@descr:' and at most one module/submodule.")
+        print("All checked .f90 files have one leading '!@descr:' and at most one module/submodule;"
+              " every source directory has a described .inf.")
         sys.exit(0)
