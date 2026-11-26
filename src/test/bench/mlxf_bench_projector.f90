@@ -4,7 +4,7 @@
 ! golden-angle spiral with in-plane angle 0 (nspace=, 2,500 by default); the volumes are seeded blobs inside the
 ! radius 58. suite=time runs the canonical driver (per parity new, set_rmat, pad_fft, expand_cmat,
 ! vol_pad2ref_pfts_opt on the device route, kill) until both banks are evaluated; suite=chain continues to the
-! reference bins on the host or device route and scores 64 particles per parity; both append a row to
+! reference tiles on the host or device route and scores 64 particles per parity; both append a row to
 ! ./bench_projector.tsv (the series columns scripts/run_parts.sh reads: samples per second 20, samples 21, MLX peak
 ! 26, cache 27, median pass 30) after a go file (go=). suite=accuracy holds 16 directions to the oracle on the
 ! device's own padded transform and asserts. A key the suite does not read stops the program.
@@ -76,8 +76,8 @@ type :: bench_config
     real(real64) :: est    = 0._real64
 end type bench_config
 
-! one timed pass: its seconds to the evaluated banks (the driver) and, for the chain, to the reference bins;
-! the stages (pad and transform, expansion, projection), the chain's own stage (the banks to the bins) and the
+! one timed pass: its seconds to the evaluated banks (the driver) and, for the chain, to the reference tiles;
+! the stages (pad and transform, expansion, projection), the chain's own stage (the banks to the tiles) and the
 ! dense score; the banks' digests (even, odd) and the score's
 type :: pass_result
     real(real64)   :: wall      = 0._real64
@@ -463,8 +463,6 @@ contains
                 call reproject(pftc, dat, cfg, res(ip))
                 t1 = clock_s()
                 call pftc%memoize_refs()
-                if( len(pftc%message()) > 0 ) nbad = nbad + 1
-                call pftc%memoize_ref_bins()
                 if( len(pftc%message()) > 0 ) nbad = nbad + 1
                 res(ip)%wall  = clock_s() - t0
                 res(ip)%chain = (res(ip)%tv2r - res(ip)%stages(3)) + (t0 + res(ip)%wall - t1)

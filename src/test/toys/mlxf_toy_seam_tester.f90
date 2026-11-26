@@ -268,8 +268,8 @@ contains
 
     ! ---- the polar calculator ------------------------------------------------------------------------------------
 
-    ! a calculator of the smallest fixture on the backend l_mlx; full also sets its references and makes the
-    ! reference bins (on the MLX backend the device tiles); nbad counts the refusals
+    ! a calculator of the smallest fixture on the backend l_mlx; full also sets and memoizes its references (on
+    ! the MLX backend with the device tiles); nbad counts the refusals
     subroutine small_calc( pftc, l_mlx, full, nbad )
         type(polarft_calc), intent(inout) :: pftc
         logical,            intent(in)    :: l_mlx, full
@@ -292,8 +292,6 @@ contains
         end do
         call pftc%memoize_refs()
         if( len(pftc%message()) > 0 ) nbad = nbad + 1
-        call pftc%memoize_ref_bins()
-        if( len(pftc%message()) > 0 ) nbad = nbad + 1
     end subroutine small_calc
 
     ! the calculator's cycles on the MLX backend, the host backend's device silence, and its refusals
@@ -308,7 +306,7 @@ contains
         live0 = mlx_live_count()
         call small_calc(pftc, .true., .true., nbad)
         call assert_true(mlx_live_count() > live0, device_name(dev)//': polarft_calc on the MLX backend holds device '// &
-            &'arrays once its reference bins are made')
+            &'arrays once its reference tiles are made')
         call pftc%kill()
         call assert_int(live0, mlx_live_count(), device_name(dev)//': polarft_calc%kill releases them')
         call mlx_synchronize()

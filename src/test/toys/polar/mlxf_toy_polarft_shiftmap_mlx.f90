@@ -17,7 +17,7 @@ contains
             type is( polarft_workspace )
                 do ieo = 1, N_REF_PARITIES
                     spec%weights = self%sigma2_wk8(self%kfromto(1):spec%kstop, ieo)
-                    call ws(ieo)%prepare_maps(spec, self%ft_ref(:, :, :, ieo), self%ft_ref2(:, :, :, ieo), st)
+                    call ws(ieo)%prepare_maps(spec, self%ft_ref_terms(:, :, :, ieo), st)
                     if( st /= 0 )then
                         self%msg = ws(ieo)%message()
                         call ws(REF_EVEN)%kill_map(spec%imap)

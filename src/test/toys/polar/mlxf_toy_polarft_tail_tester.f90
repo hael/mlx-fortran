@@ -28,7 +28,7 @@ integer, parameter :: BT = 4
 integer, parameter :: PTCL_INVALID = 3
 ! the inverse temperatures, in turn
 real(real32), parameter :: TEMP_LEVELS(4) = [0._real32, 1._real32, 30._real32, 1.e4_real32]
-! the live handles a workspace adds when its reference bins are made with the compiled tail (the tiles and the
+! the live handles a workspace adds when its reference tiles are made with the compiled tail (the tiles and the
 ! compiled function), and what the fused tail adds to that (its constants; the kernel replaces the function)
 integer, parameter :: LIVE_PER_WORKSPACE = 2
 integer, parameter :: LIVE_FUSED_EXTRA   = 1
@@ -136,8 +136,8 @@ contains
         refused = merge(1, 0, len(pftc%message()) > 0)
     end function refused
 
-    ! a calculator of the data under the tile plan (rt, bt) and the tail's form, set and memoized up to the
-    ! reference bins (left to the caller); nbad counts the calls that were refused
+    ! a calculator of the data under the tile plan (rt, bt) and the tail's form, set and memoized, with the
+    ! reference tiles; nbad counts the calls that were refused
     subroutine feed_calc( pftc, dat, plan, form, nbad )
         type(polarft_calc), intent(inout) :: pftc
         type(tail_data),    intent(in)    :: dat
@@ -201,7 +201,7 @@ contains
 
     ! ---- the tests -----------------------------------------------------------------------------------------
 
-    ! on the CPU device the fused form is refused where the reference bins are made, with the reason; set back
+    ! on the CPU device the fused form is refused where the reference tiles are made, with the reason; set back
     ! to the compiled form, the calculator scores what a calculator that never had the fused form scores
     subroutine test_cpu_refusal( dat )
         type(tail_data), intent(in) :: dat
@@ -209,18 +209,18 @@ contains
         type(polar_table_entries) :: e, eref
         integer                   :: nbad
         write(*,'(a)') 'test_cpu_refusal'
-        call feed_calc(pftc, dat, [RT, BT], POLARFT_TAILS%metal, nbad)
-        call assert_int(0, nbad, 'the calculator is set with the fused form: '//pftc%message())
-        call pftc%memoize_ref_bins
+        call feed_calc(pftc, dat, [RT, BT], POLARFT_TAILS%graph, nbad)
+        call assert_int(0, nbad, 'the calculator is set with the compiled form: '//pftc%message())
+        call pftc%set_tail_form(POLARFT_TAILS%metal)
+        call pftc%memoize_refs
         call assert_true(index(pftc%message(), 'GPU only') > 0, 'cpu: the fused tail is refused where the '//&
-            &'reference bins are made, and message() says it runs on the GPU only')
-        call assert_true(.not. pftc%ref_bins_current(), 'cpu: a refused form leaves no current reference bins')
+            &'reference tiles are made, and message() says it runs on the GPU only')
+        call assert_true(.not. pftc%ref_tiles_current(), 'cpu: a refused form leaves no current reference tiles')
         call pftc%set_tail_form(POLARFT_TAILS%graph)
-        call pftc%memoize_ref_bins
-        call assert_int(0, refused(pftc), 'cpu: set back to the compiled form, the reference bins are made')
+        call pftc%memoize_refs
+        call assert_int(0, refused(pftc), 'cpu: set back to the compiled form, the reference tiles are made')
         call score(pftc, dat, half_ptcls(1), e)
         call feed_calc(pref, dat, [RT, BT], POLARFT_TAILS%graph, nbad)
-        call pref%memoize_ref_bins
         call score(pref, dat, half_ptcls(1), eref)
         call assert_true(same_entries(e, eref), 'cpu: after the refusal the compiled form scores as it does '//&
             &'without one, bit for bit')
@@ -241,8 +241,7 @@ contains
         real(real32)              :: u0
         write(*,'(a)') 'test_kernel_identity'
         call feed_calc(pftc, dat, [RT, BT], POLARFT_TAILS%metal, nbad)
-        call pftc%memoize_ref_bins
-        call assert_int(0, nbad + refused(pftc), 'the fused calculator is made: '//pftc%message())
+        call assert_int(0, nbad, 'the fused calculator is made: '//pftc%message())
         do k = 1, 2
             u0 = 1.5_real32
             do h = 1, 2
@@ -355,11 +354,9 @@ contains
             do ib = 1, size(BTS)
                 write(plan, '(a,i0,a,i0)') 'rt ', RTS(ir), ', bt ', BTS(ib)
                 call feed_calc(pf, dat, [RTS(ir), BTS(ib)], POLARFT_TAILS%metal, nbad)
-                call pf%memoize_ref_bins
                 call pf%set_block_options(.true., .false.)
                 call score(pf, dat, pids, ef)
                 call feed_calc(pg, dat, [RTS(ir), BTS(ib)], POLARFT_TAILS%graph, nbad)
-                call pg%memoize_ref_bins
                 call score(pg, dat, pids, eg)
                 call assert_int(0, refused(pf) + refused(pg), 'both forms score '//trim(plan))
                 if( .not. allocated(ef%rows) .or. .not. allocated(eg%irots) ) cycle
@@ -384,7 +381,7 @@ contains
 
     ! the objects a workspace holds: with the compiled form (the default) its tiles and compiled function, with the
     ! fused form its constants in addition and a kernel in place of the function, and the rows variant once a
-    ! block asks for rows; 100 cycles of making and releasing the reference bins leave no live handle
+    ! block asks for rows; 100 cycles of making and releasing the reference tiles leave no live handle
     subroutine test_objects( dat )
         type(tail_data), intent(in) :: dat
         type(polarft_calc)        :: pftc
@@ -394,14 +391,16 @@ contains
         ! the default form, never set
         call pftc%new(parameters(pftsz=PFTSZ), NREF, [1, NPTCL], [2, NK + 1])
         call feed_default(pftc, dat, nbad)
+        call pftc%kill_ref_tiles
         live0 = mlx_live_count()
-        call pftc%memoize_ref_bins
-        call assert_int(2 * LIVE_PER_WORKSPACE, mlx_live_count() - live0, 'gpu: by default the reference bins of '//&
+        call pftc%memoize_refs
+        call assert_int(2 * LIVE_PER_WORKSPACE, mlx_live_count() - live0, 'gpu: by default the reference tiles of '//&
             &'both parities hold their tiles and the compiled tail, and no kernel')
         call pftc%kill
         call feed_calc(pftc, dat, [RT, BT], POLARFT_TAILS%metal, nbad)
+        call pftc%kill_ref_tiles
         live0 = mlx_live_count()
-        call pftc%memoize_ref_bins
+        call pftc%memoize_refs
         call assert_int(2 * (LIVE_PER_WORKSPACE + LIVE_FUSED_EXTRA), mlx_live_count() - live0, 'gpu: with the fused '//&
             &'form each parity holds its tiles, its kernel and its constants, and no compiled tail')
         live1 = mlx_live_count()
@@ -411,15 +410,15 @@ contains
             &'variant of its parity''s workspace, and nothing else stays')
         call score(pftc, dat, half_ptcls(1), e)
         call assert_int(1, mlx_live_count() - live1, 'gpu: a second block with rows reuses it')
-        call pftc%kill_ref_bins
-        call assert_int(live0, mlx_live_count(), 'gpu: releasing the reference bins releases the kernels and the '//&
+        call pftc%kill_ref_tiles
+        call assert_int(live0, mlx_live_count(), 'gpu: releasing the reference tiles releases the kernels and the '//&
             &'constants')
         do it = 1, 100
-            call pftc%memoize_ref_bins
-            call pftc%kill_ref_bins
+            call pftc%memoize_refs
+            call pftc%kill_ref_tiles
         end do
         call assert_int(live0, mlx_live_count(), 'gpu: 100 cycles of making and releasing the fused reference '//&
-            &'bins leave no live handle')
+            &'tiles leave no live handle')
         call pftc%kill
     end subroutine test_objects
 

@@ -55,7 +55,7 @@ contains
         if( len(self%msg) > 0 ) return
         select type( ws => self%ws )
             type is( polarft_workspace )
-                call ws(ieo)%submit(blk, self%ft_ctf2, self%ft_ptcl_ctf, st)
+                call ws(ieo)%submit(blk, self%ft_ptcl_wterms, st)
                 if( st /= 0 )then
                     self%msg = ws(ieo)%message()
                     return
@@ -117,9 +117,9 @@ contains
             self%msg = 'polarft_calc: refused: no such slot'
         else if( self%l_refs_pending )then
             self%msg = 'polarft_calc: refused: references were set and not memoized (memoize_refs)'
-        else if( self%ref_gen_bins /= self%ref_gen )then
-            self%msg = 'polarft_calc: refused: the reference bins are not those of the memoized references and '//&
-                &'tile plan (memoize_ref_bins)'
+        else if( self%ref_gen_tiles /= self%ref_gen )then
+            self%msg = 'polarft_calc: refused: the reference tiles are not those of the memoized references and '//&
+                &'tile plan (memoize_refs)'
         else if( self%ptcl_gen_memo /= self%ptcl_gen )then
             self%msg = 'polarft_calc: refused: the particle memos are not those of the particles set (memoize_ptcls)'
         else if( .not. self%l_weights )then
@@ -142,7 +142,6 @@ contains
             return
         endif
         ieo         = merge(REF_EVEN, REF_ODD, self%iseven(blk%islots(1)))
-        blk%weights = self%sigma2_wk(:, ieo)
         blk%wsq     = self%wsqsums_ptcls(blk%islots)
         blk%rows    = self%l_rows
         blk%profile = self%l_profile

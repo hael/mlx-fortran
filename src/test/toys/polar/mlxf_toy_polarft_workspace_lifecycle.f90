@@ -6,55 +6,47 @@ implicit none
 
 contains
 
-    module subroutine polarft_workspace_new( self, spec, ft_ref, ft_ref2, status )
+    module subroutine polarft_workspace_new( self, spec, ft_ref_terms, status )
         class(polarft_workspace), intent(inout) :: self
         type(polarft_tile_spec),  intent(in)    :: spec
-        complex(real32),          intent(in)    :: ft_ref(:,:,:), ft_ref2(:,:,:)
+        complex(real32),          intent(in)    :: ft_ref_terms(:,:,:)
         integer,                  intent(out)   :: status
-        complex(real32), allocatable :: tiles(:,:,:,:), g(:,:)
         real(real32),    allocatable :: rtiles(:,:,:,:)
-        integer                      :: n1, nk2, nrefs, ntiles, t, c, r, k, p, ierr
+        complex(real32), allocatable :: g(:)
+        integer                      :: n1, nk2, nrefs, ntiles, t, c, r, p, ierr
         call drop_tiles(self)
         status = 1
-        call check_refs(spec, ft_ref, ft_ref2, self%msg)
+        call check_refs(spec, shape(ft_ref_terms), self%msg)
         if( len(self%msg) > 0 ) return
         n1     = spec%pftsz + 1
         nk2    = 2 * spec%nk
-        nrefs  = size(ft_ref, 3)
+        nrefs  = size(ft_ref_terms, 3)
         ntiles = (nrefs + spec%rt - 1) / spec%rt
-        ! one tile per rt references, the last one padded with zero columns
-        allocate(tiles(nk2, spec%rt, n1, ntiles), g(nk2, spec%rt), stat=ierr)
-        if( ierr /= 0 )then
-            self%msg = 'polarft_workspace%new: the host staging of the reference tiles could not be allocated'
-            return
-        endif
-        tiles = cmplx(0._real32, 0._real32, real32)
-        do t = 1, ntiles
-            do c = 1, spec%rt
-                r = (t - 1) * spec%rt + c
-                if( r > nrefs ) exit
-                do k = 1, spec%nk
-                    tiles(k, c, :, t)           = ft_ref2(:, k, r)
-                    tiles(spec%nk + k, c, :, t) = conjg(ft_ref(:, k, r))
-                end do
-            end do
-        end do
-        ! the tile G as the real block [[Re G, Im G], [-Im G, Re G]] of every bin
-        allocate(rtiles(2*nk2, 2*spec%rt, n1, ntiles), stat=ierr)
+        ! packed on the host straight from the memos, with no complex staging: a packing on the device would leave
+        ! its intermediates in MLX's cache beside the tiles
+        allocate(rtiles(2*nk2, 2*spec%rt, n1, ntiles), g(nk2), stat=ierr)
         if( ierr /= 0 )then
             self%msg = 'polarft_workspace%new: the host staging of the packed reference tiles could not be allocated'
             return
         endif
+        ! a tile G of every bin: the conjugated memos of rt references, zero columns last, as the real block
+        ! [[Re G, Im G], [-Im G, Re G]]
         do t = 1, ntiles
             do p = 1, n1
-                g = tiles(:, :, p, t)
-                rtiles(1:nk2, 1:spec%rt, p, t)                 = real(g)
-                rtiles(1:nk2, spec%rt+1:2*spec%rt, p, t)       = aimag(g)
-                rtiles(nk2+1:2*nk2, 1:spec%rt, p, t)           = -aimag(g)
-                rtiles(nk2+1:2*nk2, spec%rt+1:2*spec%rt, p, t) = real(g)
+                do c = 1, spec%rt
+                    r = (t - 1) * spec%rt + c
+                    if( r <= nrefs )then
+                        g = conjg(ft_ref_terms(:, p, r))
+                    else
+                        g = cmplx(0._real32, 0._real32, real32)
+                    endif
+                    rtiles(1:nk2, c, p, t)               = real(g)
+                    rtiles(1:nk2, spec%rt+c, p, t)       = aimag(g)
+                    rtiles(nk2+1:2*nk2, c, p, t)         = -aimag(g)
+                    rtiles(nk2+1:2*nk2, spec%rt+c, p, t) = real(g)
+                end do
             end do
         end do
-        deallocate(tiles)
         self%refs = mlx_from(rtiles)
         deallocate(rtiles)
         call finish_tiles(self, spec, nrefs, status)
@@ -119,8 +111,7 @@ contains
             self%msg = 'polarft_workspace%set_sections: refused: the bank does not match the sections held'
             return
         endif
-        call self%memo_ref%kill()
-        call self%memo_ref2%kill()
+        call self%memo_terms%kill()
         self%l_memos = .false.
         if( iref_from == 1 .and. bs(2) == nrefs )then
             ! a bank of every reference replaces the sections
@@ -141,7 +132,7 @@ contains
         class(polarft_workspace), intent(inout) :: self
         integer,                  intent(in)    :: pftsz, nk
         integer,                  intent(out)   :: status
-        type(mlx_array) :: z, ring(2), full, a2
+        type(mlx_array) :: z, ring(2), full, a2, f(2)
         status   = 1
         self%msg = ''
         if( .not. self%l_sections )then
@@ -156,18 +147,18 @@ contains
         ring(1) = z
         ring(2) = conjg(z)
         full    = mlx_concatenate(ring, dim=1)
-        self%memo_ref = mlx_slice(mlx_fft(full, dim=1), [1, 1, 1], [pftsz + 1, nk, self%sec_nrefs])
+        f(2)    = mlx_permute(mlx_slice(mlx_fft(full, dim=1), [1, 1, 1], [pftsz + 1, nk, self%sec_nrefs]), [2, 1, 3])
         a2      = real(z) * real(z) + aimag(z) * aimag(z)
         ring(1) = a2
         ring(2) = a2
         full    = mlx_concatenate(ring, dim=1)
-        self%memo_ref2 = conjg(mlx_rfft(full, dim=1))
-        call mlx_eval(self%memo_ref, status=status)
-        if( status == 0 ) call mlx_eval(self%memo_ref2, status=status)
+        f(1)    = mlx_permute(mlx_rfft(full, dim=1), [2, 1, 3])
+        ! the host memos' layout (2nk, pftsz+1, nrefs): per shell the squared modulus's bins, then the ring's
+        self%memo_terms = mlx_concatenate(f, dim=1)
+        call mlx_eval(self%memo_terms, status=status)
         if( status /= 0 )then
             self%msg = 'polarft_workspace%memoize_sections: the memos could not be evaluated'
-            call self%memo_ref%kill()
-            call self%memo_ref2%kill()
+            call self%memo_terms%kill()
             return
         endif
         call self%sections%kill()
@@ -196,16 +187,14 @@ contains
         nrefs  = self%sec_nrefs
         ntiles = (nrefs + spec%rt - 1) / spec%rt
         npad   = ntiles * spec%rt - nrefs
-        ! G per bin: rows 1..nk ft_ref2, rows nk+1..2nk conj(ft_ref), a column per reference, zero columns last
-        g(1) = self%memo_ref2
-        g(2) = conjg(self%memo_ref)
-        a    = mlx_concatenate(g, dim=2)
+        ! G per bin: the conjugated memos (2nk, pftsz+1, references), a column per reference, zero columns last
+        a = conjg(self%memo_terms)
         if( npad > 0 )then
             g(1) = a
-            g(2) = mlx_zeros([n1, nk2, npad], dtype=MLX_DTYPES%complex64)
+            g(2) = mlx_zeros([nk2, n1, npad], dtype=MLX_DTYPES%complex64)
             a    = mlx_concatenate(g, dim=3)
         endif
-        a  = mlx_permute(reshape(a, [n1, nk2, spec%rt, ntiles]), [2, 3, 1, 4])
+        a  = mlx_permute(reshape(a, [nk2, n1, spec%rt, ntiles]), [1, 3, 2, 4])
         ! the tile G of every bin as the real block [[Re G, Im G], [-Im G, Re G]]
         re = real(a)
         im = aimag(a)
@@ -218,8 +207,7 @@ contains
         self%refs = mlx_concatenate(half, dim=1)
         call finish_tiles(self, spec, nrefs, status)
         if( status /= 0 ) return
-        call self%memo_ref%kill()
-        call self%memo_ref2%kill()
+        call self%memo_terms%kill()
         self%l_memos = .false.
     end subroutine new_from_memos
 
@@ -253,12 +241,11 @@ contains
         has_memos = self%l_memos
     end function has_memos
 
-    ! the reason the memos cannot be prepared under spec, or an empty string
-    subroutine check_refs( spec, ft_ref, ft_ref2, msg )
+    ! the reason memos of the shape shp cannot be prepared under spec, or an empty string
+    subroutine check_refs( spec, shp, msg )
         type(polarft_tile_spec),       intent(in)  :: spec
-        complex(real32),               intent(in)  :: ft_ref(:,:,:), ft_ref2(:,:,:)
+        integer,                       intent(in)  :: shp(3)
         character(len=:), allocatable, intent(out) :: msg
-        integer :: n1
         msg = ''
         if( spec%pftsz < 2 .or. mod(spec%pftsz, 2) /= 0 )then
             msg = 'polarft_workspace%new: pftsz must be even and at least 2'
@@ -266,13 +253,10 @@ contains
             msg = 'polarft_workspace%new: nk must be at least 1'
         else if( spec%rt < 1 .or. spec%bt < 1 )then
             msg = 'polarft_workspace%new: the tile plan needs rt and bt of at least 1'
-        else if( size(ft_ref, 3) < 1 )then
+        else if( shp(3) < 1 )then
             msg = 'polarft_workspace%new: no references'
-        endif
-        if( len(msg) > 0 ) return
-        n1 = spec%pftsz + 1
-        if( any(shape(ft_ref) /= [n1, spec%nk, size(ft_ref, 3)]) .or. any(shape(ft_ref2) /= shape(ft_ref)) )then
-            msg = 'polarft_workspace%new: the reference memos are not (pftsz+1, nk, references)'
+        else if( shp(1) /= 2 * spec%nk .or. shp(2) /= spec%pftsz + 1 )then
+            msg = 'polarft_workspace%new: the reference memos are not (2nk, pftsz+1, references)'
         endif
     end subroutine check_refs
 
@@ -281,8 +265,7 @@ contains
         call drop_tiles(self)
         call self%kill_maps()
         call self%sections%kill()
-        call self%memo_ref%kill()
-        call self%memo_ref2%kill()
+        call self%memo_terms%kill()
         self%l_sections = .false.
         self%l_memos    = .false.
         self%sec_npts   = 0

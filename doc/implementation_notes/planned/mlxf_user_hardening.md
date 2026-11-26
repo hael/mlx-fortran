@@ -341,16 +341,16 @@ future implementation phases, not claims that these files changed in this planni
 | `doc/implementation_notes/planned/mlxf_roadmap.md`, `doc/implementation_notes/README.md`, `doc/history/2026-11.md` | Ranking proposal, links, delivered evidence and rulings | planning, 0, 6 |
 | `doc/collaboration/apple_questions.md`, `doc/compiler_issues/README.md` | Dedupe/record upstream evidence; GCC file only if new verified facts | planning, 0–6 |
 | `scripts/probes/user_statistics_probe.c`, `scripts/probes/user_range_probe.c` (new) | Minimal direct mlx-c reproducers/controls | 0–3 |
-| `src/core/ops/mlxf_ops_reduce.f90`, `src/core/ops/mlxf_ops.f90` (interfaces until moved) | C1 and floating mean, empty extrema; own helpers where practical | 1, 3 |
+| `src/core/ops/mlxf_ops_reduce.f90` | C1 and floating mean, empty extrema; own helpers where practical | 1, 3 |
 | `src/core/linalg/mlxf_linalg_matrix.f90` | Scaled Euclidean norms | 3 |
 | `src/core/ops/mlxf_ops_reduce_tester.f90`, `src/core/linalg/mlxf_linalg_matrix_tester.f90` | Integer/range/empty regressions | 1, 3 |
 | `src/core/io/mlxf_io.f90`, `src/core/io/mlxf_io_tester.f90` | Save transaction and failure-preservation tests | 1 |
 | `src/core/runtime/mlxf_libc.f90` | Temporary-file/rename/cleanup calls, if needed | 1 |
 | `src/core/ops/mlxf_ops_index.f90`, `src/core/ops/mlxf_ops_index_tester.f90` | Explicit bounds validation API and fixtures | 2 |
-| `src/core/array/mlxf_array.f90`, `mlxf_array_elementwise.f90`, `mlxf_array_operations.f90` in that folder, or delivered rank-2d owners | Integer scalar bindings and shared helpers; no general ownership rewrite | 4; 1–3 only if shared signature/helper changes are needed |
+| `src/core/array/mlxf_array.f90`, `src/core/array/mlxf_array_elementwise.f90`, `src/core/array/mlxf_calls.f90`, `src/core/array/mlxf_calls_elementwise.f90` | Integer scalar bindings and shared helpers; no general ownership rewrite | 4; 1–3 only if shared signature/helper changes are needed |
 | `src/core/array/mlxf_array_tester.f90`, `src/core/ops/mlxf_ops_logic_tester.f90`, `src/core/ops/mlxf_ops_math_tester.f90` | Scalar promotion/native-intrinsic controls; use actual owning tester after Phase 0 mapping | 4 |
 | `src/defs/mlxf_defs.f90`, `src/core/mlxf.f90` | Validator spec if needed; explicit new public exports | 2, 4 |
-| `src/test/mlxf_test_defs.f90`, `src/test/mlxf_test_registry.f90` (then `framework/`) | Shared frozen bounds and area/guard registration, only if needed | 1–4, 6 |
+| `src/test/framework/mlxf_test_defs.f90`, `src/test/framework/mlxf_test_registry.f90` | Shared frozen bounds and area/guard registration, only if needed | 1–4, 6 |
 | `src/core/transforms/mlxf_transforms_tester.f90` or existing transform owner selected in Phase 0 | Derivative controls for changed compositions, if needed | 3 |
 | `scripts/check_rules.py`, `scripts/check_consumer.py`, `scripts/mlxf_consumer_checks.py` (last two new) | Shared lifetime analysis, consumer entry point, planted-rule self-tests | 2 |
 | `CMakeLists.txt`, `cmake/mlxfConfig.cmake.in`, `scripts/check_install.sh` | Install/check consumer tooling and new examples; optional CMake helper | 2, 4–6 |

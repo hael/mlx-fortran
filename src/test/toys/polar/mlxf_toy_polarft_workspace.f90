@@ -80,10 +80,10 @@ type :: tail_outputs
 end type tail_outputs
 
 ! the device route of one parity's references: sections the projected banks (pftsz nk, nrefs) until memoize_refs,
-! memo_ref and memo_ref2 their memos (pftsz+1, nk, nrefs) until the tiles are made from them; their flags and the
-! sections' shape. The workspace of one parity: refs holds the reference tiles (4nk, 2rt, pftsz+1, ntiles) real: a tile G of every
-! bin, rows 1..nk ft_ref2 and rows nk+1..2nk conj(ft_ref), packed as [[Re G, Im G], [-Im G, Re G]], so that a
-! tile's complex sums of every bin are one real product; tail_form the form of the tail (POLARFT_TAILS): tail the
+! memo_terms their memos (2nk, pftsz+1, nrefs), the host memos' layout, until the tiles are made from them; their
+! flags and the sections' shape. The workspace of one parity: refs holds the reference tiles (4nk, 2rt, pftsz+1,
+! ntiles) real: a tile G of every bin, the conjugated memos of rt references, packed as [[Re G, Im G], [-Im G,
+! Re G]], so that a tile's complex sums of every bin are one real product; tail_form the form of the tail (POLARFT_TAILS): tail the
 ! compiled distances and draw, or tail_kernel the fused one, tail_kernel_rows its rows variant (built on the
 ! first block that asks for rows, l_tail_rows) and tail_par the constants they read; stage_s the
 ! profiled stages' seconds: particle terms, products, inverse transform, distances and draw, concatenation;
@@ -117,8 +117,7 @@ type, extends(device_work) :: polarft_workspace
     integer                       :: sec_npts   = 0
     integer                       :: sec_nrefs  = 0
     type(mlx_array)               :: sections
-    type(mlx_array)               :: memo_ref
-    type(mlx_array)               :: memo_ref2
+    type(mlx_array)               :: memo_terms
     character(len=:), allocatable :: msg
   contains
     procedure :: new           => polarft_workspace_new
@@ -145,12 +144,12 @@ type, extends(device_work) :: polarft_workspace
 end type polarft_workspace
 
 interface
-    ! the resident tiles of one parity's reference memos (pftsz+1, nk, references) under the tile plan of spec
-    ! (validated first; a failure leaves the workspace unprepared)
-    module subroutine polarft_workspace_new( self, spec, ft_ref, ft_ref2, status )
+    ! the resident tiles of one parity's reference memos (2nk, pftsz+1, references) under the tile plan of spec
+    ! (validated first; a failure leaves the workspace unprepared): one upload, packed on the device
+    module subroutine polarft_workspace_new( self, spec, ft_ref_terms, status )
         class(polarft_workspace), intent(inout) :: self
         type(polarft_tile_spec),  intent(in)    :: spec
-        complex(real32),          intent(in)    :: ft_ref(:,:,:), ft_ref2(:,:,:)
+        complex(real32),          intent(in)    :: ft_ref_terms(:,:,:)
         integer,                  intent(out)   :: status
     end subroutine polarft_workspace_new
 
@@ -163,9 +162,9 @@ interface
         integer,                  intent(out)   :: status
     end subroutine set_sections
 
-    ! the device route's memos of the sections, as memoize_refs makes them on the host: the first pftsz+1 bins of
-    ! the full ring's transform [z; conj z], and the conjugated transform of the squared modulus; evaluated, and
-    ! the sections released
+    ! the device route's memos of the sections, as memoize_refs makes them on the host: per shell the first
+    ! pftsz+1 bins of the transform of the squared modulus, then of the full ring [z; conj z]; evaluated, and the
+    ! sections released
     module subroutine memoize_sections( self, pftsz, nk, status )
         class(polarft_workspace), intent(inout) :: self
         integer,                  intent(in)    :: pftsz, nk
@@ -243,12 +242,12 @@ interface
     end function stage_seconds
 
     ! validates a block against the tiles and queues its graph in the block's slot (1 or 2); the particles'
-    ! memos (pftsz+1, nk, particles of the batch) are read at the block's batch slots; nothing is queued on a
+    ! terms (2nk, pftsz+1, particles of the batch) are read at the block's batch slots; nothing is queued on a
     ! refusal (status /= 0)
-    module subroutine polarft_workspace_submit( self, blk, ft_ctf2, ft_ptcl_ctf, status )
+    module subroutine polarft_workspace_submit( self, blk, ft_ptcl_wterms, status )
         class(polarft_workspace), intent(inout) :: self
         type(polarft_block_spec), intent(in)    :: blk
-        complex(real32),          intent(in)    :: ft_ctf2(:,:,:), ft_ptcl_ctf(:,:,:)
+        complex(real32),          intent(in)    :: ft_ptcl_wterms(:,:,:)
         integer,                  intent(out)   :: status
     end subroutine polarft_workspace_submit
 
@@ -269,12 +268,13 @@ interface
         real(real32), allocatable, intent(out)   :: rows(:,:,:)
     end subroutine take_rows
 
-    ! map spec%imap's grid and resident data from one parity's reference memos; the map's earlier state is
-    ! dropped first, so a refusal or failure leaves no such map, the others and the scoring intact
-    module subroutine polarft_workspace_prepare_maps( self, spec, ft_ref, ft_ref2, status )
+    ! map spec%imap's grid and resident data from one parity's reference memos (2nk, pftsz+1, references); the
+    ! map's earlier state is dropped first, so a refusal or failure leaves no such map, the others and the scoring
+    ! intact
+    module subroutine polarft_workspace_prepare_maps( self, spec, ft_ref_terms, status )
         class(polarft_workspace), intent(inout) :: self
         type(polarft_map_spec),   intent(in)    :: spec
-        complex(real32),          intent(in)    :: ft_ref(:,:,:), ft_ref2(:,:,:)
+        complex(real32),          intent(in)    :: ft_ref_terms(:,:,:)
         integer,                  intent(out)   :: status
     end subroutine polarft_workspace_prepare_maps
 

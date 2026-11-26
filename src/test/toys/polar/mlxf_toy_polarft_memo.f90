@@ -1,4 +1,4 @@
-!@descr: the toy polar calculator's memoization: the setters' staging, the ring transforms of references and particles, the reference bins
+!@descr: the toy polar calculator's memoization: the setters' staging, the ring transforms of references and particles, the reference tiles
 ! The transforms are direct sums in double precision over the full ring (the half ring, then its conjugate),
 ! rounded once to single precision: the values the scorer's fixtures have always been given. The setters stage
 ! a few sections at a time; a full staging is turned into memos at once, by the whole team, and memoize_refs
@@ -117,28 +117,30 @@ contains
         self%msg = 'polarft_calc%get_ref_pft: refused: the host route keeps only the memos of a memoized reference'
     end subroutine get_ref_pft
 
-    ! the staged references become their memos
+    ! the staged references become their memos: per shell k, row nk+kk the transform of the ring and row kk that
+    ! of its squared modulus (kk = k - kfromto(1) + 1)
     subroutine flush_refs( self )
         class(polarft_calc), intent(inout) :: self
         complex(real64), allocatable :: zw(:,:), yw(:,:)
-        integer                      :: nthr, idx, j, k, iref, ieo, ithr
+        integer                      :: nthr, idx, j, k, kk, iref, ieo, ithr
         if( self%nref_staged == 0 ) return
         nthr = 1
         !$ nthr = omp_get_max_threads()
         allocate(zw(self%pftsz, nthr), yw(self%pftsz + 1, nthr))
-        !$omp parallel do default(shared) private(idx, j, k, iref, ieo, ithr) schedule(dynamic, 16) proc_bind(close)
+        !$omp parallel do default(shared) private(idx, j, k, kk, iref, ieo, ithr) schedule(dynamic, 16) proc_bind(close)
         do idx = 1, self%nref_staged * self%nk
             ithr = thread_index()
             j    = (idx - 1) / self%nk + 1
-            k    = self%kfromto(1) + mod(idx - 1, self%nk)
+            kk   = mod(idx - 1, self%nk) + 1
+            k    = self%kfromto(1) + kk - 1
             iref = self%stage_ref(1, j)
             ieo  = self%stage_ref(2, j)
             zw(:, ithr) = self%pfts_refs(:, k, j)
             call ring_bins(self%dft_e, zw(:, ithr), yw(:, ithr))
-            self%ft_ref(:, k, iref, ieo) = cmplx(yw(:, ithr), kind=real32)
+            self%ft_ref_terms(self%nk + kk, :, iref, ieo) = cmplx(yw(:, ithr), kind=real32)
             zw(:, ithr) = cmplx(abs(self%pfts_refs(:, k, j))**2, 0._real64, real64)
             call ring_bins(self%dft_e, zw(:, ithr), yw(:, ithr))
-            self%ft_ref2(:, k, iref, ieo) = cmplx(conjg(yw(:, ithr)), kind=real32)
+            self%ft_ref_terms(kk, :, iref, ieo) = cmplx(yw(:, ithr), kind=real32)
         end do
         !$omp end parallel do
         self%nref_staged = 0
@@ -306,16 +308,27 @@ contains
         else
             call flush_refs(self)
         endif
-        ! from here the route is fixed: the memos of the references that waited exist on this route only
-        if( self%l_refs_pending ) self%l_refs_memoized = .true.
+        ! from here the route is fixed: the memos of the references that waited exist on this route only; with none
+        ! waiting the memos are unchanged, and so is their generation
+        if( self%l_refs_pending )then
+            self%l_refs_memoized = .true.
+            self%ref_gen         = self%ref_gen + 1_int64
+        endif
         self%l_refs_pending = .false.
-        self%ref_gen        = self%ref_gen + 1_int64
+        ! the scorer's layout: the host kernel reads the memos in place, the device its resident tiles
+        self%ref_gen_tiles = -1_int64
+        if( self%l_mlx )then
+            call memoize_ref_tiles_mlx(self)
+            if( len(self%msg) > 0 ) return
+        endif
+        self%ref_gen_tiles = self%ref_gen
     end subroutine memoize_refs
 
     module subroutine memoize_ptcls( self )
         class(polarft_calc), intent(inout) :: self
         real(real64) :: wsq
-        integer      :: i, k, ih
+        real(real32) :: wk
+        integer      :: i, k, kk, ih, j
         if( .not. self%existence )then
             self%msg = 'polarft_calc%memoize_ptcls: refused: no calculator (new)'
             return
@@ -334,73 +347,39 @@ contains
             end do
             self%wsqsums_ptcls(i) = wsq
         end do
-        self%ptcl_gen_memo = self%ptcl_gen
-    end subroutine memoize_ptcls
-
-    module subroutine memoize_ref_bins( self )
-        class(polarft_calc), intent(inout) :: self
-        if( .not. self%existence )then
-            self%msg = 'polarft_calc%memoize_ref_bins: refused: no calculator (new)'
-            return
-        endif
-        if( self%l_refs_pending )then
-            self%msg = 'polarft_calc%memoize_ref_bins: refused: references were set and not memoized (memoize_refs)'
-            return
-        endif
-        self%msg          = ''
-        self%ref_gen_bins = -1_int64
-        if( self%l_mlx )then
-            call memoize_ref_bins_mlx(self)
-        else
-            call host_ref_bins(self)
-        endif
-        if( len(self%msg) > 0 ) return
-        self%ref_gen_bins = self%ref_gen
-    end subroutine memoize_ref_bins
-
-    ! SIMPLE's bin-major memo of the references: per angular bin the 2nk shell terms of every reference, rows
-    ! 1..nk conj(ft_ref2) and rows nk+1..2nk ft_ref, so that a block's sums of a bin read contiguous memory
-    subroutine host_ref_bins( self )
-        class(polarft_calc), intent(inout) :: self
-        integer :: iref, ieo, j, k, kk, ierr
-        if( .not. allocated(self%ft_ref_bins) )then
-            allocate(self%ft_ref_bins(2 * self%nk, self%nrefs, self%pftsz + 1, N_REF_PARITIES), stat=ierr)
-            if( ierr /= 0 )then
-                self%msg = 'polarft_calc%memoize_ref_bins: the bin-major memo could not be allocated'
-                return
-            endif
-        endif
-        !$omp parallel do default(shared) private(iref, ieo, j, k, kk) schedule(static) proc_bind(close)
-        do iref = 1, self%nrefs
-            do ieo = REF_EVEN, REF_ODD
-                do j = 1, self%pftsz + 1
-                    do k = self%kfromto(1), self%kfromto(2)
-                        kk = k - self%kfromto(1) + 1
-                        self%ft_ref_bins(kk, iref, j, ieo)           = conjg(self%ft_ref2(j, k, iref, ieo))
-                        self%ft_ref_bins(self%nk + kk, iref, j, ieo) = self%ft_ref(j, k, iref, ieo)
-                    end do
+        ! SIMPLE's particle terms of the objective, in the references' layout: rows 1..nk w_k FT(CTF2), rows
+        ! nk+1..2nk -2 w_k FT(X.CTF), with the weights rounded to single precision
+        !$omp parallel do default(shared) private(i, ih, j, kk, k, wk) schedule(static) proc_bind(close)
+        do i = 1, self%nptcls
+            ih = merge(REF_EVEN, REF_ODD, self%iseven(i))
+            do j = 1, self%pftsz + 1
+                do kk = 1, self%nk
+                    k  = self%kfromto(1) + kk - 1
+                    wk = self%sigma2_wk(k, ih)
+                    self%ft_ptcl_wterms(kk, j, i)           = wk * self%ft_ctf2(j, k, i)
+                    self%ft_ptcl_wterms(self%nk + kk, j, i) = (-2._real32 * wk) * self%ft_ptcl_ctf(j, k, i)
                 end do
             end do
         end do
         !$omp end parallel do
-    end subroutine host_ref_bins
+        self%ptcl_gen_memo = self%ptcl_gen
+    end subroutine memoize_ptcls
 
-    module subroutine kill_ref_bins( self )
+    module subroutine kill_ref_tiles( self )
         class(polarft_calc), intent(inout) :: self
         integer :: ieo
-        self%msg          = ''
-        self%ref_gen_bins = -1_int64
-        self%slot_ieo     = 0
-        if( allocated(self%ft_ref_bins) ) deallocate(self%ft_ref_bins)
+        self%msg           = ''
+        self%ref_gen_tiles = -1_int64
+        self%slot_ieo      = 0
         if( .not. allocated(self%ws) ) return
         do ieo = 1, size(self%ws)
             call self%ws(ieo)%kill()
         end do
-    end subroutine kill_ref_bins
+    end subroutine kill_ref_tiles
 
-    pure module logical function ref_bins_current( self )
+    pure module logical function ref_tiles_current( self )
         class(polarft_calc), intent(in) :: self
-        ref_bins_current = self%existence .and. self%ref_gen_bins == self%ref_gen
-    end function ref_bins_current
+        ref_tiles_current = self%existence .and. .not. self%l_refs_pending .and. self%ref_gen_tiles == self%ref_gen
+    end function ref_tiles_current
 
 end submodule mlxf_toy_polarft_memo

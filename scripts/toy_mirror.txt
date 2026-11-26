@@ -7,11 +7,13 @@
 # A name is a type T, a binding T%binding or a procedure. Rule `mirror` of scripts/check_rules.py holds the ledger
 # to the code; rule `arity` exempts the mirrored procedures from the five-dummy limit and no others.
 #
-# Read from SIMPLE commit d354efee2 (src/main/pftc/simple_polarft_calc.f90 and its submodules; for the projector
+# Read from SIMPLE commit 28c753993 (src/main/pftc/simple_polarft_calc.f90 and its submodules; for the driver
+# src/main/strategies/search/probabilistic/simple_eul_prob_tab.f90; for the projector
 # src/main/image/simple_projector.f90, simple_projector_pft_batch.f90 and, for the procedures projector inherits
 # from image, simple_image.f90 and simple_image_fft.f90; for the PCG reconstruction src/main/volume/
 # simple_reconstructor_pcg.f90, simple_pcg_lattice.f90, whose members and procedures reconstructor_pcg inherits,
-# and src/main/opt/simple_pcg_solver.f90).
+# and src/main/opt/simple_pcg_solver.f90). The polar calculator's memos are those of its one memo layout
+# (ft_ref_terms, ft_ptcl_wterms), which the pin holds since 23eb95cc2; the earlier pin was d354efee2.
 
 # ---- the opaque device state of a toy class ----
 mlxf_toy_device_work device_work addition the abstract type a toy class holds its device state as, so that its host files import no MLX name; SIMPLE has no MLX backend yet
@@ -28,7 +30,6 @@ mlxf_toy_polarft_calc polarft_calc%set_ptcl_ctfmat simple_polarft_calc polarft_c
 mlxf_toy_polarft_calc polarft_calc%set_eo simple_polarft_calc polarft_calc%set_eo
 mlxf_toy_polarft_calc polarft_calc%memoize_refs simple_polarft_calc polarft_calc%memoize_refs
 mlxf_toy_polarft_calc polarft_calc%memoize_ptcls simple_polarft_calc polarft_calc%memoize_ptcls
-mlxf_toy_polarft_calc polarft_calc%memoize_ref_bins simple_polarft_calc polarft_calc%memoize_ref_bins
 mlxf_toy_polarft_calc polarft_calc%score_block_posterior simple_polarft_calc polarft_calc%score_block_posterior
 mlxf_toy_polarft_calc polarft_calc%set_draw_keys addition the keys of the host backend's draws (the seed and each reference's full index); SIMPLE's calculator is given its scope by set_rnd_scope and keys on its own reference index
 mlxf_toy_polarft_calc polarft_calc%check_block_work addition whether a team may score blocks on the host backend, asked before the team's region; SIMPLE stops inside it
@@ -51,11 +52,12 @@ mlxf_toy_polarft_calc polarft_calc%set_sigma2_weights addition the fixtures have
 mlxf_toy_polarft_calc polarft_calc%set_tile_plan addition the particles and references of a workspace tile; no SIMPLE procedure or parameter carries the GPU route's layout
 mlxf_toy_polarft_calc polarft_calc%set_tail_form addition the dense score's tail as the compiled graph or the fused Metal kernel; SIMPLE has one CPU kernel
 mlxf_toy_polarft_calc polarft_calc%set_ref_route addition the projected references through the host memos or resident on the device to the tiles; SIMPLE's bank is a host section of pfts_refs
-mlxf_toy_polarft_calc polarft_calc%kill_ref_bins addition releases the device's tiles and keeps the host memos, so that a benchmark can change the tile plan or the device
-mlxf_toy_polarft_calc polarft_calc%ref_bins_current addition inquiry: the reference bins are those of the memoized references and tile plan (SIMPLE compares ref_gen_bins with ref_gen and stops)
+mlxf_toy_polarft_calc polarft_calc%kill_ref_tiles addition releases the device's tiles and keeps the host memos, so that a benchmark can change the tile plan or the device (memoize_refs makes them again)
+mlxf_toy_polarft_calc polarft_calc%ref_tiles_current addition inquiry: the reference tiles are those of the memoized references, tile plan and tail, which the driver requires (SIMPLE's kernels read the one memo and stop when it is not memoized)
 mlxf_toy_polarft_calc polarft_calc%message addition inquiry: the reason of the last refusal; a mirrored procedure has no status argument and SIMPLE stops where the toy refuses
 mlxf_toy_polarft_calc polarft_calc%set_block_variates addition the fixture owns each pair's keyed variate; SIMPLE draws them inside the scorer from the scope of set_rnd_scope
 mlxf_toy_polarft_calc polarft_calc%set_block_banks addition the seed banks of a block queued by submit_block, which is held to five dummies
+mlxf_toy_polarft_calc polarft_calc%shifted_ptcl_terms addition a seed bank as the particle's terms with a shifted cross term, from a fixture's shifted FT(X.CTF); SIMPLE's memoize_shifted_ptcl shifts and transforms the particle itself
 mlxf_toy_polarft_calc polarft_calc%set_block_options addition the full rows of distances for the oracle's comparison, and the profiled stages
 mlxf_toy_polarft_calc polarft_calc%submit_block addition queues a block on the device and returns: the GPU batch in flight has no counterpart in SIMPLE
 mlxf_toy_polarft_calc polarft_calc%collect_block addition waits for a queued block and copies its entries out: the one place the host waits for the device

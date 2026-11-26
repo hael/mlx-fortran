@@ -44,11 +44,9 @@ contains
         allocate(self%pinds(pfromto(1):pfromto(2)))
         self%pinds = [(i, i = 1, self%nptcls)]
         call alloc_ptcls(self)
-        allocate(self%ft_ref(self%pftsz+1, kfromto(1):kfromto(2), nrefs, N_REF_PARITIES), &
-            &self%ft_ref2(self%pftsz+1, kfromto(1):kfromto(2), nrefs, N_REF_PARITIES), &
+        allocate(self%ft_ref_terms(2 * self%nk, self%pftsz+1, nrefs, N_REF_PARITIES), &
             &self%sigma2_wk(kfromto(1):kfromto(2), 2), self%sigma2_wk8(kfromto(1):kfromto(2), 2))
-        self%ft_ref    = cmplx(0._real32, 0._real32, real32)
-        self%ft_ref2   = cmplx(0._real32, 0._real32, real32)
+        self%ft_ref_terms = cmplx(0._real32, 0._real32, real32)
         self%sigma2_wk  = 0._real32
         self%sigma2_wk8 = 0._real64
         self%ldim       = [params%box, params%box, 1]
@@ -91,13 +89,11 @@ contains
         if( allocated(self%sm_maps) ) deallocate(self%sm_maps)
         if( allocated(self%pfts_refs) ) deallocate(self%pfts_refs)
         if( allocated(self%dft_e) ) deallocate(self%dft_e)
-        if( allocated(self%ft_ref) ) deallocate(self%ft_ref)
-        if( allocated(self%ft_ref2) ) deallocate(self%ft_ref2)
+        if( allocated(self%ft_ref_terms) ) deallocate(self%ft_ref_terms)
         if( allocated(self%u_next) ) deallocate(self%u_next)
         if( allocated(self%banks_next) ) deallocate(self%banks_next)
         if( allocated(self%l_bank_next) ) deallocate(self%l_bank_next)
         if( allocated(self%rows) ) deallocate(self%rows)
-        if( allocated(self%ft_ref_bins) ) deallocate(self%ft_ref_bins)
         if( allocated(self%ref_full) ) deallocate(self%ref_full)
         call kill_block_work(self)
         call kill_ptcls(self)
@@ -109,7 +105,7 @@ contains
         self%kfromto       = 0
         self%nk            = 0
         self%ref_gen       = 0_int64
-        self%ref_gen_bins  = -1_int64
+        self%ref_gen_tiles = -1_int64
         self%ptcl_gen      = 0_int64
         self%ptcl_gen_memo = -1_int64
         self%l_weights     = .false.
@@ -153,7 +149,8 @@ contains
         class(polarft_calc), intent(inout) :: self
         associate( k1 => self%kfromto(1), k2 => self%kfromto(2), n => self%nptcls )
             allocate(self%iseven(n), self%wsqsums_ptcls(n), self%kshell_sqsums_ptcls(k1:k2, n), &
-                &self%ft_ptcl_ctf(self%pftsz+1, k1:k2, n), self%ft_ctf2(self%pftsz+1, k1:k2, n))
+                &self%ft_ptcl_ctf(self%pftsz+1, k1:k2, n), self%ft_ctf2(self%pftsz+1, k1:k2, n), &
+                &self%ft_ptcl_wterms(2 * self%nk, self%pftsz+1, n))
         end associate
         allocate(self%l_ptcl_set(self%nptcls))
         self%l_ptcl_set          = .false.
@@ -163,6 +160,7 @@ contains
         self%kshell_sqsums_ptcls = 0._real64
         self%ft_ptcl_ctf         = cmplx(0._real32, 0._real32, real32)
         self%ft_ctf2             = cmplx(0._real32, 0._real32, real32)
+        self%ft_ptcl_wterms      = cmplx(0._real32, 0._real32, real32)
     end subroutine alloc_ptcls
 
     module subroutine kill_ptcls( self )
@@ -172,6 +170,7 @@ contains
         if( allocated(self%kshell_sqsums_ptcls) ) deallocate(self%kshell_sqsums_ptcls)
         if( allocated(self%ft_ptcl_ctf) ) deallocate(self%ft_ptcl_ctf)
         if( allocated(self%ft_ctf2) ) deallocate(self%ft_ctf2)
+        if( allocated(self%ft_ptcl_wterms) ) deallocate(self%ft_ptcl_wterms)
         if( allocated(self%pfts_ptcls) ) deallocate(self%pfts_ptcls)
         if( allocated(self%ctfmats) ) deallocate(self%ctfmats)
         if( allocated(self%l_ptcl_set) ) deallocate(self%l_ptcl_set)
@@ -219,7 +218,7 @@ contains
             return
         endif
         self%msg = ''
-        if( bt /= self%bt .or. rt /= self%rt ) self%ref_gen_bins = -1_int64
+        if( bt /= self%bt .or. rt /= self%rt ) self%ref_gen_tiles = -1_int64
         self%bt = bt
         self%rt = rt
     end subroutine set_tile_plan
@@ -232,7 +231,7 @@ contains
             return
         endif
         self%msg = ''
-        if( form /= self%tail ) self%ref_gen_bins = -1_int64
+        if( form /= self%tail ) self%ref_gen_tiles = -1_int64
         self%tail = form
     end subroutine set_tail_form
 
@@ -253,7 +252,7 @@ contains
             self%msg = ''
         endif
         if( len(self%msg) > 0 ) return
-        if( route /= self%route ) self%ref_gen_bins = -1_int64
+        if( route /= self%route ) self%ref_gen_tiles = -1_int64
         self%route = route
     end subroutine set_ref_route
 

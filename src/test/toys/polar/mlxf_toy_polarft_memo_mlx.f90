@@ -44,7 +44,7 @@ contains
         end select
     end subroutine memoize_refs_mlx
 
-    module subroutine memoize_ref_bins_mlx( self )
+    module subroutine memoize_ref_tiles_mlx( self )
         class(polarft_calc), intent(inout) :: self
         type(polarft_tile_spec) :: spec
         integer                 :: ieo, st
@@ -60,7 +60,7 @@ contains
                         ! the device route: the tiles from the device memos, which they replace
                         call ws(ieo)%new_from_memos(spec, st)
                     else
-                        call ws(ieo)%new(spec, self%ft_ref(:, :, :, ieo), self%ft_ref2(:, :, :, ieo), st)
+                        call ws(ieo)%new(spec, self%ft_ref_terms(:, :, :, ieo), st)
                     endif
                     if( st /= 0 )then
                         self%msg = ws(ieo)%message()
@@ -70,7 +70,7 @@ contains
             class default
                 self%msg = WRONG_WORK
         end select
-    end subroutine memoize_ref_bins_mlx
+    end subroutine memoize_ref_tiles_mlx
 
 #else
 implicit none
@@ -92,10 +92,10 @@ contains
         self%msg = NO_MLX
     end subroutine memoize_refs_mlx
 
-    module subroutine memoize_ref_bins_mlx( self )
+    module subroutine memoize_ref_tiles_mlx( self )
         class(polarft_calc), intent(inout) :: self
         self%msg = NO_MLX
-    end subroutine memoize_ref_bins_mlx
+    end subroutine memoize_ref_tiles_mlx
 
 #endif
 end submodule mlxf_toy_polarft_memo_mlx

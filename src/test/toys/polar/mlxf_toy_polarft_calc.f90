@@ -45,14 +45,17 @@ end type polarft_block_work
 ! staging of POLARFT_STAGE_N sections: they hold what the setters were given (stage_ref: the reference and its
 ! parity; stage_ptcl: the batch slot; l_stage_pft: the section came) until the staging fills or the next
 ! memoization, which turns them into memos (l_refs_pending: references wait for it; l_refs_memoized: a reference
-! has its memo on the route in use). The memos are those of the scorer: ft_ref and ft_ref2 per parity,
-! ft_ptcl_ctf and ft_ctf2 per particle of the batch; dft_e holds the transform's factors. The rest serves the
+! has its memo on the route in use). The memos are those of the scorer: ft_ref_terms per reference and parity
+! (2nk, pftsz+1: rows 1..nk the transform of the squared modulus, rows nk+1..2nk that of the ring, SIMPLE's one
+! layout, read in place by every kernel), ft_ptcl_ctf and ft_ctf2 per particle of the batch, and from them
+! ft_ptcl_wterms, the particle's terms of the objective in the same layout (rows 1..nk w_k FT(CTF2), rows
+! nk+1..2nk -2 w_k FT(X.CTF), SIMPLE's euclid terms); dft_e holds the transform's factors. The rest serves the
 ! additions: the tile plan, the options, variates, seed banks and rows of a block, the parity of the block in
 ! each slot, the reason of the last refusal. Of the shift maps the calculator keeps what tells whether a map
 ! is that of the memoized references and weights (map_ref_gen, map_wk_gen), its band's last shell, the pairs
 ! gen_shiftmap was given (sm_*), the options and the requested outputs of the last modes. l_mlx is the backend
-! taken at new; ws the device state, allocated on the MLX backend only. The host backend's: ft_ref_bins, SIMPLE's
-! bin-major memo of the references (2nk, nrefs, pftsz+1, parities); bwork, the block kernel's work of a team of
+! taken at new; ws the device state, allocated on the MLX backend only, whose reference tiles memoize_refs makes
+! (ref_gen_tiles: the generation they are of). The host backend's: bwork, the block kernel's work of a team of
 ! nthr; idft_e, the inverse transform's factors; the keys of the draws (rnd_seed and each reference's full index).
 type :: polarft_calc
     private
@@ -78,16 +81,15 @@ type :: polarft_calc
     complex(real32),          allocatable :: pfts_ptcls(:,:,:)
     complex(real32),          allocatable :: ft_ptcl_ctf(:,:,:)
     complex(real32),          allocatable :: ft_ctf2(:,:,:)
-    complex(real32),          allocatable :: ft_ref(:,:,:,:)
-    complex(real32),          allocatable :: ft_ref2(:,:,:,:)
+    complex(real32),          allocatable :: ft_ptcl_wterms(:,:,:)
+    complex(real32),          allocatable :: ft_ref_terms(:,:,:,:)
     integer(int64) :: ref_gen       = 0_int64
-    integer(int64) :: ref_gen_bins  = -1_int64
+    integer(int64) :: ref_gen_tiles = -1_int64
     integer(int64) :: ptcl_gen      = 0_int64
     integer(int64) :: ptcl_gen_memo = -1_int64
     logical        :: existence     = .false.
     logical        :: l_mlx         = .false.
     integer        :: nthr          = 1
-    complex(real32),          allocatable :: ft_ref_bins(:,:,:,:)
     type(polarft_block_work), allocatable :: bwork(:)
     complex(real32),          allocatable :: idft_e(:,:)
     integer        :: rnd_seed      = 0
@@ -153,13 +155,13 @@ type :: polarft_calc
     procedure :: set_ptcl_ctfmat
     procedure :: memoize_refs
     procedure :: memoize_ptcls
-    procedure :: memoize_ref_bins
-    procedure :: kill_ref_bins
-    procedure :: ref_bins_current
+    procedure :: kill_ref_tiles
+    procedure :: ref_tiles_current
     ! block scoring
     procedure :: score_block_posterior
     procedure :: set_block_variates
     procedure :: set_block_banks
+    procedure :: shifted_ptcl_terms
     procedure :: set_block_options
     procedure :: submit_block
     procedure :: collect_block
@@ -220,14 +222,15 @@ interface
         real(real64),        intent(in)    :: sigma2_wk8(:,:)
     end subroutine set_sigma2_weights
 
-    ! the particles (bt) and references (rt) of a tile of the workspace; the reference bins follow it
+    ! the particles (bt) and references (rt) of a tile of the workspace; the reference tiles follow it at the next
+    ! memoize_refs
     module subroutine set_tile_plan( self, bt, rt )
         class(polarft_calc), intent(inout) :: self
         integer,             intent(in)    :: bt, rt
     end subroutine set_tile_plan
 
     ! the form of the dense score's tail (POLARFT_TAILS): the compiled graph, or the fused Metal kernel (GPU only);
-    ! the reference bins follow it
+    ! the reference tiles follow it at the next memoize_refs
     module subroutine set_tail_form( self, form )
         class(polarft_calc), intent(inout) :: self
         integer,             intent(in)    :: form
@@ -237,7 +240,7 @@ interface
     ! reference and the default; or resident on the device from the projected bank to the tiles, where the shift
     ! maps are refused; it needs the MLX backend. A change is refused while references wait to be memoized, and
     ! once a reference is memoized: its memo exists on one route only, and the other route's would be stale. The
-    ! reference bins follow the route
+    ! reference tiles follow the route
     module subroutine set_ref_route( self, route )
         class(polarft_calc), intent(inout) :: self
         integer,             intent(in)    :: route
@@ -346,33 +349,29 @@ interface
         real(real32),        intent(in)    :: ctfmat(self%pftsz, self%kfromto(1):self%kfromto(2))
     end subroutine set_ptcl_ctfmat
 
-    ! the references set since the last call have their memos: the first pftsz+1 bins of the full ring's
-    ! transform, and the conjugated transform of its squared modulus, in double precision, rounded once
+    ! the references set since the last call have their memos (2nk, pftsz+1): the first pftsz+1 bins of the
+    ! transform of the full ring's squared modulus, then of the ring, in double precision, rounded once; on the
+    ! MLX backend both parities' resident tiles follow, under the tile plan and tail, made again when none wait
     module subroutine memoize_refs( self )
         class(polarft_calc), intent(inout) :: self
     end subroutine memoize_refs
 
     ! the particles set since the last call have their memos (the particle times its CTF, and the squared
-    ! CTF), and every particle's weighted square sum is made from its half's shell weights
+    ! CTF), and every particle's weighted square sum and terms (2nk, pftsz+1) are made from its half's weights
     module subroutine memoize_ptcls( self )
         class(polarft_calc), intent(inout) :: self
     end subroutine memoize_ptcls
 
-    ! the block scorer's layout of the reference memos: the resident tiles of both workspaces, on the current
-    ! device, under the tile plan; follows memoize_refs
-    module subroutine memoize_ref_bins( self )
+    ! releases the device's reference tiles; the host memos stay, and memoize_refs makes the tiles again
+    module subroutine kill_ref_tiles( self )
         class(polarft_calc), intent(inout) :: self
-    end subroutine memoize_ref_bins
+    end subroutine kill_ref_tiles
 
-    ! releases the reference bins (the device's tiles); the host memos stay, and memoize_ref_bins makes them again
-    module subroutine kill_ref_bins( self )
-        class(polarft_calc), intent(inout) :: self
-    end subroutine kill_ref_bins
-
-    ! whether the reference bins are those of the memoized references and the tile plan
-    pure module logical function ref_bins_current( self )
+    ! whether the reference tiles (on the host backend the memos themselves) are those of the memoized
+    ! references, the tile plan and the tail, with no reference waiting to be memoized
+    pure module logical function ref_tiles_current( self )
         class(polarft_calc), intent(in) :: self
-    end function ref_bins_current
+    end function ref_tiles_current
 
     ! ---- block scoring ----
 
@@ -381,8 +380,9 @@ interface
     ! On the host backend it is SIMPLE's block kernel, thread-safe (the calling thread's work): at most
     ! PFTC_BLOCK_NB particles, any references, the variate keyed by set_draw_keys; inside a parallel region a
     ! refused block leaves SIMPLE's invalid entries and no message. On the MLX backend: all the references in
-    ! order, the variates of set_block_variates, one calling thread. A refused block (message) leaves dists at huge
-    ! and irots at 1.
+    ! order, the variates of set_block_variates, one calling thread. Seed banks (2nk, pftsz+1, nb), as
+    ! shifted_ptcl_terms makes them, replace a particle's terms where l_bank. A refused block (message) leaves
+    ! dists at huge and irots at 1.
     module subroutine score_block_posterior( self, nb, iptcls, nr, irefs, temps, dists, irots, banks, l_bank )
         class(polarft_calc),       intent(inout) :: self
         integer,                   intent(in)    :: nb, nr
@@ -441,13 +441,22 @@ interface
         real(real32), allocatable, intent(inout) :: u(:,:)
     end subroutine set_block_variates
 
-    ! the seed banks of the next block queued by submit_block: banks (pftsz+1, shells, particles of the block)
-    ! replaces a particle's memo where l_bank; copied, and consumed by that block
+    ! the seed banks of the next block queued by submit_block: banks (2nk, pftsz+1, particles of the block)
+    ! replaces a particle's terms where l_bank; copied, and consumed by that block
     module subroutine set_block_banks( self, banks, l_bank )
         class(polarft_calc), intent(inout) :: self
         complex(real32),     intent(in)    :: banks(:,:,:)
         logical,             intent(in)    :: l_bank(:)
     end subroutine set_block_banks
+
+    ! the seed bank of particle iptcl (project index) from its shifted FT(X.CTF) xctf (pftsz+1, shells): its
+    ! memoized terms with the cross term rows nk+1..2nk -2 w_k xctf; a refusal (message) leaves bank at zero
+    module subroutine shifted_ptcl_terms( self, iptcl, xctf, bank )
+        class(polarft_calc), intent(inout) :: self
+        integer,             intent(in)    :: iptcl
+        complex(real32),     intent(in)    :: xctf(:,:)
+        complex(real32),     intent(out)   :: bank(2 * self%nk, self%pftsz + 1)
+    end subroutine shifted_ptcl_terms
 
     ! what the following blocks do besides scoring: keep their full rows of distances for block_rows (on the host
     ! backend in each thread's work, for copy_block_rows too); evaluate after every stage and add the stages'
@@ -635,9 +644,9 @@ interface
 
     ! the resident tiles of both parities under the tile plan: from the host memos, or on the device route from
     ! the device memos, which they replace
-    module subroutine memoize_ref_bins_mlx( self )
+    module subroutine memoize_ref_tiles_mlx( self )
         class(polarft_calc), intent(inout) :: self
-    end subroutine memoize_ref_bins_mlx
+    end subroutine memoize_ref_tiles_mlx
 
     ! ---- block scoring ----
 

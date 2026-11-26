@@ -95,12 +95,10 @@ type :: chain_run
     real(real32), allocatable :: rows(:,:,:,:)
 end type chain_run
 
-! the stages after which a run may ask for the other route: the projection, memoize_refs, memoize_ref_bins
+! the stages after which a run may ask for the other route: the projection, memoize_refs (which makes the tiles)
 integer,          parameter :: AFTER_PROJECTION = 1
 integer,          parameter :: AFTER_MEMOS      = 2
-integer,          parameter :: AFTER_BINS       = 3
-character(len=*), parameter :: SWITCH_STAGES(3) = [character(len=24) :: 'the projection', 'memoize_refs', &
-    &'memoize_ref_bins']
+character(len=*), parameter :: SWITCH_STAGES(2) = [character(len=24) :: 'the projection', 'memoize_refs']
 
 contains
 
@@ -978,7 +976,7 @@ contains
         call pftc%memoize_ptcls()
     end subroutine chain_particles
 
-    ! one run of the chain: projection, memoize_refs, memoize_ref_bins, particles, then each half's block with its
+    ! one run of the chain: projection, memoize_refs with the tiles, particles, then each half's block with its
     ! full rows; nbad counts the refusals
     subroutine chain_once( fx, run, nbad )
         type(chain_fixture), intent(in)    :: fx
@@ -996,9 +994,6 @@ contains
         if( len(pftc%message()) > 0 ) nbad = nbad + 1
         if( run%switch_at == AFTER_MEMOS ) call chain_switch(pftc, run)
         call chain_particles(pftc, fx, nbad)
-        call pftc%memoize_ref_bins()
-        if( len(pftc%message()) > 0 ) nbad = nbad + 1
-        if( run%switch_at == AFTER_BINS ) call chain_switch(pftc, run)
         allocate(run%rows(CH_NROTS, CH_NSPACE, CH_NPTCLS / 2, 2))
         do h = 1, 2
             pids = [(i, i = h, CH_NPTCLS, 2)]
@@ -1106,8 +1101,7 @@ contains
         end do
     end subroutine test_chain_rows
 
-    ! a change of route asked for after the projection, after memoize_refs and after memoize_ref_bins, from either
-    ! route: each is refused and changes nothing, so that the run's rows are those of a run that never asked, bit
+    ! a change of route asked for after the projection and after memoize_refs, from either route: each is refused and changes nothing, so that the run's rows are those of a run that never asked, bit
     ! for bit (and with them within the chain's gate)
     subroutine test_chain_route_switch
         type(chain_fixture) :: fx
@@ -1119,7 +1113,7 @@ contains
             plain%route = merge(POLARFT_REF_ROUTES%host, POLARFT_REF_ROUTES%device, ir == 1)
             if( allocated(plain%rows) ) deallocate(plain%rows)
             call chain_once(fx, plain, nbad)
-            do stage = AFTER_PROJECTION, AFTER_BINS
+            do stage = AFTER_PROJECTION, AFTER_MEMOS
                 run%route     = plain%route
                 run%switch_at = stage
                 run%l_refused = .false.
@@ -1133,7 +1127,7 @@ contains
         end do
     end subroutine test_chain_route_switch
 
-    ! on either route a block scored before memoize_ref_bins is refused; on the device route the shift maps and a
+    ! on either route a block scored before memoize_refs is refused; on the device route the shift maps and a
     ! change of route while the sections wait are refused
     subroutine test_chain_refusals
         type(chain_fixture)           :: fx
@@ -1191,20 +1185,20 @@ contains
                 call assert_true(index(pftc%message(), 'refused') > 0, &
                     &'the route cannot change while the projected sections wait')
             endif
-            call pftc%memoize_refs()
-            if( ir == 1 )then
-                call pftc%get_ref_pft(2, .false., pft)
-                call assert_true(index(pftc%message(), 'refused') > 0, &
-                    &'get_ref_pft of a memoized reference is refused on the host route')
-            endif
             call chain_particles(pftc, fx, nbad)
             allocate(u(CH_NSPACE, 4), dists(CH_NSPACE, 4), irots(CH_NSPACE, 4))
             u = 0.5_real32
             call pftc%set_block_variates(u)
             call pftc%score_block_posterior(4, [1, 3, 5, 7], CH_NSPACE, [(i, i = 1, CH_NSPACE)], fx%temps(1:4), &
                 &dists, irots)
-            call assert_true(index(pftc%message(), 'refused') > 0, 'a block before memoize_ref_bins is refused on '// &
+            call assert_true(index(pftc%message(), 'refused') > 0, 'a block before memoize_refs is refused on '// &
                 &'the '//route_name(merge(POLARFT_REF_ROUTES%host, POLARFT_REF_ROUTES%device, ir == 1))//' route')
+            call pftc%memoize_refs()
+            if( ir == 1 )then
+                call pftc%get_ref_pft(2, .false., pft)
+                call assert_true(index(pftc%message(), 'refused') > 0, &
+                    &'get_ref_pft of a memoized reference is refused on the host route')
+            endif
             if( ir == 2 )then
                 call pftc%setup_shiftmaps(1._real64, 2._real64, 1._real64, prior_w, kscreen)
                 call assert_true(index(pftc%message(), 'device route') > 0, 'a shift map on the device route is refused')

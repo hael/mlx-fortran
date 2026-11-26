@@ -123,21 +123,26 @@ tile plan 64 by 250, on the M5 Ultra):
 - **Who owns the device state.** `polarft_calc%ws`, one `polarft_workspace` per reference parity, made in
   `new` and released in `kill`. Nothing else holds an MLX handle: the driver and the fixtures hold none.
 - **What is resident, and from when.** The reference tiles of both parities, 7.14e9 B (*derived*: 2 parities
-  of 40 tiles of 244 by 500 by 183 single-precision values), from `memoize_ref_bins` until `kill_ref_bins`,
-  `kill` or the next `memoize_ref_bins`: one iteration of a part process. A shift map adds 2.63e9 B for both
+  of 40 tiles of 244 by 500 by 183 single-precision values), made by `memoize_refs` (packed on the host from the
+  memo, 3.57e9 B of staging per parity while one is uploaded, *derived*) and held until `kill_ref_tiles`, `kill`
+  or the next `memoize_refs`: one iteration of a part process. A shift map adds 2.63e9 B for both
   parities (*measured*: 9.77e9 B of active memory with the tiles) from `new_shiftmap` or `setup_shiftmaps`
   until `kill_shiftmap`. A block in flight holds its graph: the MLX peak is 10.26e9 B while a half of 1,000
   particles is scored, and MLX keeps 3.28e9 B in its cache afterwards (*measured*). With the fused tail the peak
   is 16.71e9 B: a cheap tail lets the host queue more tiles ahead of the device (*measured*, K1).
-- **What stays on the host.** The memos of the references (`ft_ref`, `ft_ref2`, both parities: 3.57e9 B) and
-  of the particles (0.36e9 B) (*derived*). The raw sections do not stay: the setters stage 64 at a time and
+- **What stays on the host.** The one memo of the references (`ft_ref_terms`, both parities: 3.57e9 B) and the
+  particles' memos (`ft_ptcl_ctf` and `ft_ctf2`, 0.36e9 B, which the maps read, and the terms `ft_ptcl_wterms`,
+  0.36e9 B) (*derived*). The bin-major copy of SIMPLE's earlier layout (3.57e9 B more on the host backend) is
+  gone. The raw sections do not stay: the setters stage 64 at a time and
   memoize them.
-- **Where the host waits.** In `memoize_ref_bins` and `new_shiftmap` (the tiles and the maps' tables are
+- **Where the host waits.** In `memoize_refs` and `new_shiftmap` (the tiles and the maps' tables are
   evaluated), in `collect_block` (a block's entries are copied out; `score_block_posterior` is a submission
   and its collection), and in `shiftmap_mode`, once per tile of particles. `submit_block` returns while the
   device works, so one block or two can be in flight.
-- **What a part process holds.** 20.81e9 B of peak footprint for all 2,000 particles and 20.11e9 B for a third
-  of them (*measured*): the references dominate, and each part holds all of them.
+- **What a part process holds.** 19.03e9 B of peak footprint for all 2,000 particles and 18.32e9 B for a third
+  of them, bt 64 and the compiled tail (*measured* on the one memo layout, before the particle terms; 20.81e9 and
+  20.11e9 B in the earlier layout, whose host packing staged the tiles twice); the particle terms add 0.36e9 B
+  (*derived*). The references dominate, and each part holds all of them.
 
 **The seam in files** (run `mlxf_toy_seam`; `scripts/toy_seam.txt`):
 - **Host:** `mlxf_toy_polarft_calc.f90` and its submodules `_core`, `_memo`, `_block`, `_shiftmap`, and the driver
@@ -155,10 +160,10 @@ tile plan 64 by 250, on the M5 Ultra):
   backend's tolerances, the same bytes from a team of 1 and of 4 threads, and both branches of the fill within
   those tolerances on three seeds. The build without MLX (`test/offstate/`) fills the same table byte for byte.
 
-**Differences from SIMPLE** (read at `d354efee2`; the ledger `scripts/toy_mirror.txt` lists every procedure
+**Differences from SIMPLE** (read at `28c753993`; the ledger `scripts/toy_mirror.txt` lists every procedure
 as mirrored or as an addition with its reason):
-- **Dummies dropped:** `new` has no `nmany_refs` and `fftw_measure`; `memoize_refs` no `eulspace`;
-  `new_pipeline` no `block_memo`. `params` is the record `parameters` of the test definitions, with SIMPLE's
+- **Dummies dropped:** `new` has no `nmany_refs` and `fftw_measure`; `memoize_refs` no `eulspace` (mirrored
+  references are not modelled). `params` is the record `parameters` of the test definitions, with SIMPLE's
   member names for the members read (`pftsz`, `box`, `nthr`, `prob_beta`, `shift_sigma`, `smpd`, `trs`).
 - **Kinds:** `set_ref_pft` takes its section in `complex(real64)`, because the benchmark's reference rings
   are double precision and rounding them changes the scores' bits; `parameters%prob_beta` is `real(real64)`.
@@ -168,6 +173,22 @@ as mirrored or as an addition with its reason):
   their map grids in through `new_shiftmap`; `setup_shiftmaps` builds SIMPLE's grids by SIMPLE's rule.
 - **Staging:** `pfts_refs`, `pfts_ptcls` and `ctfmats` hold 64 sections, not every section, and a particle's
   CTF is set before its section. The weighted square sum is made in `memoize_ptcls`.
+- **The memos:** SIMPLE's one layout and names: `ft_ref_terms (2nk, pftsz+1, nrefs, 2)` (rows 1..nk the
+  transform of the squared modulus, rows nk+1..2nk that of the ring) and the particle terms `ft_ptcl_wterms`
+  (rows 1..nk `w_k FT(CTF2)`, rows nk+1..2nk `-2 w_k FT(X.CTF)`), made at the end of `memoize_ptcls`; the host
+  kernel reads both in place. `ft_ptcl_ctf` and `ft_ctf2` stay for the maps; there is no `ft_ptcl_terms` (the
+  toy is euclid only until K7).
+- **The tiles:** the device's copy of the one memo, made by `memoize_refs` on the MLX backend under the tile
+  plan and tail set before it (on the device route from the device's memo `memo_terms`), released by
+  `kill_ref_tiles` and asked for by `ref_tiles_current` (additions); `new_pipeline` refuses a calculator whose
+  tiles are not current, where SIMPLE's block kernel stops on references that are not memoized.
+- **The counters:** the toy keeps `ref_gen` (its maps and tiles check it), `ref_gen_tiles`, `ptcl_gen` and
+  `ptcl_gen_memo`, which SIMPLE no longer has; they make a stale memo a refusal where SIMPLE trusts the caller.
+- **The seed banks:** particle terms `(2nk, pftsz+1, nb)` with a shifted cross term, as SIMPLE's
+  `memoize_shifted_ptcl` returns them; the toy makes them with the addition `shifted_ptcl_terms` from a
+  fixture's shifted FT(X.CTF), where SIMPLE shifts and transforms the particle itself.
+- **The weights:** `set_sigma2_weights` (an addition) invalidates the particle memo, and `memoize_ptcls` makes the
+  terms again; SIMPLE's `memoize_sigma2_weights` remakes them itself when the particle memo is current.
 - **The block:** all the references in their order (`irefs` = 1..`nrefs`; arbitrary lists are deliverable
   K3's), any number of particles of one half, tiled by `set_tile_plan`; SIMPLE's block is at most 16
   particles against tiles of 32 references.
@@ -176,7 +197,9 @@ as mirrored or as an addition with its reason):
   iteration), the dense temperatures (`set_temps`), the maps' candidates (`set_candidates`; SIMPLE's pool
   selects them) and, when it has one, its own map (`use_shiftmap`).
 - **The maps:** they are built on the device when `shiftmap_mode` reads them, tile by tile; `gen_shiftmap`
-  records the pairs. There is no `shiftmap_shift`, no `shiftmap_draw` and no in-cell refinement.
+  records the pairs. There is no `shiftmap_shift`, no `shiftmap_draw` and no in-cell refinement. They read the
+  memo's rows, and the reference power keeps the toy's order (`sum(c2 r2 w)`); SIMPLE's euclid power multiplies
+  the weighted CTF term by the reference term, an order K4 revisits.
 - **The driver:** one thread walks the blocks, one or two in flight on the device (SIMPLE: an OpenMP loop
   over the blocks); `new_pipeline` takes the calculator where SIMPLE takes its builder; no assignment, no
   states, no diagnostics. `set_fill_stages` lets the benchmark run the dense score or the maps alone.

@@ -470,7 +470,7 @@ contains
     end function set_ptcl
 
     ! a calculator of the fixture: both halves' references and every particle, set and memoized, the reference
-    ! bins made under a tile plan of 4 references and 2 particles; nbad counts the calls that were refused
+    ! tiles made under a tile plan of 4 references and 2 particles; nbad counts the calls that were refused
     subroutine feed_calc( pftc, fx, nbad )
         type(polarft_calc), intent(inout) :: pftc
         type(map_fixture),  intent(in)    :: fx
@@ -491,8 +491,6 @@ contains
         call pftc%memoize_refs
         nbad = nbad + refused(pftc)
         call pftc%memoize_ptcls
-        nbad = nbad + refused(pftc)
-        call pftc%memoize_ref_bins
         nbad = nbad + refused(pftc)
     end subroutine feed_calc
 

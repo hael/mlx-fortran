@@ -106,7 +106,7 @@ contains
     end function make_polarft_host_fixture
 
     ! a calculator of the fixture on the backend and with the team of params: references and particles set and
-    ! memoized, the reference bins made; msg is the first refusal, empty when there was none
+    ! memoized (on the MLX backend with the reference tiles); msg is the first refusal, empty when there was none
     subroutine polarft_host_calc( fx, params, pftc, msg )
         type(polarft_host_fixture),    intent(in)    :: fx
         type(parameters),              intent(in)    :: params
@@ -142,8 +142,6 @@ contains
         call pftc%memoize_refs()
         call note(pftc%message())
         call pftc%memoize_ptcls()
-        call note(pftc%message())
-        call pftc%memoize_ref_bins()
         call note(pftc%message())
 
       contains

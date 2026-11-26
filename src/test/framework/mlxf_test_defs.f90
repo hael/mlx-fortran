@@ -306,15 +306,15 @@ type :: polarft_tile_spec
 end type polarft_tile_spec
 
 ! one block for a workspace: the slot it is queued in, the batch slots of its particles in the calculator's
-! memos, their parity's shell weights, weighted square sums and inverse temperatures, each pair's variate
-! (references, particles), and the seed banks that replace a particle's memo where l_bank; rows asks for the
-! full rows of distances as well; profile evaluates after every stage and adds the stages' seconds
+! memos, their weighted square sums and inverse temperatures, each pair's variate (references, particles), and
+! the seed banks (2nk, pftsz+1, particles of the block), particle terms with a shifted cross term, that replace
+! a particle's terms where l_bank; rows asks for the full rows of distances as well; profile evaluates after
+! every stage and adds the stages' seconds
 type :: polarft_block_spec
     integer                      :: slot    = 1
     logical                      :: rows    = .false.
     logical                      :: profile = .false.
     integer,         allocatable :: islots(:)
-    real(real32),    allocatable :: weights(:)
     real(real64),    allocatable :: wsq(:)
     real(real32),    allocatable :: temps(:)
     real(real32),    allocatable :: u(:,:)

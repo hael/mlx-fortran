@@ -389,7 +389,7 @@ contains
     end function refused_for
 
     ! a calculator of the references sel%ids of sel%half (its references 1.., in that order) and the batch of
-    ! particles sel%pids under the tile plan, set and memoized up to the reference bins; nbad counts the
+    ! particles sel%pids under the tile plan, set and memoized, with the reference tiles; nbad counts the
     ! calls that were refused
     subroutine feed_calc( pftc, fx, sel, nbad )
         type(polarft_calc), intent(inout) :: pftc
@@ -434,17 +434,6 @@ contains
         call pftc%set_ptcl_pft(pid, fx%xring(:, :, pid))
     end subroutine set_ptcl
 
-    ! feed_calc, then the reference bins
-    subroutine make_calc( pftc, fx, sel, nbad )
-        type(polarft_calc), intent(inout) :: pftc
-        type(fixture),      intent(in)    :: fx
-        type(selection),    intent(in)    :: sel
-        integer,            intent(out)   :: nbad
-        call feed_calc(pftc, fx, sel, nbad)
-        call pftc%memoize_ref_bins
-        nbad = nbad + refused(pftc)
-    end subroutine make_calc
-
     ! the block of particles pids of one half against the references ids: its temperatures, the variates keyed
     ! by global IDs, and the seed banks' memos
     function make_block( fx, ids, pids ) result(blk)
@@ -465,21 +454,37 @@ contains
         end do
     end function make_block
 
+    ! the block's seed banks as the calculator takes them, particle terms (2nk, pftsz+1, particles of the block):
+    ! made by shifted_ptcl_terms from the fixture's shifted transforms where l_bank, zero elsewhere
+    function toy_banks( pftc, blk ) result(tb)
+        type(polarft_calc),      intent(inout) :: pftc
+        type(polar_table_block), intent(in)    :: blk
+        complex(real32), allocatable :: tb(:,:,:)
+        integer                      :: b
+        allocate(tb(2 * NK, NBINS, size(blk%ptcl_ids)))
+        tb = cmplx(0._real32, 0._real32, real32)
+        do b = 1, size(blk%ptcl_ids)
+            if( blk%l_bank(b) ) call pftc%shifted_ptcl_terms(blk%ptcl_ids(b), blk%banks(:, :, b), tb(:, :, b))
+        end do
+    end function toy_banks
+
     ! the block scored synchronously against the calculator's references 1..: its entries, and its rows when
     ! the calculator keeps them; a refused block leaves SIMPLE's invalid entries
     subroutine score_block( pftc, blk, ent )
         type(polarft_calc),        intent(inout) :: pftc
         type(polar_table_block),   intent(in)    :: blk
         type(polar_table_entries), intent(out)   :: ent
-        real(real32), allocatable :: u(:,:)
-        integer                   :: nr, nb, i
+        real(real32),    allocatable :: u(:,:)
+        complex(real32), allocatable :: tb(:,:,:)
+        integer                      :: nr, nb, i
         nr = size(blk%ref_ids)
         nb = size(blk%ptcl_ids)
         u  = blk%u
+        tb = toy_banks(pftc, blk)
         allocate(ent%dists(nr, nb), ent%irots(nr, nb))
         call pftc%set_block_variates(u)
         call pftc%score_block_posterior(nb, blk%ptcl_ids, nr, [(i, i = 1, nr)], blk%temps, ent%dists, ent%irots, &
-            &banks=blk%banks, l_bank=blk%l_bank)
+            &banks=tb, l_bank=blk%l_bank)
         if( refused(pftc) == 0 ) call pftc%block_rows(ent%rows)
     end subroutine score_block
 
@@ -491,7 +496,7 @@ contains
         real(real32), allocatable :: u(:,:)
         u = blk%u
         call pftc%set_block_variates(u)
-        call pftc%set_block_banks(blk%banks, blk%l_bank)
+        call pftc%set_block_banks(toy_banks(pftc, blk), blk%l_bank)
         call pftc%submit_block(slot, size(blk%ptcl_ids), blk%ptcl_ids, blk%temps)
     end subroutine submit
 
@@ -515,7 +520,7 @@ contains
         type(polar_table_entries), intent(out) :: ent
         type(polarft_calc) :: pftc
         integer            :: nbad
-        call make_calc(pftc, fx, sel, nbad)
+        call feed_calc(pftc, fx, sel, nbad)
         call assert_int(0, nbad, 'the references and particles are set and memoized: '//pftc%message())
         blk = make_block(fx, sel%ids, sel%pids)
         call score_block(pftc, blk, ent)
@@ -620,7 +625,7 @@ contains
         write(*,'(a)') 'test_fallbacks'
         fx = make_fixture(POLAR_SEED_JUDGED)
         fx%tail = form
-        call make_calc(pftc, fx, selection_of(1, ALL_REFS, half_ptcls(1), [RT, BT]), nbad)
+        call feed_calc(pftc, fx, selection_of(1, ALL_REFS, half_ptcls(1), [RT, BT]), nbad)
         call assert_int(0, nbad, 'the references and particles are set and memoized')
         blk   = make_block(fx, ALL_REFS, half_ptcls(1))
         blk%u = 0._real32
@@ -749,27 +754,31 @@ contains
     ! what does not match the memoized state is refused before scoring, and a refused block queues nothing
     subroutine test_refusals( dev , form )
         integer, intent(in) :: dev, form
-        type(fixture)             :: fx
-        type(polarft_calc)        :: pftc
-        type(polar_table_block)   :: blk, bad
-        type(polar_table_entries) :: ent
-        real(real32), allocatable :: u(:,:)
-        real(real32)              :: d3(3, 6)
-        integer                   :: i3(3, 6), nbad, live0, pid
+        type(fixture)                :: fx
+        type(polarft_calc)           :: pftc
+        type(polar_table_block)      :: blk, bad
+        type(polar_table_entries)    :: ent
+        real(real32),    allocatable :: u(:,:)
+        complex(real32), allocatable :: tb(:,:,:)
+        complex(real32)              :: bank(2 * NK, NBINS)
+        real(real32)                 :: d3(3, 6)
+        integer                      :: i3(3, 6), nbad, live0, pid
         write(*,'(a)') 'test_refusals'
         fx  = make_fixture(POLAR_SEED_JUDGED)
         fx%tail = form
         blk = make_block(fx, ALL_REFS, half_ptcls(1))
         call feed_calc(pftc, fx, selection_of(1, ALL_REFS, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], [RT, BT]), nbad)
+        call pftc%kill_ref_tiles
         call score_block(pftc, blk, ent)
-        call assert_true(refused_for(pftc, 'memoize_ref_bins'), device_name(dev)//': a calculator without '//&
-            &'reference bins refuses a block')
-        call pftc%memoize_ref_bins
+        call assert_true(refused_for(pftc, 'reference tiles'), device_name(dev)//': a calculator whose reference '//&
+            &'tiles were released refuses a block')
         call pftc%memoize_refs
+        call pftc%set_tile_plan(BT, RT + 1)
         call score_block(pftc, blk, ent)
-        call assert_true(refused_for(pftc, 'memoize_ref_bins'), device_name(dev)//': a block is refused when the '//&
-            &'references were memoized again and their bins were not')
-        call pftc%memoize_ref_bins
+        call assert_true(refused_for(pftc, 'reference tiles'), device_name(dev)//': a block is refused when the '//&
+            &'tile plan changed after the references were memoized')
+        call pftc%set_tile_plan(BT, RT)
+        call pftc%memoize_refs
         live0 = mlx_live_count()
         bad   = make_block(fx, ALL_REFS, [1, 3, 5, 7, 9, 2])
         call score_block(pftc, bad, ent)
@@ -777,27 +786,34 @@ contains
             &'is refused')
         u = blk%u
         call pftc%set_block_variates(u)
+        tb = toy_banks(pftc, blk)
         call pftc%score_block_posterior(6, blk%ptcl_ids, NREFS, ALL_REFS, blk%temps, ent%dists, ent%irots, &
-            &banks=blk%banks(:, 1:NK-1, :), l_bank=blk%l_bank)
+            &banks=tb(:, 1:NBINS-1, :), l_bank=blk%l_bank)
         call assert_true(refused_for(pftc, 'shapes'), device_name(dev)//': seed banks of another shape are refused')
         u = blk%u
         call pftc%set_block_variates(u)
         call pftc%score_block_posterior(6, blk%ptcl_ids, NREFS, [2, 1, 3, 4, 5, 6, 7, 8], blk%temps, ent%dists, &
-            &ent%irots, banks=blk%banks, l_bank=blk%l_bank)
+            &ent%irots, banks=tb, l_bank=blk%l_bank)
         call assert_true(refused_for(pftc, 'reference list'), device_name(dev)//': a block naming the references '//&
             &'in another order is refused')
         u = blk%u
         call pftc%set_block_variates(u)
-        call pftc%score_block_posterior(6, blk%ptcl_ids, 3, [1, 2, 3], blk%temps, d3, i3, banks=blk%banks, &
+        call pftc%score_block_posterior(6, blk%ptcl_ids, 3, [1, 2, 3], blk%temps, d3, i3, banks=tb, &
             &l_bank=blk%l_bank)
         call assert_true(refused_for(pftc, 'reference list'), device_name(dev)//': a block naming another list '//&
             &'of references is refused')
         u = blk%u
         call pftc%set_block_variates(u)
         call pftc%score_block_posterior(6, blk%ptcl_ids, NREFS, ALL_REFS, blk%temps, ent%dists, ent%irots, &
-            &banks=blk%banks)
+            &banks=tb)
         call assert_true(refused_for(pftc, 'go together'), device_name(dev)//': banks without their flags are '//&
             &'refused')
+        call pftc%shifted_ptcl_terms(blk%ptcl_ids(1), fx%banks(:, 1:NK-1, blk%ptcl_ids(1)), bank)
+        call assert_true(refused_for(pftc, 'shifted transform'), device_name(dev)//': a seed bank from a shifted '//&
+            &'transform of another shape is refused')
+        call pftc%shifted_ptcl_terms(NPTCLS + 1, fx%banks(:, :, 1), bank)
+        call assert_true(refused_for(pftc, 'not in the batch'), device_name(dev)//': a seed bank of a particle '//&
+            &'outside the batch is refused')
         ! a particle whose section is zero has no weighted square sum
         pid = blk%ptcl_ids(2)
         call pftc%set_ptcl_ctfmat(pid, fx%ctf(:, :, pid))
@@ -829,7 +845,7 @@ contains
         call pftc%kill
     end subroutine test_refusals
 
-    ! references that change are memoized again and their bins made again; a particle set again is memoized
+    ! references that change are memoized again, with their tiles; a particle set again is memoized
     ! again: until then blocks are refused, afterwards the entries match the oracle of the new references and
     ! differ from the old ones
     subroutine test_rebuild( dev , form )
@@ -846,7 +862,7 @@ contains
         fb  = make_fixture(POLAR_SEED_JUDGED + 10)
         fa%tail = form
         fb%tail = form
-        call make_calc(pftc, fa, selection_of(2, ALL_REFS, half_ptcls(2), [RT, BT]), nbad)
+        call feed_calc(pftc, fa, selection_of(2, ALL_REFS, half_ptcls(2), [RT, BT]), nbad)
         call assert_int(0, nbad, 'the first references are memoized')
         blk = make_block(fa, ALL_REFS, half_ptcls(2))
         call score_block(pftc, blk, ea)
@@ -856,14 +872,13 @@ contains
         do j = 1, NREFS
             call pftc%set_ref_pft(j, cmplx(fb%rring(:, :, j, 2), kind=real64), .false.)
         end do
-        call pftc%memoize_refs
-        call assert_false(pftc%ref_bins_current(), device_name(dev)//': after the references are memoized again '//&
-            &'their bins are not current')
+        call assert_false(pftc%ref_tiles_current(), device_name(dev)//': after the references are set again '//&
+            &'their tiles are not current')
         call score_block(pftc, blk, eb)
-        call assert_true(refused_for(pftc, 'memoize_ref_bins'), device_name(dev)//': a block is refused until '//&
-            &'the changed references'' bins are made')
-        call pftc%memoize_ref_bins
-        call assert_int(0, refused(pftc), 'the changed references'' bins are made')
+        call assert_true(refused_for(pftc, 'memoize_refs'), device_name(dev)//': a block is refused until '//&
+            &'the changed references are memoized')
+        call pftc%memoize_refs
+        call assert_int(0, refused(pftc), 'the changed references are memoized, with their tiles')
         pid = blk%ptcl_ids(1)
         call set_ptcl(pftc, fa, pid)
         call score_block(pftc, blk, eb)
@@ -902,7 +917,7 @@ contains
         fx%tail = form
         do h = 1, 2
             pids = half_ptcls(h)
-            call make_calc(pftc, fx, selection_of(h, ALL_REFS, pids, [RT, BT]), nbad)
+            call feed_calc(pftc, fx, selection_of(h, ALL_REFS, pids, [RT, BT]), nbad)
             call pftc%set_block_options(.false., .false.)
             blk = make_block(fx, ALL_REFS, pids)
             call score_block(pftc, blk, e0)
@@ -1065,7 +1080,7 @@ contains
         type(polar_table_block)   :: blk
         type(polar_table_entries) :: e
         integer                   :: n
-        call make_calc(pftc, fx, selection_of(1, ALL_REFS, half_ptcls(1), [RT, BT]), n)
+        call feed_calc(pftc, fx, selection_of(1, ALL_REFS, half_ptcls(1), [RT, BT]), n)
         nbad = nbad + n
         blk  = make_block(fx, ALL_REFS, half_ptcls(1))
         call submit(pftc, blk, 1)

@@ -14,14 +14,14 @@ implicit none
 character(len=*), parameter :: BLOCK_REFUSALS(13) = [character(len=120) :: &
     &'polarft_calc: refused: no calculator on the host backend (new)', &
     &'polarft_calc: refused: references were set and not memoized (memoize_refs)', &
-    &'polarft_calc: refused: the reference bins are not those of the memoized references (memoize_ref_bins)', &
+    &'polarft_calc: refused: the reference tiles are not those of the memoized references and tile plan (memoize_refs)', &
     &'polarft_calc: refused: the particle memos are not those of the particles set (memoize_ptcls)', &
     &'polarft_calc: refused: no shell weights (set_sigma2_weights)', &
     &'polarft_calc: refused: no keys of the draws (set_draw_keys)', &
     &'polarft_calc: refused: the team exceeds the block kernel''s work (the parameters'' nthr)', &
     &'polarft_calc%score_block_posterior: refused: a block holds 1 to PFTC_BLOCK_NB particles', &
     &'polarft_calc%score_block_posterior: refused: a reference is outside 1..nrefs', &
-    &'polarft_calc%score_block_posterior: refused: banks and l_bank go together, the banks (pftsz+1, shells, nb)', &
+    &'polarft_calc%score_block_posterior: refused: banks and l_bank go together, the banks (2nk, pftsz+1, nb)', &
     &'polarft_calc: refused: a particle index is outside the calculator''s range', &
     &'polarft_calc: refused: a particle index is not in the batch', &
     &'polarft_calc: refused: the block mixes the two halves']
@@ -39,8 +39,7 @@ contains
         logical,         optional, intent(in)    :: l_bank(nb)
         complex(real32) :: acc
         real(real64)    :: u
-        real(real32)    :: wk
-        integer         :: ithr, why, i, i1, ih, ieo, b, j, kk, k0, n1, r0, nt, ir, iref, irot
+        integer         :: ithr, why, i, i1, ieo, b, j, kk, n1, r0, nt, ir, iref, irot
         logical         :: l_serial, l_banks, l_b
         if( self%l_mlx )then
             call score_block_posterior_mlx(self, nb, iptcls, nr, irefs, temps, dists, irots, banks, l_bank)
@@ -56,7 +55,7 @@ contains
         why     = block_refusal(self, iptcls, irefs, ithr)
         if( why == 0 .and. (l_banks .neqv. present(l_bank)) ) why = 10
         if( why == 0 .and. l_banks )then
-            if( size(banks, 1) /= self%pftsz + 1 .or. size(banks, 2) /= self%nk .or. size(banks, 3) < nb ) why = 10
+            if( size(banks, 1) /= 2 * self%nk .or. size(banks, 2) /= self%pftsz + 1 .or. size(banks, 3) < nb ) why = 10
         endif
         ! where SIMPLE stops, the entries stay invalid; the reason is kept when no other thread can be writing it
         if( l_serial )then
@@ -65,39 +64,35 @@ contains
         endif
         if( why /= 0 ) return
         n1  = self%pftsz + 1
-        k0  = self%kfromto(1)
         i1  = self%pinds(iptcls(1))
-        ih  = merge(1, 2, self%iseven(i1))
         ieo = merge(REF_EVEN, REF_ODD, self%iseven(i1))
         associate( bw => self%bwork(ithr) )
-            ! the particle terms of every bin: rows 1..nk w_k FT(CTF2), rows nk+1..2nk -2 w_k FT(X.CTF)
+            ! the particle terms of every bin, copied from the memo (or the seed bank): rows 1..nk w_k FT(CTF2),
+            ! rows nk+1..2nk -2 w_k FT(X.CTF)
             do b = 1, nb
                 i           = self%pinds(iptcls(b))
                 bw%norms(b) = self%wsqsums_ptcls(i) * real(2 * self%nrots, real64)
                 l_b         = .false.
                 if( l_banks ) l_b = l_bank(b)
                 do j = 1, n1
-                    do kk = 1, self%nk
-                        wk = self%sigma2_wk(k0 + kk - 1, ih)
-                        bw%pterms(kk, b, j) = wk * self%ft_ctf2(j, k0 + kk - 1, i)
-                        if( l_b )then
-                            bw%pterms(self%nk + kk, b, j) = (-2._real32 * wk) * banks(j, kk, b)
-                        else
-                            bw%pterms(self%nk + kk, b, j) = (-2._real32 * wk) * self%ft_ptcl_ctf(j, k0 + kk - 1, i)
-                        endif
-                    end do
+                    if( l_b )then
+                        bw%pterms(:, b, j) = banks(:, j, b)
+                    else
+                        bw%pterms(:, b, j) = self%ft_ptcl_wterms(:, j, i)
+                    endif
                 end do
             end do
             do r0 = 1, nr, PFTC_BLOCK_NR
                 nt = min(PFTC_BLOCK_NR, nr - r0 + 1)
-                ! D(b, ir) = sum_k conj(P(k, b)) G(k, ir) of every bin, the conjugate of the pair's sums
+                ! D(b, ir) = sum_k conj(P(k, b)) G(k, ir) of every bin, the conjugate of the pair's sums; G is the
+                ! reference's memo, read in place
                 do j = 1, n1
                     do ir = 1, nt
                         iref = irefs(r0 + ir - 1)
                         do b = 1, nb
                             acc = cmplx(0._real32, 0._real32, real32)
                             do kk = 1, 2 * self%nk
-                                acc = acc + conjg(bw%pterms(kk, b, j)) * self%ft_ref_bins(kk, iref, j, ieo)
+                                acc = acc + conjg(bw%pterms(kk, b, j)) * self%ft_ref_terms(kk, j, iref, ieo)
                             end do
                             bw%prods(b, ir, j) = acc
                         end do
@@ -136,7 +131,7 @@ contains
             why = 1
         else if( self%l_refs_pending )then
             why = 2
-        else if( self%ref_gen_bins /= self%ref_gen .or. .not. allocated(self%ft_ref_bins) )then
+        else if( self%ref_gen_tiles /= self%ref_gen )then
             why = 3
         else if( self%ptcl_gen_memo /= self%ptcl_gen )then
             why = 4
@@ -340,6 +335,34 @@ contains
         self%banks_next  = banks
         self%l_bank_next = l_bank
     end subroutine set_block_banks
+
+    module subroutine shifted_ptcl_terms( self, iptcl, xctf, bank )
+        class(polarft_calc), intent(inout) :: self
+        integer,             intent(in)    :: iptcl
+        complex(real32),     intent(in)    :: xctf(:,:)
+        complex(real32),     intent(out)   :: bank(2 * self%nk, self%pftsz + 1)
+        real(real32) :: wk
+        integer      :: i, ih, j, kk
+        bank = cmplx(0._real32, 0._real32, real32)
+        i    = ptcl_slot(self, iptcl)
+        if( i == 0 )then
+            self%msg = 'polarft_calc%shifted_ptcl_terms: refused: the particle is not in the batch'
+            return
+        endif
+        if( size(xctf, 1) /= self%pftsz + 1 .or. size(xctf, 2) /= self%nk )then
+            self%msg = 'polarft_calc%shifted_ptcl_terms: refused: the shifted transform is not (pftsz+1, shells)'
+            return
+        endif
+        self%msg = ''
+        ih       = merge(REF_EVEN, REF_ODD, self%iseven(i))
+        do j = 1, self%pftsz + 1
+            do kk = 1, self%nk
+                wk = self%sigma2_wk(self%kfromto(1) + kk - 1, ih)
+                bank(kk, j)           = self%ft_ptcl_wterms(kk, j, i)
+                bank(self%nk + kk, j) = (-2._real32 * wk) * xctf(j, kk)
+            end do
+        end do
+    end subroutine shifted_ptcl_terms
 
     module subroutine set_block_options( self, rows, profile )
         class(polarft_calc), intent(inout) :: self

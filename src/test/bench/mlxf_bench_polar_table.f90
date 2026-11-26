@@ -816,13 +816,14 @@ contains
         if( allocated(t%rows) ) ent%rows = t%rows(:, :, c0:c1)
     end function entries_of
 
-    ! the calculator's reference bins under cfg (tile plan and tail), on the current device
+    ! the calculator's reference tiles under cfg (tile plan and tail), on the current device: memoize_refs makes
+    ! them again from the memos
     subroutine prepare( pftc, cfg )
         type(polarft_calc), intent(inout) :: pftc
         type(bench_config), intent(in)    :: cfg
         call pftc%set_tail_form(cfg%tail)
         call pftc%set_tile_plan(cfg%bt, cfg%rt)
-        call pftc%memoize_ref_bins
+        call pftc%memoize_refs
         call assert_int(0, refused(pftc), 'bench_polar_table: the references are prepared: '//pftc%message())
     end subroutine prepare
 
@@ -852,7 +853,7 @@ contains
 
     ! the 64,000-pair block (BLOCK_NPTCLS particles, BLOCK_NREFS references per half, the case's geometry):
     ! the CPU calibration (block seed 1, reported) and, on every device, seed 2 against the DFT-matrix oracle and
-    ! the frozen bounds, the sensitivities and schedule identity; one calculator per seed, its reference bins
+    ! the frozen bounds, the sensitivities and schedule identity; one calculator per seed, its reference tiles
     ! made again on each device
     subroutine bench_accuracy
         type(bench_case)          :: cs
@@ -886,12 +887,12 @@ contains
                     call feed_calc(pftc1, d1)
                 endif
                 call report_block_calibration(pftc1, d1, or1, cfg)
-                call pftc1%kill_ref_bins
+                call pftc1%kill_ref_tiles
             endif
             call judge_block(pftc2, d2, or2, cfg)
             call block_sensitivity(pftc2, d2, or2, cfg)
             call block_identity(pftc2, d2, cfg)
-            call pftc2%kill_ref_bins
+            call pftc2%kill_ref_tiles
             if( cfg%tail == POLARFT_TAILS%metal )then
                 if( .not. allocated(or1) )then
                     call make_data(d1, cs, POLAR_SEED_CALIBRATION, .true.)
@@ -967,12 +968,12 @@ contains
         type(bench_config), intent(in)    :: cfg
         type(form_check) :: chk
         chk = compare_forms(pftc1, d1, cfg)
-        call pftc1%kill_ref_bins
+        call pftc1%kill_ref_tiles
         write(*,'(a,es23.16,a,es23.16,a,i0,a,i0,a,i0,a,i0)') '    calibration (block seed 1, gpu, fused against '//&
             &'compiled): rows ', chk%err_rows, ', distances ', chk%err_dists, ', drawn rotations differing ', &
             &chk%nrot, ' of ', chk%npairs, '; validity off ', chk%valid_off, ', draws off ', chk%draws_off
         chk = compare_forms(pftc2, d2, cfg)
-        call pftc2%kill_ref_bins
+        call pftc2%kill_ref_tiles
         write(*,'(a,es10.3,a,es10.3,a,i0,a,i0)') '    block seed 2, fused against compiled: rows ', chk%err_rows, &
             &', distances ', chk%err_dists, ', drawn rotations differing ', chk%nrot, ' of ', chk%npairs
         call assert_int(BLOCK_NPTCLS * BLOCK_NREFS, chk%npairs, 'both forms score the block''s 64,000 pairs')
@@ -1407,7 +1408,7 @@ contains
             cache = real(mlx_cache_memory(), real64)
             call report_digest('time', trim(d%cs%name)//' '//plan_label(cfg, plan), digest_halves(t))
             call tab%kill
-            call pftc%kill_ref_bins
+            call pftc%kill_ref_tiles
             call mlx_clear_cache()
         endif
         call write_time_row(d, cfg, [walls(1:min(3, npasses)), [(-1._real64, i = npasses + 1, 3)], prep, est, peak, &
@@ -1812,7 +1813,7 @@ contains
         call tab%batch_map_results(res)
     end subroutine score_maps_pass
 
-    ! one map on the case: the calculator's reference bins and the map made (timed apart), then each tile of
+    ! one map on the case: the calculator's reference tiles and the map made (timed apart), then each tile of
     ! pairs timed (warm-up, best of 3, MLX peak) and profiled once; every result in range. The calculator is fed
     ! at the first map, and again when a map's box differs.
     subroutine time_map( pftc, d, mp, ptiles )
@@ -1936,7 +1937,7 @@ contains
         end do
         call tab%kill
         call pftc%kill_shiftmap
-        call pftc%kill_ref_bins
+        call pftc%kill_ref_tiles
         call mlx_clear_cache()
     end subroutine time_map
 

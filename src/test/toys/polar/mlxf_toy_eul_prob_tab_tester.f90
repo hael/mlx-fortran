@@ -276,7 +276,7 @@ contains
         call assert_int(0, nbad, 'the calculator is set and memoized: '//pftc%message())
         call make_driver(tab, pftc, n)
         call assert_int(0, n, 'the driver is made, with its keys and temperatures: '//tab%message())
-        call assert_true(pftc%ref_bins_current(), 'the driver''s construction makes the reference bins')
+        call assert_true(pftc%ref_tiles_current(), 'the driver is made on the reference tiles memoize_refs made')
         live0 = mlx_live_count()
         call tab%set_fill_options(NPTCL, 1, .true., .false.)
         call tab%fill_tab_range(1, NPTCL)

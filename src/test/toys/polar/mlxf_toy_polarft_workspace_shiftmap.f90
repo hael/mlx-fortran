@@ -43,18 +43,18 @@ end type map_tile
 
 contains
 
-    module subroutine polarft_workspace_prepare_maps( self, spec, ft_ref, ft_ref2, status )
+    module subroutine polarft_workspace_prepare_maps( self, spec, ft_ref_terms, status )
         class(polarft_workspace), intent(inout) :: self
         type(polarft_map_spec),   intent(in)    :: spec
-        complex(real32),          intent(in)    :: ft_ref(:,:,:), ft_ref2(:,:,:)
+        complex(real32),          intent(in)    :: ft_ref_terms(:,:,:)
         integer,                  intent(out)   :: status
-        complex(real32), allocatable :: rfull(:,:,:), ephase(:,:,:)
+        complex(real32), allocatable :: rfull(:,:,:), ref2b(:,:,:), ephase(:,:,:)
         real(real32),    allocatable :: wres(:,:,:), cellx(:,:,:), celly(:,:,:), cellr2(:,:,:)
         real(real64),    allocatable :: jn(:)
         real(real64)                 :: alpha, fac
         integer,         allocatable :: nharm(:)
         type(mlx_function)           :: ftail
-        integer                      :: im, pftsz, nrots, nrefs, nkb, nrho, nalpha, norder, n1, r, k, m, n, ir, j, ierr
+        integer                      :: im, pftsz, nrots, nrefs, nkb, nrho, nalpha, norder, n1, nk, r, k, m, n, ir, j, ierr
         status = 1
         if( spec%imap < 1 .or. spec%imap > NSHIFTMAPS )then
             self%msg = 'polarft_workspace%prepare_maps: no such shift map'
@@ -63,12 +63,13 @@ contains
         im = spec%imap
         ! the previous map goes first: a refused or failed preparation leaves no map, the scoring intact
         call polarft_workspace_drop_map(self, im)
-        call check_map_spec(spec, shape(ft_ref), shape(ft_ref2), self%msg)
+        call check_map_spec(spec, shape(ft_ref_terms), self%msg)
         if( len(self%msg) > 0 ) return
-        n1     = size(ft_ref, 1)
+        nk     = size(ft_ref_terms, 1) / 2
+        n1     = size(ft_ref_terms, 2)
         pftsz  = n1 - 1
         nrots  = 2 * pftsz
-        nrefs  = size(ft_ref, 3)
+        nrefs  = size(ft_ref_terms, 3)
         nkb    = spec%kstop - spec%kfrom + 1
         nrho   = size(spec%rho)
         nalpha = spec%nalpha
@@ -79,19 +80,21 @@ contains
                 &real(spec%box, real64))
         end do
         norder = maxval(nharm)
-        ! the references' full-ring spectra over the band, F[nrots - m] = (-1)^m conj(F[m]), laid out (shell, ring
-        ! position, reference): a candidate's spectra are one contiguous slab
-        allocate(rfull(nkb, nrots, nrefs), stat=ierr)
+        ! the references' full-ring spectra over the band (memo rows nk+1..), F[nrots - m] = (-1)^m conj(F[m]), laid
+        ! out (shell, ring position, reference): a candidate's spectra are one contiguous slab; and the squared
+        ! modulus's memos of the band (rows 1..) conjugated, laid out (bin, shell, reference)
+        allocate(rfull(nkb, nrots, nrefs), ref2b(n1, nkb, nrefs), stat=ierr)
         if( ierr /= 0 )then
             self%msg = 'polarft_workspace%prepare_maps: the host staging of the reference spectra could not be allocated'
             return
         endif
         do r = 1, nrefs
             do k = 1, nkb
-                rfull(k, 1:n1, r) = ft_ref(:, k, r)
+                rfull(k, 1:n1, r) = ft_ref_terms(nk + k, :, r)
                 do m = 1, pftsz - 1
-                    rfull(k, nrots - m + 1, r) = real(1 - 2 * mod(m, 2), real32) * conjg(ft_ref(m + 1, k, r))
+                    rfull(k, nrots - m + 1, r) = real(1 - 2 * mod(m, 2), real32) * conjg(ft_ref_terms(nk + k, m + 1, r))
                 end do
+                ref2b(:, k, r) = conjg(ft_ref_terms(k, :, r))
             end do
         end do
         ! the Bessel weights fac_n w_k J_n(2 pi k rho / box) of the orders each radius keeps (zero beyond), real64
@@ -127,7 +130,7 @@ contains
             cellr2(1, 1, ir) = real(spec%rho(ir)**2, real32)
         end do
         self%maps(im)%rfull  = mlx_from(rfull)
-        self%maps(im)%ref2b  = mlx_from(ft_ref2(:, 1:nkb, :))
+        self%maps(im)%ref2b  = mlx_from(ref2b)
         self%maps(im)%wfold  = mlx_from(reshape(wres, [nkb, 1, norder + 1, nrho, 1, 1]))
         self%maps(im)%ffold  = mlx_from(reshape(ephase, [1, norder + 1, 1, nrots, 1]))
         self%maps(im)%wband  = mlx_from(reshape(real(spec%weights, real32), [1, nkb, 1]))
@@ -163,16 +166,16 @@ contains
     end subroutine polarft_workspace_prepare_maps
 
     ! the reason a map cannot be prepared from memos of shapes shpr and shpr2, or an empty string
-    subroutine check_map_spec( spec, shpr, shpr2, msg )
+    subroutine check_map_spec( spec, shpr, msg )
         type(polarft_map_spec),        intent(in)  :: spec
-        integer,                       intent(in)  :: shpr(3), shpr2(3)
+        integer,                       intent(in)  :: shpr(3)
         character(len=:), allocatable, intent(out) :: msg
         msg = ''
-        if( shpr(1) < 3 .or. mod(shpr(1), 2) /= 1 .or. shpr(3) < 1 .or. any(shpr2 /= shpr) )then
-            msg = 'polarft_workspace%prepare_maps: refused: the reference memos are not (pftsz+1, nk, references)'
+        if( shpr(2) < 3 .or. mod(shpr(2), 2) /= 1 .or. shpr(3) < 1 .or. shpr(1) < 2 .or. mod(shpr(1), 2) /= 0 )then
+            msg = 'polarft_workspace%prepare_maps: refused: the reference memos are not (2nk, pftsz+1, references)'
         else if( spec%box < 2 .or. spec%nalpha < 1 .or. spec%kfrom < 1 )then
             msg = 'polarft_workspace%prepare_maps: the grid needs a box, a first shell and a direction'
-        else if( spec%kstop < spec%kfrom .or. spec%kstop - spec%kfrom + 1 > shpr(2) )then
+        else if( spec%kstop < spec%kfrom .or. spec%kstop - spec%kfrom + 1 > shpr(1) / 2 )then
             msg = 'polarft_workspace%prepare_maps: the band must lie in the references'' shells'
         else if( .not. allocated(spec%rho) .or. .not. allocated(spec%weights) )then
             msg = 'polarft_workspace%prepare_maps: the grid lacks its radii or the band its weights'

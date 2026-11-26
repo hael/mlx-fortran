@@ -132,7 +132,7 @@ descriptions come from `<dir>/<dir>.inf`. Regenerate with
         - `mlxf_toy_polarft_core.f90` — the toy polar calculator's core: new, kill, the particles' halves, the shell weights, the tile plan and tail, the message
         - `mlxf_toy_polarft_core_mlx.f90` — the toy polar calculator's core on MLX (glue): the device state of a new calculator, the device route's projected bank
         - `mlxf_toy_polarft_host_tester.f90` — tests of the polar toy's host route: SIMPLE's block kernel against the ring oracle, the team's table, the fill's two branches
-        - `mlxf_toy_polarft_memo.f90` — the toy polar calculator's memoization: the setters' staging, the ring transforms of references and particles, the reference bins
+        - `mlxf_toy_polarft_memo.f90` — the toy polar calculator's memoization: the setters' staging, the ring transforms of references and particles, the reference tiles
         - `mlxf_toy_polarft_memo_mlx.f90` — the toy polar calculator's memoization on MLX (glue): the device route's sections and memos, the resident reference tiles
         - `mlxf_toy_polarft_shiftmap.f90` — the toy polar calculator's shift maps: new_shiftmap, setup_shiftmaps, gen_shiftmap, shiftmap_mode and their inquiries
         - `mlxf_toy_polarft_shiftmap_mlx.f90` — the toy polar calculator's shift maps on MLX (glue): a map's resident data on both parities, the maps of a block, the inquiries

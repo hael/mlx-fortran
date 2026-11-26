@@ -72,8 +72,8 @@ end type eul_prob_tab
 contains
 
     ! the driver of the particles pinds (project indices, all held by the calculator) against every reference of
-    ! the calculator, whose reference bins are made here unless they are current; a refusal (message) leaves the
-    ! driver not existing
+    ! the calculator, whose reference tiles memoize_refs made under the calculator's tile plan and tail; a refusal
+    ! (message) leaves the driver not existing
     subroutine new_pipeline( self, params, pftc, pinds )
         class(eul_prob_tab),        intent(inout) :: self
         type(parameters),           intent(in)    :: params
@@ -89,12 +89,10 @@ contains
             self%msg = 'eul_prob_tab%new_pipeline: refused: the team has at least one thread'
             return
         endif
-        if( .not. pftc%ref_bins_current() )then
-            call pftc%memoize_ref_bins
-            if( len(pftc%message()) > 0 )then
-                self%msg = pftc%message()
-                return
-            endif
+        if( .not. pftc%ref_tiles_current() )then
+            self%msg = 'eul_prob_tab%new_pipeline: refused: the calculator''s reference tiles are not those of its '// &
+                &'memoized references, tile plan and tail (memoize_refs)'
+            return
         endif
         self%pftc      => pftc
         self%params    = params

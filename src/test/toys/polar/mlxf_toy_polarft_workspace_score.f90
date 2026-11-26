@@ -22,22 +22,22 @@ end type tile_inputs
 
 contains
 
-    module subroutine polarft_workspace_submit( self, blk, ft_ctf2, ft_ptcl_ctf, status )
+    module subroutine polarft_workspace_submit( self, blk, ft_ptcl_wterms, status )
         class(polarft_workspace), intent(inout) :: self
         type(polarft_block_spec), intent(in)    :: blk
-        complex(real32),          intent(in)    :: ft_ctf2(:,:,:), ft_ptcl_ctf(:,:,:)
+        complex(real32),          intent(in)    :: ft_ptcl_wterms(:,:,:)
         integer,                  intent(out)   :: status
-        complex(real32), allocatable :: ctf2(:,:,:), xctf(:,:,:)
+        complex(real32), allocatable :: terms(:,:,:)
         real(real32),    allocatable :: iw(:), temps(:), u(:,:)
         type(mlx_array), allocatable :: dcol(:), icol(:), rcol(:), drow(:), irow(:), rrow(:)
-        type(mlx_array)              :: c2, xc, w3, wt, wx, pt, ptj, iwa, ta, ua, dd, ii, rr, prod
+        type(mlx_array)              :: pt, ptj, iwa, ta, ua, dd, ii, rr, prod
         type(tile_inputs)            :: inp
         type(tail_inputs)            :: tin
         type(tail_outputs)           :: tout
         real(real64)                 :: t0
         integer                      :: nb, n1, nbt, bpad, rpad, j, t, b, b0, b1, r0, ierr, gk, gr, slot
         status = 1
-        call check_block(self, blk, shape(ft_ctf2), shape(ft_ptcl_ctf), self%msg)
+        call check_block(self, blk, shape(ft_ptcl_wterms), self%msg)
         if( len(self%msg) > 0 ) return
         slot = blk%slot
         n1   = self%pftsz + 1
@@ -45,35 +45,30 @@ contains
         nbt  = (nb + self%bt - 1) / self%bt
         bpad = nbt * self%bt
         rpad = self%ntiles * self%rt
-        ! the block staged on the host, padded to whole tiles: padded particles score zero sums
-        allocate(ctf2(n1, self%nk, bpad), xctf(n1, self%nk, bpad), iw(bpad), temps(bpad), u(rpad, bpad), stat=ierr)
+        ! the block's particle terms gathered on the host (a seed bank where l_bank), padded to whole tiles:
+        ! padded particles score zero sums
+        allocate(terms(2 * self%nk, n1, bpad), iw(bpad), temps(bpad), u(rpad, bpad), stat=ierr)
         if( ierr /= 0 )then
             self%msg = 'polarft_workspace%submit: the host staging of the block could not be allocated'
             return
         endif
-        ctf2  = cmplx(0._real32, 0._real32, real32)
-        xctf  = cmplx(0._real32, 0._real32, real32)
+        terms = cmplx(0._real32, 0._real32, real32)
         iw    = 0._real32
         temps = 0._real32
         u     = 0._real32
         do b = 1, nb
-            ctf2(:,:, b) = ft_ctf2(:,:, blk%islots(b))
-            xctf(:,:, b) = ft_ptcl_ctf(:,:, blk%islots(b))
+            terms(:,:, b) = ft_ptcl_wterms(:,:, blk%islots(b))
             if( allocated(blk%l_bank) )then
-                if( blk%l_bank(b) ) xctf(:,:, b) = blk%banks(:,:, b)
+                if( blk%l_bank(b) ) terms(:,:, b) = blk%banks(:,:, b)
             endif
             iw(b)    = real(1._real64 / (2._real64 * blk%wsq(b)), real32)
             temps(b) = max(0._real32, blk%temps(b))
         end do
         u(1:self%nrefs, 1:nb) = blk%u
         t0 = clock_s()
-        ! the particle terms of every bin, on the device: w_k CTF2 on rows 1..nk, -2 w_k X.CTF on rows nk+1..2nk
-        c2  = mlx_from(ctf2)
-        xc  = mlx_from(xctf)
-        w3  = mlx_from(reshape(blk%weights, [1, self%nk, 1]))
-        wt  = c2 * w3
-        wx  = xc * (w3 * (-2._real32))
-        pt  = mlx_concatenate([wt, wx], 2)
+        ! the particle terms of every bin (2nk, pftsz+1, bpad): w_k CTF2 on rows 1..nk, -2 w_k X.CTF on rows
+        ! nk+1..2nk, as the calculator made them
+        pt  = mlx_from(terms)
         iwa = mlx_from(reshape(iw, [1, 1, bpad]))
         ta  = mlx_from(reshape(temps, [1, 1, bpad]))
         ua  = mlx_from(u)
@@ -85,7 +80,7 @@ contains
         do j = 1, nbt
             b0  = (j - 1) * self%bt + 1
             b1  = j * self%bt
-            ptj    = mlx_permute(mlx_slice(pt, [1, 1, b0], [n1, 2 * self%nk, b1]), [3, 2, 1])
+            ptj    = mlx_permute(mlx_slice(pt, [1, 1, b0], [2 * self%nk, n1, b1]), [3, 1, 2])
             inp%pt = packed_terms(ptj)
             tin%iw    = mlx_slice(iwa, [1, 1, b0], [1, 1, b1])
             tin%temps = mlx_slice(ta, [1, 1, b0], [1, 1, b1])
@@ -272,12 +267,12 @@ contains
         tout%irots = irot
     end subroutine tail_graph
 
-    ! the reason blk cannot be scored, or an empty string: nothing about the block is assumed; shp2 and shpx are
-    ! the shapes of the particles' memos
-    subroutine check_block( self, blk, shp2, shpx, msg )
+    ! the reason blk cannot be scored, or an empty string: nothing about the block is assumed; shpt is the shape
+    ! of the particles' terms
+    subroutine check_block( self, blk, shpt, msg )
         class(polarft_workspace),      intent(in)  :: self
         type(polarft_block_spec),      intent(in)  :: blk
-        integer,                       intent(in)  :: shp2(3), shpx(3)
+        integer,                       intent(in)  :: shpt(3)
         character(len=:), allocatable, intent(out) :: msg
         integer :: n1, nb
         msg = ''
@@ -289,20 +284,19 @@ contains
             msg = 'polarft_workspace%submit: the slot holds a block not yet collected'
         else if( .not. self%prepared )then
             msg = 'polarft_workspace%submit: refused: no prepared reference tiles'
-        else if( .not. allocated(blk%islots) .or. .not. allocated(blk%weights) .or. .not. allocated(blk%wsq) .or. &
-            &.not. allocated(blk%temps) .or. .not. allocated(blk%u) )then
+        else if( .not. allocated(blk%islots) .or. .not. allocated(blk%wsq) .or. .not. allocated(blk%temps) .or. &
+            &.not. allocated(blk%u) )then
             msg = 'polarft_workspace%submit: refused: the block lacks an input'
         endif
         if( len(msg) > 0 ) return
         n1 = self%pftsz + 1
         nb = size(blk%islots)
-        if( nb < 1 .or. any(shp2 /= [n1, self%nk, shp2(3)]) .or. any(shpx /= shp2) .or. &
-            &size(blk%weights) /= self%nk .or. size(blk%wsq) /= nb .or. size(blk%temps) /= nb .or. &
-            &any(shape(blk%u) /= [self%nrefs, nb]) )then
+        if( nb < 1 .or. any(shpt /= [2 * self%nk, n1, shpt(3)]) .or. size(blk%wsq) /= nb .or. &
+            &size(blk%temps) /= nb .or. any(shape(blk%u) /= [self%nrefs, nb]) )then
             msg = 'polarft_workspace%submit: refused: the block''s shapes do not match the prepared references'
             return
         endif
-        if( any(blk%islots < 1 .or. blk%islots > shp2(3)) )then
+        if( any(blk%islots < 1 .or. blk%islots > shpt(3)) )then
             msg = 'polarft_workspace%submit: refused: a particle of the block is outside the batch'
             return
         endif
@@ -311,7 +305,7 @@ contains
             return
         endif
         if( allocated(blk%banks) )then
-            if( any(shape(blk%banks) /= [n1, self%nk, nb]) .or. size(blk%l_bank) /= nb )then
+            if( any(shape(blk%banks) /= [2 * self%nk, n1, nb]) .or. size(blk%l_bank) /= nb )then
                 msg = 'polarft_workspace%submit: refused: the banks'' shapes do not match the block'
                 return
             endif
