@@ -392,6 +392,60 @@ layout does 2.9 million pairs per second on 24 cores; the target machine is an M
       the library builds loads and distributed nodes on the CPU's default stream whatever the default device;
       the iterators' end code is the constant `MLXF_MAP_END`.
 
+32. **RoPE's float32 accuracy on the GPU depends on the GPU.** Status: open; measured 2026-11-26 with MLX 0.32.4.
+    - Ask: the same rotary embeddings (angles up to 28 radians, offsets and frequencies given or not) are within
+      2 float32 epsilons of a float64 reference on the CPU and on an M5 Ultra's GPU, and 14 to 21 epsilons off on
+      an M2 Ultra's GPU. Is the kernel's angle and its cosine and sine computed with the fast Metal functions, and
+      is an accurate form (or a range reduction before `fast::cos`/`fast::sin`) possible for long positions?
+    - Where: MLX `mlx/backend/metal/kernels/rope.metal`.
+    - Meanwhile: the tests hold `mlx_rope`'s float32 GPU results to a separate bound (`FAST_GPU_ROPE`, 41.5
+      epsilons), the CPU to the floor.
+
+## O. Numerical and index boundaries found by external consumers
+
+33. **Integer mean and variance overflow before producing a floating result.** Status: open, not sent;
+    reproduced 2026-11-26 with MLX 0.32.4 / mlx-c 0.8.0 on CPU and Metal GPU (`applegpu_g14d`), including
+    direct mlx-c calls without mlx-fortran.
+    - Ask: `mean` of int32 `[2000000000, 2000000000]` returns float32 `-147483648`, status 0, and `var`
+      returns about `4.61168602e18` instead of zero. A constant 1024×1024 int32 image of 4096 gives mean 0
+      and variance 16777216 through the binding. Could integer inputs be promoted before accumulation in
+      mean, and before variance/std compute their mean? Converting the inputs to float32 first makes these
+      fixtures correct; it does not promise exact conversion of every int64/uint64 value.
+    - Where: MLX `mlx/ops.cpp`, mean/variance reductions; mlx-c `mlx_mean` and `mlx_var`. The direct C
+      reproducer and logs are `/tmp/mlxf_codex_user_review_2026-11-26/backend_stats.c` and
+      `backend-stats.log`; the exact fixtures and follow-up are retained in
+      [the consolidated plan](../implementation_notes/planned/mlxf_user_hardening.md), C1.
+    - Meanwhile: recommend explicit floating conversion before integer statistics. A local correction of
+      mean/variance/std is planned, not implemented. Current upstream issue/release status has not been
+      checked by this review; deduplicate and rerun before submission.
+
+34. **Euclidean norms and floating means overflow or underflow internally when the answer is representable.**
+    Status: open, not sent; observed 2026-11-26 through mlx-fortran with MLX 0.32.4, both devices for float32
+    and the CPU for float64, in Debug and Release.
+    - Ask: norm2 of two equal float32 inputs 1e20 gives infinity and of 1e-30 gives zero, with status 0;
+      the answers are approximately 1.41421359e20 and 1.41421357e-30. CPU float64 has the analogous result
+      at 1e200 and 1e-200. Mean of two float32 values 2e38 is infinity. Is a scaled reduction planned, or
+      should the supported input range and intermediate arithmetic be explicit in the operation docs?
+    - Where: MLX `mlx/linalg.cpp`'s Euclidean norm and `mlx/ops.cpp`'s mean, reached through
+      `mlxf_linalg_matrix` and `mlxf_ops_reduce`. Fixtures and closed-form references:
+      [consolidated plan](../implementation_notes/planned/mlxf_user_hardening.md), C5. A direct C control
+      for this item remains to be admitted; do not confuse it with question 33's direct C verification.
+    - Meanwhile: describe the limitation and use an explicitly scaled calculation where the range requires
+      it. A local robust reduction is planned, not implemented. Check current upstream status before filing.
+
+35. **Unchecked indices can crash on CPU or return plausible zeros on GPU without an error.** Status: open,
+    not sent; reproduced 2026-11-26 with MLX 0.32.4 / mlx-c 0.8.0 through mlx-fortran.
+    - Ask: after the binding's one-based shift, `take` on five values with MLX index 5 returns zero/status
+      0, and with MLX index 999999 crashes on CPU but returns zero/status 0 on GPU. Could the API document
+      out-of-range access explicitly, including backend-dependent behavior, and is opt-in checked indexing
+      planned? This is a request for a defined checked path, not a claim that unchecked indexing promises
+      bounds validation. Negative-index wrapping is a separate convention.
+    - Where: `mlx_take`, reached from the `p11_take_each.f90` probe in
+      `~/for_claude/mlxf_user_review_2026-11-26/`; repeated against a fresh install by Codex. The consolidated
+      plan's C3 preserves the exact fixtures and proposes explicit boundary validation.
+    - Meanwhile: callers must validate input indices and slab extents before indexing. The existing lazy
+      path stays unchecked; a local explicit validator is planned. Check current upstream reports first.
+
 ## For information (not Apple's to fix)
 
 - gfortran mis-finalizes derived types in four patterns (allocatable components with defined assignment,

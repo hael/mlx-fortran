@@ -10,7 +10,7 @@ use mlxf,             only: mlx_array, mlx_from, mlx_live_count, mlx_set_default
                             mlx_scaled_dot_product_attention, mlx_attention_spec, mlx_cross_entropy
 use mlxf_test_utils,  only: assert_true, assert_int, test_devices, device_name, judge_error, find_tolerance, &
                             family_seeds, seeded_uniform, seeded_array, shaped_error
-use mlxf_test_defs,   only: ELEM_CEILING, FAST_TOLERANCES, elem_tolerance
+use mlxf_test_defs,   only: ELEM_CEILING, FAST_GPU_ROPE, FAST_TOLERANCES, elem_tolerance
 use mlxf_test_reduce, only: nan_max
 implicit none
 private
@@ -27,7 +27,7 @@ contains
         integer, allocatable :: devs(:), seeds(:)
         integer              :: i, s, original, live0
         write(*,'(a)') '**** running all fast_layers tests ****'
-        call assert_true(all(FAST_TOLERANCES%f32 <= ELEM_CEILING), &
+        call assert_true(all(FAST_TOLERANCES%f32 <= ELEM_CEILING) .and. FAST_GPU_ROPE <= ELEM_CEILING, &
             &'every frozen float32 tolerance of a fused layer is within the ceiling of 64 float32 epsilons')
         call test_devices(devs)
         original = mlx_default_device()
@@ -140,6 +140,7 @@ contains
         integer              :: none(NB), i
         write(*,'(a,i0,a,l1)') 'test_rope seed=', seed, ' wide=', wide
         tol = find_tolerance(FAST_TOLERANCES, 'mlx_rope')
+        if( mlx_default_device() == MLX_DEVICES%gpu ) tol%f32 = FAST_GPU_ROPE
         x = reshape(seeded_uniform(ND*NT*NB, seed+40), [ND, NT, NB])
         x4 = reshape(seeded_uniform(ND*NT*NI*NB, seed+50), [ND, NT, NI, NB])
         freqs = [1._real64, 2.5_real64, 7._real64, 20._real64]

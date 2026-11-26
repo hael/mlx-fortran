@@ -532,6 +532,12 @@ type(elem_tolerance), parameter :: FAST_TOLERANCES(6) = [&
     &elem_tolerance('mlx_attention_fused', ELEM_FLOOR32, ELEM_FLOOR32), &
     &elem_tolerance('mlx_cross_entropy', ELEM_FLOOR32, ELEM_FLOOR32)]
 
+! MLX's GPU rotary embedding loses accuracy as its angle grows (the fixture reaches 28 radians), by an amount that
+! depends on the GPU: at the floor on an M5 Ultra, 21 float32 epsilons on an M2 Ultra. Its float32 GPU results are
+! held to this separate bound, twice the largest error of seed 1 on the GPU of either machine; the CPU keeps its
+! tolerance above
+real(real64), parameter :: FAST_GPU_ROPE = 4.942484934e-06_real64
+
 ! the transforms' largest error against a closed-form derivative, over a polynomial, exp(a x) and a chain of two
 ! matrix products, relative to max(1, the same sum of magnitudes). Calibrated on seed 1 on both devices and frozen
 ! as ELEM_TOLERANCES is: none reached two epsilons of its kind, so each holds the floor
