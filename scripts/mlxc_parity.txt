@@ -452,7 +452,7 @@ mlx_median_axes                                  public     mlx_median
 mlx_median_axis                                  public     mlx_median
 mlx_meshgrid                                     public     mlx_meshgrid
 mlx_metal_get_metallib_path                      excluded   build configuration, not API
-mlx_metal_is_available                           plumbing   -
+mlx_metal_is_available                           public     mlx_metal_is_available
 mlx_metal_set_metallib_path                      excluded   build configuration, not API
 mlx_metal_start_capture                          pending 8  mlx_metal_start_capture
 mlx_metal_stop_capture                           pending 8  mlx_metal_stop_capture

@@ -5,6 +5,11 @@
 - macOS on Apple silicon; Xcode with the Metal toolchain only for the source build of MLX and for GPU
   profiling (section 2).
 - Homebrew: `brew install gcc cmake` (GFortran 14 or newer; the scripts pick the newest `gfortran-1x`).
+  Tested: GNU Fortran 16.2.0, the whole tree; 14.4.0 (`brew install gcc@14`) builds the library without a
+  warning and passes the installed-consumer check, but not the test executable (a `-Wuninitialized` false
+  positive in `src/test/mlxf_bench_polar_table.f90` and a submodule's own procedures it does not link in
+  `src/test/mlxf_toy_reconstructor_pcg_tester_solve.f90`), so the CI's oldest leg is 15 (`gcc@15`).
+- `pkg-config` (`brew install pkgconf`) for `scripts/check_install.sh`.
 
 ## 2. MLX and mlx-c
 
@@ -23,6 +28,13 @@ Either of:
   `python3 --version` changed, put it back with `brew unlink python@3.15` and
   `brew unlink python@3.14 && brew link python@3.14` (with your versions).
 
+- **CPU-only, pinned**: `scripts/build_mlx_deps.sh --cpu-only` builds the same tags without the Metal backend
+  (`MLX_BUILD_METAL=OFF`; no Xcode needed) into `.deps/install-cpu`, which no build searches by default:
+  `MLXC_ROOT=$PWD/.deps/install-cpu`. Such an MLX has no GPU and allocates on the CPU device, so the device tests
+  run on the CPU where no GPU opens, as on GitHub's runners (the CI's CPU-only jobs run
+  `scripts/ci_cpu_job.sh Debug|Release gfortran-1x`, which builds it when the prefix is empty). `PREFIX=` and
+  `WORK=` move the install and the scratch directory.
+
 Xcode is needed only to build MLX from source (`build_mlx_deps.sh`) and for GPU profiling (Instruments'
 Metal System Trace, and the `.gputrace` captures of `mlx_metal_start_capture`). Custom Metal kernels are
 compiled at run time by the Metal framework and need no Xcode.
@@ -39,9 +51,12 @@ build/bin/mlxf_test_exec expect_aborts object_contracts  # the guard group, each
 ```
 
 Options: `MLXF_REQUIRE_GPU` (ON on Apple silicon) fails the device tests when the session cannot open a GPU
-(a headless or sandboxed session, a virtual machine); `MLXF_WERROR` turns warnings into errors. The compile
-scripts pass the environment variable `MLXF_CMAKE_ARGS` to CMake, as the CI does:
-`MLXF_CMAKE_ARGS="-DMLXF_REQUIRE_GPU=OFF -DMLXF_WERROR=ON" ./compile_clean.sh`. The build generates the
+(a headless or sandboxed session, a virtual machine, or a CPU-only MLX); `MLXF_WERROR` turns warnings into
+errors. The compile scripts pass the environment variable `MLXF_CMAKE_ARGS` to CMake, as the CI's Metal
+build-only jobs do: `MLXF_CMAKE_ARGS="-DMLXF_REQUIRE_GPU=OFF -DMLXF_WERROR=ON -DFORTLS=OFF" ./compile_clean.sh`.
+The tests tell three sessions apart (`mlxf_test_utils`): Metal with a GPU runs both devices; Metal without one
+cannot allocate and skips; a CPU-only MLX runs the CPU device, and the checks that need the GPU or Metal's
+allocator skip with `SKIP: GPU-only check on a CPU-only MLX build`. The build generates the
 `bind(c)` layer from the mlx-c headers it links (`build/gen/mlxf_c_*.f90`) and fails if the generator and
 the independent prototype list disagree. `unit_core`'s recovery test evaluates 1 GiB per device after the
 failure; its half-batch form, `build/bin/mlxf_test_exec test=unit_core suite=recovery_half`, allocates half

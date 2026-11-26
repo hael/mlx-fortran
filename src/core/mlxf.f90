@@ -8,8 +8,8 @@ use mlxf_version,       only: mlxf_version_string, mlxf_build_description, mlx_r
                               mlxf_runtime_description
 use mlxf_error,         only: mlx_last_error
 use mlxf_registry,      only: mlx_live_count
-use mlxf_device,        only: mlx_device_count, mlx_default_device, mlx_set_default_device, mlx_device_info_size, &
-                              mlx_device_info_string
+use mlxf_device,        only: mlx_metal_is_available, mlx_device_count, mlx_default_device, mlx_set_default_device, &
+                              mlx_device_info_size, mlx_device_info_string
 use mlxf_memory,        only: mlx_active_memory, mlx_peak_memory, mlx_reset_peak_memory, mlx_cache_memory, &
                               mlx_clear_cache, mlx_set_memory_limit, mlx_set_cache_limit
 use mlxf_array,         only: mlx_array, mlx_from, mlx_to, mlx_to_alloc, mlx_item, mlx_view, mlx_alloc, mlx_eval, &
@@ -52,7 +52,7 @@ implicit none
 
 public :: mlxf_version_string, mlxf_build_description, mlx_runtime_version, mlxf_runtime_description
 public :: MLXF_HARD_ERROR_STATUS, MLX_DEVICES, MLX_DTYPES, mlx_last_error, mlx_live_count
-public :: mlx_device_count, mlx_default_device, mlx_set_default_device, mlx_device_info_size
+public :: mlx_metal_is_available, mlx_device_count, mlx_default_device, mlx_set_default_device, mlx_device_info_size
 public :: mlx_device_info_string
 public :: mlx_active_memory, mlx_peak_memory, mlx_reset_peak_memory, mlx_cache_memory, mlx_clear_cache
 public :: mlx_set_memory_limit, mlx_set_cache_limit

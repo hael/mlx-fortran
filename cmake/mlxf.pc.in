@@ -2,6 +2,7 @@ prefix=${pcfiledir}/../..
 libdir=${prefix}/@CMAKE_INSTALL_LIBDIR@
 includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
 mlxc_libdir=@MLX_C_LIBRARY_DIRS@
+mlxc_version=@MLXC_VERSION@
 fortran_compiler_id=@CMAKE_Fortran_COMPILER_ID@
 fortran_compiler_version=@CMAKE_Fortran_COMPILER_VERSION@
 

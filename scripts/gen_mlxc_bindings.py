@@ -2,6 +2,7 @@
 """gen_mlxc_bindings.py -- the private bind(c) layer of mlx-fortran, generated from the mlx-c headers linked.
 
 usage: scripts/gen_mlxc_bindings.py <dir holding mlx/c/*.h> <output dir> [--expect LIST] [--list-outputs]
+       scripts/gen_mlxc_bindings.py <dir holding mlx/c/*.h> <output dir> --probe <probe header>
 
 Writes into <output dir>:
   mlxf_c_types.f90       every handle type of mlx-c as `type, bind(c) :: mlxc_<x>` holding one
@@ -17,7 +18,13 @@ branches), variadic functions and the functions taking mlx_io_vtable (a struct o
 value; IO is out of scope), and prints the skip list. It exits with 2 on a C type the mapping table does not
 map or a struct it does not know. With --expect LIST (the names scripts/list_mlxc_prototypes.py writes) it exits
 with 3 unless the generated and skipped names together equal LIST. --list-outputs prints the .f90 files it
-would write, one per line, and writes nothing. Python 3.7 or newer, standard library only.
+would write, one per line, and writes nothing.
+With --probe <header> (the ABI probe of the test build, src/test/mlxf_abi_probe.h) it reads mlx-c's headers for
+their types only and writes nothing of the layer above: it writes <output dir>/mlxf_c_abi_probe.f90, the module
+mlxf_c_abi_probe with the bind(c) interfaces of the probe header's mlx_abiprobe_* prototypes, made by the same
+mapping table, and two procedures that report, by C name, the size, alignment and field offsets of every bind(c)
+struct of mlxf_c_types and the value of every enumerator as Fortran sees them, for the probe to compare with C's.
+Python 3.7 or newer, standard library only.
 """
 import glob
 import os
@@ -346,8 +353,8 @@ def types_module(model):
     return text.replace('@ISO@', iso_import('\n'.join(body)))
 
 
-def header_module(model, header, protos):
-    mod = 'mlxf_c_' + header[:-2]
+def header_module(model, header, protos, mod=None):
+    mod = mod or 'mlxf_c_' + header[:-2]
     used_types, ifaces = set(), []
     for name, ret, params in protos:
         fret, used = map_return(model, ret)
@@ -386,6 +393,70 @@ def header_module(model, header, protos):
     return mod, '\n'.join(lines)
 
 
+PROBE_MODULE = 'mlxf_c_abi_probe'
+PROBE_ISO = ('c_char', 'c_int', 'c_intptr_t', 'c_loc', 'c_ptr', 'c_size_t', 'c_sizeof')
+
+
+def probe_module(model, protos):
+    """the probe's interfaces, and the layouts of the structs and the values of the enumerators as Fortran sees
+    them: a struct's alignment is the offset of a member that follows one character"""
+    _, text = header_module(model, 'probe', protos, PROBE_MODULE)
+    head, tail = text.split('\nimplicit none\n', 1)
+    structs = sorted(model.handles) + sorted(n for n in model.structs if n not in KNOWN_UNMAPPED_STRUCTS)
+    enums = [(e, enum_name(e)) for name in sorted(model.enums) for e, _ in model.enums[name][1]]
+    fields = {n: ['ctx'] for n in model.handles}
+    fields.update({n: [f for _, f in model.structs[n][1]] for n in structs if n in model.structs})
+    pads = []
+    for n in structs:
+        pads += ['! %s after one character: its alignment is the offset of x' % n,
+                 'type, bind(c) :: pad_%s' % f_name(n), '    character(kind=c_char) :: c',
+                 '    type(%s) :: x' % f_name(n), 'end type pad_%s' % f_name(n), '']
+    lay = ['    ! the C name, size and alignment of bind(c) struct k (1 to %d), and the offsets (fields(1:2)) and sizes'
+           % len(structs), '    ! (fields(3:4)) of its first two fields',
+           '    subroutine mlxf_abi_struct_layout( k, name, size, align, fields )',
+           '        integer,           intent(in)  :: k', '        character(len=64), intent(out) :: name',
+           '        integer(c_size_t), intent(out) :: size, align, fields(4)']
+    for i, n in enumerate(structs, 1):
+        lay.append('        type(%s), target :: s%d' % (f_name(n), i))
+        lay.append('        type(pad_%s), target :: p%d' % (f_name(n), i))
+    lay += ['        name    = \'\'', '        size    = 0', '        align   = 0', '        fields  = 0',
+            '        select case( k )']
+    for i, n in enumerate(structs, 1):
+        lay += ['            case( %d )' % i, '                name  = \'%s\'' % n,
+                '                size  = c_sizeof(s%d)' % i,
+                '                align = mlxf_abi_offset(c_loc(p%d%%x), c_loc(p%d))' % (i, i)]
+        for j, f in enumerate(fields[n][:2], 1):
+            lay.append('                fields(%d) = mlxf_abi_offset(c_loc(s%d%%%s), c_loc(s%d))' % (j, i, f, i))
+            lay.append('                fields(%d) = c_sizeof(s%d%%%s)' % (j + 2, i, f))
+    lay += ['        end select', '    end subroutine mlxf_abi_struct_layout', '',
+            '    ! the C name and the value of enumerator k (1 to %d)' % len(enums),
+            '    subroutine mlxf_abi_enumerator( k, name, value )',
+            '        integer,           intent(in)  :: k', '        character(len=64), intent(out) :: name',
+            '        integer(c_int),    intent(out) :: value', '        name  = \'\'', '        value = -1',
+            '        select case( k )']
+    for i, (c, f) in enumerate(enums, 1):
+        lay += ['            case( %d )' % i, '                name  = \'%s\'' % c, '                value = %s' % f]
+    lay += ['        end select', '    end subroutine mlxf_abi_enumerator', '',
+            '    ! the distance in bytes from address b to address a',
+            '    integer(c_size_t) function mlxf_abi_offset( a, b )',
+            '        type(c_ptr), intent(in) :: a, b',
+            '        mlxf_abi_offset = int(transfer(a, 0_c_intptr_t) - transfer(b, 0_c_intptr_t), c_size_t)',
+            '    end function mlxf_abi_offset']
+    used = sorted(set([f_name(n) for n in structs] + [f for _, f in enums]))
+    lines = head.split('\n')
+    lines = [l for l in lines if not l.startswith('use, intrinsic :: iso_c_binding') and
+             not l.startswith('use mlxf_c_types')]
+    body = text.split('\nimplicit none\n', 1)[1].rsplit('\nend module ' + PROBE_MODULE, 1)[0]
+    iso = sorted(set(PROBE_ISO) | set(n for n in ISO_NAMES if re.search(r'\b%s\b' % n, body)))
+    out = lines[:3] + ['use, intrinsic :: iso_c_binding, only: ' + ', '.join(iso),
+                       'use mlxf_c_types, only: ' + ', '.join(used), 'implicit none', '',
+                       'integer, parameter :: MLXF_ABI_NSTRUCTS = %d' % len(structs),
+                       'integer, parameter :: MLXF_ABI_NENUMS = %d' % len(enums), ''] + pads
+    out += [body.strip('\n'), '', 'contains', ''] + lay + ['', 'end module ' + PROBE_MODULE, '']
+    out[0] = '!@descr: generated from the ABI probe header: the probe\'s bind(c) interfaces, and the layouts as Fortran sees them'
+    return '\n'.join(out)
+
+
 def check_names(model):
     """Fortran names are case-insensitive: no two generated entities may collide"""
     seen = {}
@@ -401,12 +472,32 @@ def check_names(model):
         seen[k] = n
 
 
+def write_probe(model, outdir):
+    path = sys.argv[sys.argv.index('--probe') + 1]
+    probe = Model()
+    with open(path, encoding='utf-8', errors='replace') as f:
+        probe.parse(os.path.basename(path), f.read())
+    protos = [(n, r, p) for _, n, r, p in probe.protos if n.startswith('mlx_abiprobe_')]
+    try:
+        text = probe_module(model, protos)
+    except GenError as e:
+        print('gen_mlxc_bindings: error: %s' % e, file=sys.stderr)
+        return 2
+    os.makedirs(outdir, exist_ok=True)
+    with open(os.path.join(outdir, PROBE_MODULE + '.f90'), 'w') as f:
+        f.write(text)
+    print('gen_mlxc_bindings: --probe: %d interfaces in %s' % (len(protos), PROBE_MODULE))
+    return 0
+
+
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith('--')]
     expect = None
     if '--expect' in sys.argv:
         expect = sys.argv[sys.argv.index('--expect') + 1]
         args = [a for a in args if a != expect]
+    if '--probe' in sys.argv:
+        args = [a for a in args if a != sys.argv[sys.argv.index('--probe') + 1]]
     if len(args) != 2:
         print(__doc__, file=sys.stderr)
         return 2
@@ -419,6 +510,8 @@ def main():
     for h in headers:
         with open(os.path.join(hdir, h), encoding='utf-8', errors='replace') as f:
             model.parse(h, f.read())
+    if '--probe' in sys.argv:
+        return write_probe(model, outdir)
     by_header, skipped = {}, []
     for h, name, ret, params in model.protos:
         why = skip_reason(model, ret, params)

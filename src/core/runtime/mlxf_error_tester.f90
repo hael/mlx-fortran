@@ -3,8 +3,8 @@ module mlxf_error_tester
 use, intrinsic :: iso_fortran_env, only: int64, real32
 use mlxf,            only: mlx_array, mlx_from, mlx_to, mlx_eval, mlx_synchronize, mlx_clear_cache, mlx_active_memory, &
                            mlx_live_count, mlx_last_error, mlx_set_default_device, mlx_default_device, &
-                           mlx_device_count, mlx_device_info_size, MLX_DEVICES
-use mlxf_test_utils, only: assert_true, assert_int, test_devices, device_name
+                           mlx_device_info_size, MLX_DEVICES
+use mlxf_test_utils, only: assert_true, assert_int, test_devices, device_name, gpu_check_runs
 implicit none
 private
 
@@ -61,7 +61,8 @@ contains
 
     ! an evaluation needing one buffer beyond the device's maximum returns a status whose message names the
     ! allocation; the same graph at a batch that fits then evaluates (half the failing batch, or 1 GiB); the
-    ! live count and active memory return to where they were
+    ! live count and active memory return to where they were. The maximum is the Metal allocator's, which serves
+    ! both devices: a CPU-only MLX allocates on the heap, so the gate is a GPU-only check there
     subroutine recovery_gate( half_batch )
         logical, intent(in) :: half_batch
         integer, allocatable          :: devs(:)
@@ -73,8 +74,8 @@ contains
         integer                       :: i, nfull, nok, live0, st, original
         call test_devices(devs)
         if( size(devs) == 0 ) return
-        maxbuf = -1_int64
-        if( mlx_device_count(MLX_DEVICES%gpu) > 0 ) maxbuf = mlx_device_info_size(MLX_DEVICES%gpu, 'max_buffer_length')
+        if( .not. gpu_check_runs('the recovery gate (the maximum buffer of the Metal allocator)') ) return
+        maxbuf = mlx_device_info_size(MLX_DEVICES%gpu, 'max_buffer_length')
         if( maxbuf <= 0_int64 )then
             write(*,'(A)') '    SKIP: the device reports no maximum buffer length'
             return

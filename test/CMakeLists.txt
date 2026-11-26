@@ -12,13 +12,50 @@
 # a whole stays under 60 s of real time (scripts/run_fast_gate.sh); an entry above 0.5 s in Release says
 # why in its registration comment.
 
-add_executable(mlxf_test_exec "${CMAKE_CURRENT_SOURCE_DIR}/mlxf_test_exec.f90" ${MLXF_TEST_ONLY_SOURCES})
+# The ABI probe (unit_core, sub-suite abi): the interfaces of src/test/mlxf_abi_probe.h, generated with the library's
+# mapping table into gen_test/ (never the library's gen/), and its echo functions compiled by Apple's clang, the
+# compiler of mlx-c, as an object of this executable: CMake's C compiler is GCC, whose ABI agrees with GNU Fortran's
+# by construction. Elsewhere than macOS the C compiler of the build stands in for Apple's clang.
+set(_probe_header "${PROJECT_SOURCE_DIR}/src/test/mlxf_abi_probe.h")
+set(_probe_c      "${PROJECT_SOURCE_DIR}/src/test/mlxf_abi_probe.c")
+set(_probe_dir    "${PROJECT_BINARY_DIR}/gen_test")
+set(_probe_f90    "${_probe_dir}/mlxf_c_abi_probe.f90")
+set(_probe_obj    "${_probe_dir}/mlxf_abi_probe.o")
+file(MAKE_DIRECTORY "${_probe_dir}")
+file(GLOB _probe_mlxc_headers CONFIGURE_DEPENDS "${MLX_C_INCLUDE_DIRS}/mlx/c/*.h")
+add_custom_command(
+    OUTPUT "${_probe_f90}"
+    COMMAND "${MLXF_PYTHON3}" -I "${PROJECT_SOURCE_DIR}/scripts/gen_mlxc_bindings.py" "${MLX_C_INCLUDE_DIRS}"
+            "${_probe_dir}" --probe "${_probe_header}"
+    DEPENDS "${_probe_header}" "${PROJECT_SOURCE_DIR}/scripts/gen_mlxc_bindings.py" ${_probe_mlxc_headers}
+    COMMENT "Generating the ABI probe's interfaces (mlxf_c_abi_probe)"
+    VERBATIM)
+if(APPLE)
+    # the target of GNU's linker: the running macOS's major release, as scripts/build_mlx_deps.sh builds MLX for
+    execute_process(COMMAND sw_vers -productVersion OUTPUT_VARIABLE _probe_macos OUTPUT_STRIP_TRAILING_WHITESPACE)
+    string(REGEX REPLACE "^([0-9]+).*" "\\1.0" _probe_macos "${_probe_macos}")
+    set(_probe_cc xcrun clang "-mmacosx-version-min=${_probe_macos}")
+else()
+    set(_probe_cc "${CMAKE_C_COMPILER}")
+endif()
+add_custom_command(
+    OUTPUT "${_probe_obj}"
+    COMMAND ${_probe_cc} -std=c11 -O1 -Wall -Wextra -Werror "-I${MLX_C_INCLUDE_DIRS}" -c "${_probe_c}" -o "${_probe_obj}"
+    DEPENDS "${_probe_c}" "${_probe_header}" ${_probe_mlxc_headers}
+    COMMENT "Compiling the ABI probe's echo functions with the compiler of mlx-c"
+    VERBATIM)
+set_source_files_properties("${_probe_obj}" PROPERTIES EXTERNAL_OBJECT TRUE GENERATED TRUE)
+
+add_executable(mlxf_test_exec "${CMAKE_CURRENT_SOURCE_DIR}/mlxf_test_exec.f90" ${MLXF_TEST_ONLY_SOURCES}
+    "${_probe_f90}" "${_probe_obj}")
 set(_moddir "${PROJECT_BINARY_DIR}/modules/mlxf_test_exec")
 file(MAKE_DIRECTORY "${_moddir}")
 set_target_properties(mlxf_test_exec PROPERTIES
     LINKER_LANGUAGE          Fortran
     Fortran_MODULE_DIRECTORY "${_moddir}")
-target_include_directories(mlxf_test_exec PRIVATE "${MLXF_GEN_DIR}")
+# the library's own tests import its private modules (testers are submodules of the modules they test); a
+# target that only links mlxf sees mlxf.mod alone (src/CMakeLists.txt)
+target_include_directories(mlxf_test_exec PRIVATE "${PROJECT_BINARY_DIR}/modules/mlxf" "${MLXF_GEN_DIR}")
 target_link_libraries(mlxf_test_exec PRIVATE mlxf mlxf_build_flags)
 # MLXF_REQUIRE_GPU (CMakeLists.txt) is a compile definition, not an environment variable: the library and its
 # tests read no variable of their own. With it, a session that cannot open a GPU fails the device tests.

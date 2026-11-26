@@ -1,9 +1,30 @@
 #!/usr/bin/env bash
-# Explicit outside-project check; never registered with CTest. Optional second argument supplies a consumer.
+# scripts/check_install.sh -- the installed package used from outside the project; never registered with CTest.
+#
+#   scripts/check_install.sh [BUILD [CONSUMER]] [--require-gpu]
+#
+# Installs the configured build BUILD (default build/) into a scratch prefix whose path holds spaces, builds the
+# consumer project CONSUMER (default test/consumer/) against it with only -Dmlxf_DIR= and runs its programs (the
+# consumer and the examples of README.md and doc/quickstart.md), then
+# checks that only mlxf.mod was installed and no producer path or flag leaked, that the private modules cannot be
+# imported, that a copy of the package config naming another compiler version or another mlx-c version refuses
+# the consumer with its message, and that pkg-config links the consumer. Without --require-gpu the programs run
+# on every device MLX can allocate on and skip where it can allocate on none; with it (the release gate) a
+# missing GPU fails them. MLXF_INSTALL_CHECK_KEEP=1 keeps the scratch directory.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BUILD="${1:-$ROOT/build}"
-CONSUMER="${2:-$ROOT/test/consumer}"
+positional=()
+GPU_ARGS=()
+for arg in "$@"; do
+    case "$arg" in
+        --require-gpu) GPU_ARGS=(require-gpu) ;;
+        -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
+        -*) echo "check_install: unknown option: $arg (see --help)" >&2; exit 2 ;;
+        *) positional+=("$arg") ;;
+    esac
+done
+BUILD="${positional[0]:-$ROOT/build}"
+CONSUMER="${positional[1]:-$ROOT/test/consumer}"
 BUILD="$(cd "$BUILD" && pwd)"
 CONSUMER="$(cd "$CONSUMER" && pwd)"
 CACHE="$BUILD/CMakeCache.txt"
@@ -28,13 +49,24 @@ PREFIX="$WORK/prefix with spaces"
 PACKAGE="$PREFIX/$LIBDIR/cmake/mlxf"
 cmake --install "$BUILD" --prefix "$PREFIX" --component mlxf
 mkdir "$WORK/consumer"
-cp "$CONSUMER/CMakeLists.txt" "$CONSUMER/mlxf_consumer.f90" "$WORK/consumer/"
+cp "$CONSUMER/CMakeLists.txt" "$CONSUMER"/*.f90 "$WORK/consumer/"
 # Each check runs outside the source and producer build trees; only the package config exposes modules.
 cmake -S "$WORK/consumer" -B "$WORK/consumer build" \
     "-DCMAKE_Fortran_COMPILER=$FC" "-Dmlxf_DIR=$PACKAGE" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 cmake --build "$WORK/consumer build" --parallel 2
-MLX_ENABLE_TF32=0 OMP_NUM_THREADS=1 OMP_WAIT_POLICY=PASSIVE OMP_THREAD_LIMIT=4 \
-    "$WORK/consumer build/mlxf_consumer"
+run_env=(env MLX_ENABLE_TF32=0 OMP_NUM_THREADS=1 OMP_WAIT_POLICY=PASSIVE OMP_THREAD_LIMIT=4)
+"${run_env[@]}" "$WORK/consumer build/mlxf_consumer" "${GPU_ARGS[@]+"${GPU_ARGS[@]}"}" | tee "$WORK/consumer.log"
+# the examples the documents show. The first, the README's program, takes no argument and runs on MLX's default
+# device: it runs where the consumer did not skip, and under --require-gpu that device must be the GPU
+if ! grep -q '^SKIP' "$WORK/consumer.log"; then
+    "${run_env[@]}" "$WORK/consumer build/mlxf_example_first" | tee "$WORK/example_first.log"
+    if [[ ${#GPU_ARGS[@]} -gt 0 ]] && ! grep -q 'default device gpu' "$WORK/example_first.log"; then
+        echo "check_install: mlxf_example_first did not run on the GPU" >&2; exit 1
+    fi
+fi
+for example in mlxf_example_differences mlxf_example_errors; do
+    "${run_env[@]}" "$WORK/consumer build/$example" "${GPU_ARGS[@]+"${GPU_ARGS[@]}"}"
+done
 "$PY" - "$PREFIX" "$BUILD" "$ROOT" "$WORK/consumer build/compile_commands.json" <<'PY'
 from pathlib import Path
 import sys
@@ -65,45 +97,56 @@ text = Path(sys.argv[1]).read_text().lower()
 assert 'cannot open module file' in text and sys.argv[2] + '.mod' in text, text
 PY
 done
-cp -R "$PREFIX" "$WORK/incompatible prefix"
-BAD="$WORK/incompatible prefix/$LIBDIR/cmake/mlxf"
-"$PY" - "$BAD/mlxfConfig.cmake" <<'PY'
+# a copy of the package config with one recorded fact planted, which the consumer's configure must refuse
+refused() {
+    local name="$1" pattern="$2"
+    shift 2
+    cp -R "$PREFIX" "$WORK/$name prefix"
+    local bad="$WORK/$name prefix/$LIBDIR/cmake/mlxf"
+    "$PY" - "$bad/mlxfConfig.cmake" "$pattern" <<'PY'
 from pathlib import Path
 import re
 import sys
-p = Path(sys.argv[1])
-text, count = re.subn(r'set\(mlxf_Fortran_COMPILER_VERSION "[^"]+"\)',
-                      'set(mlxf_Fortran_COMPILER_VERSION "0.0.0-incompatible")', p.read_text())
-assert count == 1
+p, name = Path(sys.argv[1]), sys.argv[2]
+text, count = re.subn(r'set\(%s "[^"]+"\)' % name, 'set(%s "0.0.0-incompatible")' % name, p.read_text())
+assert count == 1, (name, count)
 p.write_text(text)
 PY
-if cmake -S "$WORK/consumer" -B "$WORK/incompatible build" "-DCMAKE_Fortran_COMPILER=$FC" \
-        "-Dmlxf_DIR=$BAD" > "$WORK/incompatible.log" 2>&1; then
-    echo "check_install: incompatible compiler metadata was accepted" >&2; exit 1
-fi
-"$PY" - "$WORK/incompatible.log" <<'PY'
+    if cmake -S "$WORK/consumer" -B "$WORK/$name build" "-DCMAKE_Fortran_COMPILER=$FC" \
+            "-Dmlxf_DIR=$bad" > "$WORK/$name.log" 2>&1; then
+        echo "check_install: a package config naming another $name was accepted" >&2; exit 1
+    fi
+    "$PY" - "$WORK/$name.log" "$@" <<'PY'
 from pathlib import Path
 import sys
-text = Path(sys.argv[1]).read_text()
-assert 'mlxf Fortran compiler mismatch' in text and '0.0.0-incompatible' in text, text
+text = ' '.join(Path(sys.argv[1]).read_text().split())
+for want in sys.argv[2:]:
+    assert want in text, (want, text)
 PY
-# mlx-c ships no .pc file; mlxf.pc carries its shared link dependency and optional OpenMP link flags.
+}
+refused compiler mlxf_Fortran_COMPILER_VERSION 'mlxf Fortran compiler mismatch' 0.0.0-incompatible
+MLXC_BUILT=$(sed -n 's/^set(mlxf_MLXC_VERSION "\([^"]*\)")$/\1/p' "$PACKAGE/mlxfConfig.cmake")
+[[ -n "$MLXC_BUILT" ]] || { echo "check_install: the package config records no mlx-c version" >&2; exit 1; }
+refused mlx-c mlxf_MLXC_VERSION "mlxf mlx-c mismatch: built with 0.0.0-incompatible; found ${MLXC_BUILT}"
+# mlx-c ships no .pc file; mlxf.pc carries its shared link dependency, its version and optional OpenMP flags.
 PKG_CONFIG_PATH="$PREFIX/$LIBDIR/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}" \
-    "$PY" - "$FC" "$WORK" "$PREFIX" "$INCDIR" <<'PY'
+    "$PY" - "$FC" "$WORK" "$PREFIX" "$INCDIR" "$MLXC_BUILT" "${GPU_ARGS[@]+"${GPU_ARGS[@]}"}" <<'PY'
 from pathlib import Path
 import os
 import shlex
 import subprocess
 import sys
-compiler, work, prefix, incdir = sys.argv[1:]
+compiler, work, prefix, incdir, mlxc = sys.argv[1:6]
 flags = shlex.split(subprocess.check_output(['pkg-config', '--cflags', '--libs', '--static', 'mlxf'], text=True))
 assert '-lmlxf' in flags and '-lmlxc' in flags, flags
+recorded = subprocess.check_output(['pkg-config', '--variable=mlxc_version', 'mlxf'], text=True).strip()
+assert recorded == mlxc, (recorded, mlxc)
 # both sides resolved: on macOS /var/folders and /private/var/folders name one directory
 want = Path(prefix, incdir, 'mlxf').resolve()
 assert any(f.startswith('-I') and Path(f[2:]).resolve() == want for f in flags), (flags, str(want))
-print('pkg-config:', flags, flush=True)
+print('pkg-config:', flags, 'mlxc_version=' + recorded, flush=True)
 subprocess.run([compiler, str(Path(work) / 'consumer/mlxf_consumer.f90')] + flags + ['-o', str(Path(work) / 'pkg consumer')], check=True, cwd=work)
-subprocess.run([str(Path(work) / 'pkg consumer')], check=True, cwd=work,
+subprocess.run([str(Path(work) / 'pkg consumer')] + sys.argv[6:], check=True, cwd=work,
                env=dict(os.environ, MLX_ENABLE_TF32='0', OMP_NUM_THREADS='1', OMP_THREAD_LIMIT='4', OMP_WAIT_POLICY='PASSIVE'))
 PY
-echo "check_install: passed (consumer, isolation, compiler refusal, private modules, pkg-config)"
+echo "check_install: passed (consumer and examples${GPU_ARGS[*]:+ (require-gpu)}, isolation, compiler and mlx-c refusals, private modules, pkg-config)"

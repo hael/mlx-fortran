@@ -2,6 +2,8 @@
 
 set(mlxf_Fortran_COMPILER_ID "@CMAKE_Fortran_COMPILER_ID@")
 set(mlxf_Fortran_COMPILER_VERSION "@CMAKE_Fortran_COMPILER_VERSION@")
+# the mlx-c release whose headers the archive's bind(c) layer was generated from: exactly that one is accepted
+set(mlxf_MLXC_VERSION "@MLXC_VERSION@")
 if(NOT CMAKE_Fortran_COMPILER_LOADED)
     set(mlxf_FOUND FALSE)
     set(mlxf_NOT_FOUND_MESSAGE "Enable the Fortran language before finding mlxf.")
@@ -34,6 +36,12 @@ if(NOT MLXC_FOUND OR NOT TARGET mlxc)
     set(mlxf_FOUND FALSE)
     set(mlxf_NOT_FOUND_MESSAGE
         "mlxf needs shared mlx-c (built with @MLXC_VERSION@). Install the compatible MLX/mlx-c pair or set MLXC_ROOT to its prefix. ${MLXC_NOT_FOUND_MESSAGE}")
+    return()
+endif()
+if(NOT MLXC_VERSION VERSION_EQUAL mlxf_MLXC_VERSION)
+    set(mlxf_FOUND FALSE)
+    set(mlxf_NOT_FOUND_MESSAGE
+        "mlxf mlx-c mismatch: built with ${mlxf_MLXC_VERSION}; found ${MLXC_VERSION} at ${MLXC_DIR}. The installed interfaces were generated from mlx-c ${mlxf_MLXC_VERSION}'s headers: install that release (or set MLXC_ROOT to its prefix), or rebuild mlxf against the one found.")
     return()
 endif()
 get_target_property(_mlxf_mlxc_type mlxc TYPE)

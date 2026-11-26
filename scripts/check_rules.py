@@ -93,6 +93,27 @@ Rules:
   cmakeroot  the CMake files name the library's own directories (PROJECT_SOURCE_DIR, PROJECT_BINARY_DIR,
              CMAKE_CURRENT_*), never CMAKE_SOURCE_DIR or CMAKE_BINARY_DIR, which name a parent project's when
              mlx-fortran is added with add_subdirectory()
+  fortlsoff  no editor side effects downstream: every configure line (cmake -S, cmake -B, cmake ..; a line
+             continued with a backslash read whole) of scripts/release_gate.sh, scripts/check_install.sh,
+             scripts/ci_*.sh, .github/workflows/ci.yml, README.md, doc/quickstart.md and
+             doc/how2s/how2use_from_simple.md names -DFORTLS=OFF or configures no producer (a consumer of the
+             installed package, -Dmlxf_DIR= or a consumer/ source, or the release gate's mlx-c probe), and every
+             MLXF_CMAKE_ARGS they set names -DFORTLS=OFF. The developer's compile scripts are outside the rule
+  devquery   test code (src/test/, *_tester.f90, test/*.f90) asks whether a GPU is present only through
+             mlxf_test_utils (test_devices, gpu_present, gpu_check_runs), which tells the three situations apart
+             (Metal with a GPU, Metal without one, a CPU-only MLX): a call of mlx_device_count(MLX_DEVICES%gpu)
+             elsewhere is in DEVQUERY_LEDGER or fails. The outside programs of test/consumer/, which cannot use the
+             test library, classify for themselves: a file that asks for the GPU count also calls
+             mlx_metal_is_available
+  docex      the documents' Fortran is run: every fenced fortran block of README.md, doc/quickstart.md and
+             CONTRIBUTING.md is preceded by <!-- example: test/consumer/<file> --> and is a verbatim run of that
+             file's lines (scripts/check_install.sh compiles and runs those programs against the installed
+             package); every row | D<n> | of the quickstart's table has exactly one block ! D<n> in
+             test/consumer/mlxf_example_differences.f90 or names a member of the registry's GUARDS, and every
+             block ! D<n> has its row
+  cbsig      the procedures C++ calls keep C's passing modes: each dummy of the four callbacks of CALLBACKS is
+             declared with or without value as C passes it (a dummy the procedure ignores, which no test can
+             observe, included)
 
 Python 3.7 or newer, standard library only; it runs before the compile.
 """
@@ -120,6 +141,10 @@ STATE_LEDGER = {
     'src/test/mlxf_test_utils.f90': (5, 'the assertion totals and the suite and failure records of the test library'),
 }
 MAX_DUMMIES = 5
+# test code that asks MLX for the GPU count itself (rule devquery); may only shrink
+DEVQUERY_LEDGER = {
+    'src/core/runtime/mlxf_device_tester.f90': (2, 'tests mlx_device_count itself: a stable, non-negative count'),
+}
 # (module, constant) -> reason: a constant another module imports from outside src/defs, argued here
 DEFS_EXCEPTIONS = {}
 ENTRY_CALLS = ('mlxf_enter', 'mlxf_guard_thread', 'mlxf_require_device')
@@ -981,6 +1006,174 @@ def check_cmakeroot(root, out):
     return out
 
 
+FORTLSOFF_FILES = ('scripts/release_gate.sh', 'scripts/check_install.sh', '.github/workflows/ci.yml', 'README.md',
+                   'doc/quickstart.md', 'doc/how2s/how2use_from_simple.md')
+CONFIGURE = re.compile(r'(^|[\s;&|(`"\'])cmake\s+(-S|-B|\.\.)(\s|$|["\'`])')
+# a configure of no producer: one that finds the installed package, or whose source is a consumer or the probe
+SOURCE_ARG = re.compile(r'-S\s*("[^"]*"|\'[^\']*\'|\S+)')
+NO_PRODUCER_SOURCE = re.compile(r'consumer|mlxc_probe')
+CMAKE_ARGS = re.compile(r'\bMLXF_CMAKE_ARGS\s*[:=]')
+
+
+def fortlsoff_files(root):
+    rels = [r for r in FORTLSOFF_FILES if os.path.isfile(os.path.join(root, r))]
+    scripts = os.path.join(root, 'scripts')
+    rels += sorted('scripts/' + f for f in os.listdir(scripts) if f.startswith('ci_') and f.endswith('.sh'))
+    return rels
+
+
+def check_fortlsoff(root, out):
+    for rel in fortlsoff_files(root):
+        lines = read(root, rel).split('\n')
+        k = 0
+        while k < len(lines):
+            first, text = k, lines[k]
+            while text.rstrip().endswith('\\') and k + 1 < len(lines):
+                k += 1
+                text = text.rstrip()[:-1] + ' ' + lines[k]
+            k += 1
+            src = SOURCE_ARG.search(text)
+            producer = '-Dmlxf_DIR=' not in text and not (src and NO_PRODUCER_SOURCE.search(src.group(1)))
+            if CONFIGURE.search(text) and '-DFORTLS=OFF' not in text and producer:
+                out.append('%s:%d: fortlsoff: a configure of the library without -DFORTLS=OFF (the fortls target '
+                           'writes into the source tree and the editor settings)' % (rel, first + 1))
+            if CMAKE_ARGS.search(text) and '-DFORTLS=OFF' not in text:
+                out.append('%s:%d: fortlsoff: MLXF_CMAKE_ARGS without -DFORTLS=OFF' % (rel, first + 1))
+    return out
+
+
+GPU_COUNT = re.compile(r'\bmlx_device_count\s*\(\s*MLX_DEVICES\s*%\s*gpu\s*\)', re.I)
+METAL_QUERY = re.compile(r'\bmlx_metal_is_available\s*\(', re.I)
+TEST_UTILS = 'src/test/mlxf_test_utils.f90'
+CONSUMER_DIR = 'test/consumer/'
+
+
+def is_test_code(rel):
+    return (rel.startswith('src/test/') or rel.endswith('_tester.f90') or
+            (rel.startswith('test/') and '/' not in rel[len('test/'):]))
+
+
+def check_devquery(root, files, out):
+    counts = {}
+    for rel in files:
+        codes = [code_of(l) for l in read(root, rel).split('\n')]
+        n = sum(len(GPU_COUNT.findall(c)) for c in codes)
+        if not n:
+            continue
+        if rel.startswith(CONSUMER_DIR):
+            if not any(METAL_QUERY.search(c) for c in codes):
+                out.append('%s: devquery: an outside program asks for the GPU count without mlx_metal_is_available: '
+                           'a CPU-only MLX and a session without a GPU look alike' % rel)
+        elif is_test_code(rel) and rel != TEST_UTILS:
+            counts[rel] = n
+    ledger_check('devquery', counts, DEVQUERY_LEDGER, out)
+    return out
+
+
+DOCEX_FILES = ('README.md', 'doc/quickstart.md', 'CONTRIBUTING.md')
+DOCEX_MARK = re.compile(r'^<!--\s*example:\s*(test/consumer/[\w.]+\.f90)\s*-->\s*$')
+DOCEX_TABLE = 'doc/quickstart.md'
+DOCEX_EXAMPLE = 'test/consumer/mlxf_example_differences.f90'
+DOCEX_ROW = re.compile(r'^\|\s*D(\d+)\s*\|(.*)$')
+DOCEX_BLOCK = re.compile(r'^\s*!\s*D(\d+)\b')
+DOCEX_GUARD = re.compile(r"guard_member\(\s*'(\w+)'", re.I)
+
+
+def check_docex(root, out):
+    for rel in DOCEX_FILES:
+        if not os.path.isfile(os.path.join(root, rel)):
+            continue
+        lines = read(root, rel).split('\n')
+        k = 0
+        while k < len(lines):
+            if not re.match(r'^```\s*fortran\s*$', lines[k].strip(), re.I):
+                k += 1
+                continue
+            first, k = k, k + 1
+            block = []
+            while k < len(lines) and lines[k].strip() != '```':
+                block.append(lines[k])
+                k += 1
+            prev = first - 1
+            while prev >= 0 and not lines[prev].strip():
+                prev -= 1
+            m = DOCEX_MARK.match(lines[prev].strip()) if prev >= 0 else None
+            if not m:
+                out.append('%s:%d: docex: a fortran block without <!-- example: test/consumer/<file> --> before it'
+                           % (rel, first + 1))
+                continue
+            src = m.group(1)
+            if not os.path.isfile(os.path.join(root, src)):
+                out.append('%s:%d: docex: the example %s does not exist' % (rel, first + 1, src))
+                continue
+            text = read(root, src).split('\n')
+            n = len(block)
+            if not n or not any(text[i:i + n] == block for i in range(len(text) - n + 1)):
+                out.append('%s:%d: docex: the block is not a verbatim run of the lines of %s' % (rel, first + 1, src))
+    if not os.path.isfile(os.path.join(root, DOCEX_TABLE)):
+        return out
+    guards = set(DOCEX_GUARD.findall(read(root, 'src/test/mlxf_test_registry.f90')))
+    blocks = {}
+    if os.path.isfile(os.path.join(root, DOCEX_EXAMPLE)):
+        for line in read(root, DOCEX_EXAMPLE).split('\n'):
+            m = DOCEX_BLOCK.match(line)
+            if m:
+                blocks[m.group(1)] = blocks.get(m.group(1), 0) + 1
+    rows = set()
+    for n, line in enumerate(read(root, DOCEX_TABLE).split('\n'), 1):
+        m = DOCEX_ROW.match(line)
+        if not m:
+            continue
+        row, rest = m.group(1), m.group(2)
+        if row in rows:
+            out.append('%s:%d: docex: row D%s twice' % (DOCEX_TABLE, n, row))
+        rows.add(row)
+        named = set(re.findall(r'\bguard_\w+', rest))
+        unknown = named - guards
+        if unknown:
+            out.append('%s:%d: docex: row D%s names %s, not a member of GUARDS' % (DOCEX_TABLE, n, row,
+                                                                                 ', '.join(sorted(unknown))))
+        elif not named and blocks.get(row, 0) != 1:
+            out.append('%s:%d: docex: row D%s has %d blocks ! D%s in %s and names no guard (one is its evidence)'
+                       % (DOCEX_TABLE, n, row, blocks.get(row, 0), row, DOCEX_EXAMPLE))
+    for row in sorted(set(blocks) - rows, key=int):
+        out.append('%s: docex: the block ! D%s has no row in %s' % (DOCEX_EXAMPLE, row, DOCEX_TABLE))
+    return out
+
+
+# the procedures C++ calls and their C signatures: each dummy, passed by value (True) or by reference (False)
+CALLBACKS = {
+    'src/core/runtime/mlxf_error.f90': {'record_mlx_error': (('msg', True), ('data', True))},
+    'src/core/compile/mlxf_compile.f90': {'invoke_callback': (('res', False), ('input', True), ('payload', True)),
+                                          'delete_payload': (('payload', True),)},
+    'src/core/array/mlxf_array_borrow.f90': {'release_buffer': (('rec', True),)},
+}
+
+
+def check_cbsig(root, out):
+    for rel, procs in sorted(CALLBACKS.items()):
+        lines = read(root, rel).split('\n')
+        for proc, dummies in sorted(procs.items()):
+            head = [k for k, l in enumerate(lines)
+                    if re.search(r'\b(subroutine|function)\s+%s\s*\(' % proc, code_of(l), re.I)]
+            if not head:
+                out.append('%s: cbsig: %s not found' % (rel, proc))
+                continue
+            modes = {}
+            for l in lines[head[0] + 1:]:
+                c = code_of(l)
+                if '::' not in c:
+                    break
+                attrs, names = c.split('::', 1)
+                for n in re.findall(r'\b(\w+)', re.sub(r'\([^)]*\)', '', names)):
+                    modes[n.lower()] = bool(re.search(r'\bvalue\b', attrs, re.I))
+            for dummy, by_value in dummies:
+                if modes.get(dummy) != by_value:
+                    out.append('%s: cbsig: %s: dummy %s must be passed %s, as C passes it' % (
+                        rel, proc, dummy, 'by value (value)' if by_value else 'by reference (no value)'))
+    return out
+
+
 def check_findpkg(root, out):
     for rel in cmake_files(root):
         text = '\n'.join(re.sub(r'#.*', '', l) for l in read(root, rel).split('\n'))
@@ -1379,6 +1572,10 @@ def main():
     check_entry(root, files, api, out)
     check_findpkg(root, out)
     check_cmakeroot(root, out)
+    check_fortlsoff(root, out)
+    check_devquery(root, files, out)
+    check_docex(root, out)
+    check_cbsig(root, out)
     check_parity(root, files, api, out)
     ledger_check('cbind', cbind, CBIND_LEDGER, out)
     ledger_check('libc', libc, LIBC_LEDGER, out)
@@ -1387,7 +1584,7 @@ def main():
     if listing:
         print(__doc__)
         for name, ledger in (('cbind', CBIND_LEDGER), ('libc', LIBC_LEDGER), ('prints', PRINT_LEDGER),
-                             ('state', STATE_LEDGER)):
+                             ('state', STATE_LEDGER), ('devquery', DEVQUERY_LEDGER)):
             for rel, (n, why) in sorted(ledger.items()):
                 print('ledger %-7s %-50s %3d  %s' % (name, rel, n, why))
     for line in out:

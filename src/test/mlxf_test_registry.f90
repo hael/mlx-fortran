@@ -41,6 +41,7 @@ use mlxf_oracle_projection_tester,     only: run_all_oracle_projection_tests
 use mlxf_toy_projector_tester,         only: run_all_projector_tests, run_all_projector_chain_tests
 use mlxf_toy_reconstructor_pcg_tester, only: run_all_reconstructor_pcg_tests, run_all_reconstructor_pcg_n32_tests
 use mlxf_toy_pcg_solver_tester,        only: run_all_pcg_solver_tests
+use mlxf_abi_tester,                   only: run_all_abi_tests
 use mlxf_bench_polar_table,            only: run_bench_polar_table
 use mlxf_bench_recon_pcg,              only: run_bench_recon_pcg
 use mlxf_bench_projector,              only: run_bench_projector
@@ -49,7 +50,7 @@ use mlxf_test_utils,                   only: begin_test_suite, end_test_suite
 implicit none
 private
 
-public :: run_area, list_areas, run_guard, guard_members, run_bench
+public :: run_area, list_areas, run_guard, guard_members, guard_need, run_bench
 
 abstract interface
     subroutine tester_entry()
@@ -65,33 +66,36 @@ character(len=*), parameter :: BENCHES(4) = [character(len=32) :: 'polar_table',
 character(len=*), parameter :: NAMED_ONLY(3) = [character(len=32) :: 'recovery_half', 'polar_shiftmap_accuracy', &
     &'reconstructor_pcg_n32']
 
+! a member of a guard group and the device its fixture needs: 'cpu' (any session that allocates) or 'gpu' (a
+! GPU device; on a CPU-only MLX the member skips)
 type :: guard_member
-    character(len=32) :: name  = ''
-    character(len=32) :: group = ''
+    character(len=32) :: name   = ''
+    character(len=32) :: group  = ''
+    character(len=3)  :: device = 'cpu'
 end type guard_member
 
 type(guard_member), parameter :: GUARDS(21) = [&
-    &guard_member('guard_empty_operation',   'object_contracts'), &
-    &guard_member('guard_stale_handle',      'object_contracts'), &
-    &guard_member('guard_openmp_region',     'object_contracts'), &
-    &guard_member('guard_float64_on_gpu',    'object_contracts'), &
-    &guard_member('guard_region_empty_eval', 'object_contracts'), &
-    &guard_member('guard_region_live_count', 'object_contracts'), &
-    &guard_member('guard_region_last_error', 'object_contracts'), &
-    &guard_member('guard_region_private',    'object_contracts'), &
-    &guard_member('guard_fft_norm',          'object_contracts'), &
-    &guard_member('guard_fft2_norm',         'object_contracts'), &
-    &guard_member('guard_dtype_astype',      'object_contracts'), &
-    &guard_member('guard_dtype_zeros',       'object_contracts'), &
-    &guard_member('guard_dtype_arange',      'object_contracts'), &
-    &guard_member('guard_kernel_spec',       'object_contracts'), &
-    &guard_member('guard_kernel_empty',      'object_contracts'), &
-    &guard_member('guard_segments_shape',    'object_contracts'), &
-    &guard_member('guard_matrix_rank',       'object_contracts'), &
-    &guard_member('guard_eigh_uplo',         'object_contracts'), &
-    &guard_member('guard_conv_spec',         'object_contracts'), &
-    &guard_member('guard_strided_span',      'object_contracts'), &
-    &guard_member('guard_matmul_integer',    'object_contracts')]
+    &guard_member('guard_empty_operation',   'object_contracts', 'cpu'), &
+    &guard_member('guard_stale_handle',      'object_contracts', 'cpu'), &
+    &guard_member('guard_openmp_region',     'object_contracts', 'cpu'), &
+    &guard_member('guard_float64_on_gpu',    'object_contracts', 'gpu'), &
+    &guard_member('guard_region_empty_eval', 'object_contracts', 'cpu'), &
+    &guard_member('guard_region_live_count', 'object_contracts', 'cpu'), &
+    &guard_member('guard_region_last_error', 'object_contracts', 'cpu'), &
+    &guard_member('guard_region_private',    'object_contracts', 'cpu'), &
+    &guard_member('guard_fft_norm',          'object_contracts', 'cpu'), &
+    &guard_member('guard_fft2_norm',         'object_contracts', 'cpu'), &
+    &guard_member('guard_dtype_astype',      'object_contracts', 'cpu'), &
+    &guard_member('guard_dtype_zeros',       'object_contracts', 'cpu'), &
+    &guard_member('guard_dtype_arange',      'object_contracts', 'cpu'), &
+    &guard_member('guard_kernel_spec',       'object_contracts', 'cpu'), &
+    &guard_member('guard_kernel_empty',      'object_contracts', 'cpu'), &
+    &guard_member('guard_segments_shape',    'object_contracts', 'cpu'), &
+    &guard_member('guard_matrix_rank',       'object_contracts', 'cpu'), &
+    &guard_member('guard_eigh_uplo',         'object_contracts', 'cpu'), &
+    &guard_member('guard_conv_spec',         'object_contracts', 'cpu'), &
+    &guard_member('guard_strided_span',      'object_contracts', 'cpu'), &
+    &guard_member('guard_matmul_integer',    'object_contracts', 'cpu')]
 
 contains
 
@@ -110,6 +114,7 @@ contains
                 call run_suite('registry',      run_all_registry_tests,      suite, ran)
                 call run_suite('error',         run_all_error_tests,         suite, ran)
                 call run_suite('recovery_half', run_all_recovery_half_tests, suite, ran)
+                call run_suite('abi',           run_all_abi_tests,           suite, ran)
             case('array')
                 call run_suite('array',    run_all_array_tests,    suite, ran)
             case('ops')
@@ -219,6 +224,17 @@ contains
             if( trim(GUARDS(i)%group) == trim(group) ) names = [names, GUARDS(i)%name]
         end do
     end function guard_members
+
+    ! the device a guard member's fixture needs, 'cpu' or 'gpu' (blank: no such member)
+    function guard_need( name ) result(need)
+        character(len=*), intent(in) :: name
+        character(len=3) :: need
+        integer          :: i
+        need = ''
+        do i = 1, size(GUARDS)
+            if( trim(GUARDS(i)%name) == trim(name) ) need = GUARDS(i)%device
+        end do
+    end function guard_need
 
     ! runs one guard member in this process; returns only when the member did not stop
     subroutine run_guard( name, found )

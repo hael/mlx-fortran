@@ -4,7 +4,7 @@ use, intrinsic :: iso_fortran_env, only: real32, int32
 use mlxf,            only: mlx_array, mlx_metal_kernel, mlx_metal_kernel_spec, mlx_function, mlx_compile, mlx_from, &
                            mlx_to, mlx_item, mlx_eval, mlx_live_count, mlx_last_error, mlx_set_default_device, &
                            mlx_default_device, MLX_DEVICES, MLX_DTYPES, transpose
-use mlxf_test_utils, only: test_devices, device_name, assert_true, assert_int, bits_equal
+use mlxf_test_utils, only: test_devices, device_name, assert_true, assert_int, bits_equal, cpu_only_mlx
 implicit none
 private
 public :: run_all_fast_tests
@@ -567,7 +567,11 @@ contains
         call assert_true(st /= 0, 'on the CPU device a Metal kernel is refused with a status')
         call assert_true(.not. allocated(outputs), 'the CPU refusal publishes no output')
         message = mlx_last_error()
-        call assert_true(index(message, 'GPU') > 0, 'the refusal says that a Metal kernel needs the GPU')
+        if( cpu_only_mlx() )then
+            call assert_true(index(message, 'No Metal') > 0, 'on a CPU-only MLX the refusal says there is no Metal backend')
+        else
+            call assert_true(index(message, 'GPU') > 0, 'the refusal says that a Metal kernel needs the GPU')
+        endif
         b = a+a
         call mlx_to(y, b, status=st)
         call assert_int(0, st, 'the CPU device evaluates after the refusal')

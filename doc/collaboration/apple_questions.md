@@ -303,6 +303,35 @@ layout does 2.9 million pairs per second on 24 cores; the target machine is an M
       insertion's plan (K6) chooses between the atomic kernel, `mlx_scatter_add` and a sorted, deterministic
       form on its own repeatability gate.
 
+## L. Packaging: the version of mlx-c and a session without a GPU
+
+27. **mlx-c has no run-time query of its own version.** Status: open; read 2026-11-25 in mlx-c 0.8.0.
+    - Ask: `mlx_version()` returns MLX's version; nothing returns mlx-c's. A binding generated from mlx-c's
+      headers is correct only for the release it was generated from, so a consumer must check it at configure
+      time (mlx-fortran's installed package refuses any mlx-c that is not the one it was built with), and a
+      program cannot report or check at run time which mlx-c it loaded. Could mlx-c offer `mlx_c_version()` (or
+      `MLX_C_VERSION` macros in a header), and could its CMake version file say `SameMinorVersion` while it is
+      0.x, so that `find_package(MLXC 0.8)` does not accept 0.9?
+    - Where: mlx-c `mlx/c/version.h` (`int mlx_version(mlx_string* str_)`); the installed `MLXCConfigVersion.cmake`
+      (`SameMajorVersion`).
+    - Meanwhile: `mlxfConfig.cmake` records `MLXC_VERSION` at build time and refuses a different one with
+      "mlxf mlx-c mismatch"; `mlxf.pc` carries `mlxc_version`.
+
+28. **A Metal build of MLX cannot allocate on the CPU device when no GPU opens.** Status: open; read 2026-11-25 in
+    MLX v0.32.4.
+    - Ask: on a Mac where Metal opens no device (a headless or sandboxed session, a virtual machine such as a
+      hosted CI runner), a Metal build of MLX fails at the first allocation on either device, the CPU's
+      included, because its one allocator is `metal::allocator()`, built on `metal::device(Device::gpu)`. A
+      build with `-DMLX_BUILD_METAL=OFF` allocates on the heap and runs the CPU device fine. Could a Metal build
+      fall back to the common (heap) allocator when no Metal device can be created, so that the CPU device keeps
+      working? Homebrew's bottle is a Metal build, so hosted CI cannot test on the CPU without building MLX from
+      source.
+    - Where: MLX `mlx/backend/metal/allocator.cpp` (`allocator()`), `mlx/backend/metal/device_info.cpp`
+      (`gpu::device_count()` wraps the same call in a `try`), `mlx/backend/no_gpu/allocator.cpp`.
+    - Meanwhile: mlx-fortran's tests tell the three sessions apart (`mlx_metal_is_available()` and the GPU
+      count); its CI builds MLX v0.32.4 and mlx-c v0.8.0 without Metal (`scripts/build_mlx_deps.sh --cpu-only`,
+      cached) and runs the device tests on the CPU there.
+
 ## For information (not Apple's to fix)
 
 - gfortran mis-finalizes derived types in four patterns (allocatable components with defined assignment,

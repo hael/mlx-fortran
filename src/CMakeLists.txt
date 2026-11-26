@@ -43,9 +43,19 @@ add_custom_command(
 
 mlxf_add_library(mlxf ${MLXF_SOURCES} ${MLXF_GENERATED_SOURCES})
 set_target_properties(mlxf PROPERTIES VERSION ${PROJECT_VERSION})
-target_include_directories(mlxf
-    PUBLIC  $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/mlxf>
-    PRIVATE "${MLXF_GEN_DIR}")
+# A target that links mlxf sees mlxf.mod alone, in the build tree as in the installed package: after each build
+# it is copied into include/mlxf, the build interface, while every other module stays in the library's own module
+# directory (a parent project that embeds the library could otherwise import mlxf_c_array and reach a handle).
+# The test executable, the library's own, adds that directory itself.
+set(MLXF_PUBLIC_MODULE_DIR "${PROJECT_BINARY_DIR}/include/mlxf")
+file(MAKE_DIRECTORY "${MLXF_PUBLIC_MODULE_DIR}")
+set_property(TARGET mlxf PROPERTY INTERFACE_INCLUDE_DIRECTORIES
+    "$<BUILD_INTERFACE:${MLXF_PUBLIC_MODULE_DIR}>" "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/mlxf>")
+target_include_directories(mlxf PRIVATE "${PROJECT_BINARY_DIR}/modules/mlxf" "${MLXF_GEN_DIR}")
+add_custom_command(TARGET mlxf POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${PROJECT_BINARY_DIR}/modules/mlxf/mlxf.mod"
+            "${MLXF_PUBLIC_MODULE_DIR}/mlxf.mod"
+    VERBATIM)
 target_link_libraries(mlxf PUBLIC mlxc)
 if(USE_OPENMP)
     target_link_libraries(mlxf PUBLIC OpenMP::OpenMP_Fortran)

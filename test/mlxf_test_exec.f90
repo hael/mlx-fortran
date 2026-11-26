@@ -3,9 +3,9 @@
 ! every member of a guard group in its own child process (guard=<member>) and accepts only the library's
 ! hard-error status; expect_abort <member> does the same for one member.
 program mlxf_test_exec
-use mlxf,               only: MLXF_HARD_ERROR_STATUS, MLX_DEVICES, mlx_device_count
-use mlxf_test_registry, only: run_area, list_areas, run_guard, guard_members, run_bench
-use mlxf_test_utils,    only: report_summary
+use mlxf,               only: MLXF_HARD_ERROR_STATUS
+use mlxf_test_registry, only: run_area, list_areas, run_guard, guard_members, guard_need, run_bench
+use mlxf_test_utils,    only: report_summary, gpu_present, cpu_only_mlx
 implicit none
 character(len=256) :: arg, test, suite, guard
 integer            :: i
@@ -88,46 +88,59 @@ contains
     subroutine expect_aborts( group )
         character(len=*), intent(in) :: group
         character(len=32), allocatable :: members(:)
-        integer                        :: k, nbad
+        integer                        :: k, nbad, nrun
         members = guard_members(group)
         if( size(members) == 0 )then
             write(*,'(A)') 'mlxf_test_exec: no guard group '//trim(group)
             call list_areas
             error stop 2
         endif
-        if( .not. device_present() ) return
+        if( .not. session_allocates() ) return
         nbad = 0
+        nrun = 0
         do k = 1, size(members)
+            if( .not. member_runs(members(k)) ) cycle
+            nrun = nrun + 1
             if( .not. stops_as_guard(members(k)) ) nbad = nbad + 1
         end do
         if( nbad > 0 )then
-            write(*,'(A,I0,A,I0,A)') 'FAIL: '//trim(group)//': ', nbad, ' of ', size(members), &
+            write(*,'(A,I0,A,I0,A)') 'FAIL: '//trim(group)//': ', nbad, ' of ', nrun, &
                 &' guard members did not stop with the hard-error status'
             error stop 1
         endif
-        write(*,'(A,I0,A)') 'PASS: '//trim(group)//': ', size(members), ' guard members stopped with the hard-error status'
+        write(*,'(A,I0,A)') 'PASS: '//trim(group)//': ', nrun, ' guard members stopped with the hard-error status'
     end subroutine expect_aborts
 
     subroutine expect_abort( member )
         character(len=*), intent(in) :: member
         logical :: ok
-        if( .not. device_present() ) return
+        if( .not. session_allocates() ) return
+        if( .not. member_runs(member) ) return
         ok = stops_as_guard(member)
         if( .not. ok ) error stop 1
     end subroutine expect_abort
 
-    ! the guard members need a device: without one a Metal build cannot allocate and every member would
-    ! stop for that reason instead of its own; MLXF_REQUIRE_GPU makes the absence a failure
-    logical function device_present()
-        device_present = mlx_device_count(MLX_DEVICES%gpu) > 0
-        if( device_present ) return
+    ! the guard members need a session that allocates: on Metal without a GPU every member would stop for that
+    ! reason instead of its own. A CPU-only MLX allocates on the CPU. MLXF_REQUIRE_GPU makes a missing GPU a failure
+    logical function session_allocates()
+        session_allocates = gpu_present()
+        if( session_allocates ) return
 #ifdef MLXF_REQUIRE_GPU
         write(*,'(A)') 'FAIL: a GPU device can be opened (MLXF_REQUIRE_GPU): none in this session'
         error stop 1
 #else
-        write(*,'(A)') 'SKIP: no GPU device in this session; the guard members are not run'
+        session_allocates = cpu_only_mlx()
+        if( .not. session_allocates ) write(*,'(A)') 'SKIP: no GPU device in this session; the guard members are not run'
 #endif
-    end function device_present
+    end function session_allocates
+
+    ! a member whose fixture needs the GPU skips on a CPU-only MLX; the others run
+    logical function member_runs( member )
+        character(len=*), intent(in) :: member
+        member_runs = trim(guard_need(member)) /= 'gpu'
+        if( .not. member_runs ) member_runs = gpu_present()
+        if( .not. member_runs ) write(*,'(A)') '    SKIP: GPU-only check on a CPU-only MLX build: '//trim(member)
+    end function member_runs
 
     logical function stops_as_guard( member )
         character(len=*), intent(in) :: member

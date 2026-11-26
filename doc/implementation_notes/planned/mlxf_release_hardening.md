@@ -458,7 +458,7 @@ files named in the report.
 | `scripts/mlxc_parity.txt` | its line `public` | 2 |
 | `src/core/runtime/mlxf_device_tester.f90` | its test; decision 8 | 2 |
 | `src/core/runtime/mlxf_error_tester.f90`, `src/core/runtime/mlxf_memory_tester.f90` | decision 8, if needed | 2 |
-| `src/core/fast/mlxf_fast_tester.f90` | GPU-only checks on a CPU-only MLX, if needed | 2 |
+| `src/core/fast/mlxf_fast_tester.f90` | GPU-only checks on a CPU-only MLX, if needed (the CPU refusal's message) | 2 |
 | `src/test/mlxf_test_utils.f90` | `test_devices` | 2 |
 | `test/mlxf_test_exec.f90` | the guard gate | 2 |
 | `src/test/mlxf_test_registry.f90` | the `GUARDS` device column; sub-suite `abi` | 2, 4 |
@@ -466,7 +466,7 @@ files named in the report.
 | `scripts/check_test_registry.py` | the `GUARDS` form, if needed | 2 |
 | `scripts/build_mlx_deps.sh` | `--cpu-only` | 2 |
 | `scripts/ci_cpu_job.sh` (new) | the CPU-only CI job | 2 |
-| `.github/workflows/ci.yml` | the jobs of decisions 12 and 14 | 2 |
+| `.github/workflows/ci.yml` | the jobs of decisions 12 and 14; `-DFORTLS=OFF` for rule `fortlsoff` (Phase 1) | 1, 2 |
 | `doc/policies/test_environment_policy.md` | section 4; the guard count; the ABI sub-suite | 2, 3, 4 |
 | `doc/policies/binding_contract_policy.md` | section 7; a corrected row, if decision 16 finds one | 2, 3 |
 | `doc/how2s/how2set_up_dev.md` | the CPU-only build; the compilers | 2 |
@@ -482,7 +482,7 @@ files named in the report.
 | `src/test/mlxf_abi_probe.c` (new) | the echo functions | 4 |
 | `src/test/mlxf_abi_tester.f90` (new) | sub-suite `abi` | 4 |
 | `src/test/test.inf` | the directory's description | 4 |
-| `test/CMakeLists.txt` | the probe's generation and clang object; comments | 4 |
+| `test/CMakeLists.txt` | the probe's generation and clang object; comments; the test executable's own module directory (decision 25, row added in Phase 1) | 1, 4 |
 | `doc/collaboration/apple_questions.md` | decision 24 | 5 |
 | `doc/implementation_notes/planned/mlxf_roadmap.md` | the rank 2b row | 5 |
 | `doc/implementation_notes/README.md` | the index | 5 |
@@ -494,3 +494,390 @@ files named in the report.
 ## Progress
 
 (one entry per phase, written by the run)
+
+Logs are under the run's `scratch/keep/` (`p0/`, `p1/`, ...); `K` below stands for that directory.
+
+### Phase 0, 2026-11-25 21:09 to 21:21, M5 Ultra (arun host `local`), base `0071f5a`
+
+- **Machine and toolchain** (`K/p0/machine.txt`): Apple M5 Ultra, 30 cores, 103.1 GB, macOS 27.2.1; GNU Fortran
+  16.2.0 (`gcc`) and 14.4.0 (`gcc@14`); CMake 4.5.1; Python 3.9.6; Homebrew mlx 0.32.4, mlx-c 0.8.0, pkgconf
+  3.0.11; Apple clang 21.0.0. The base holds every item of the first stop (K2's report, `guard_strided_span`,
+  `guard_matmul_integer`, `PIPESTATUS`, `ctest_budget.py --self-test`, 673/680 in the README, `nan_maxval` and
+  rule `nanmax`, rule `cmakeroot`, `scripts/check_embed.sh`); pkg-config is present (decision 13 done).
+- **Files changed:** this Progress entry only.
+- **Builds** (`K/p0/{debug,release}{1,2}.*`; the prompt's recipe, `-DFORTLS=OFF -DMLXF_WERROR=ON`, `-j 12`):
+  0 warnings in all four. Configure / build / fast gate (wall, static gate included) / CTest real, *measured*:
+  Debug 1.59 / 5.77 / 16.50 / 12.68 s and 1.53 / 5.71 / 16.37 / 12.66 s; Release 1.69 / 17.60 / 14.62 / 10.75 s
+  and 1.55 / 17.41 / 14.36 / 10.63 s. Loads 1.9 to 4.1.
+- **A base failure, recorded and left:** Release build 1's gate failed once, `unit_kernels`, sub-suite
+  `reconstructor_pcg`, `test_lifecycle` on the GPU: "100 cycles ... leave the active memory as it was". The
+  file is out of bounds (`src/test/mlxf_toy_*`). The sub-suite alone passed 20 of 20 (`K/p0/recon_flake_alone.txt`);
+  the other three gates and both release gates passed. A recurrence is recorded where it happens, never rerun away.
+- **Check counts per area and device** (`K/p0/counts_*.txt`, `mlxf_test_exec test=unit_<area> device=...`, two
+  runs per build type, *exact*): identical in Debug and Release except `core`, whose sub-suite `registry` adds one
+  check per device when MLX reuses a freed address ("the freed address was reused by a new object: T"); the
+  count is 55 + that check per device and 80 + them for `all` (seen: 80, 81, 82). Compared later as the count less
+  the number of "reused ...: T" lines.
+
+  | device | core | array | ops | linalg | fft | compile | fast | kernels |
+  | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+  | cpu | 55 (+1) | 103 | 1,469 | 397 | 101 | 32 | 13 | 769 |
+  | gpu | 55 (+1) | 101 | 995 | 239 | 94 | 32 | 82 | 1,014 |
+  | all | 80 (+2) | 193 | 2,462 | 632 | 194 | 63 | 94 | 1,732 |
+
+- **Release gate as it is** (`K/p0/release_gate{1,2}.*`): passed twice, 59.25 s and 57.76 s real (*measured*).
+- **Consumer check as it is** (`K/p0/install_{release,debug}{1,2}.*`): passed four times, Release 1.93 and 1.91 s,
+  Debug 1.95 and 1.88 s (*measured*); the consumer ran on the CPU and the GPU, pkg-config linked it.
+- **A clean snapshot** (`K/p0/snap_release.*`): `git archive HEAD` built Release with `-DMLXC_ROOT=/opt/homebrew`
+  (what the checkout resolves: no `MLXC_ROOT`, no `.deps/`, `MLXC_DIR=/opt/homebrew/share/cmake/MLXC`); 0
+  warnings; the fast gate 9 of 9 (CTest 10.46 s); the archive's 59 members equal the checkout's (`ar t`,
+  `K/p0/ar_*.txt`). Read outside `src/` by configure, build and the static gate: `CMakeLists.txt`, `cmake/*`,
+  `test/` (its CMake file, the program, the consumer is not built), `scripts/` (the generator, the prototype
+  list, the gate scripts, `mlxc_parity.txt`, `toy_mirror.txt`), `doc/implementation_notes/planned/mlxf_mlxc_parity.md`
+  (rule `parity`), every `CLAUDE.md` under `src/` and `test/` with its imports in `.github/skills/` (through the
+  tracked symlink `.claude/skills`), and mlx-c's headers. `git archive` carries all of them; the static gate's
+  untracked-file warning does not run there (no work tree).
+- **No-device recipe** (`K/p0/nogpu*`; Release, `-DMLXF_REQUIRE_GPU=OFF`, `sandbox-exec -p "(version 1)(allow
+  default)(deny iokit-open)"`): the gate passed 9 of 9 with "GPU devices: 0" and 34 skip lines: one per
+  sub-suite of every area that runs on a device (32 lines "SKIP: no GPU device in this session; a Metal build of
+  MLX cannot allocate": array 1, compile 1, core 6 (device 1, error 2, memory 2, registry 1), fast 1, fft 2,
+  kernels 8, linalg 5, ops 8), the device tester's "SKIP: no GPU device", and the guard group's "SKIP: no GPU
+  device in this session; the guard members are not run". Assertions still evaluated: core 16, kernels 51,
+  linalg 4, ops 2, compile 1, fft 1, fast 1, array 0 (`K/p0/nogpu_skips_by_entry.txt`).
+- **ABI classes** (`K/abi_classes.py` over `build/gen`, *exact*, `K/p0/abi_classes.txt`): 673 interfaces, 383
+  called by the library; every count of section 2's table holds once the two iterator structs (two pointers) are
+  counted with the handle structs, as the table does (by value 562 + 4 = 566, as result 68 + 2 = 70): 29 dummy
+  classes and 6 result classes, 35 in all; 36 structs (31 handles, 2 iterators, 3 optional pairs); 23
+  enumerators.
+- **The generated layer** (`K/p0/gen_sha256.txt`): 27 files `mlxf_c_*.f90`, identical in Debug and Release; the
+  sha256 of the list of their hashes is `66db5146d820ca6b...`.
+- **Configure lines** (`K/p0/configure_lines.txt`): `-DFORTLS=OFF` in `scripts/release_gate.sh` (line 60),
+  `doc/how2s/how2use_from_simple.md` (line 10) and `check_embed.sh`'s parent (a cached `FORTLS OFF`); the consumer
+  configures (check_install.sh, how2use line 14) configure no producer; the README configures through the compile
+  scripts (`FORTLS` on by default, `-DFORTLS=OFF` named as an option); **the CI passes none** (its
+  `MLXF_CMAKE_ARGS` is `-DMLXF_REQUIRE_GPU=OFF -DMLXF_WERROR=ON`), as section 2 found.
+- **Frozen** (section 6; the larger of two runs):
+  - check counts: the table above (*measured*, *exact*);
+  - skip lines under the no-device recipe: the 34 above (*measured*);
+  - fast gate real time (CTest): Debug 12.68 s, Release 10.75 s (*measured*); bound Debug 15.68 s, Release 13.75 s
+    (base plus 3 s, *guessed*), under 60 s;
+  - consumer check: 1.95 s (*measured*);
+  - release gate: 59.25 s (*measured*); bound 59.25 + 2 x 1.95 + 60 = 123.15 s (*derived* from decision 4, the
+    60 s *guessed*);
+  - the generated layer's hashes (`K/p0/gen_sha256.txt`, *exact*).
+- **Exit:** the numbers are frozen; both builds free of warnings; the gate passes (one recorded base flake); the
+  consumer check passes on both builds.
+- **Decisions taken under delegation:** (P0-a) the fast gate's time is CTest's real time (what
+  `ctest_budget.py` holds to 60 s); the static gate's wall time is recorded beside it. (P0-b) `core`'s counts are
+  compared less the conditional address-reuse check, which is MLX's allocation and not the library's.
+- **What it means, in short:** the base is sound and fast (a whole release gate in a minute); the snapshot
+  builds what the checkout builds; one toy lifecycle check is flaky under the gate's shared GPU.
+
+### Phase 1, 2026-11-25 21:22 to 21:47, M5 Ultra, base `0071f5a` (working tree)
+
+- **Files changed:** `scripts/release_gate.sh`, `scripts/check_install.sh`, `scripts/check_embed.sh`,
+  `scripts/check_rules.py` (rule `fortlsoff`), `scripts/check_tree.sh` (its comment), `cmake/mlxfConfig.cmake.in`,
+  `cmake/mlxf.pc.in`, `src/CMakeLists.txt`, `test/CMakeLists.txt`, `test/consumer/mlxf_consumer.f90`,
+  `.github/workflows/ci.yml` (`-DFORTLS=OFF` only), `doc/how2s/how2use_from_simple.md`, this note.
+- **The release gate** builds a snapshot in `build_release_gate/src/`: release mode `git archive HEAD` (the log
+  lists the untracked files left out), `--allow-dirty` the working tree's tracked and not-ignored files (deleted
+  ones left out; tag `<commit>-dirty`; every file that differs from HEAD listed), `--require-tag` (refuses unless
+  HEAD carries `v<VERSION>`). mlx-c is resolved by a probe project as the checkout would (`MLXC_ROOT`, then
+  `.deps/install`, then CMake's search), passed as `-DMLXC_ROOT=` and exported, and each build's `MLXC_DIR` is
+  checked against the probe's. It runs the snapshot's own fast gate, consumer check (`--require-gpu`) and
+  `check_embed.sh`, hashes every file of the snapshot before configuring and after the last install, and records
+  the checkout's `.claude/settings.local.json` (mtime and size).
+- **Exit items:**
+  - Decision 2's plant (`K/p1/plant_*.log`, a scratch `git clone` of the copy at `0071f5a`, the new gate as the
+    untracked `scripts/release_gate_hardened.sh`): with an untracked `src/core/runtime/mlxf_planted.f90` that does
+    not compile, release mode passed and named it among the files left out (attempt 2; attempt 1 failed on the
+    base flake below, `plant_release_mode_attempt1.log`); `--allow-dirty` failed on it (`mlxf_planted.f90.o`
+    Error 1); `--require-tag` refused (exit 2, "does not carry the tag v0.1.0"). Control: the old gate failed on
+    the same plant, since it builds the checkout in place (`plant_old_gate.log`). The working-tree export leaves a
+    deleted tracked file out and keeps the `.claude/skills` symlink (checked on the pipeline alone).
+  - Decision 3's side-effect check, planted (`plant_side_effects.log`): a configure that writes a file into the
+    source tree and touches `<checkout>/.claude/settings.local.json` failed the gate with both findings.
+  - Decision 6 (`K/p1/install_*.log`, `mlxc_mismatch_refusal.log`): the package config refuses an mlx-c that is
+    not `VERSION_EQUAL` the recorded one, before the library-type check: "mlxf mlx-c mismatch: built with
+    0.0.0-incompatible; found 0.8.0 at /opt/homebrew/share/cmake/MLXC ..."; `check_install.sh` plants it in a copy
+    of the installed config and asserts the refusal and its message, as for the compiler (whose plant now also
+    asserts the planted version); `mlxf.pc` carries `mlxc_version=0.8.0`, checked against the config.
+  - Rule `fortlsoff` with six plants (`K/plant_fortlsoff_*.log`): a producer configure without `-DFORTLS=OFF` in
+    `release_gate.sh`, in `how2use_from_simple.md`, in `README.md`, one continued over two lines in
+    `check_install.sh`, and `MLXF_CMAKE_ARGS` without it in `ci.yml` each fail the rule; the control (an added
+    option on the consumer's configure) passes it.
+  - Decision 25 (`K/p1/embed*.log`): the library's build interface is `<build>/include/mlxf`, holding `mlxf.mod`
+    alone (copied after each build); the test executable adds the module directory itself. `check_embed.sh` builds
+    and runs a parent program that uses `mlxf` on the CPU device and fails unless a parent source importing
+    `mlxf_c_array` fails with "cannot open module file 'mlxf_c_array.mod'". Controls: the new check fails on the
+    base and on a tree that exposes the whole module directory (both import `mlxf_c_array`).
+  - Decision 5's argument: `mlxf_consumer [require-gpu]`; without it a session without a GPU prints `SKIP` and
+    exits 0 (decision 8's three situations come with Phase 2).
+  - The release gate in `--allow-dirty` mode passed with the consumer check on both builds (`K/p1/gate_dirty.log`,
+    63.03 s against the bound 123.15 s), attempt 2: attempt 1 (`gate_dirty_attempt1.log`) failed on the base flake.
+  - Builds (`K/p1/{debug,release}.*`): Debug and Release from scratch, 0 warnings, fast gate 9 of 9, CTest 12.93 s
+    and 10.47 s (bounds 15.68 and 13.75 s); check counts identical to Phase 0 (`K/p1/counts_release.txt`,
+    normalized as Phase 0 says); `check_tree.sh` passed; the consumer formatted; `shellcheck -x` clean on the three
+    scripts (the repository's own form: the base's touched scripts are clean with `-x`); `check_rules.py` parses at
+    3.7 and imports `os`, `re`, `sys`; `ci.yml` parses with `ruby -ryaml`. The consumer check takes 2.49 to 2.56 s
+    (one configure more than the base's 1.95 s).
+- **Found:** section 2's premise that the library's include directories hold only an `INSTALL_INTERFACE` was
+  wrong: `mlxf_add_library` (`cmake/CompilerConfig.cmake`) adds the module directory as a `BUILD_INTERFACE`, so at
+  the base a parent could import every module, `mlxf_c_array` included (the control above). Decision 25 holds
+  either way; the property is now set in `src/CMakeLists.txt`.
+- **The base flake, diagnosed:** `test_lifecycle` of the toy `reconstructor_pcg` tester reads `mlx_active_memory()`
+  without `mlx_synchronize()` first, while every other lifecycle check of the tree synchronizes (the projector's,
+  `polarft_calc`'s, the array and memory testers'); buffers that the GPU's completion handlers release late are
+  still counted. Under the gate's parallel load it failed 3 of 12 CTest runs of the fast label (`K/p1/flake_rate_unfixed.txt`);
+  with the two synchronizations in a scratch copy, 0 of 12 (`flake_rate_fixed.txt`, the diff
+  `K/p1/flakefix.diff`). Over the run so far: 6 failures in about 27 gate runs, all this one assertion.
+- **Decisions taken under delegation:**
+  - (P1-a) The toy tester is out of bounds (section 4) and is not edited; a gate run whose only failure is this
+    assertion is repeated once and both logs are kept; the two-line fix is reserved for the maintainer, ahead of
+    the tagged run. Reason: section 4 names `src/test/mlxf_toy_*` explicitly, and the flake is K8's, diagnosed.
+  - (P1-b) The release gate runs the snapshot's own scripts (fast gate, `check_install.sh`, `check_embed.sh`), so
+    the export is what is judged; it passes `--require-gpu` after the two positional arguments, which an older
+    `check_install.sh` ignores, so release mode can judge an older commit (the base) too.
+  - (P1-c) Rule `fortlsoff` also reads `.github/workflows/ci.yml` (decision 3 says "CI included"); a configure of
+    no producer is one with `-Dmlxf_DIR=` or whose `-S` source names a consumer or the mlx-c probe.
+    `ci.yml` got `-DFORTLS=OFF` in this phase so that the static gate holds (table row updated).
+  - (P1-d) The build-tree interface is set on the target in `src/CMakeLists.txt` (the file table's row) instead of
+    in `mlxf_add_library`; the test executable's module directory is added in `test/CMakeLists.txt` (row added).
+  - (P1-e) A scratch `git clone` of the copy (read-only for the copy) serves the release-mode runs, since the
+    copy's working tree is dirty and nothing may be committed.
+- **What it means, in short:** the gate now judges what a user receives, a snapshot, refuses a wrong mlx-c and
+  editor side effects, and proves a parent sees only `mlxf.mod`; one toy test, out of this plan's bounds, makes a
+  quarter of the gate runs fail until its owner adds two synchronizations.
+
+### Phase 2, 2026-11-25 21:47 to 22:10, M5 Ultra, base `0071f5a` (working tree)
+
+- **Ruling R1** (`spec/rulings.md`) arrived during this phase: the `reconstructor_pcg` lifecycle flake is the
+  base's, owned by run `mlxf_toy_seam`; a gate failing at that assertion alone is recorded and run once more, and
+  judged by the second run; no timed step is repeated for it. It confirms decision P1-a. Occurrences so far: 4 in
+  gate runs (Phase 0 Release build 1, Phase 1 gate `--allow-dirty` attempt 1, Phase 1 release-mode plant attempt
+  1, and in measurement loops 3 of 12 CTest runs, `K/p1/flake_rate_unfixed.txt`); none in Phase 2.
+- **Files changed:** `src/core/runtime/mlxf_device.f90` (`mlx_metal_is_available`), `src/core/mlxf.f90`,
+  `scripts/mlxc_parity.txt` (`plumbing` to `public`), `src/core/runtime/mlxf_device_tester.f90`,
+  `src/core/runtime/mlxf_error_tester.f90`, `src/core/fast/mlxf_fast_tester.f90`, `src/test/mlxf_test_utils.f90`,
+  `src/test/mlxf_test_registry.f90`, `test/mlxf_test_exec.f90`, `test/consumer/mlxf_consumer.f90`,
+  `scripts/check_rules.py` (rule `devquery`), `scripts/check_test_registry.py`, `scripts/check_tree.sh`,
+  `scripts/build_mlx_deps.sh`, `scripts/ci_cpu_job.sh` (new, mode 755), `.github/workflows/ci.yml`,
+  `doc/policies/test_environment_policy.md` (section 4), `doc/policies/binding_contract_policy.md` (sections 7 and
+  12), `doc/how2s/how2set_up_dev.md`, `README.md` (the devices row, the compilers, the CI paragraph), this note.
+- **The public addition:** `mlx_metal_is_available()` (entry, checked status), re-exported; its test
+  (`unit_core`, `device`, `test_backend`): stable across calls; no GPU without the backend; on a CPU-only MLX
+  the CPU device allocates and evaluates.
+- **Decision 8:** `test_devices` returns the devices asked for with a GPU, none with the old skip on Metal without
+  one, and `[cpu]` on a CPU-only MLX (`device=gpu` there: the GPU-only skip); `gpu_present`, `cpu_only_mlx` and
+  `gpu_check_runs` serve the testers that ask for the GPU themselves (the device information, the recovery gate);
+  `GUARDS` rows carry `cpu` or `gpu` (only `guard_float64_on_gpu` is `gpu`: on a CPU-only MLX it would stop in
+  `mlx_set_default_device`, "Cannot set gpu device without gpu backend", not at its guard; the 20 others were read
+  to stop at their own guard there, `K/p2/guards_cpu_only.txt`); the guard gate skips the `gpu` members on a
+  CPU-only MLX; `check_test_registry.py` requires the column. The consumer classifies the same way. The fast
+  tester's CPU refusal expects "No Metal" on a CPU-only MLX ("[metal_kernel] No Metal back-end", MLX v0.32.4
+  `backend/common/metal_kernel.cpp`), "GPU" otherwise.
+- **Rule `devquery`** with five plants (`K/plant_devquery_*.log`): a tester that skips on the GPU count, the guard
+  gate asking MLX directly, a consumer that drops `mlx_metal_is_available`, and the ledger's file with a third
+  call each fail; the control (a second call inside `mlxf_test_utils`) passes. Ledger: the device tester, 2 calls
+  (from the base's 7 calls in 4 files: the guard gate's and the error tester's moved onto `mlxf_test_utils`, two
+  of the device tester's onto `gpu_present`).
+- **CPU-only MLX** (`K/p2/mlx_cpu*.{log,times}`): `build_mlx_deps.sh --cpu-only` built MLX v0.32.4 and mlx-c
+  v0.8.0 with `MLX_BUILD_METAL=OFF` into a prefix under the run's scratch (`PREFIX=`, `WORK=`; nothing under the
+  copy's `.deps/`) in 40.9 s real (*measured*, reported, 24 jobs, loads 2.7 to 3.8; MLX's configure fetched its
+  dependencies). A first build targeted macOS 27.2, and every Fortran link then warned "linking with dylib ...
+  built for newer version 27.2": the script now passes `CMAKE_OSX_DEPLOYMENT_TARGET` = the running major release
+  (27.0) or `MACOSX_DEPLOYMENT_TARGET`, and the warning is gone.
+- **Decision 11, GNU Fortran 16.2** (`K/p2/cpu16_*`, `K/p2/counts_cpu16*.txt`): Debug and Release, `-DMLXF_WERROR=ON
+  -DMLXF_REQUIRE_GPU=OFF`, 0 warnings, the fast gate 9 of 9 (CTest 4.97 s Debug), no no-device skip line, three
+  GPU-only skips (the GPU's information, the recovery gate, `guard_float64_on_gpu`; the guard group passed 20
+  members). Counts per area, CPU-only (`device=all`, Debug = Release) against the Metal build's `device=cpu` of
+  this phase (Phase 0's plus decision 9's two checks), *exact*:
+
+  | area | Metal `device=cpu` | CPU-only | owned by GPU-only checks |
+  | --- | --- | --- | --- |
+  | core | 57 (+1 address reuse) | 49 | 8: `device` 16 to 14 (5 checks of the GPU's information, against 3 that run only without a GPU: the absent GPU's -1, the absent GPU as default, the CPU-only allocation), `error` 8 to 2 (the 6 checks of the recovery gate on the CPU device) |
+  | array, ops, linalg, fft, compile, fast, kernels | 103, 1,469, 397, 101, 32, 13, 769 | the same | 0 |
+
+- **Decision 11, GNU Fortran 14.4** (`K/p2/cpu14_*`, `K/p2/lib14_*`): the test executable does not build: Release
+  fails `-Werror=uninitialized` on `or1.dim[0].ubound` and `or1.dim[1].stride` in `src/test/mlxf_bench_polar_table.f90`
+  (line 861, an allocatable that is allocated before every use: a false positive), and Debug (and Release without
+  `-Werror`) fails to link `mlxf_toy_reconstructor_pcg_tester_solve`'s own procedures `dot_error` and
+  `iterate_error` (undefined `___mlxf_toy_reconstructor_pcg_tester.mlxf_toy_reconstructor_pcg_tester_solve_MOD_*`;
+  the submodule-linkage defect of GNU Fortran before 16, in a form `check_submodule_linkage.py` does not look
+  for: a submodule's own plain procedures). Both files are out of bounds and outside `src/core`. The library alone
+  with 14.4 builds without a warning in Debug and Release, on Homebrew's Metal MLX and on the CPU-only one, and
+  `check_install.sh` passes on all four (the consumer on the CPU and the GPU, resp. the CPU).
+- **Decision 22, second branch** (taken): the failure is recorded here; the CI's oldest leg is GNU Fortran 15
+  (`gcc@15`, 15.3.0 by section 2, not installed on the M5: Homebrew is read-only, so that leg is unverified); the
+  advertised floor (14) is the maintainer's. The README and the setup guide say what 14.4 does and does not pass.
+- **CI** (`K/p2/ci_*`): `scripts/ci_cpu_job.sh BUILD_TYPE COMPILER` is the whole CPU-only job (configure with the
+  CPU-only prefix, check that the build linked it, build, fast gate, no no-device skip, `Metal backend: F` in the
+  log, install, `check_install.sh`, a step summary). Run on the M5: 16.2 Debug 18.1 s and Release 26.4 s, passed;
+  a cache miss (an empty prefix: it built the CPU-only MLX itself) 66.7 s, passed; 14.4 Release failed as above.
+  The workflow (decision 12, 14, 22): job `cpu` on `macos-latest`, {Debug, Release} x {gfortran-15 (`gcc@15`),
+  gfortran-16 (`gcc`)}, the prefix cached under the key runner OS, arch, `ImageOS`, `ImageVersion`, the two tags
+  and `hashFiles('scripts/build_mlx_deps.sh')`, the clones made only on a miss; job `metal-build` as before with
+  `-DFORTLS=OFF`. Its step script run on the M5 under the no-device recipe (`K/p2/ci_metal_compile_*.log`):
+  `compile_debug.sh` and `compile_clean.sh` with its `MLXF_CMAKE_ARGS` passed, 0 warnings, "GPU devices: 0", the 34
+  skip lines of Phase 0, `.claude/settings.local.json` untouched. `ruby -ryaml` parses the file. Not verifiable
+  here: the runner image, its network and cache, the job times, GitHub's evaluation, the 15.3 leg.
+- **Exit items:** Metal build Debug and Release from scratch, 0 warnings, fast gate 9 of 9 (CTest 12.76 and
+  10.54 s, bounds 15.68 and 13.75 s); check counts identical to Phase 0 except `core`'s `device` sub-suite, +2 per
+  device and in `all` (decision 9's checks), `K/p2/counts_{debug,release}.txt`; the no-device recipe's skip lines
+  identical to Phase 0 (`K/p2/nogpu_skips_by_entry.txt`; `core` evaluates 18 there, Phase 0's 16 plus the two);
+  the CPU-only build with 16.2 as above; with 14.4 decision 22's second branch; rule `devquery` and its plants;
+  `check_tree.sh` passed; the touched Fortran formatted; `shellcheck -x` clean; Python at 3.7.
+- **Decisions taken under delegation:**
+  - (P2-a) Decision 11's comparison is against this phase's Metal `device=cpu` counts, which are Phase 0's plus
+    decision 9's two device checks; "identical counts on the Metal build" is read as identical except the checks
+    this plan adds by name (decision 9 here, the `abi` sub-suite in Phase 4), each listed.
+  - (P2-b) Rule `devquery`'s ledger covers `src/test/`, the testers and `test/*.f90`; the outside programs of
+    `test/consumer/`, which cannot use `mlxf_test_utils`, must instead call `mlx_metal_is_available` wherever they
+    ask for the GPU count (they classify for themselves). Reason: the consumer and the examples of Phase 3 document
+    the classification for users; a ledger line per new example would grow a ledger that may only shrink.
+  - (P2-c) On a CPU-only MLX the GPU-only skip reads `SKIP: GPU-only check on a CPU-only MLX build: <what>`; the
+    two-device tests run on the CPU without a skip line (the GPU leg does not exist there), and `device=gpu`
+    gives one skip.
+  - (P2-d) The recovery gate is a GPU-only check on a CPU-only MLX (the maximum buffer belongs to the Metal
+    allocator, which serves both devices on a Metal build); the memory tests run there (the heap allocator keeps
+    the active, peak and cache counts and the limits: 8 of 8 passed).
+  - (P2-e) `build_mlx_deps.sh` pins the deployment target to the running major release, for both modes (a fix
+    found on the way, in the file's row); `WORK=` joins `PREFIX=` so that a build can stay out of `.deps/`.
+  - (P2-f) Decision 22's second branch: the first branch allows workarounds in `src/core` only, and both 14.4
+    failures are in out-of-bounds test files.
+- **What it means, in short:** a pull request can now get numbers: on a runner without Metal the whole fast gate
+  runs on the CPU device of a CPU-only MLX, with only three GPU-only checks skipped; GNU Fortran 14 builds and
+  serves the library but not this tree's tests, because of two compiler defects in K-run test files.
+
+### Phase 3, 2026-11-25 22:10 to 22:22, M5 Ultra, base `0071f5a` (working tree)
+
+- **Files changed:** `test/consumer/mlxf_example_first.f90`, `mlxf_example_differences.f90`,
+  `mlxf_example_errors.f90` (new), `test/consumer/CMakeLists.txt`, `test/consumer/consumer.inf`,
+  `scripts/check_install.sh`, `scripts/check_rules.py` (rule `docex`), `scripts/check_tree.sh`, `doc/quickstart.md`
+  (new, 80 lines), `CONTRIBUTING.md` (new, 58 lines), `README.md` (the lead, the transfer kinds),
+  `doc/how2s/how2use_from_simple.md` (links), this note. The test policy's guard count already read twenty-one.
+- **The examples** (decision 15): `mlxf_example_first` (24 lines, the README's program verbatim; no argument: it
+  runs on MLX's default device, and `check_install.sh --require-gpu` requires that device to be the GPU from its
+  printed runtime line; it runs only where the consumer did not skip); `mlxf_example_differences` (one block
+  `! D<n>` per row, 17 blocks, each printing `D<n>: ok`; `[require-gpu]`; float64 rows on the CPU device);
+  `mlxf_example_errors` (a refused `mlx_to` through `status` and `mlx_last_error()`, the named owner of
+  `mlx_view`, the three sessions; `[require-gpu]`). The consumer project builds the four programs.
+- **The table** (decision 16): 19 rows, D1 to D19, in `doc/quickstart.md`; D3 names `guard_matmul_integer` and
+  D15 `guard_float64_on_gpu`, the others their block. Every row held against MLX 0.32.4 on the GPU and on the
+  CPU-only MLX: no row disagreed with the contract, so neither a correction nor a stop. The README's lead
+  summarises it in its first paragraph. The obligations table (decision 19) follows it, nine rows.
+- **Found while running the README's commands:** the first program checked its result at 1e-6 and failed as a
+  user runs it, without `MLX_ENABLE_TF32=0`: MLX's default float32 matrix product on the M5's GPU is TF32
+  (0.637698 against 0.637628). The program now checks at 1e-3 and says why in a comment; the consumer check
+  runs it with `MLX_ENABLE_TF32=0`. (The contract's section 7 already says so; it is the first thing a user
+  meets.)
+- **Exit items:**
+  - Rule `docex` with six plants (`K/plant_docex_*.log`): an edited line in the README's block, the README's
+    block without its marker, a row without evidence, a row naming an unknown guard (`guard_float64_on_cpu`), a
+    block `! D20` without a row (which also leaves D19 without evidence), and an edited line of the quickstart's
+    block each fail it.
+  - The examples pass in the consumer check on the GPU (`--require-gpu`, Debug and Release, 17 rows ok,
+    `K/p3/install_{debug,release}_gpu.log`), on the CPU-only MLX (16.2 Release, 17 rows ok, `K/p3/install_cpu16.log`)
+    and skip in a session without a device (`K/p3/install_nodevice.log`).
+  - The README's commands (its first 45 lines: the paragraph, the program, five commands that build, install with
+    `-DFORTLS=OFF` and compile and run the program, the links) ran verbatim, extracted from the file, in a scratch
+    copy of the tree without `MLX_ENABLE_TF32` set: passed, 4.59 s (`K/p3/readme_run.log`, `readme_commands.sh`).
+  - Debug and Release from scratch, 0 warnings, fast gate 9 of 9 (CTest 12.84 and 10.56 s); `check_tree.sh`
+    passed; the examples formatted; `shellcheck -x` clean; `check_rules.py` parses at 3.7.
+- **Decisions taken under delegation:**
+  - (P3-a) The first example takes no argument (it is the README's program); its GPU is proven by its printed
+    runtime line under `--require-gpu`, and it is not run where the consumer skipped.
+  - (P3-b) Rule `docex` also fails a block `! D<n>` without a row (the reverse of the decision's direction), so
+    that a row cannot be dropped while its proof stays.
+  - (P3-c) The first example's tolerance is MLX's default precision (1e-3), not full float32: a README program
+    must pass as a user runs it.
+- **What it means, in short:** a user's first page now holds a program that is compiled and run against the
+  installed package on every release gate, and a table of the 19 places where Fortran and `mlxf` part ways, each
+  proven by a block that runs or a guard that stops.
+
+### Phase 4, 2026-11-25 22:22 to 22:56, M5 Ultra, base `0071f5a` (working tree)
+
+- **Files changed:** `scripts/gen_mlxc_bindings.py` (`--probe`), `src/test/mlxf_abi_probe.h`, `src/test/mlxf_abi_probe.c`,
+  `src/test/mlxf_abi_tester.f90` (new), `src/test/mlxf_test_registry.f90` (sub-suite `abi` of `core`),
+  `src/test/test.inf`, `test/CMakeLists.txt` (the probe's generation into `build/gen_test/` and its `xcrun clang`
+  object), `scripts/check_rules.py` (rule `cbsig`, below), `scripts/check_tree.sh`, `README.md` (name coverage and
+  the ABI), `doc/policies/test_environment_policy.md` (the `abi` sub-suite), this note.
+  `scripts/list_mlxc_prototypes.py` needed no change (the probe's names are outside the `--expect` check).
+- **The probe:** 33 echo functions `mlx_abiprobe_*` in mlx-c's types, compiled by `xcrun clang -std=c11 -O1 -Wall
+  -Wextra -Werror` for the running macOS major release (no linker warning); their interfaces generated with the
+  library's mapping table into the module `mlxf_c_abi_probe`, which also carries, generated from the same model,
+  the size, alignment (the offset after one character) and the offsets and sizes of the first two fields of every
+  struct and the value of every enumerator, by C name; the C file holds the same facts from `sizeof`, `_Alignof`
+  and `offsetof`, written by hand from the headers. The sub-suite `abi` (99 checks) calls no MLX function.
+- **Coverage** (*exact*, `K/p4/probe_classes.txt`, the Phase 0 script over the probe module): every class the
+  library's interfaces have (29 dummy and 6 result classes, the iterators counted with the handles) and the
+  probe's own splits (pair struct by value and as result, optional pairs by reference); `int`, `bool`, `float`,
+  `double` and the three optional pairs in a register and on the stack (after eight integer-class and eight
+  floating-point arguments, packed); the two-pointer iterator and a handle as results; 36 structs and 23
+  enumerators against C, all equal.
+- **Found while writing it** (`K/p4/escape_finding.txt`): with handles holding addresses of local variables, the
+  array-of-handles echo failed in Release only: C returned the right address (printed, equal), and the
+  comparison `c_associated(r%ctx, c_loc(w))` evaluated false at `-O3`, true at `-O0`. The optimizer folds a
+  comparison with an address it believes has not escaped, though it was passed inside an `intent(in)` array. Not
+  an ABI mismatch and not a path of the library, whose handles come from C; the probe now uses addresses C never
+  dereferences. Reported for the maintainer (a candidate GNU Fortran report).
+- **Mutations** (decision 21; `scripts/mutations.py` of the run, `K/p4/mut/final.tsv`, logs `K/p4/mut/<name>.*`):
+  63, each alone on a fresh copy, built from scratch (Debug, warnings as errors) and gated: the 31 lines of the
+  scalar table (each passing mode flipped), the 3 result lines and the pointer, struct, enum and void results
+  (a different kind, or a function for a subroutine), the struct by value, by reference and as a `const` array,
+  the enum by value and by reference, the typedef'd and inline function pointers, a second field in the handle
+  template, the value and flag fields of the three optional pairs and both fields of both iterators (a field of
+  another size), and the passing mode of each dummy of the four callbacks. **63 of 63 killed**: 37 by the build
+  (the library's abstract interfaces and calls hold the generated ones), 26 by the gate (19 with `unit_core`, the
+  probe's area, among the failed entries, 4 of them first by a probe assertion, the rest by a crash; 6 in other
+  areas only; one by rule `cbsig`). First run: 59 killed, 3 patch errors of the
+  harness (the result lines' alignment), the six callback mutations killed by the layout check alone (re-judged
+  with the mutated file restyled), and one survivor, `char**` by value, which the probe did not exercise (only
+  `const char**`): `mlx_abiprobe_chars` now does, and the mutation is killed (SIGSEGV in `unit_core`). Second run:
+  one survivor, `record_mlx_error`'s `data` without `value`: the handler ignores `data`, so no test can see it (an
+  equivalent mutant). It got the check that kills it: **rule `cbsig`** in `check_rules.py`, the four callbacks'
+  dummies against C's passing modes, with three plants (`K/plant_cbsig_*.log`); the third run killed it in the
+  static gate.
+- **Exit items:** the generated layer byte-identical to Phase 0 (27 files, `K/p0/gen_sha256.txt`); the probe passes
+  in Debug and Release on the Metal build and on the CPU-only MLX (99 checks); every mutation fails the gate; Debug
+  and Release from scratch, 0 warnings, fast gate 9 of 9 (CTest 12.52 and 10.47 s, bounds 15.68 and 13.75 s);
+  check counts identical to Phase 0 except `core`: +101 per device and in `all` (decision 9's 2, the `abi`
+  sub-suite's 99), `K/p4/counts_release.txt`; `check_tree.sh` passed; the tester formatted; Python at 3.7.
+- **Ruling R1 occurrences:** the Release gate of the pre-mutation build (`K/p4/release_attempt1.gate`) and of the
+  exit build (`K/p4/release_exit_attempt1.gate`) failed at the lifecycle assertion alone; each rerun passed. Five in
+  all so far.
+- **Decisions taken under delegation:**
+  - (P4-a) The layout facts are generated into the probe module (from the generator's model), and C's by hand: a
+    struct mlx-c adds fails the probe until the C table lists it.
+  - (P4-b) Mutations are judged on a fresh copy built from scratch, which satisfies "the object, the archive and
+    the executable deleted before each build"; a mutated Fortran file is restyled first, so that the layout check
+    cannot be the killer.
+  - (P4-c) The equivalent mutant is killed by a static rule (`cbsig`), the only check that can see a passing mode
+    of an ignored dummy.
+  - (P4-d) Field sizes joined the layout check (a `has_value` flag mutated to a 4-byte logical keeps the size and
+    offsets of the pair; its field size does not).
+- **What it means, in short:** the generated layer is now checked for ABI, not just names: every way it passes an
+  argument or returns a result meets C compiled by mlx-c's compiler, and every line of its mapping table, mutated,
+  breaks the build or the gate.
+
+### Phase 5, 2026-11-25 22:56 to 23:05, M5 Ultra, base `0071f5a` (working tree)
+
+- **Files changed:** `doc/history/2026-11.md`, `doc/implementation_notes/planned/mlxf_roadmap.md` (rank 2b),
+  `doc/implementation_notes/README.md`, `doc/collaboration/apple_questions.md` (questions 27 and 28, decision 24),
+  `doc/architecture_principles.md` (the new rules, the three sessions), `CONTRIBUTING.md` (rule `cbsig` named),
+  `doc/implementation_notes/completed/mlxf_release_hardening_report.md` (new), this note.
+- **Exit items:**
+  - The release gate in `--allow-dirty` mode passed (`K/p5/gate_dirty.log`, `K/p5/release_gate_0071f5a-dirty.log`):
+    the snapshot of the working tree (231 files), mlx-c 0.8.0 resolved by CMake's search and pinned, Debug and
+    Release with no skip and the GPU opened, the consumer and the three examples on the GPU in both
+    (`--require-gpu`; every row of the table holds), the mlx-c and compiler refusals, the embedding check, no side
+    effect; 63.38 s real (*measured*, load 1.8 to 4.7) against the bound 123.15 s.
+  - Release mode on the base commit (`K/p5/gate_release_base.log`, `K/p5/release_gate_0071f5a.log`; the scratch
+    clone at `0071f5a` with the final gate as its untracked `scripts/release_gate_hardened.sh`, listed as left out):
+    passed on its second run; the first (`K/p5/gate_release_base_attempt1.log`, 58.63 s, started at load 4.1)
+    failed at the K8 lifecycle assertion alone (ruling R1, the sixth occurrence). The base's own install check and
+    embedding check ran there, the new gate calling them in a form they accept.
+  - The report exists; `git status` shows only paths of the file table, the new files named in the report's
+    commit message.
+- **What it means, in short:** the release criterion's first step is met by the run; its second, the tagged run,
+  waits for the maintainer's commit and tag.

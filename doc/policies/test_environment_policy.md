@@ -29,6 +29,15 @@ One test executable, `mlxf_test_exec`, built by every compile script unless it i
 `MLXF_CTEST_BUDGET` in `test/CMakeLists.txt` must equal the registered count or configuration fails; it
 changes only with an owner decision or a plan that names the new entry, recorded in `doc/history/`.
 
+`unit_core`'s sub-suite `abi` is the ABI probe of the generated layer: the interfaces of `src/test/mlxf_abi_probe.h`
+are generated with the library's mapping table (`scripts/gen_mlxc_bindings.py --probe`, into `build/gen_test/`) and
+its echo functions are compiled by Apple's clang (`xcrun clang`, the compiler of mlx-c; CMake's C compiler is GCC)
+into an object of `mlxf_test_exec`. Each of the 35 classes of argument and result is echoed at least once; `int`,
+`bool`, `float`, `double` and the three optional pairs both in a register and on the stack; the size, alignment,
+field offsets and field sizes of the 36 structs and the values of the 23 enumerators are compared with C's by name.
+It calls no MLX function and runs in every session. A struct or enumerator that mlx-c adds fails it until the C
+tables of `src/test/mlxf_abi_probe.c` list it.
+
 The current process budget is **9**: areas `core`, `array`, `ops`, `linalg`, `fft`, `compile`, `fast`,
 `kernels`, plus the `object_contracts` guard group (twenty-one members, including invalid FFT normalizations, dtypes
 outside `MLX_DTYPES`, a Metal kernel spec without outputs, an empty kernel applied, segments of the wrong shape, a
@@ -159,16 +168,29 @@ by the owner; running either accuracy suite is correctness validation, not a thr
 - MLX runs an operation on the CPU device or the GPU device (Metal). A test of an operation runs on
   every device present; `mlxf_test_exec device=cpu|gpu|all` (default `all`) restricts it. A tester takes
   its devices from `test_devices(devs)` of `mlxf_test_utils`.
-- Whether a GPU is present is `mlx_device_count(MLX_DEVICES%gpu) > 0`, not `mlx_metal_is_available`, which only says
-  that the Metal backend was compiled in. In a headless, sandboxed or virtual session the count is 0, and a
-  Metal build of MLX then cannot allocate arrays on either device: tests that need a device report a skip,
-  the memory limits (the Metal allocator's) included. A test asserts no more about an absent device than
-  that the call returns: MLX 0.32 accepts an absent GPU as the default device and fails only at the first
-  allocation. The headless gate is reproduced on a Mac with
+- Three sessions, one classification (`mlxf_test_utils`: `test_devices`, `gpu_present`, `cpu_only_mlx`,
+  `gpu_check_runs`; the guard gate of `mlxf_test_exec` and the outside programs of `test/consumer/` follow it):
+
+  | `mlx_metal_is_available()` | GPU count | session | tests | under `MLXF_REQUIRE_GPU` |
+  | --- | --- | --- | --- | --- |
+  | true | > 0 | Metal with a device | the devices `device=` asks for | as they are |
+  | true | 0 | Metal without a device (headless, sandboxed, virtual) | skip: `SKIP: no GPU device in this session` | failure |
+  | false | 0 | CPU-only MLX (`scripts/build_mlx_deps.sh --cpu-only`) | the CPU device; a check that needs the GPU or Metal's allocator skips with `SKIP: GPU-only check on a CPU-only MLX build` | failure |
+
+  A GPU is present when `mlx_device_count(MLX_DEVICES%gpu) > 0`; `mlx_metal_is_available()` says only that the
+  Metal backend was compiled in. A Metal build of MLX without a GPU cannot allocate arrays on either device, the
+  memory limits (the Metal allocator's) included; a CPU-only MLX allocates on the heap. A test asserts no more
+  about an absent device than that the call returns: MLX 0.32 accepts an absent GPU as the default device and
+  fails only at the first allocation. Test code asks for the GPU only through `mlxf_test_utils` (rule
+  `devquery`; the device tester, which tests the count itself, is its ledger). Each `GUARDS` member names the
+  device its fixture needs (`cpu` or `gpu`); on a CPU-only MLX the `gpu` members skip with the same message. The
+  GPU-only checks of the fast gate on a CPU-only MLX: the GPU's device information (`unit_core`, `device`), the
+  recovery gate (`error`: the maximum buffer is the Metal allocator's) and `guard_float64_on_gpu`; the Metal
+  kernels' GPU tests run only on the GPU anyway. The headless gate is reproduced on a Mac with
   `sandbox-exec -p "(version 1)(allow default)(deny iokit-open)"` around a build configured with
-  `-DMLXF_REQUIRE_GPU=OFF`.
+  `-DMLXF_REQUIRE_GPU=OFF`; the CPU-only gate with `scripts/ci_cpu_job.sh`.
 - CMake option `MLXF_REQUIRE_GPU` (default ON on macOS arm64, OFF in the CI), a compile definition of the
-  test executable, turns that skip into a failure, so a development Mac can never pass the gate without
+  test executable, turns those skips into failures, so a development Mac can never pass the gate without
   running the device tests.
 - GPU results are compared with tolerances, never bytes: the GPU computes in float32 and complex64 only,
   and atomic reductions sum in an order that changes from run to run. Identity tests (bytes) are for

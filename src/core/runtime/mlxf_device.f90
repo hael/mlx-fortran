@@ -1,6 +1,7 @@
-!@descr: devices and initialisation: the device count, the default device, device information, the default stream
+!@descr: devices and initialisation: the backend, the device count, the default device, device information, the default stream
 ! The first public call installs the error handler. A GPU is present when MLX can open one; without one a
-! Metal build of MLX cannot allocate on either device, and the first operation that would allocate stops.
+! Metal build of MLX cannot allocate on either device, and the first operation that would allocate stops. A
+! CPU-only build of MLX (no Metal backend) has no GPU and allocates on the CPU device.
 module mlxf_device
 use, intrinsic :: iso_c_binding,   only: c_bool, c_int, c_null_char, c_ptr, c_size_t
 use, intrinsic :: iso_fortran_env, only: int64
@@ -15,7 +16,7 @@ use mlxf_libc,     only: c_string_copy
 use mlxf_error,    only: mlxf_check, mlxf_fail, mlxf_report, mlxf_install_error_handler, mlxf_guard_thread
 implicit none
 
-public :: mlx_device_count, mlx_default_device, mlx_set_default_device, mlx_device_info_size
+public :: mlx_metal_is_available, mlx_device_count, mlx_default_device, mlx_set_default_device, mlx_device_info_size
 public :: mlx_device_info_string, mlxf_enter, mlxf_require_device, mlxf_default_stream, mlxf_synchronize_device
 private
 
@@ -50,6 +51,16 @@ contains
         if( init_state == WITHOUT_DEVICE ) call mlxf_fail(proc, 'no Metal device can be opened in this session '//&
             &'(headless, sandboxed or virtual); a Metal build of MLX cannot allocate on either device')
     end subroutine mlxf_require_device
+
+    ! whether MLX was built with its Metal backend; true on a Metal build also when no GPU opens in this session
+    ! (mlx_device_count says whether one does), false on a CPU-only build, which allocates on the CPU device
+    logical function mlx_metal_is_available()
+        logical(c_bool) :: metal
+        call mlxf_enter('mlx_metal_is_available')
+        metal = .false.
+        call mlxf_check(mlxc_metal_is_available(metal), 'mlx_metal_is_available')
+        mlx_metal_is_available = logical(metal)
+    end function mlx_metal_is_available
 
     ! the number of devices of a type (MLX_DEVICES%cpu or %gpu) MLX can open here
     integer function mlx_device_count( device_type )

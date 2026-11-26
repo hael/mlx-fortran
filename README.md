@@ -1,14 +1,56 @@
 # mlx-fortran
 
-A modern Fortran interface to [MLX](https://github.com/ml-explore/mlx), Apple's array framework for the
-unified CPU/GPU memory of Apple silicon, built on MLX's C API
-[mlx-c](https://github.com/ml-explore/mlx-c).
+A Fortran interface to [MLX](https://github.com/ml-explore/mlx), Apple's array framework for the unified memory of
+Apple silicon, through [mlx-c](https://github.com/ml-explore/mlx-c), in Fortran's view (column-major, 1-based). The
+arithmetic is MLX's: integer `/` is true division, `matmul` of integers stops, scalars are weak ([quickstart](doc/quickstart.md)).
+
+<!-- example: test/consumer/mlxf_example_first.f90 -->
+```fortran
+!@descr: the README's first program: two arrays, exp(-matmul(a, b)) on MLX's default device, copied back with a status
+program mlxf_example_first
+use, intrinsic :: iso_fortran_env, only: real32
+use mlxf, only: mlx_array, mlx_from, mlx_to_alloc, matmul, exp, mlx_last_error, mlxf_runtime_description
+implicit none
+type(mlx_array)           :: a, b, c
+real(real32)              :: x(2, 3), y(3, 2)
+real(real32), allocatable :: z(:,:)
+integer                   :: status
+x = reshape([1., 2., 3., 4., 5., 6.], shape(x)) / 10.
+y = 0.5
+a = mlx_from(x)                         ! a copy in MLX, still a (2, 3) array in Fortran's view
+b = mlx_from(y)
+c = exp(-matmul(a, b))                  ! a lazy graph: nothing is computed yet
+call mlx_to_alloc(z, c, status=status)  ! evaluates on the default device, then copies into z
+if( status /= 0 )then
+    write(*,'(a)') 'mlxf_example_first: '//mlx_last_error()
+    error stop 1
+endif
+write(*,'(a)') mlxf_runtime_description()
+write(*,'(2f10.6)') transpose(z)
+! MLX's GPU may multiply float32 matrices at reduced precision (TF32) unless MLX_ENABLE_TF32=0
+if( .not. all(abs(z - exp(-matmul(x, y))) <= 1.e-3) ) error stop 'mlxf_example_first: wrong values'
+end program mlxf_example_first
+```
+
+Build and install it (GFortran 14+, CMake 3.25+: `brew install gcc cmake mlx-c`), then compile that program:
+
+```bash
+cmake -S . -B build_release -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=OFF -DFORTLS=OFF
+cmake --build build_release --parallel
+cmake --install build_release --prefix "$PWD/install"
+cmake -S test/consumer -B build_examples -Dmlxf_DIR="$PWD/install/lib/cmake/mlxf"
+cmake --build build_examples --target mlxf_example_first && build_examples/mlxf_example_first
+```
+
+Next: [quickstart](doc/quickstart.md), [installed use](doc/how2s/how2use_from_simple.md), [consumer](test/consumer/mlxf_consumer.f90), [contributing](CONTRIBUTING.md).
 
 **Status: milestone 1 closed; the library is growing toward parity with mlx-c.** mlx-c 0.8.0 is bound at the
 C level, generated at build time from the headers that are linked: 673 interfaces, and 7 names skipped with a
 reason (variadic functions and structs that are not handles), checked against an independent list of the
-headers' 680 names. That check is name coverage, not ABI verification: an interface is proven against the C
-library only where a test calls it. On top of it, the Fortran layer has the
+headers' 680 names. That check is name coverage; the ABI is checked by an echo probe, C functions compiled by
+Apple's clang that return what they receive, for every class of argument and result the generator maps (in a
+register and on the stack), with the layout of every struct and the value of every enumerator (`unit_core`, sub-suite
+`abi`; each class's line of the mapping table, mutated, fails the gate). On top of it, the Fortran layer has the
 `mlx_array` type and its lifetime, data movement, evaluation and errors, plus the first operations: elementwise
 arithmetic and comparisons, shape and indexing operations, reductions and scans, batched `matmul`, 1D and 2D
 FFTs, and graph compilation of Fortran callbacks. That set covers the first SIMPLE-shaped pipeline (scoring
@@ -34,17 +76,6 @@ and handles whose lifetime the compiler manages. It is developed first for
 [SIMPLE](https://github.com/hael/SIMPLE), the cryo-EM package, and its first kernels are SIMPLE's, but it
 does not depend on SIMPLE.
 
-```fortran
-use mlxf, only: mlx_array, mlx_from, mlx_to_alloc, matmul, exp
-type(mlx_array) :: a, b, c
-real, allocatable :: x(:,:), y(:,:), z(:,:)
-! ... fill x(m,k) and y(k,n)
-a = mlx_from(x)              ! an MLX array holding a copy of the Fortran (m,k) array
-b = mlx_from(y)
-c = exp(-matmul(a, b))       ! a lazy graph on the default device (the GPU)
-call mlx_to_alloc(z, c)      ! evaluates, allocates z(m,n) and copies
-```
-
 ## The Fortran view
 
 - **Memory order and indices.** Shapes, dimensions, indices and positions are Fortran's: column-major and
@@ -64,8 +95,9 @@ call mlx_to_alloc(z, c)      ! evaluates, allocates z(m,n) and copies
 - **Errors.** An error MLX reports while a graph is built is a program error and stops with
   `error stop 86`. The procedures that run a graph or move data take an optional `status`, and
   `mlx_last_error()` has MLX's message. MLX's exceptions never cross into Fortran.
-- **Kinds and devices.** Transfers take `real32`, `real64`, `complex64`, `int32` and `int64`. The default
-  device is the GPU (`MLX_DEVICES%gpu`); float64 runs only on the CPU, as in MLX.
+- **Kinds and devices.** Transfers take eight kinds: `real32`, `real64`, `complex(real32)`, `int8`, `int16`,
+  `int32`, `int64` and `logical(c_bool)`. The default device is the GPU (`MLX_DEVICES%gpu`); float64 runs only
+  on the CPU, as in MLX. A CPU-only MLX (`mlx_metal_is_available()` false) runs on the CPU device alone.
 
 The full contract is [`doc/policies/binding_contract_policy.md`](doc/policies/binding_contract_policy.md).
 
@@ -89,7 +121,7 @@ The full contract is [`doc/policies/binding_contract_policy.md`](doc/policies/bi
 | Fourier transforms | `mlx_fft`, `mlx_ifft`, `mlx_rfft`, `mlx_irfft`, `mlx_fft2`, `mlx_ifft2`, `mlx_fftn`, `mlx_ifftn`, `mlx_rfft2`, `mlx_irfft2`, `mlx_rfftn`, `mlx_irfftn` (the half-size dimension is the first listed), `mlx_fftshift`, `mlx_ifftshift`, `mlx_fftfreq`, `mlx_rfftfreq`, `MLX_FFT_NORMS` |
 | compilation | `mlx_function` (from a Fortran callback), `mlx_compile` |
 | custom kernels | `mlx_metal_kernel` (a Metal kernel from source text, GPU only), `mlx_metal_kernel_spec` |
-| devices and memory | `mlx_device_count`, `mlx_default_device`, `mlx_set_default_device`, `mlx_device_info_*`, `mlx_active_memory`, `mlx_peak_memory`, `mlx_reset_peak_memory`, `mlx_cache_memory`, `mlx_clear_cache`, `mlx_set_memory_limit`, `mlx_set_cache_limit` |
+| devices and memory | `mlx_metal_is_available`, `mlx_device_count`, `mlx_default_device`, `mlx_set_default_device`, `mlx_device_info_*`, `mlx_active_memory`, `mlx_peak_memory`, `mlx_reset_peak_memory`, `mlx_cache_memory`, `mlx_clear_cache`, `mlx_set_memory_limit`, `mlx_set_cache_limit` |
 | runtime | `mlx_last_error`, `mlx_live_count`, `mlx_runtime_version`, `mlxf_version_string`, `mlxf_build_description`, `mlxf_runtime_description`, `MLX_DTYPES`, `MLX_DEVICES`, `MLXF_HARD_ERROR_STATUS` |
 
 Fortran intrinsics that the library extends (`matmul`, `sum`, `exp`, ...) keep their names. Everything that
@@ -97,7 +129,8 @@ is MLX-specific is `mlx_<x>`.
 
 ## Building
 
-Requirements: macOS on Apple silicon, CMake 3.25+, GFortran 14+ (`brew install gcc cmake`), and mlx-c as a
+Requirements: macOS on Apple silicon, CMake 3.25+, GFortran 14+ (`brew install gcc cmake`; tested with 16.2.0,
+and 14.4.0 for the library and its installed consumer), and mlx-c as a
 shared library, either `brew install mlx-c` (no Xcode needed) or the pinned source build
 `scripts/build_mlx_deps.sh` (MLX v0.32.4 and mlx-c v0.8.0 from local clones; needs Xcode's Metal toolchain).
 
@@ -115,10 +148,13 @@ By default (`FORTLS=ON`) a build also installs the Fortran language server fortl
 and registers its Claude Code plugin for this checkout; offline it only warns. Downstream and offline builds
 can pass `-DFORTLS=OFF`.
 
-The CI on GitHub's macOS runners builds both configurations and runs the source checks, but the runners have
-no Metal device, so the device tests skip there. A release needs `scripts/release_gate.sh` on an Apple-silicon
-Mac with a GPU: Debug and Release from scratch with `MLXF_REQUIRE_GPU=ON`, the fast gate on each, and a
-failure on any skip; its log names the commit, the toolchain, MLX and the device.
+The CI on GitHub's macOS arm64 runners, which open no Metal device, runs the fast gate and the installed-consumer
+check against MLX built without Metal (`scripts/build_mlx_deps.sh --cpu-only`, cached), where the device tests run
+on the CPU, in Debug and Release with GNU Fortran 15 and 16 (`scripts/ci_cpu_job.sh`), and builds the tree against
+Homebrew's Metal MLX, whose device tests skip there. A release needs `scripts/release_gate.sh` on an Apple-silicon
+Mac with a GPU: a snapshot of the commit (`git archive`), Debug and Release from scratch with
+`MLXF_REQUIRE_GPU=ON`, the fast gate and the installed-consumer check on each, the embedding check, and a
+failure on any skip or editor side effect; its log names the commit, the toolchain, mlx-c and the device.
 
 ## Layout
 

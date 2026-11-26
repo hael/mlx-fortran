@@ -217,7 +217,8 @@ the style of the others and checked where reading can check them.
   areas to each other.
 - **New here: devices.** Every operation test runs on every device present; GPU results are compared with
   tolerances; `MLXF_REQUIRE_GPU` (a compile definition of the test executable, not an environment variable)
-  makes a missing GPU a failure.
+  makes a missing GPU a failure. Three sessions are told apart (Metal with a GPU, Metal without one, a CPU-only
+  MLX, on which the device tests run on the CPU), so that a runner without Metal still runs them.
 
 ## 8. The static gate
 
@@ -228,7 +229,11 @@ the style of the others and checked where reading can check them.
 - **Adopt (XEMA): every new rule a reading can check gets its check, with a planted violation shown to fail**
   (SIMPLE's plan standard says the same). Phase 1 added `arity`, `ctorcall` and, under `reexport`, the user
   module naming no `mlxc_` entity; `check_test_registry.py` also holds the guard groups to their CTest
-  entries and the named-only sub-suites to their rows. The milestone-1 follow-ups added `ctorexpr`.
+  entries and the named-only sub-suites to their rows. The milestone-1 follow-ups added `ctorexpr`. Release
+  hardening added `fortlsoff` (no editor side effects downstream), `devquery` (test code asks for the GPU only
+  through the test library's three-session classification) and `docex` (the documents' Fortran is a verbatim run
+  of a program the install check runs; every row of the quickstart's table has its evidence) and `cbsig` (the
+  callbacks C++ calls keep C's passing modes), and the registry check requires each guard member's device.
 
 ## 9. Documentation and records
 

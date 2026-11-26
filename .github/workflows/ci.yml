@@ -1,13 +1,66 @@
-name: Build-only CI (macOS, no Metal device)
+name: CI (macOS arm64; CPU-only MLX tests, Metal build-only)
 
 on:
   push:
   pull_request:
   workflow_dispatch:
 
+env:
+  # the pinned pair (scripts/build_mlx_deps.sh); a new tag is a new cache key
+  MLX_REF: v0.32.4
+  MLXC_REF: v0.8.0
+
 jobs:
-  build:
-    name: ${{ matrix.build }} build (device tests skip)
+  # The hosted runners are virtual machines and open no Metal device, where a Metal build of MLX cannot allocate on
+  # either device. MLX built from source without Metal allocates on the CPU device, so these jobs run every device
+  # test on the CPU (the GPU-only checks skip) and the installed-consumer check. scripts/ci_cpu_job.sh is the whole
+  # job; the steps before it only provide the toolchain and the cached CPU-only MLX.
+  cpu:
+    name: CPU-only MLX, ${{ matrix.build }}, ${{ matrix.compiler }}
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        build: [Debug, Release]
+        compiler: [gfortran-15, gfortran-16]
+        include:
+          - compiler: gfortran-15
+            formula: gcc@15
+          - compiler: gfortran-16
+            formula: gcc
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install dependencies
+        run: |
+          brew install ${{ matrix.formula }} cmake pkgconf
+          brew list --versions ${{ matrix.formula }} cmake pkgconf
+          ${{ matrix.compiler }} --version | head -n 1
+
+      - name: Cache the CPU-only MLX
+        id: mlx-cache
+        uses: actions/cache@v4
+        with:
+          path: .deps/install-cpu
+          key: mlx-cpu-${{ runner.os }}-${{ runner.arch }}-${{ env.ImageOS }}-${{ env.ImageVersion }}-${{ env.MLX_REF }}-${{ env.MLXC_REF }}-${{ hashFiles('scripts/build_mlx_deps.sh') }}
+
+      - name: Clone MLX and mlx-c at the pinned tags
+        if: steps.mlx-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch "$MLX_REF" https://github.com/ml-explore/mlx.git "$RUNNER_TEMP/mlx"
+          git clone --depth 1 --branch "$MLXC_REF" https://github.com/ml-explore/mlx-c.git "$RUNNER_TEMP/mlx-c"
+
+      - name: CPU-only job (scripts/ci_cpu_job.sh)
+        env:
+          MLX_SRC: ${{ runner.temp }}/mlx
+          MLXC_SRC: ${{ runner.temp }}/mlx-c
+        run: scripts/ci_cpu_job.sh ${{ matrix.build }} ${{ matrix.compiler }}
+
+  # Homebrew's mlx is a Metal build: here it only builds, with warnings as errors, and runs the source checks; its
+  # device tests skip. Neither these jobs nor the CPU-only ones gate a release: that is scripts/release_gate.sh on
+  # an Apple-silicon Mac, which fails on any skip and runs the installed consumer on the GPU.
+  metal-build:
+    name: Metal build-only, ${{ matrix.build }}
     runs-on: macos-latest
     strategy:
       fail-fast: false
@@ -21,13 +74,9 @@ jobs:
           brew install gcc cmake mlx-c
           brew list --versions gcc cmake mlx mlx-c
 
-      # The runners are virtual machines and open no Metal device; a Metal build of MLX then cannot allocate
-      # arrays on either device. The gate's tests that need a device report a skip (MLXF_REQUIRE_GPU=OFF); the
-      # build, with warnings as errors, and the source checks run. This job does not gate a release: that is
-      # scripts/release_gate.sh on an Apple-silicon Mac, which fails on any skip.
       - name: Build, fast gate, install
         env:
-          MLXF_CMAKE_ARGS: -DMLXF_REQUIRE_GPU=OFF -DMLXF_WERROR=ON
+          MLXF_CMAKE_ARGS: -DMLXF_REQUIRE_GPU=OFF -DMLXF_WERROR=ON -DFORTLS=OFF
         run: |
           if [ "${{ matrix.build }}" = debug ]; then ./compile_debug.sh; else ./compile_clean.sh; fi
 
@@ -39,8 +88,8 @@ jobs:
           [ -f "$T" ] && nskip=$(grep -c 'SKIP' "$T" || true)
           grep -h -m 1 -E 'GPU devices' "$T" || true
           {
-            echo "### ${{ matrix.build }}: build-only run"
+            echo "### ${{ matrix.build }}: Metal build-only run"
             echo ""
             echo "Tests that reported a skip for lack of a Metal device: **${nskip}**."
-            echo "A green run here does not cover the device tests; releases need scripts/release_gate.sh on Apple silicon."
+            echo "The CPU-only jobs run the device tests on the CPU; releases need scripts/release_gate.sh on Apple silicon."
           } >> "$GITHUB_STEP_SUMMARY"

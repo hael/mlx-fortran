@@ -252,10 +252,12 @@ written, the skill `mlxf-modern-fortran`.
 
 ## 7. Devices, threads, precision
 
-- A GPU is present when `mlx_device_count(MLX_DEVICES%gpu) > 0` (not `mlx_metal_is_available`, which says
-  only that the backend was compiled in). The default device is MLX's (the GPU when present);
-  `mlx_set_default_device(MLX_DEVICES%cpu)` or `(MLX_DEVICES%gpu)` changes it. Without a GPU a Metal build of MLX cannot allocate on
-  either device: the first operation that would allocate stops saying so. Explicit streams are not offered.
+- A GPU is present when `mlx_device_count(MLX_DEVICES%gpu) > 0`; `mlx_metal_is_available()` says whether MLX
+  was built with its Metal backend. Three sessions follow: Metal with a GPU (both devices); Metal without one
+  (headless, sandboxed, virtual), where a Metal build of MLX cannot allocate on either device and the first
+  operation that would allocate stops saying so; and a CPU-only MLX (`MLX_BUILD_METAL=OFF`), which has no GPU and
+  allocates on the CPU device (heap memory; no maximum buffer length, no Metal kernels). The default device is
+  MLX's (the GPU when present); `mlx_set_default_device(MLX_DEVICES%cpu)` or `(MLX_DEVICES%gpu)` changes it. Explicit streams are not offered.
   One choice of stream is the library's own: the factorisations, inverses, determinants, eigenvalues and
   solvers of section 10, which MLX implements on the CPU only, always run on the CPU's default stream.
 - **One submitting thread.** Graphs are built and evaluated from one thread. Every public procedure opens
@@ -726,7 +728,8 @@ graph form of the same computation stays as the CPU path and as the reference.
   With `ensure_row_contiguous = .false.` a strided input reaches the source as its buffer, in storage order:
   the source then goes through `elem_to_loc(elem, a_shape, a_strides, a_ndim)`.
 - **Errors.** `apply` is a checked procedure. It returns a status, with `outputs` unallocated and MLX usable,
-  when the default device is the CPU ("[metal_kernel] Only supports the GPU"), when the number of inputs is
+  when the default device is the CPU ("[metal_kernel] Only supports the GPU"; on a CPU-only MLX "[metal_kernel]
+  No Metal back-end"), when the number of inputs is
   not the number of input names, when an input is empty or stale ("mlx_metal_kernel apply: an input array is
   empty or stale"), and when an output is float64. The source
   is compiled at the first evaluation of a result, so a source that does not compile, and a threadgroup above

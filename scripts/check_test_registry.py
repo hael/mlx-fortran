@@ -10,7 +10,8 @@ Three lists must agree, or a tester never runs and nothing reports it:
     suite= names them) is the name of a row.
 And the guard groups agree: every `expect_aborts <group>` entry of test/CMakeLists.txt names a group of the
 registry's GUARDS table, every group of the table has such an entry, and every member of the table has its
-case() branch in run_guard (and no branch lacks a member). And the benchmarks agree: every name of the registry's
+case() branch in run_guard (and no branch lacks a member), and every member names the device its fixture
+needs (guard_member('<name>', '<group>', 'cpu'|'gpu')). And the benchmarks agree: every name of the registry's
 BENCHES table has its case() branch in run_bench, and no branch lacks a name.
 usage: scripts/check_test_registry.py [ROOT] [--verbose]
 exit status: 0 consistent, 1 a mismatch
@@ -27,7 +28,9 @@ TABLE_RE = re.compile(r"AREAS\s*\(\s*\d+\s*\)\s*=\s*\[[^\]]*::([^\]]*)\]", re.IG
 CASE_RE = re.compile(r"^\s*case\s*\(\s*'(\w+)'\s*\)", re.IGNORECASE)
 ROW_RE = re.compile(r"call\s+run_suite\s*\(\s*'([^']+)'\s*,\s*(\w+)", re.IGNORECASE)
 ENTRY_DEF_RE = re.compile(r"^\s*(?:module\s+)?subroutine\s+(run_all_\w+_tests)\b", re.IGNORECASE)
-GUARD_RE = re.compile(r"guard_member\(\s*'(\w+)'\s*,\s*'(\w+)'\s*\)", re.IGNORECASE)
+# a member, its group and the device its fixture needs (cpu or gpu)
+GUARD_RE = re.compile(r"guard_member\(\s*'(\w+)'\s*,\s*'(\w+)'\s*,\s*'(?:cpu|gpu)'\s*\)", re.IGNORECASE)
+GUARD_ANY_RE = re.compile(r"guard_member\(\s*'", re.IGNORECASE)
 CMAKE_GUARD_RE = re.compile(r"expect_aborts\s+(\w+)", re.IGNORECASE)
 
 
@@ -69,6 +72,9 @@ def main():
         for name, entry in ROW_RE.findall(line):
             rows.append((area, name, entry.lower()))
     guards = GUARD_RE.findall("".join(reg))
+    if len(guards) != len(GUARD_ANY_RE.findall("".join(reg))):
+        problems.append("a GUARDS row is not guard_member('<name>', '<group>', 'cpu'|'gpu'): every member names "
+                        "the device its fixture needs")
     guard_groups = sorted(set(g for _, g in guards))
     cmake_groups = sorted(set(CMAKE_GUARD_RE.findall(re.sub(r"#[^\n]*", "", cmake_text))))
     if guard_groups != cmake_groups:
