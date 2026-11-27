@@ -80,8 +80,8 @@ plan, written to `doc/how2s/how2write_agent_plans.md`.
 | 2g | **User-facing hardening from Claude's and Codex's prospective-user reviews**: integer statistics, failed-save preservation, explicit index/lifetime safeguards, numerical boundaries and user guidance | [`mlxf_user_hardening.md`](mlxf_user_hardening.md), C1–C14; local hardening delivered on the M5, second-architecture validation closed on the M2 on 2026-11-27 ([report](../completed/mlxf_user_hardening_report.md)); benchmark correctness follow-up validated. C7 remains deferred. RB1 (empty host-array constructors) closed and RB2 (a tagged gate) withdrawn on 2026-11-27 | rank 2f (one run at a time on the M5; 2d→2e→2f keep decision 16's order); decision 17. Rank 4 waits for its Phases 0 to 2 | the plan's local P1 actions and release gates pass; deferred API changes and open upstream issues remain explicit |
 | 2h | **Linux, CPU only, on dell2** (Hans, 2026-11-26, decision 19): MLX and mlx-c built on Linux, the library and its suite on the CPU device, the install checks, a Linux CI job, and the inventory of Apple assumptions the CUDA step meets (delivered in the working tree on dell2, 2026-11-26, by run `mlxf_linux`, no ruling: [report](../completed/mlxf_linux_report.md) with the CUDA inventory; every unit area passes on Linux's CPU device in Debug and Release, five GPU-only skips, no Linux-only one; three portability fixes, one of them a real bug of file checks on Linux; awaits the controller's macOS gates on the M5 and the maintainer's read) | [`mlxf_linux.md`](mlxf_linux.md) (run `mlxf_linux`, on dell2) | nothing on the M5: it runs beside the K runs; `liblapacke-dev` on dell2 (its decision 3) | its plan's acceptance; the macOS gates unchanged when the result is fetched |
 | 3 | **The rest of parity** (the rest of Phase 4, the random half of Phase 5, Phase 6, the other `fast` functions, Phases 8 and 9) (delivered in the working tree, 2026-11-26, by run `mlxf_parity_rest`: [report](../completed/mlxf_mlxc_parity_report.md), section 10; the ledger has no pending line; rulings R5 and R6 were taken in the session under the maintainer's go, open to his review; the API of Phases 5 to 8 was not read at a hold and awaits his read) | the parity plan | rank 1b and rank 2b (Hans, 2026-11-25: release hardening before parity's remaining phases); after rank 2c (Hans, 2026-11-25: "Yes, go" on the plan's order: the next kernels and SIMPLE's integration build on the toys' shape) | no `pending` line; the parity report |
-| 4 | **SIMPLE's integration** | a SIMPLE plan, written by SIMPLE's rules | ranks 2d, 2e and 2f (decision 16) and Phases 0 to 2 of rank 2g (decision 17), then rank 2 for the family concerned | not started here |
-| 5 | **CUDA on NVIDIA Blackwell** (Hans, 2026-11-26, decision 19): MLX's CUDA backend under mlx-fortran, the suite on the CUDA device, a wrapper of mlx-c's CUDA kernel next to the Metal one, CUDA twins of the kept fused kernels judged by the 30 % rule against their graph forms | a plan written from rank 2h's inventory | rank 2h; access to one of the three Blackwell machines at Hans's work | its plan's acceptance |
+| 4 | **SIMPLE's integration**, designed and measured on the Mac with the seam's bytes per part recorded (decision 20) | a SIMPLE plan, written by SIMPLE's rules | ranks 2d, 2e and 2f (decision 16) and Phases 0 to 2 of rank 2g (decision 17), then rank 2 for the family concerned | not started here |
+| 5 | **CUDA on NVIDIA Blackwell** (Hans, 2026-11-26, decision 19; split 2026-11-27, decision 20): MLX's CUDA backend under mlx-fortran, the suite on the CUDA device, one kernel type for Metal and CUDA sources, CUDA twins of the kept fused kernels judged by the 30 % rule against their graph forms, and the measurements rank 4 needs from a PCIe card (transfer costs, parts sharing one card) | [`mlxf_cuda.md`](mlxf_cuda.md) (ruled 2026-11-27: the kernel type `mlx_custom_kernel`, the toolkit chosen at work): Part A `mlxf_cuda_prep` on dell2 now, Part B `mlxf_cuda_twins` on dell2 after K7, Part C `mlxf_cuda_blackwell` on a Blackwell machine at work with Claude Code there | rank 2h; dell2's CUDA 12.9 toolkit and cuDNN (installed 2026-11-27); for Part C, Hans at a Blackwell machine | its plan's acceptance |
 
 **Rank 0b: the refactoring.** Milestone 1's kernels model a GPU workspace beside SIMPLE's calculator, under
 their own names. The refactoring turns them into a miniature of SIMPLE's `polarft_calc`, with a driver that
@@ -325,6 +325,26 @@ without a dimension, `mlx_gather` and the `mlx_scatter` family.
       and spec beside the Metal one and changes nothing else; no toy or library code branches on the platform
       outside the kernel's source and the device checks of the tests. Each K run reports what its kept kernels
       would need for a CUDA twin.
+
+20. (2026-11-27, Hans: "1. PCIe. 2. no. 3. Both, but Mac has priority") **SIMPLE's platforms, and what that means
+    for ranks 4 and 5.** The Blackwell machines at work are PCIe cards in x86 hosts; none can be reached from here;
+    SIMPLE will run on both platforms, the Mac first. Hence (recommended, not ruled):
+    - **Rank 4 is designed and measured on the Mac** and does not wait for rank 5. Two rules keep the NVIDIA
+      platform open: the references a part needs stay on the GPU across the calls of an iteration, and each call
+      does a large piece of work; and the integration plan measures, on the Mac, the bytes that cross the seam
+      between SIMPLE and the library per part per iteration. Over PCIe those bytes are the cost, so rank 5's
+      measured seconds per byte predict the NVIDIA price before integration is ported. One GPU state per part
+      process, as all the Mac work assumes; a shared GPU server is a question for discrete cards, answered by rank
+      5's parts measurement if at all.
+    - **Rank 5 in three runs** ([`mlxf_cuda.md`](mlxf_cuda.md), ruled by Hans the same day: option A for the
+      kernel type, the toolkit chosen at work by the plan's rule, every other decision as recommended): what needs no GPU is done on dell2 first (the
+      CUDA build, the backend query, a fourth test session, one kernel type, the memory guard, a session script),
+      the kernels' CUDA sources after K7, and the session at work is bring-up and measurement, with Claude Code on
+      that machine since nothing there is reachable from here.
+    - dell2 holds a compile-only CUDA setup (Hans, 2026-11-27): CUDA 12.9 in `/opt/cuda-12.9` (the runfile's
+      components; its installer needs `libxml2.so.2`, absent on Ubuntu 26.04), cuDNN 9.28 in
+      `/opt/cudnn-9-cuda12`, `gcc-14`, and six declarations of `crt/math_functions.h` given `noexcept (true)` for
+      glibc 2.43.
 
 ## 5. Not planned
 
