@@ -1,8 +1,8 @@
 # Release hardening: the report (run `mlxf_release_hardening`)
 
 Status, 2026-11-25: delivered in the working tree on the M5 Ultra, base `0071f5a`; Phases 0 to 5 done. The
-plan ([`planned/mlxf_release_hardening.md`](../planned/mlxf_release_hardening.md)) moves to `completed/` after
-`scripts/release_gate.sh --require-tag` passes on the maintainer's tag. Every number and log path is in the plan's
+plan ([`mlxf_release_hardening.md`](mlxf_release_hardening.md)) moved to `completed/` on 2026-11-27, closed by the M2
+Ultra's release-mode gate; the tagged run is withdrawn (when to tag a release is the maintainer's decision). Every number and log path is in the plan's
 Progress; `K` there is the run's `scratch/keep/`.
 
 ## 1. What was learned

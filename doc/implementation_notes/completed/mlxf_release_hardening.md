@@ -1,5 +1,9 @@
 # Release hardening: the installed package under test (run `mlxf_release_hardening`, on the M5 Ultra)
 
+Closed 2026-11-27: the release gate passes in `--allow-dirty` mode (M5) and in release mode (M2 Ultra, at `0f8252b`).
+The tagged run this plan ended on is withdrawn: when to tag a release is the maintainer's decision, outside the plans (hans, 2026-11-27). The script keeps its
+`--require-tag` option for that day.
+
 Status, 2026-11-25: planned and ruled (Hans: "Yes, all seven", on decisions 6, 9, 12, 13, 18, 22 and 25 as
 recommended); runs after K2. Decision 13 is the maintainer's to do: `brew install pkgconf gcc@14` before launch. The roadmap's rank 2b (Hans, 2026-11-25: "Yes, plan it"). Base: the commit that holds K2's
 result, the review's release fixes and this note (the maintainer commits them; the run pins the hash in Phase 0

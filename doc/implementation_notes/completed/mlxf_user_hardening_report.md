@@ -1,8 +1,8 @@
 # User-facing hardening: report and M2 validation closeout
 
 Updated 2026-11-27: **second-architecture validation closed** on the M2 Ultra; benchmark correctness follow-up
-validated. Release remains blocked by the empty-host-constructor contract violation and the final clean-tagged
-release gate, listed below. This update closes the missing-architecture item, not those separate conditions.
+validated. The two release conditions listed below were settled the same day: RB1 closed (`mlx_from` refuses
+an array of unknown size, Hans's ruling (a)); RB2 withdrawn (when to tag a release is the maintainer's decision, outside the plans (hans, 2026-11-27)).
 
 Run `mlxf_user_hardening`, 2026-11-26, unattended on the M5 Ultra (macOS 27.2.1, GPU `applegpu_g17d`, GNU Fortran
 16.2.0, MLX 0.32.4, mlx-c 0.8.0), base `ae7d62367facaffc88a2262f8cb9b34ffcd88cfc`, everything in the working tree.
@@ -129,7 +129,7 @@ architectures closes decision 12. The final tagged artifact still needs its own 
    tag; the benchmark fix and documentation remain unstaged. The successful full M2 snapshot predates that fix
    and was not a `--require-tag` run. After RB1 is resolved, the maintainer must commit the intended candidate,
    tag the project version, and obtain a passing `scripts/release_gate.sh --require-tag` from the clean tagged
-   tree. This is the existing [release-hardening criterion](../planned/mlxf_release_hardening.md), not a missing
+   tree. This is the existing [release-hardening criterion](mlxf_release_hardening.md), not a missing
    second-machine test. Git remains read-only for this agent.
 
 No other original C1–C14 local acceptance failure is established by this closeout. The following remain

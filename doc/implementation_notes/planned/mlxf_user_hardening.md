@@ -2,15 +2,15 @@
 
 Status, 2026-11-27: **Phases 0 to 6 delivered; second-architecture validation closed.** The M5 Ultra
 (`applegpu_g17d`, original run under rulings R0 to R2) and M2 Ultra (`applegpu_g14d`, verified follow-up) satisfy
-decision 12's architecture coverage. The C11 benchmark correctness fix is also validated. **Release readiness
-remains open** on RB1 (empty host-array constructors, a compiler/binding-contract defect) and RB2 (the final
-clean tagged release gate), detailed in the closeout entry below. The plan stays in `planned/` to track those
-release conditions, not a missing GPU run. Report: [`completed/mlxf_user_hardening_report.md`](../completed/mlxf_user_hardening_report.md).
+decision 12's architecture coverage. The C11 benchmark correctness fix is also validated. RB1 (empty host-array
+constructors) is closed (2026-11-27, Hans's ruling (a): `mlx_from` refuses an array of unknown size, guard
+`guard_from_unknown_size`); RB2 (a clean tagged release gate) is withdrawn: when to tag a release is the maintainer's decision, outside the plans (hans, 2026-11-27). The plan
+stays in `planned/` for the deferred follow-ups (C7, documented limits, residual test gaps). Report: [`completed/mlxf_user_hardening_report.md`](../completed/mlxf_user_hardening_report.md).
 Originally planned on 2026-11-26 at Hans's request.
 Written against `96c5c5c272af7b688047f841897dfc98e9f30fdf`, with the existing working-tree RoPE test adjustment
 and Claude review. The implementation pins its actual base in Phase 0. Supersedes: no implementation plan;
 this note is the single owner of the two user reviews' follow-up work. Related work:
-[refactoring](mlxf_refactor.md), [release hardening](mlxf_release_hardening.md), and
+[refactoring](mlxf_refactor.md), [release hardening](../completed/mlxf_release_hardening.md), and
 [kernel-form measurements](mlxf_kernel_forms.md). No simultaneous edits to their shared files.
 
 ## 1. Why and consolidated findings
@@ -1189,6 +1189,9 @@ build, and a passing non-gating timing control. This later evidence does not rep
 | --- | --- | --- |
 | RB1 | Compiler / library transfer boundary: empty host-array constructors still violate binding-policy section 4. `mlx_from([integer(int32) ::])` and its real32 counterpart exit 86 on both M2 devices. Named zero-length real32, int32 and int64 arrays pass. A Fortran-only assumed-rank probe returns size/shape `-1` for the constructor at both `-O0` and `-O3` with GNU Fortran 16.2.0; named-array control is `0`. This narrows the Phase 2 report and belongs to the corrupt-empty-descriptor family in compiler issue 6, not an MLX numerical operation. | Prefer a safe transfer-boundary fix with named-array and empty-expression regression cases in Debug/Release on CPU/GPU, preserving empty shape and avoiding a giant allocation request. A temporary unsupported-form restriction instead requires an explicit contract decision and matching user documentation; none has been adopted. |
 | RB2 | Release artifact: HEAD `0f8252b` is untagged, and the benchmark fix/records remain unstaged. The successful M2 full release gate predates the benchmark fix and was not run with `--require-tag`. | After RB1 is resolved, the maintainer commits the intended candidate and tags the project version; `scripts/release_gate.sh --require-tag` must pass from that clean tagged tree. This is the existing rank-2b release criterion, not another architecture measurement. |
+
+Update, 2026-11-27: RB1 closed by `mlx_from`'s refusal of an array of unknown size (Hans's ruling (a)); RB2
+withdrawn: when to tag a release is the maintainer's decision, outside the plans (hans, 2026-11-27).
 
 RB1 is a confirmed release-contract problem outside the original C1–C14 implementation rows; it is not a
 reason to reopen the completed architecture test. No additional original P1 local acceptance failure was
