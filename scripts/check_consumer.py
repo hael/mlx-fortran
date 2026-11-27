@@ -85,6 +85,39 @@ c = mlx_concatenate([a, t, v(1), v(2)])
 s = [a%ndim(), size(v)]
 end program p
 ''', []),
+    ('ctorexpr sibling scopes', '''
+module m
+use mlxf, only: mlx_array
+implicit none
+contains
+    subroutine device_part(a)
+        type(mlx_array), intent(in) :: a
+    end subroutine device_part
+    subroutine host_part(a, b)
+        real, intent(in) :: a
+        real, intent(out) :: b(1)
+        b = [2*a]
+    end subroutine host_part
+end module m
+''', []),
+    ('ctorexpr host and shadowed scopes', '''
+module m
+use mlxf, only: mlx_array, mlx_concatenate
+implicit none
+type(mlx_array) :: g
+contains
+    subroutine uses_host(c)
+        type(mlx_array), intent(inout) :: c
+        c = mlx_concatenate([c, g*2.0])
+    end subroutine uses_host
+    subroutine shadows(b)
+        real, intent(out) :: b(1)
+        real :: g
+        g = 1.0
+        b = [2*g]
+    end subroutine shadows
+end module m
+''', ['ctorexpr']),
     ('wholefunc', '''
 program p
 use mlxf, only: mlx_array, exp

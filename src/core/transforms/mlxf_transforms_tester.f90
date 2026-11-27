@@ -10,7 +10,8 @@ use mlxf,             only: mlx_array, mlx_function, mlx_grad_function, mlx_valu
                             mlx_custom_vjp, mlx_custom_function, mlx_checkpoint, mlx_depends, mlx_stop_gradient, &
                             mlx_compile, mlx_from, mlx_to, mlx_live_count, mlx_last_error, mlx_set_default_device, &
                             mlx_default_device, MLX_DEVICES, sum, exp, matmul, mlx_eval, mlx_synchronize, &
-                            mlx_active_memory, mlx_function_exporter, mlx_imported_function, norm2, mlx_mean
+                            mlx_active_memory, mlx_function_exporter, mlx_imported_function, norm2, mlx_mean, reshape, &
+                            mlx_astype, MLX_DTYPES
 use mlxf_test_utils,  only: assert_true, assert_int, test_devices, device_name, bits_equal, judge_error, &
                             find_tolerance, family_seeds, seeded_uniform, seeded_array, shaped_error
 use mlxf_test_defs,   only: ELEM_CEILING, GRAD_TOLERANCES, elem_tolerance
@@ -42,12 +43,15 @@ contains
                 call test_value_and_grad(seeds(s), .false.)
                 call test_products(seeds(s), .false.)
                 call test_scaled_gradients(seeds(s), .false.)
+                call test_scaled_dim_gradients(seeds(s), .false.)
                 if( devs(i) == MLX_DEVICES%cpu )then
+                    call test_scaled_dim_gradients(seeds(s), .true.)
                     call test_scaled_gradients(seeds(s), .true.)
                     call test_value_and_grad(seeds(s), .true.)
                     call test_products(seeds(s), .true.)
                 endif
             end do
+            call test_half_gradients
             call test_positions_and_outputs
             call test_custom_rules
             call test_stop_gradient_and_depends
@@ -98,7 +102,7 @@ contains
         type(mlx_array)              :: x
         type(mlx_array), allocatable :: values(:), grads(:)
         type(elem_tolerance)         :: tol
-        real(real64)                 :: xs(NV), err, limit, nrm, big
+        real(real64)                 :: xs(NV), err, limit, nrm, big, small
         real(real32)                 :: gz(NV)
         write(*,'(a,i0,a,l1)') 'test_scaled_gradients seed=', seed, ' wide=', wide
         tol = find_tolerance(GRAD_TOLERANCES, 'mlx_value_and_grad')
@@ -117,6 +121,13 @@ contains
         call g%apply([x], values, grads)
         err = nan_max(err, shaped_error(values(1)*(1._real64/big), nrm, nrm))
         err = nan_max(err, shaped_error(grads(1), xs/nrm, abs(xs)/nrm))
+        ! small nonzero values, whose squares underflow: the scaled norm stands, and its derivative must not take the
+        ! plain norm's 0/0 through the branch merge masks
+        small = merge(1.e-200_real64, 1.e-30_real64, wide)
+        x = seeded_array(xs*small, wide)
+        call g%apply([x], values, grads)
+        err = nan_max(err, shaped_error(values(1)*(1._real64/small), nrm, nrm))
+        err = nan_max(err, shaped_error(grads(1), xs/nrm, abs(xs)/nrm))
         f = mlx_function(mean_value)
         g = mlx_value_and_grad(f)
         x = seeded_array(xs, wide)
@@ -133,6 +144,83 @@ contains
             write(*,'(a,l1)') '    the gradient of norm2 at zero is finite: ', all(ieee_is_finite(gz))
         endif
     end subroutine test_scaled_gradients
+
+    ! norm2 along a dimension and over a list of dimensions, of a (NV/2, 2) array at the scales 1 and small (1e-30,
+    ! 1e-200 wide), whose squares underflow: value and gradient against the closed forms (the column norms' sum and
+    ! x over its column's norm; the whole norm and x over it), under the frozen gradient tolerance
+    subroutine test_scaled_dim_gradients( seed, wide )
+        integer, intent(in) :: seed
+        logical, intent(in) :: wide
+        type(mlx_function)           :: f
+        type(mlx_grad_function)      :: g
+        type(mlx_array)              :: x
+        type(mlx_array), allocatable :: values(:), grads(:)
+        type(elem_tolerance)         :: tol
+        real(real64)                 :: xs(NV), err, limit, nc(2), nrm, scale
+        real(real64)                 :: want(NV)
+        integer                      :: k
+        write(*,'(a,i0,a,l1)') 'test_scaled_dim_gradients seed=', seed, ' wide=', wide
+        tol = find_tolerance(GRAD_TOLERANCES, 'mlx_value_and_grad')
+        limit = merge(tol%f64, tol%f32, wide)
+        err = 0._real64
+        xs = seeded_uniform(NV, seed+600)
+        nc = [sqrt(sum(xs(1:NV/2)**2)), sqrt(sum(xs(NV/2+1:)**2))]
+        nrm = sqrt(sum(xs**2))
+        want = [xs(1:NV/2)/nc(1), xs(NV/2+1:)/nc(2)]
+        do k = 1, 2
+            scale = merge(1._real64, merge(1.e-200_real64, 1.e-30_real64, wide), k == 1)
+            x = seeded_array(xs*scale, wide)
+            f = mlx_function(norm_dim_value)
+            g = mlx_value_and_grad(f)
+            call g%apply([x], values, grads)
+            err = nan_max(err, shaped_error(values(1)*(1._real64/scale), sum(nc), sum(nc)))
+            err = nan_max(err, shaped_error(grads(1), want, abs(want)))
+            f = mlx_function(norm_dims_value)
+            g = mlx_value_and_grad(f)
+            call g%apply([x], values, grads)
+            err = nan_max(err, shaped_error(values(1)*(1._real64/scale), nrm, nrm))
+            err = nan_max(err, shaped_error(grads(1), xs/nrm, abs(xs)/nrm))
+        end do
+        call judge_error(err, limit, 'scaled norm2 gradients along dim and over dims', &
+            &merge('float64', 'float32', wide), seed)
+    end subroutine test_scaled_dim_gradients
+
+    ! norm2 and mlx_mean of 65,536 float16 and bfloat16 ones, which the narrow kinds hold (256 and 1) but cannot sum:
+    ! values and gradients (1/256 and 1/65536, a subnormal float16) exact, in the operand's kind
+    subroutine test_half_gradients
+        integer,         parameter   :: NH = 65536
+        type(mlx_function)           :: f
+        type(mlx_grad_function)      :: g
+        type(mlx_array)              :: x
+        type(mlx_array), allocatable :: values(:), grads(:)
+        real(real32)                 :: v(1)
+        real(real32),    allocatable :: gv(:)
+        integer                      :: k, dt
+        character(len=8)             :: label
+        write(*,'(a)') 'test_half_gradients'
+        allocate(gv(NH))
+        do k = 1, 2
+            dt    = merge(MLX_DTYPES%float16, MLX_DTYPES%bfloat16, k == 1)
+            label = merge('float16 ', 'bfloat16', k == 1)
+            x = mlx_astype(mlx_from(spread(1._real32, 1, NH)), dt)
+            f = mlx_function(norm_value)
+            g = mlx_value_and_grad(f)
+            call g%apply([x], values, grads)
+            call mlx_to(v, reshape(mlx_astype(values(1), MLX_DTYPES%float32), [1]))
+            call mlx_to(gv, mlx_astype(grads(1), MLX_DTYPES%float32))
+            call assert_int(dt, values(1)%kind(), trim(label)//': norm2 keeps the operand''s kind')
+            call assert_int(dt, grads(1)%kind(), trim(label)//': its gradient keeps the operand''s kind')
+            call assert_true(bits_equal(v(1), 256._real32) .and. all(bits_equal(gv, 1._real32/256._real32)), &
+                &trim(label)//': norm2 of 65536 ones is 256 and its gradient 1/256, exactly')
+            f = mlx_function(mean_value)
+            g = mlx_value_and_grad(f)
+            call g%apply([x], values, grads)
+            call mlx_to(v, reshape(mlx_astype(values(1), MLX_DTYPES%float32), [1]))
+            call mlx_to(gv, mlx_astype(grads(1), MLX_DTYPES%float32))
+            call assert_true(bits_equal(v(1), 1._real32) .and. all(bits_equal(gv, 2._real32**(-16))), &
+                &trim(label)//': the mean of 65536 ones is 1 and its gradient 1/65536, exactly')
+        end do
+    end subroutine test_half_gradients
 
     ! values and gradients of the three functions; float64 operands (wide) for the polynomial and the chain,
     ! which MLX computes in float64 on the CPU device
@@ -634,6 +722,26 @@ contains
         allocate(outputs(1))
         outputs(1) = norm2(inputs(1))
     end subroutine norm_value
+
+    ! the sum of the norms of the two columns of the one input, taken as a (NV/2, 2) array
+    subroutine norm_dim_value( inputs, outputs, status )
+        type(mlx_array), intent(in)               :: inputs(:)
+        type(mlx_array), allocatable, intent(out) :: outputs(:)
+        integer,         intent(out)              :: status
+        status = 0
+        allocate(outputs(1))
+        outputs(1) = sum(norm2(reshape(inputs(1), [NV/2, 2]), dim=1))
+    end subroutine norm_dim_value
+
+    ! the norm over both dimensions of the one input, taken as a (NV/2, 2) array
+    subroutine norm_dims_value( inputs, outputs, status )
+        type(mlx_array), intent(in)               :: inputs(:)
+        type(mlx_array), allocatable, intent(out) :: outputs(:)
+        integer,         intent(out)              :: status
+        status = 0
+        allocate(outputs(1))
+        outputs(1) = norm2(reshape(inputs(1), [NV/2, 2]), [1, 2])
+    end subroutine norm_dims_value
 
     ! mlx_mean of the one input
     subroutine mean_value( inputs, outputs, status )

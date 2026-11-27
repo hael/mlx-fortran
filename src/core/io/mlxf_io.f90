@@ -310,7 +310,8 @@ contains
     ! the first step of a save, before anything is written: the destination's name settled (suffix added where
     ! missing), the destination refused when it is a symbolic link, not a regular file, a file with other hard links
     ! or another user's file (a rename could not replace it as it is), its permission bits kept, and a fresh
-    ! temporary sibling created, hidden, ending with the suffix. A failure is reported (status 1) with no file made
+    ! temporary sibling created, hidden, ending with the suffix, the owner's alone (0600) when it will replace a
+    ! file. A failure is reported (status 1) with no file made
     subroutine mlxf_save_begin( file, suffix, proc, t, status )
         character(len=*),       intent(in)  :: file, suffix, proc
         type(mlxf_save_target), intent(out) :: t
@@ -358,6 +359,14 @@ contains
                 if( c_fclose(f) /= 0 )then
                     ierr = c_unlink(t%temp//c_null_char)
                     call mlxf_report(proc, 'the temporary file could not be closed', status)
+                else if( t%existed )then
+                    ! the empty file is the owner's alone before any data reaches it: the program's default mode
+                    ! may be wider than the destination's, which the file takes only at the end (mlxf_save_end)
+                    if( c_chmod(t%temp//c_null_char, int(o'600', c_int16_t)) /= 0 )then
+                        ierr = c_unlink(t%temp//c_null_char)
+                        call mlxf_report(proc, 'the temporary file could not be made private; nothing was written', &
+                            &status)
+                    endif
                 endif
                 return
             endif

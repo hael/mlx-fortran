@@ -3857,7 +3857,7 @@ generic norm2
         dim            integer, optional, intent(in) :: dim
         keepdims       logical, optional, intent(in) :: keepdims
         result         type(mlx_array) :: r
-        ! the Euclidean norm along dimension dim, as Fortran's norm2 (of magnitudes for a complex array); without dim, of every element. A floating or complex array is scaled first (scaled_norm2), so that the norm of values near the ends of the kind's range is computed where it is representable
+        ! the Euclidean norm along dimension dim, as Fortran's norm2 (of magnitudes for a complex array); without dim, of every element. A floating or complex array is scaled first (scaled_norm2), so that the norm of values near the ends of the kind's range is computed where it is representable; a float16 or bfloat16 one in float32 (mlxf_widened) and narrowed back, so that a long sum is accumulated where it is representable
     function norm2(a, dims, [keepdims])
         a              type(mlx_array), intent(in) :: a
         dims           integer, intent(in) :: dims(:)

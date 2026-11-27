@@ -7,7 +7,8 @@
 # consumer project CONSUMER (default test/consumer/) against it with only -Dmlxf_DIR= and runs its programs (the
 # consumer and the examples of README.md and doc/quickstart.md), compiles CONSUMER/mlxf_api_names.f90, which
 # imports every public name of mlxf (scripts/list_public_api.py --check holds it to src/core/mlxf.f90), runs the
-# installed lifetime checker (self-test, the consumer programs, a planted leak), then
+# installed lifetime checker (self-test, the consumer programs, a planted leak, its path resolved before mlx-c's
+# package can rewrite the prefix), then
 # checks that only mlxf.mod was installed and no producer path or flag leaked, that the private modules cannot be
 # imported, that a copy of the package config naming another compiler version or another mlx-c version refuses
 # the consumer with its message, and that pkg-config links the consumer. Without --require-gpu the programs run
@@ -96,6 +97,18 @@ if cmake --build "$WORK/leak build" >> "$WORK/leak build.log" 2>&1; then
     echo "check_install: a project holding the planted leak built through mlxf_check_lifetime" >&2; exit 1
 fi
 grep -q 'leak.f90:4: ctorexpr: ' "$WORK/leak build.log" || { cat "$WORK/leak build.log"; echo "check_install: mlxf_check_lifetime did not report the planted leak" >&2; exit 1; }
+# the checker's path is resolved before any dependency is found: a nested package configuration of CMake 3.29 or
+# older rewrites PACKAGE_PREFIX_DIR to its own prefix (newer CMake restores it after a nested find_package, so no
+# consumer here can show it): in the installed config, mlxf_LIFETIME_CHECKER is set before the first find_package
+"$PY" - "$PACKAGE/mlxfConfig.cmake" <<'PY'
+import re, sys
+text = open(sys.argv[1]).read()
+checker = text.find('set(mlxf_LIFETIME_CHECKER')
+first = re.search(r'^\s*find_(package|dependency)\(', text, re.M)
+if checker < 0 or (first is not None and first.start() < checker):
+    sys.exit('check_install: the installed config resolves the lifetime checker after a dependency is found, where '
+             'CMake 3.29 or older has rewritten PACKAGE_PREFIX_DIR')
+PY
 "$PY" - "$PREFIX" "$BUILD" "$ROOT" "$WORK/consumer build/compile_commands.json" <<'PY'
 from pathlib import Path
 import sys

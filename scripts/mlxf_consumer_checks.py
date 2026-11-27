@@ -27,6 +27,9 @@ leaks nothing; mlx_live_count() at run time is the check of record):
     module or file than the ones checked (each file is read alone; a type's components are known only when the
     type is defined in the same file);
   - aliasing: pointers, associate names, dummies passed on, a handle reached through a procedure argument;
+  - scopes (ctorexpr): a name is a handle where the nearest scope declaring it declares a handle type, but the
+    components of a type defined in the file count as handles in every scope (a local real with a component's
+    name is reported), and a BLOCK construct's declarations are not a scope of their own;
   - generic resolution: a renamed or user generic that returns a handle is seen only as a function of mlxf
     (ctorcall) or through its handle arguments (ctorexpr);
   - preprocessing: directives are not evaluated (code in an inactive #if branch is checked too) and macros are
@@ -338,15 +341,62 @@ def ctorcall_findings(lines, names):
 
 
 def ctorexpr_findings(lines, functions=()):
-    """(line, element) for each element of a constructor that refers to a handle without being a bare designator"""
-    handles = handle_names(lines)
-    if not handles:
+    """(line, element) for each element of a constructor that refers to a handle without being a bare designator.
+    A name is a handle where the nearest scope that declares it (the procedure, the procedure or module hosting it,
+    the program unit) declares it of a handle type: a dummy a of a handle type in one procedure makes no handle of
+    a real a in its sibling. A separate module procedure body takes the declarations of its interface body when the
+    file holds it; the components of a type defined in the file are handles wherever they appear"""
+    if not handle_names(lines):
         return []
-    functions = handle_functions(lines, handles) | set(functions)
+    functions = handle_functions(lines, handle_names(lines)) | set(functions)
+    holders = handle_holders(lines)
+    components, interfaces = set(), {}
+    scopes = [({}, None)]
+    in_type = in_interface = False
     found = []
     for start, stmt in logical_lines([code_of(l) for l in lines]):
-        for body in constructors(stmt):
-            for e in ctor_violations(body, handles, functions):
+        s = stmt.strip()
+        if not s:
+            continue
+        if re.match(r'^type\s*(?:,[^:]*)?::\s*[a-z_]\w*\s*$|^type\s+[a-z_]\w*\s*$', s, re.I):
+            in_type = True
+            continue
+        if in_type:
+            in_type = not re.match(r'^end\s*type\b', s, re.I)
+            if in_type and HANDLE_DECL.match(s):
+                components |= set(n for n, k in declared(s, holders).items() if k in ('harray', 'hscalar'))
+            continue
+        if re.match(r'^(abstract\s+)?interface\b', s, re.I):
+            in_interface = True
+            continue
+        if re.match(r'^end\s*interface\b', s, re.I):
+            in_interface = False
+            continue
+        body = re.match(r'^\s*module\s+procedure\s+([a-z_]\w*)\s*$', s, re.I)
+        if body and not in_interface:
+            scopes.append((dict(interfaces.get(body.group(1).lower(), {})), body.group(1).lower()))
+            continue
+        head = PROC_HEAD.match(s)
+        if UNIT_HEAD.match(s) or (head and not re.match(r'^\s*module\s+procedure\b', s, re.I)):
+            scopes.append(({}, head.group(2).lower() if head else None))
+            continue
+        if UNIT_END.match(s):
+            if len(scopes) > 1:
+                decls, name = scopes.pop()
+                if name and in_interface:
+                    interfaces[name] = decls
+            continue
+        for name, kind in declared(s, holders).items():
+            scopes[-1][0][name] = kind in ('harray', 'hscalar')
+        handles = set(components)
+        for decls, _ in scopes:
+            for name, is_handle in decls.items():
+                if is_handle:
+                    handles.add(name)
+                else:
+                    handles.discard(name)
+        for body_text in constructors(s):
+            for e in ctor_violations(body_text, handles, functions):
                 found.append((start, e))
     return found
 

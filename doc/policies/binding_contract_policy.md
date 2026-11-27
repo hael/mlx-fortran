@@ -130,7 +130,7 @@ written, the skill `mlxf-modern-fortran`.
   | unsupported form | rule | detected |
   | --- | --- | --- |
   | 3: a function result in a constructor, `[a, mlx_from(x)]`, a renamed import `[a, f(x)]` | `ctorcall` | yes, for names imported from `mlxf` |
-  | 3: an expression of handles in a constructor, `[a*2.0, b]`, `[exp(a), b]`, `[e(a), b]` | `ctorexpr` | yes, for handles the file declares |
+  | 3: an expression of handles in a constructor, `[a*2.0, b]`, `[exp(a), b]`, `[e(a), b]` | `ctorexpr` | yes, for handles the file declares, each name by its scope |
   | 4: a function result assigned to a whole array or a section of handles, `v = exp(a)` | `wholefunc` | yes, for arrays declared in scope |
   | 1: an allocatable handle component in a type without a defined assignment | `alloccomp` | yes, at the type's definition |
   | 2: `allocate(source=)` and `mold=` of a handle; array intrinsics on arrays of handles | `allocsrc`, `arrayintr` | yes, for names declared in scope |

@@ -480,6 +480,26 @@ contains
         facts(2) = same(contents(CKPT), old)
         call assert_true(st /= 0 .and. .not. facts(1) .and. facts(2), &
             &'a failed write removes the temporary file and leaves the checkpoint''s bytes')
+        ! the temporary file of a replacement is private before data reaches it and while it holds them: a 0600
+        ! checkpoint under the program's default mode (0644 under umask 022) is never copied into a wider file
+        k = int(c_chmod(CKPT//c_null_char, int(o'600', c_int16_t)))
+        call assert_int(0, k, 'the checkpoint''s mode is set to 600')
+        call mlxf_save_begin(CKPT, '.safetensors', 'test', t, st)
+        call assert_int(0, st, 'a save over the 600 checkpoint is begun')
+        info = c_file_info(t%temp)
+        call assert_int(0, iand(info%mode, int(o'077')), 'its empty temporary file is the owner''s alone')
+        open(newunit=unit, file=t%temp, access='stream', form='unformatted', status='old', action='write')
+        write(unit) 'payload'
+        close(unit)
+        info = c_file_info(t%temp)
+        call assert_int(0, iand(info%mode, int(o'077')), 'and stays so while it holds the payload')
+        call mlxf_save_end(t, 'test', st)
+        info = c_file_info(CKPT)
+        facts(1) = exists(t%temp)
+        call assert_true(st == 0 .and. .not. facts(1), 'the replacement is committed and leaves no temporary file')
+        call assert_int(int(o'600'), info%mode, 'and the checkpoint keeps its permission bits, 600')
+        call mlx_save_safetensors(CKPT, ['w'], [a], status=st)
+        old = contents(CKPT)
         ! a failed replacement: the temporary file gone before its permissions and rename
         call mlxf_save_begin(CKPT, '.safetensors', 'test', t, st)
         call remove(t%temp)

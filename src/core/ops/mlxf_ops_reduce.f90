@@ -24,19 +24,19 @@ use mlxf_defs,            only: MLX_DTYPES, mlxf_reduce_spec, mlxf_scan_spec
 use mlxf_error,           only: mlxf_fail, mlxf_check
 use mlxf_device,          only: mlxf_enter, mlxf_require_device, mlxf_default_stream
 use mlxf_array,           only: mlx_array, mlxf_handle, mlxf_adopt
-use mlxf_ops_elementwise, only: mlx_astype, merge, real, aimag, max
+use mlxf_ops_elementwise, only: mlx_astype, merge, real, aimag, max, mlxf_widened, mlxf_narrowed
 use mlxf_ops_math,        only: abs, mlx_stop_gradient
 use mlxf_ops_logic,       only: mlx_isfinite
 use mlxf_ops_create,      only: mlx_full, mlx_ones_like
 use mlxf_ops_shape,       only: mlx_zeros, mlx_squeeze
 use mlxf_calls,           only: mlxf_check_dim, mlxf_axes_of, mlxf_binary, mlxf_list_op, mlxf_one_based, &
-                                mlxf_reduce_all_op, mlxf_reduce_dims_op
+                                mlxf_reduce_all_op, mlxf_reduce_dims_op, mlxf_reduced_dims, mlxf_empty_reduction
 use mlxf_transfer,        only: mlx_from
 implicit none
 
 public :: sum, minval, mlx_logsumexp, mlx_cumsum, minloc, product, maxval, all, any, count, maxloc, mlx_mean, &
     &mlx_median, mlx_var, mlx_std, mlx_cumprod, mlx_cummax, mlx_cummin, mlx_logcumsumexp, mlx_softmax, mlxf_reduce_scale, &
-    &mlxf_reduced_dims, mlxf_empty_reduction, mlxf_scaled_reduction
+    &mlxf_scaled_reduction
 private
 
 interface sum
@@ -296,13 +296,12 @@ contains
         x = statistic_operand(a, 'mlx_mean')
         if( mlxf_scaled_reduction(a, mlxf_reduced_dims(a, dim=dim)) )then
             r = scaled_mean(x, mlxf_reduced_dims(a, dim=dim), keepdims)
-            return
-        endif
-        if( present(dim) )then
+        else if( present(dim) )then
             call mlxf_reduce_op(r, mlxc_mean_axis, x, reduce_spec(dim=dim, keepdims=keepdims), 'mlx_mean')
         else
             call mlxf_reduce_all_op(r, mlxc_mean, x, reduce_spec(keepdims=keepdims), 'mlx_mean')
         endif
+        r = mlxf_narrowed(r, a%kind())
     end function mean_array
 
     ! mlx_mean over the dimensions dims
@@ -316,9 +315,10 @@ contains
         x = statistic_operand(a, 'mlx_mean')
         if( mlxf_scaled_reduction(a, dims) )then
             r = scaled_mean(x, dims, keepdims)
-            return
+        else
+            call mlxf_reduce_dims_op(r, mlxc_mean_axes, x, reduce_spec(dims=dims, keepdims=keepdims), 'mlx_mean')
         endif
-        call mlxf_reduce_dims_op(r, mlxc_mean_axes, x, reduce_spec(dims=dims, keepdims=keepdims), 'mlx_mean')
+        r = mlxf_narrowed(r, a%kind())
     end function mean_dims
 
     ! the median, the mean of the two middle elements of an even count: along dim, or over every dimension without it
@@ -384,6 +384,7 @@ contains
         else
             call mlxf_var_all_op(r, mlxc_var, x, reduce_spec(keepdims=keepdims, ddof=ddof), 'mlx_var')
         endif
+        r = mlxf_narrowed(r, a%kind())
     end function var_array
 
     ! mlx_var over the dimensions dims
@@ -397,6 +398,7 @@ contains
         call mlxf_enter('mlx_var')
         x = statistic_operand(a, 'mlx_var')
         call mlxf_var_dims_op(r, mlxc_var_axes, x, reduce_spec(dims=dims, keepdims=keepdims, ddof=ddof), 'mlx_var')
+        r = mlxf_narrowed(r, a%kind())
     end function var_dims
 
     ! the standard deviation, the square root of mlx_var: along dim, or over every dimension without it
@@ -414,6 +416,7 @@ contains
         else
             call mlxf_var_all_op(r, mlxc_std, x, reduce_spec(keepdims=keepdims, ddof=ddof), 'mlx_std')
         endif
+        r = mlxf_narrowed(r, a%kind())
     end function std_array
 
     ! mlx_std over the dimensions dims
@@ -427,10 +430,12 @@ contains
         call mlxf_enter('mlx_std')
         x = statistic_operand(a, 'mlx_std')
         call mlxf_var_dims_op(r, mlxc_std_axes, x, reduce_spec(dims=dims, keepdims=keepdims, ddof=ddof), 'mlx_std')
+        r = mlxf_narrowed(r, a%kind())
     end function std_dims
 
     ! the operand of mlx_mean, mlx_var and mlx_std: an integer or boolean array converted to float32 first, since
-    ! MLX sums such input in its own kind, where a large total wraps; a floating or complex array is a itself
+    ! MLX sums such input in its own kind, where a large total wraps; a float16 or bfloat16 array widened to float32
+    ! (mlxf_widened), its statistic narrowed back to its kind; a float32, float64 or complex array is a itself
     function statistic_operand( a, proc ) result(x)
         type(mlx_array),  intent(in) :: a
         character(len=*), intent(in) :: proc
@@ -441,7 +446,7 @@ contains
             &MLX_DTYPES%uint8, MLX_DTYPES%uint16, MLX_DTYPES%uint32, MLX_DTYPES%uint64]) )then
             x = mlx_astype(a, MLX_DTYPES%float32)
         else
-            x = a
+            x = mlxf_widened(a)
         endif
     end function statistic_operand
 
@@ -477,32 +482,6 @@ contains
         ok = mlx_isfinite(m) .and. m > 0._real32
         s = merge(m, mlx_ones_like(m), ok)
     end subroutine mlxf_reduce_scale
-
-    ! the Fortran dimensions a reduction takes: dim, the list dims, or every dimension of a
-    function mlxf_reduced_dims( a, dim, dims ) result(rd)
-        type(mlx_array),   intent(in) :: a
-        integer, optional, intent(in) :: dim, dims(:)
-        integer, allocatable :: rd(:)
-        integer              :: i
-        if( present(dim) )then
-            rd = [dim]
-        else if( present(dims) )then
-            rd = dims
-        else
-            rd = [(i, i = 1, a%ndim())]
-        endif
-    end function mlxf_reduced_dims
-
-    ! whether a reduction of a over the Fortran dimensions rd takes an extent of zero (false for an invalid list)
-    logical function mlxf_empty_reduction( a, rd )
-        type(mlx_array), intent(in) :: a
-        integer,         intent(in) :: rd(:)
-        integer, allocatable :: sh(:)
-        sh = a%shape()
-        mlxf_empty_reduction = .false.
-        if( any(rd < 1 .or. rd > size(sh)) ) return
-        mlxf_empty_reduction = any(sh(rd) == 0)
-    end function mlxf_empty_reduction
 
     ! maxval (low) or minval over an extent of zero, as Fortran: the most negative or the largest finite value of a's
     ! kind (false or true for booleans), in the reduction's shape (dimensions removed, or kept with extent 1)

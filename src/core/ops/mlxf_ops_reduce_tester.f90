@@ -87,6 +87,7 @@ contains
             call test_reduce_conventions
             call test_integer_statistics
             call test_mean_range
+            call test_half_statistics
             call test_empty_extrema
         end do
         call mlx_set_default_device(original)
@@ -601,6 +602,59 @@ contains
         end subroutine near
 
     end subroutine test_mean_range
+
+    ! mlx_mean, mlx_var and mlx_std of 65,536 float16 and bfloat16 values, whose answers the kind holds but whose sums
+    ! it does not (float16 overflows at 65504, bfloat16 stops adding ones at 256): ones (1, 0, 0) and alternating 1
+    ! and 3 (2, 1, 1), every answer exact, over every element, along dimension 1 of a (65536, 1) array, over the list
+    ! [1, 2] of a (32768, 2) array, and kept; the result in the operand's kind
+    subroutine test_half_statistics
+        integer, parameter        :: NH = 65536
+        real(real32)              :: x(NH)
+        type(mlx_array)           :: a, a1, a2
+        integer                   :: i, k, j, dt
+        character(len=8)          :: label
+        character(len=5)          :: what
+        write(*,'(a)') 'test_half_statistics'
+        do k = 1, 2
+            dt    = merge(MLX_DTYPES%float16, MLX_DTYPES%bfloat16, k == 1)
+            label = merge('float16 ', 'bfloat16', k == 1)
+            do j = 1, 2
+                if( j == 1 )then
+                    x = 1._real32
+                    what = 'ones'
+                else
+                    do i = 1, NH
+                        x(i) = merge(1._real32, 3._real32, mod(i, 2) == 1)
+                    end do
+                    what = '1 3'
+                endif
+                a  = mlx_astype(mlx_from(x), dt)
+                a1 = reshape(a, [NH, 1])
+                a2 = reshape(a, [NH/2, 2])
+                call check(mlx_mean(a), merge(1._real64, 2._real64, j == 1), 'mlx_mean')
+                call check(mlx_mean(a1, 1), merge(1._real64, 2._real64, j == 1), 'mlx_mean along dimension 1')
+                call check(mlx_mean(a2, [1, 2]), merge(1._real64, 2._real64, j == 1), 'mlx_mean over [1, 2]')
+                call check(mlx_mean(a, keepdims=.true.), merge(1._real64, 2._real64, j == 1), 'mlx_mean kept')
+                call check(mlx_var(a), merge(0._real64, 1._real64, j == 1), 'mlx_var')
+                call check(mlx_var(a1, 1), merge(0._real64, 1._real64, j == 1), 'mlx_var along dimension 1')
+                call check(mlx_var(a2, [1, 2]), merge(0._real64, 1._real64, j == 1), 'mlx_var over [1, 2]')
+                call check(mlx_std(a), merge(0._real64, 1._real64, j == 1), 'mlx_std')
+                call check(mlx_std(a2, [1, 2]), merge(0._real64, 1._real64, j == 1), 'mlx_std over [1, 2]')
+            end do
+        end do
+    contains
+        subroutine check( res, want, name )
+            type(mlx_array),  intent(in) :: res
+            real(real64),     intent(in) :: want
+            character(len=*), intent(in) :: name
+            real(real64), allocatable :: v(:)
+            call values_of(res, v)
+            call assert_int(dt, res%kind(), trim(label)//' '//trim(what)//': '//name//' is in the operand''s kind')
+            call assert_true(size(v) == 1 .and. all(abs(v-want) <= 0._real64), &
+                &trim(label)//' '//trim(what)//': '//name//' of 65536 values is the exact answer')
+        end subroutine check
+
+    end subroutine test_half_statistics
 
     ! maxval and minval over an extent of zero give Fortran's identities in the operand's kind and the reduction's
     ! shape (-huge and huge for reals, -huge-1 and huge for integers, 0 and the largest value for the unsigned

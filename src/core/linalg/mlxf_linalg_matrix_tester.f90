@@ -14,8 +14,8 @@ use mlxf,             only: mlx_array, mlx_from, mlx_to, mlx_set_default_device,
                             mlx_cholesky_inv, mlx_qr, mlx_lu, mlx_lu_factor, mlx_svd, mlx_eigh, mlx_eigvalsh, mlx_eig, &
                             mlx_eigvals, mlx_solve, mlx_solve_triangular, mlx_norm, mlx_norm_matrix, norm2, reshape, &
                             mlx_astype, mlx_zeros
-use mlxf_test_utils,  only: set_fixed_seed, assert_true, test_devices, device_name, judge_error, find_tolerance, &
-                            family_seeds, seeded_uniform, seeded_array, shaped_error
+use mlxf_test_utils,  only: set_fixed_seed, assert_true, assert_int, test_devices, device_name, judge_error, &
+                            find_tolerance, family_seeds, seeded_uniform, seeded_array, shaped_error
 use mlxf_test_defs,   only: ELEM_CEILING, MATRIX_TOLERANCES, LINALG_RESIDUAL_FACTOR, elem_tolerance, &
                             ELEM_SEED_CALIBRATION
 use mlxf_test_reduce, only: nan_maxval, nan_max
@@ -132,6 +132,47 @@ contains
 
     end subroutine test_norm2_range
 
+    ! norm2 of 65,536 float16 and bfloat16 values, whose norm the kind holds but whose sum of squares it does not
+    ! (float16 overflows at 65504, bfloat16 stops adding ones at 256): ones exactly 256 over every element, along
+    ! dimension 1 of a (65536, 1) array, over the list [1, 2] of a (32768, 2) array and kept; alternating 1 and 3
+    ! within the kind's epsilon of sqrt(327680), the one rounding of the float32 norm to the kind; in the kind
+    subroutine test_norm2_half_long
+        integer, parameter :: NH = 65536
+        real(real32)       :: x(NH)
+        type(mlx_array)    :: a
+        integer            :: i, k, dt
+        real(real64)       :: eps
+        character(len=8)   :: label
+        write(*,'(a)') 'test_norm2_half_long'
+        do k = 1, 2
+            dt    = merge(MLX_DTYPES%float16, MLX_DTYPES%bfloat16, k == 1)
+            label = merge('float16 ', 'bfloat16', k == 1)
+            eps   = merge(2._real64**(-10), 2._real64**(-7), k == 1)
+            a = mlx_astype(mlx_from(spread(1._real32, 1, NH)), dt)
+            call within(norm2(a), 256._real64, 0._real64, 'norm2 of 65536 ones')
+            call within(norm2(reshape(a, [NH, 1]), dim=1), 256._real64, 0._real64, 'along dimension 1')
+            call within(norm2(reshape(a, [NH/2, 2]), [1, 2]), 256._real64, 0._real64, 'over the list [1, 2]')
+            call within(norm2(a, keepdims=.true.), 256._real64, 0._real64, 'kept')
+            do i = 1, NH
+                x(i) = merge(1._real32, 3._real32, mod(i, 2) == 1)
+            end do
+            a = mlx_astype(mlx_from(x), dt)
+            call within(norm2(a), sqrt(327680._real64), eps, 'norm2 of 65536 values alternating 1 and 3')
+        end do
+    contains
+        subroutine within( res, want, rel, name )
+            type(mlx_array),  intent(in) :: res
+            real(real64),     intent(in) :: want, rel
+            character(len=*), intent(in) :: name
+            real(real64), allocatable :: v(:)
+            call fetch_values(res, v)
+            call assert_int(dt, res%kind(), trim(label)//': '//name//' is in the operand''s kind')
+            call assert_true(size(v) == 1 .and. all(abs(v-want) <= rel*want), trim(label)//': '//name//' is within '//&
+                &'its bound')
+        end subroutine within
+
+    end subroutine test_norm2_half_long
+
     ! the values of a real result of any floating kind as real64, in array element order
     subroutine fetch_values( r, y )
         type(mlx_array),           intent(in)  :: r
@@ -179,6 +220,7 @@ contains
             call test_solve_triangular
             call test_norms
             call test_norm2_range
+            call test_norm2_half_long
             call test_matrix_norms
         end do
         call mlx_set_default_device(original)

@@ -10,7 +10,7 @@ use mlxf_calls,    only: mlxf_binary, mlxf_dtype_op, mlxf_ternary_op, mlxf_unary
 use mlxf_transfer, only: mlx_from
 implicit none
 
-public :: real, aimag, conjg, sqrt, mlx_astype, mlx_bitcast, max, merge, cmplx
+public :: real, aimag, conjg, sqrt, mlx_astype, mlx_bitcast, max, merge, cmplx, mlxf_widened, mlxf_narrowed
 private
 
 interface real
@@ -83,6 +83,32 @@ contains
         type(mlx_array) :: r
         call mlxf_dtype_op(r, mlxc_astype, a, dtype, 'mlx_astype')
     end function mlx_astype
+
+    ! a float16 or bfloat16 array as float32, the operand of a reduction whose answer the narrow kind holds but whose
+    ! sum it does not accumulate (MLX sums in the operand's kind: the mean of 65,536 float16 ones came out 0.25 on the
+    ! CPU and Inf on the GPU); any other array is a itself
+    function mlxf_widened( a ) result(w)
+        type(mlx_array), intent(in) :: a
+        type(mlx_array) :: w
+        if( any(a%kind() == [MLX_DTYPES%float16, MLX_DTYPES%bfloat16]) )then
+            w = mlx_astype(a, MLX_DTYPES%float32)
+        else
+            w = a
+        endif
+    end function mlxf_widened
+
+    ! r, computed on mlxf_widened's operand, in the operand's kind k: a float16 or bfloat16 statistic narrowed back,
+    ! any other r itself
+    function mlxf_narrowed( r, k ) result(n)
+        type(mlx_array), intent(in) :: r
+        integer,         intent(in) :: k
+        type(mlx_array) :: n
+        if( any(k == [MLX_DTYPES%float16, MLX_DTYPES%bfloat16]) )then
+            n = mlx_astype(r, k)
+        else
+            n = r
+        endif
+    end function mlxf_narrowed
 
     ! a's bytes read as dtype, one of MLX_DTYPES (MLX's view; mlx_view is the Fortran pointer view): no value
     ! is converted. Where the item sizes differ, the first Fortran dimension scales by their ratio, so a float32

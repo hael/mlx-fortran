@@ -137,4 +137,30 @@ contains
         if( .not. mlxf_is_empty(a) ) h = mlxf_handle(a, proc)
     end function mlxf_optional_handle
 
+    ! the Fortran dimensions a reduction takes: dim, the list dims, or every dimension of a
+    module function mlxf_reduced_dims( a, dim, dims ) result(rd)
+        type(mlx_array),   intent(in) :: a
+        integer, optional, intent(in) :: dim, dims(:)
+        integer, allocatable :: rd(:)
+        integer              :: i
+        if( present(dim) )then
+            rd = [dim]
+        else if( present(dims) )then
+            rd = dims
+        else
+            rd = [(i, i = 1, a%ndim())]
+        endif
+    end function mlxf_reduced_dims
+
+    ! whether a reduction of a over the Fortran dimensions rd takes an extent of zero (false for an invalid list)
+    module logical function mlxf_empty_reduction( a, rd )
+        type(mlx_array), intent(in) :: a
+        integer,         intent(in) :: rd(:)
+        integer, allocatable :: sh(:)
+        sh = a%shape()
+        mlxf_empty_reduction = .false.
+        if( any(rd < 1 .or. rd > size(sh)) ) return
+        mlxf_empty_reduction = any(sh(rd) == 0)
+    end function mlxf_empty_reduction
+
 end submodule mlxf_calls_checks

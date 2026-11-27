@@ -14,7 +14,7 @@ implicit none
 public :: mlxf_unary, mlxf_binary, mlxf_weak_scalar, mlxf_integer_scalar, mlxf_dtype_op, mlxf_int_op, mlxf_vector_op, mlxf_ternary_op, &
     &mlxf_zeros_op, mlxf_reduce_all_op, mlxf_reduce_dims_op, mlxf_int2_op, mlxf_list_op, mlxf_check_dtype, &
     &mlxf_axes_of, mlxf_zero_based, mlxf_one_based, mlxf_check_dim, mlxf_slice_bounds, mlxf_cpu_stream, &
-    &mlxf_optional_handle
+    &mlxf_optional_handle, mlxf_reduced_dims, mlxf_empty_reduction
 private
 
 interface
@@ -165,6 +165,19 @@ interface
         integer,          intent(in) :: dim
         character(len=*), intent(in) :: proc
     end subroutine mlxf_check_dim
+
+    ! the Fortran dimensions a reduction takes: dim, the list dims, or every dimension of a
+    module function mlxf_reduced_dims( a, dim, dims ) result(rd)
+        type(mlx_array),   intent(in) :: a
+        integer, optional, intent(in) :: dim, dims(:)
+        integer, allocatable :: rd(:)
+    end function mlxf_reduced_dims
+
+    ! whether a reduction of a over the Fortran dimensions rd takes an extent of zero (false for an invalid list)
+    module logical function mlxf_empty_reduction( a, rd )
+        type(mlx_array), intent(in) :: a
+        integer,         intent(in) :: rd(:)
+    end function mlxf_empty_reduction
 
     ! MLX's start, stop and strides (the columns of b) of the section option of a: Fortran's inclusive 1-based
     module subroutine mlxf_slice_bounds( a, option, b, proc )

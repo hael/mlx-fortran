@@ -24,10 +24,11 @@ use mlxf_defs,            only: MLX_DTYPES, mlxf_reduce_spec, mlxf_norm_spec
 use mlxf_array,           only: mlx_array, mlxf_handle, mlxf_vector_import, mlxf_adopt
 use mlxf_device,          only: mlxf_enter, mlxf_default_stream, mlxf_require_device
 use mlxf_error,           only: mlxf_fail, mlxf_check
-use mlxf_calls,           only: mlxf_axes_of, mlxf_cpu_stream, mlxf_int2_op, mlxf_one_based, mlxf_reduce_dims_op, &
-                                mlxf_unary, mlxf_vector_op
-use mlxf_ops_elementwise, only: real, aimag, sqrt, merge
-use mlxf_ops_reduce,      only: sum, mlxf_reduce_scale, mlxf_reduced_dims, mlxf_scaled_reduction
+use mlxf_calls,           only: mlxf_reduced_dims, mlxf_axes_of, mlxf_cpu_stream, mlxf_int2_op, mlxf_one_based, &
+                                mlxf_reduce_dims_op, mlxf_unary, mlxf_vector_op
+use mlxf_ops_elementwise, only: real, aimag, sqrt, merge, mlxf_widened, mlxf_narrowed
+use mlxf_ops_create,      only: mlx_ones_like
+use mlxf_ops_reduce,      only: sum, mlxf_reduce_scale, mlxf_scaled_reduction
 use mlxf_ops_shape,       only: mlx_squeeze
 implicit none
 public :: mlx_inv, mlx_pinv, mlx_tri_inv, mlx_det, mlx_slogdet, mlx_cholesky, mlx_cholesky_inv, mlx_qr, mlx_lu
@@ -330,18 +331,22 @@ contains
 
     ! the Euclidean norm along dimension dim, as Fortran's norm2 (of magnitudes for a complex array); without dim,
     ! of every element. A floating or complex array is scaled first (scaled_norm2), so that the norm of values near
-    ! the ends of the kind's range is computed where it is representable
+    ! the ends of the kind's range is computed where it is representable; a float16 or bfloat16 one in float32
+    ! (mlxf_widened) and narrowed back, so that a long sum is accumulated where it is representable
     function norm2_dim( a, dim, keepdims ) result(r)
         type(mlx_array), intent(in)           :: a
         integer,         optional, intent(in) :: dim
         logical,         optional, intent(in) :: keepdims
         type(mlx_array) :: r
+        type(mlx_array) :: w, n
         call mlxf_enter('norm2')
-        if( mlxf_scaled_reduction(a, mlxf_reduced_dims(a, dim=dim)) )then
-            r = scaled_norm2(a, mlxf_reduced_dims(a, dim=dim), plain_norm2_dim(a, dim, .true.), keepdims)
+        w = mlxf_widened(a)
+        if( mlxf_scaled_reduction(w, mlxf_reduced_dims(w, dim=dim)) )then
+            n = scaled_norm2(w, mlxf_reduced_dims(w, dim=dim), keepdims, dim=dim)
         else
-            r = plain_norm2_dim(a, dim, keepdims)
+            n = plain_norm2_dim(w, dim, keepdims)
         endif
+        r = mlxf_narrowed(n, a%kind())
     end function norm2_dim
 
     ! the Euclidean norm over one or two dimensions (the Frobenius norm of the matrices they span)
@@ -350,13 +355,16 @@ contains
         integer,         intent(in)           :: dims(:)
         logical,         optional, intent(in) :: keepdims
         type(mlx_array) :: r
+        type(mlx_array) :: w, n
         call mlxf_enter('norm2')
         if( size(dims) < 1 ) call mlxf_fail('norm2', 'one or two dimensions are needed')
-        if( mlxf_scaled_reduction(a, dims) )then
-            r = scaled_norm2(a, dims, plain_norm2_dims(a, dims, .true.), keepdims)
+        w = mlxf_widened(a)
+        if( mlxf_scaled_reduction(w, dims) )then
+            n = scaled_norm2(w, dims, keepdims, dims=dims)
         else
-            r = plain_norm2_dims(a, dims, keepdims)
+            n = plain_norm2_dims(w, dims, keepdims)
         endif
+        r = mlxf_narrowed(n, a%kind())
     end function norm2_dims
 
     ! MLX's Euclidean norm along dim, or of every element (it squares before it sums: it overflows above about
@@ -399,16 +407,23 @@ contains
     ! the Euclidean norm of a over the Fortran dimensions rd: s*sqrt(sum((a/s)**2)), s the largest magnitude of the
     ! reduced elements (of their real and imaginary parts for a complex array), each squared term at most 1 (2 for
     ! a complex one), so that nothing overflows or underflows where the norm is representable. Where s is zero or
-    ! not finite the plain norm stands (0 for zeros; infinity, or NaN with a NaN). s's gradient is stopped: the
-    ! derivative is a/norm2(a), as for the plain norm, away from zero (where neither has one)
-    function scaled_norm2( a, rd, plain, keepdims ) result(r)
+    ! not finite the plain norm stands (0 for zeros; infinity, or NaN with a NaN), the norm along dim or over dims as
+    ! the caller reduces. s's gradient is stopped: the derivative is a/norm2(a), as for the plain norm, away from
+    ! zero (where neither has one). Where the scaled norm stands the plain one is taken of ones: merge masks its
+    ! derivative but does not remove it, and MLX's sqrt divides by its result, 0/0 for a sum that underflows
+    function scaled_norm2( a, rd, keepdims, dim, dims ) result(r)
         type(mlx_array),   intent(in) :: a
         integer,           intent(in) :: rd(:)
-        type(mlx_array),   intent(in) :: plain
         logical, optional, intent(in) :: keepdims
+        integer, optional, intent(in) :: dim, dims(:)
         type(mlx_array) :: r
-        type(mlx_array) :: s, ok, y, re, im, q
+        type(mlx_array) :: s, ok, y, re, im, q, plain
         call mlxf_reduce_scale(a, rd, s, ok)
+        if( present(dims) )then
+            plain = plain_norm2_dims(merge(mlx_ones_like(a), a, ok), dims, .true.)
+        else
+            plain = plain_norm2_dim(merge(mlx_ones_like(a), a, ok), dim, .true.)
+        endif
         y = a/s
         if( a%kind() == MLX_DTYPES%complex64 )then
             re = real(y)
