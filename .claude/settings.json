@@ -1,11 +1,8 @@
 {
   "permissions": {
     "deny": [
-      "Bash(git commit *)",
-      "Bash(git -C * commit *)",
       "Bash(git push *)",
       "Bash(git -C * push *)",
-      "Bash(git add *)",
       "Bash(git stash *)",
       "Bash(git reset *)",
       "Bash(git restore *)",
