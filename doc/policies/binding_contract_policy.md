@@ -774,6 +774,17 @@ graph form of the same computation stays as the CPU path and as the reference.
   order: an insertion of 2.84e8 such deposits gives different bits in up to 49 % of its 2.3e6 elements from run to
   run (`bench_insert_probe`). A `threadgroup` array declared in the body, with `threadgroup_barrier`, builds and
   gives correct results, though MLX's documentation does not name it (question 26 of the Apple questions).
+- **Measured by the kernel-forms benchmark** (`mlxf_test_exec test=bench_kernel_forms`, MLX 0.32.4, mlx-c 0.8.0, M5
+  Ultra, 2026-11-26). Suite `probe`: a `threadgroup` array with a barrier after each level gives exact group sums
+  for groups of 32 to 1,024 threads and wrong ones from 256 threads up without the barriers; `simd_sum`,
+  `simd_min`, `simd_prefix_inclusive_sum`, `simd_shuffle` and the attributes `thread_index_in_simdgroup`,
+  `simdgroup_index_in_threadgroup` and `threads_per_simdgroup` (32) are exact; a fixed tree is bit-repeatable
+  over runs and processes; arrays up to 32,768 B build and 65,536 B is refused at evaluation with status 1 and the
+  device's limit in the message (the process continues). Suite `sizes`: sizes read from an int32 input of fewer
+  than 8 elements (in `constant` space) instead of template integers give the same results bit for bit and the
+  same time per launch; a new value costs about 42 ms when it is a template (a new Metal source) and 2.6 to 3.1
+  ms when it is an input (a new object of one source), so sizes that change per call belong in an input and
+  templates in constants of a run.
 
 ## 13. Random numbers
 

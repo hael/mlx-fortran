@@ -15,7 +15,7 @@ use, intrinsic :: iso_fortran_env, only: int32, int64, real32, real64
 use mlxf,                   only: mlx_array, mlx_metal_kernel, mlx_metal_kernel_spec, mlx_from, mlx_to, mlx_eval, &
                                   mlx_synchronize, mlx_set_default_device, mlx_peak_memory, mlx_reset_peak_memory, &
                                   mlx_zeros, MLX_DEVICES, MLX_DTYPES
-use mlxf_test_defs,         only: KBWINSZ, KBALPHA, MAXIMGBATCHSZ, PROJ_TIE_MARGIN, PROBE_ERR_CAP
+use mlxf_test_defs,         only: KBWINSZ, KBALPHA, MAXIMGBATCHSZ, PROJ_TIE_MARGIN, PROBE_ERR_CAP, probe_case
 use mlxf_oracle_gridding,   only: oracle_grid_plane, oracle_grid_lattice, oracle_grid_selfcheck
 use mlxf_oracle_projection, only: oracle_proj_stencil
 use mlxf_test_utils,        only: assert_true, set_fixed_seed, bits_equal
@@ -23,7 +23,7 @@ use mlxf_test_reduce,       only: nan_maxval, nan_max
 implicit none
 private
 
-public :: run_bench_insert_probe
+public :: run_bench_insert_probe, probe_spec, seeded_case, window_coefficients
 
 character(len=1), parameter :: NL = achar(10)
 real(real64),     parameter :: PI = acos(-1._real64)
@@ -94,23 +94,6 @@ character(len=*), parameter :: SRC_PLAIN = &
     &'      num[2 * v + 1] = num[2 * v + 1] + fn * cv.imag;'//NL// &
     &'      dens[v] = dens[v] + fd * qv;'//NL
 character(len=*), parameter :: SRC_TAIL = '    }'//NL//'  }'//NL//'}'
-
-! the planes of one case: the box, the disc's pixels (h, k) in the kernel's order, per plane the rotation, the
-! weight and the data of every disc pixel (c with the conjugate of the mate where k > 0, q), and the oracle's
-! arrays of the same data (c, q on the half k <= 0, (n + 1, n + 1)); the pixels given no data near a tie
-type :: probe_case
-    character(len=40)            :: name = ''
-    integer                      :: n    = 0
-    integer                      :: npix = 0
-    integer                      :: ntie = 0
-    real(real32),    allocatable :: hk(:,:)
-    real(real32),    allocatable :: rot(:,:,:)
-    real(real32),    allocatable :: omega(:)
-    complex(real32), allocatable :: c(:,:)
-    real(real32),    allocatable :: q(:,:)
-    complex(real64), allocatable :: oc(:,:,:)
-    real(real64),    allocatable :: oq(:,:,:)
-end type probe_case
 
 ! the results of one insertion of a case: the numerator (2, nvox) and the density (nvox), and the batches' seconds
 type :: probe_run

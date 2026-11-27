@@ -5,7 +5,7 @@
 ! [bt, rt, nrots], so pair e of the array element order of (rt, bt) reads raw[e nrots + i]. The rows variant
 ! writes every distance too. A kernel object is for one tile shape, so a workspace holds one per variant.
 submodule (mlxf_toy_polarft_workspace) mlxf_toy_polarft_workspace_tail
-use mlxf,           only: mlx_from, mlx_default_device, mlx_metal_kernel_spec, reshape, MLX_DEVICES, MLX_DTYPES
+use mlxf,           only: mlx_from, mlx_default_device, reshape, MLX_DEVICES, MLX_DTYPES
 use mlxf_test_defs, only: POLAR_DIST_MAX, POLAR_DIST_INVALID, POLAR_DIST_VALID, POLAR_ARG_CUTOFF, POLAR_DRAW_FLOOR, &
                           POLARFT_TAILS, POLARFT_TAIL_TG
 implicit none
@@ -74,9 +74,7 @@ contains
             &'  if (s >= tgt) { pick = i; break; }'//NL//'}'//NL//SRC_ENTRY
     end function tail_source
 
-    ! the kernel of a tile (nrots, rt, bt) of the tile plan: one thread per pair, grid [rt bt, 1, 1]; with rows
-    ! the third output holds every distance as (nrots, rt bt)
-    function tail_spec( spec_t, rows ) result(spec)
+    module function tail_spec( spec_t, rows ) result(spec)
         type(polarft_tile_spec), intent(in) :: spec_t
         logical,                 intent(in) :: rows
         type(mlx_metal_kernel_spec) :: spec

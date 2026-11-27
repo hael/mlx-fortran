@@ -21,7 +21,8 @@ use mlxf_toy_polarft_calc, only: polarft_calc
 use mlxf_toy_eul_prob_tab, only: eul_prob_tab
 use mlxf_oracle_polar,     only: polar_dft_matrix, polar_keyed_u, polar_compare_rows, polar_draws_off, &
                                  polar_report_draws, polar_memo_rows
-use mlxf_test_utils,       only: assert_true, assert_int, test_devices, device_name, set_fixed_seed, bits_equal
+use mlxf_test_utils,       only: assert_true, assert_int, test_devices, device_name, set_fixed_seed, bits_equal, &
+                                 digest_bits, wait_for_go_file
 use mlxf_test_reduce,      only: nan_maxval, nan_max
 implicit none
 private
@@ -43,11 +44,8 @@ integer, parameter :: TAIL_ROWS_FUSED = 1
 ! fused one
 character(len=*), parameter :: FORMULATION       = 'B+compiled'
 character(len=*), parameter :: FORMULATION_FUSED = 'B+metal'
-! the digest's starting state (any non-zero value), the go file's polling interval in microseconds and the
-! seconds after which a process that was never told to go gives up
+! the digest's starting state (any non-zero value)
 integer(int64), parameter :: DIGEST_START = 88172645463325252_int64
-integer,        parameter :: GO_POLL_US   = 10000
-real(real64),   parameter :: GO_WAIT_MAX  = 3600._real64
 
 ! one of SIMPLE's measured cases
 type :: bench_case
@@ -184,11 +182,6 @@ interface
         real(c_double) :: loadavg(*)
         integer(c_int), value :: nelem
     end function getloadavg
-
-    integer(c_int) function usleep( useconds ) bind(c, name='usleep')
-        import :: c_int
-        integer(c_int), value :: useconds
-    end function usleep
 end interface
 
 contains
@@ -410,45 +403,9 @@ contains
     ! with go=<file>: the data are ready, so <file>.ready.<part> is written, and the process waits until <file>
     ! exists; simultaneous processes then start scoring together. Without the key it returns at once
     subroutine wait_for_go
-        character(len=:), allocatable :: go
-        character(len=16)             :: part
-        real(real64)                  :: t0
-        integer                       :: u
-        integer(c_int)                :: rc
-        logical                       :: l_go
         if( .not. arg_given('go') ) return
-        go = arg_str('go', '')
-        write(part, '(i0)') arg_int('part', 1)
-        open(newunit=u, file=go//'.ready.'//trim(part), action='write', status='replace')
-        write(u,'(a)') 'ready'
-        close(u)
-        write(*,'(a)') '    ready; waiting for '//go
-        flush(6)
-        t0 = clock_s()
-        do
-            inquire(file=go, exist=l_go)
-            if( l_go ) exit
-            if( clock_s() - t0 > GO_WAIT_MAX )then
-                write(*,'(a)') 'bench_polar_table: no go file '//go//' appeared'
-                error stop 2
-            endif
-            rc = usleep(int(GO_POLL_US, c_int))
-        end do
+        call wait_for_go_file(arg_str('go', ''), arg_int('part', 1), 'bench_polar_table')
     end subroutine wait_for_go
-
-    ! the digest after the bit patterns of bits, in order: each pattern enters by exclusive or and the state
-    ! then takes one 64-bit shift-register step, so a changed bit or a changed order changes the digest
-    pure subroutine digest_bits( h, bits )
-        integer(int64), intent(inout) :: h
-        integer(int32), intent(in)    :: bits(:)
-        integer :: i
-        do i = 1, size(bits)
-            h = ieor(h, iand(int(bits(i), int64), 4294967295_int64))
-            h = ieor(h, ishft(h, 13))
-            h = ieor(h, ishft(h, -7))
-            h = ieor(h, ishft(h, 17))
-        end do
-    end subroutine digest_bits
 
     ! the digest after a table's entries: the distances' bit patterns, then the rotations
     pure subroutine digest_entries( h, dists, irots )

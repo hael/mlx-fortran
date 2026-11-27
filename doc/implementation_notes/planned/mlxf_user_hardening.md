@@ -337,26 +337,26 @@ future implementation phases, not claims that these files changed in this planni
 
 | File / owner | Work | Phases |
 | --- | --- | --- |
-| `doc/implementation_notes/planned/mlxf_user_hardening.md` | Single contract, decisions, acceptance and progress record | all |
+| `doc/implementation_notes/planned/mlxf_user_hardening.md` | Single contract, decisions, acceptance and progress record | 0, 1, 2, 3, 4, 5, 6 |
 | `doc/implementation_notes/planned/mlxf_roadmap.md`, `doc/implementation_notes/README.md`, `doc/history/2026-11.md` | Ranking proposal, links, delivered evidence and rulings | planning, 0, 6 |
-| `doc/collaboration/apple_questions.md`, `doc/compiler_issues/README.md` | Dedupe/record upstream evidence; GCC file only if new verified facts | planning, 0–6 |
-| `scripts/probes/user_statistics_probe.c`, `scripts/probes/user_range_probe.c` (new) | Minimal direct mlx-c reproducers/controls | 0–3 |
+| `doc/collaboration/apple_questions.md`, `doc/compiler_issues/README.md` | Dedupe/record upstream evidence; GCC file only if new verified facts | planning, 0, 1, 2, 3, 4, 5, 6 |
+| `scripts/probes/user_statistics_probe.c`, `scripts/probes/user_range_probe.c` (new) | Minimal direct mlx-c reproducers/controls | 0, 1, 2, 3 |
 | `src/core/ops/mlxf_ops_reduce.f90` | C1 and floating mean, empty extrema; own helpers where practical | 1, 3 |
 | `src/core/linalg/mlxf_linalg_matrix.f90` | Scaled Euclidean norms | 3 |
 | `src/core/ops/mlxf_ops_reduce_tester.f90`, `src/core/linalg/mlxf_linalg_matrix_tester.f90` | Integer/range/empty regressions | 1, 3 |
 | `src/core/io/mlxf_io.f90`, `src/core/io/mlxf_io_tester.f90` | Save transaction and failure-preservation tests | 1 |
 | `src/core/runtime/mlxf_libc.f90` | Temporary-file/rename/cleanup calls, if needed | 1 |
 | `src/core/ops/mlxf_ops_index.f90`, `src/core/ops/mlxf_ops_index_tester.f90` | Explicit bounds validation API and fixtures | 2 |
-| `src/core/array/mlxf_array.f90`, `src/core/array/mlxf_array_elementwise.f90`, `src/core/array/mlxf_calls.f90`, `src/core/array/mlxf_calls_elementwise.f90` | Integer scalar bindings and shared helpers; no general ownership rewrite | 4; 1–3 only if shared signature/helper changes are needed |
+| `src/core/array/mlxf_array.f90`, `src/core/array/mlxf_array_elementwise.f90`, `src/core/array/mlxf_calls.f90`, `src/core/array/mlxf_calls_elementwise.f90` | Integer scalar bindings and shared helpers; no general ownership rewrite | 4; 1, 2, 3 only if shared signature/helper changes are needed |
 | `src/core/array/mlxf_array_tester.f90`, `src/core/ops/mlxf_ops_logic_tester.f90`, `src/core/ops/mlxf_ops_math_tester.f90` | Scalar promotion/native-intrinsic controls; use actual owning tester after Phase 0 mapping | 4 |
 | `src/defs/mlxf_defs.f90`, `src/core/mlxf.f90` | Validator spec if needed; explicit new public exports | 2, 4 |
-| `src/test/framework/mlxf_test_defs.f90`, `src/test/framework/mlxf_test_registry.f90` | Shared frozen bounds and area/guard registration, only if needed | 1–4, 6 |
+| `src/test/framework/mlxf_test_defs.f90`, `src/test/framework/mlxf_test_registry.f90` | Shared frozen bounds and area/guard registration, only if needed | 1, 2, 3, 4, 6 |
 | `src/core/transforms/mlxf_transforms_tester.f90` or existing transform owner selected in Phase 0 | Derivative controls for changed compositions, if needed | 3 |
 | `scripts/check_rules.py`, `scripts/check_consumer.py`, `scripts/mlxf_consumer_checks.py` (last two new) | Shared lifetime analysis, consumer entry point, planted-rule self-tests | 2 |
-| `CMakeLists.txt`, `cmake/mlxfConfig.cmake.in`, `scripts/check_install.sh` | Install/check consumer tooling and new examples; optional CMake helper | 2, 4–6 |
-| `README.md`, `doc/quickstart.md`, `doc/how2s/how2use_from_simple.md`, `doc/how2s/how2use_installed.md` (new) | Immediate guidance, compatible general-user entry, architecture/precision limits | 0–6 |
-| `doc/policies/binding_contract_policy.md`, `doc/policies/test_environment_policy.md`, `doc/architecture_principles.md` | Current contract with implemented changes; two-architecture release rule only when adopted | 1–6 |
-| `test/consumer/mlxf_example_user_safety.f90` (new), `test/consumer/CMakeLists.txt`, existing examples if needed | Installed compile/run evidence for guidance and API additions | 0–5 |
+| `CMakeLists.txt`, `cmake/mlxfConfig.cmake.in`, `scripts/check_install.sh` | Install/check consumer tooling and new examples; optional CMake helper | 2, 4, 5, 6 |
+| `README.md`, `doc/quickstart.md`, `doc/how2s/how2use_from_simple.md`, `doc/how2s/how2use_installed.md` (new) | Immediate guidance, compatible general-user entry, architecture/precision limits | 0, 1, 2, 3, 4, 5, 6 |
+| `doc/policies/binding_contract_policy.md`, `doc/policies/test_environment_policy.md`, `doc/architecture_principles.md` | Current contract with implemented changes; two-architecture release rule only when adopted | 1, 2, 3, 4, 5, 6 |
+| `test/consumer/mlxf_example_user_safety.f90` (new), `test/consumer/CMakeLists.txt`, existing examples if needed | Installed compile/run evidence for guidance and API additions | 0, 1, 2, 3, 4, 5 |
 | `scripts/generate_api_reference.py`, `doc/api_reference.md` (new), rank-2d API inventory tool | Source-derived signatures, coverage and semantic links | 5 |
 | `scripts/check_tree.sh` | Shared checker/reference checks and planted negative controls | 2, 5 |
 | `src/test/bench/mlxf_bench_user_costs.f90` (new, only missing cases after 2d/2f) | Named-only timings; no new executable or CTest process | 5 |

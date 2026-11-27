@@ -6,13 +6,13 @@
 ! a user writes; lifecycle, scoring, the fused tail and the shift maps are submodules.
 module mlxf_toy_polarft_workspace
 use, intrinsic :: iso_fortran_env, only: int64, real32, real64
-use mlxf,                 only: mlx_array, mlx_function, mlx_metal_kernel
+use mlxf,                 only: mlx_array, mlx_function, mlx_metal_kernel, mlx_metal_kernel_spec
 use mlxf_test_defs,       only: NSHIFTMAPS, POLARFT_TAILS, polarft_tile_spec, polarft_block_spec, polarft_map_spec, &
                                 polarft_map_block, polar_map_results
 use mlxf_toy_device_work, only: device_work
 implicit none
 
-public :: polarft_workspace
+public :: polarft_workspace, tail_spec
 private
 
 ! the slots a caller may have in flight: one scored synchronously, or two overlapped
@@ -217,6 +217,14 @@ interface
         type(mlx_array), allocatable, intent(out) :: outputs(:)
         integer,                      intent(out) :: status
     end subroutine polar_tail_callback
+
+    ! the fused tail's kernel of a tile (nrots, rt, bt) of the tile plan spec_t: one thread per pair, grid
+    ! [rt bt, 1, 1]; with rows the third output holds every distance as (nrots, rt bt)
+    module function tail_spec( spec_t, rows ) result(spec)
+        type(polarft_tile_spec), intent(in) :: spec_t
+        logical,                 intent(in) :: rows
+        type(mlx_metal_kernel_spec) :: spec
+    end function tail_spec
 
     ! the fused tail of the tile plan spec: its constants and its kernel, on the GPU only (a refusal sets msg);
     ! the form becomes metal

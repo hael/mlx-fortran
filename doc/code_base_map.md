@@ -96,9 +96,11 @@ descriptions come from `<dir>/<dir>.inf`. Regenerate with
   - **defs/** — the constants and vocabularies shared by more than one module of mlx-fortran (exported = defs, local = stay)
     - `mlxf_defs.f90` — the constants and vocabularies more than one module uses: the hard-error status, the devices, the dtypes
   - **test/** — test-only code compiled into mlxf_test_exec: framework/ (assertions, the suite registry, the ABI probe), toys/ (the toys that mirror SIMPLE, one folder per toy), oracles/ (their independent references), bench/ (the benchmarks)
-    - **bench/** — the benchmarks run by hand (mlxf_test_exec test=bench_<x>): the polar table, the projector, the reconstruction and the insertion probe
+    - **bench/** — the benchmarks run by hand (mlxf_test_exec test=bench_<x>): the polar table, the projector, the reconstruction, the insertion probe, the BLAS products and the kernel forms
       - `mlxf_bench_blas.f90` — the crossover of BLAS and MLX matrix products: sgemm and cgemm on the host against matmul on MLX's devices
       - `mlxf_bench_insert_probe.f90` — the protected-update probe: SIMPLE's gridding insertion as one Metal kernel with atomic float32 deposits, against the oracle
+      - `mlxf_bench_kernel_forms.f90` — the kernel-forms benchmark: ways of writing a Metal kernel, set beside the toys' current kernels on the GPU
+      - `mlxf_bench_kernel_forms_src.f90` — the kernel-forms benchmark's Metal sources and their specs: the probe's kernels and the alternative forms
       - `mlxf_bench_polar_table.f90` — benchmark of the polar table workspace at SIMPLE's sizes: accuracy block, timing sweep, profile, overlap, shift maps
       - `mlxf_bench_projector.f90` — benchmark of the toy projector at SIMPLE's sizes: the reprojection of one state timed, chained to family A, and judged
       - `mlxf_bench_recon_pcg.f90` — benchmark of the toy reconstructor_pcg at SIMPLE's boxes: transforms, timing, profile, probe, accuracy

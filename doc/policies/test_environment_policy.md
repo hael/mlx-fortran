@@ -175,6 +175,18 @@ all-width CPU speedup. Grid files must carry fresh `simple_commit`, `fftw_plans`
 ratios are used; `revision=` identifies the measured mlx-fortran tree. Performance runs are currently deferred
 by the owner; running either accuracy suite is correctness validation, not a throughput benchmark.
 
+`bench_kernel_forms` sets ways of writing a Metal kernel beside the toys' current kernels, on the GPU only (a
+session without one is refused). The current kernels enter through the toys' own spec functions (`tail_spec`,
+`gather_spec`, `probe_spec`), so the bench holds no copy of a current source; the alternatives' sources and specs
+are in `mlxf_bench_kernel_forms_src.f90`. `suite=probe [form=a|b|c|d]` asserts what threadgroup memory and the
+SIMD-group functions give through the wrapper. `suite=tail|reduce|sizes|select|insert|waits` take `mode=agree`,
+which asserts each alternative against the current form before anything is timed (bit for bit where the order of
+the arithmetic is the same, else within `FORMS_REDUCE_TOL` or `FORMS_INSERT_TOL`, frozen in
+`mlxf_test_defs.f90` on seed 1), and `mode=time`, which runs an A-A control and five interleaved pairs of medians
+of five and prints decision 3's verdict of the kernel-forms plan; `suite=tail mode=part` is one process of
+`scripts/run_parts.sh` (`RUN_PARTS_BENCH=bench_kernel_forms RUN_PARTS_SUITE=tail`) and `suite=sizes mode=compile`
+the first evaluations of new sizes in a fresh process. A key a suite does not read stops it.
+
 ## 2. What a test is
 
 - It can fail, and its failure reaches the exit status (`mlxf_test_utils` assertions; `mlxf_test_exec`

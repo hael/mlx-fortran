@@ -19,7 +19,7 @@ use mlxf_test_defs,       only: KBWINSZ, KBALPHA, OSMPL_PAD_FAC, PROJ_FORMS, PRO
 use mlxf_toy_device_work, only: device_work
 implicit none
 
-public :: projector_workspace, projector_bank
+public :: projector_workspace, projector_bank, gather_spec
 private
 
 character(len=1), parameter :: NL = achar(10)

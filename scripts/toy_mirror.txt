@@ -111,6 +111,7 @@ mlxf_toy_polarft_workspace polarft_workspace%new_from_memos addition the device 
 mlxf_toy_polarft_workspace polarft_workspace%get_section addition the device route: one projected section copied to the host (get_ref_pft's device half)
 mlxf_toy_polarft_workspace polarft_workspace%has_sections addition inquiry: projected sections wait to be memoized
 mlxf_toy_polarft_workspace polarft_workspace%has_memos addition inquiry: device memos wait to become tiles
+mlxf_toy_polarft_workspace tail_spec addition the fused tail's kernel spec of a tile, public because the kernel-forms bench builds the current form from it
 
 # ---- the projector (src/main/image/simple_projector.f90; new, set_rmat, pad_fft and kill are image's) ----
 mlxf_toy_projector projector simple_projector projector
@@ -148,6 +149,7 @@ mlxf_toy_projector_workspace projector_workspace%message addition inquiry: the r
 mlxf_toy_projector_workspace projector_workspace%kill addition releases the transform, the cube and the kernels
 mlxf_toy_projector_workspace projector_bank addition a bank of projected sections that stays on the device: what the batch projector hands the calculator's device route, opaque to both classes' host files
 mlxf_toy_projector_workspace projector_bank%kill addition releases the sections
+mlxf_toy_projector_workspace gather_spec addition the fused gather's kernel spec, public because the kernel-forms bench builds the current form from it
 
 # ---- the PCG reconstruction (one half's assembly after the reduction) ----
 # mask_mul, apply_normal, apply_normal_kernel, apply_precond and dot_real_volume take and return SIMPLE's host arrays

@@ -258,6 +258,13 @@ integer, parameter :: POLARFT_TAIL_TG = 64
 real(real64), parameter :: POLARFT_TAIL_ROW_TOL = 2.3816146966584994e-07_real64
 integer,      parameter :: POLARFT_TAIL_ROT_FIX = 1
 integer,      parameter :: POLARFT_TAIL_ROT_BLK = 5
+! the kernel-forms benchmark's reductions against the host's double sum, relative to the sum of |terms| of a sum:
+! twice the largest error of the four forms on seed 1 on the GPU, above 2^-23, frozen before seeds 2 and 3
+real(real64), parameter :: FORMS_REDUCE_TOL = 4.7556730237612776e-07_real64
+! the kernel-forms benchmark's pulled insertion against the probe's atomic one, relative to the sum of a voxel's
+! |terms| (each part on its own): twice the largest difference on seed 1 at n = 64 on the GPU, frozen before seeds 2
+! and 3
+real(real64), parameter :: FORMS_INSERT_TOL = 3.6158061349382692e-06_real64
 
 ! the fixture of the polar host route (sub-suite polarft_host and the off-state program): shells kfrom .. kfrom +
 ! nk - 1 on a half ring of pftsz samples, nrefs references per half (more than one tile of PFTC_BLOCK_NR, the
@@ -621,5 +628,22 @@ type(recon_pcg_tolerance), parameter :: RECON_PCG_TOLERANCES(16) = [&
 ! true one within a tenth of it. Zero: not frozen (the preconditioned solve does not reach the floor in 200
 ! iterations), and rule T is reported, not gated
 real(real64), parameter :: RECON_PCG_RTOL_T = 0._real64
+
+! the insertion probe's planes of one case: the box, the disc's pixels (h, k) in the kernel's order, per plane the
+! rotation, the weight and the data of every disc pixel (c with the conjugate of the mate where k > 0, q), and the
+! oracle's arrays of the same data (c, q on the half k <= 0, (n + 1, n + 1)); the pixels given no data near a tie
+type :: probe_case
+    character(len=40)            :: name = ''
+    integer                      :: n    = 0
+    integer                      :: npix = 0
+    integer                      :: ntie = 0
+    real(real32),    allocatable :: hk(:,:)
+    real(real32),    allocatable :: rot(:,:,:)
+    real(real32),    allocatable :: omega(:)
+    complex(real32), allocatable :: c(:,:)
+    real(real32),    allocatable :: q(:,:)
+    complex(real64), allocatable :: oc(:,:,:)
+    real(real64),    allocatable :: oq(:,:,:)
+end type probe_case
 
 end module mlxf_test_defs

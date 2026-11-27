@@ -21,7 +21,7 @@ use mlxf_toy_polarft_calc,        only: polarft_calc, vol_pad2ref_pfts_opt
 use mlxf_toy_projector,           only: projector
 use mlxf_toy_projector_pft_batch, only: fproject_polar_batch_opt
 use mlxf_oracle_projection,       only: oracle_proj_stencil, oracle_proj_edge_gather, oracle_proj_edge_index
-use mlxf_test_utils,              only: assert_true, set_fixed_seed
+use mlxf_test_utils,              only: assert_true, set_fixed_seed, digest_bits, wait_for_go_file
 use mlxf_test_reduce,             only: nan_maxval
 implicit none
 private
@@ -53,10 +53,8 @@ real(real64), parameter :: GOLDEN = 180._real64 * (3._real64 - sqrt(5._real64))
 real(real64), parameter :: PI     = acos(-1._real64)
 ! the transforms' working memory, guessed, for the estimate of a process's device bytes
 real(real64), parameter :: FFT_WORK_B = 0.3e9_real64
-! the digest's starting state, the go file's polling interval (microseconds) and the longest wait for it (s)
+! the digest's starting state
 integer(int64), parameter :: DIGEST_START = 88172645463325252_int64
-integer,        parameter :: GO_POLL_US   = 10000
-real(real64),   parameter :: GO_WAIT_MAX  = 3600._real64
 ! the keys each suite reads, blank separated; test and suite belong to the executable
 character(len=*), parameter :: SUITE_KEYS(3) = [character(len=96) :: &
     &'time form tile tg nspace nthr nparts part go seed passes', &
@@ -101,11 +99,6 @@ interface
         real(c_double) :: loadavg(*)
         integer(c_int), value :: nelem
     end function getloadavg
-
-    integer(c_int) function usleep( useconds ) bind(c, name='usleep')
-        import :: c_int
-        integer(c_int), value :: useconds
-    end function usleep
 end interface
 
 contains
@@ -662,44 +655,9 @@ contains
     ! with go=<file>: the data are ready, so <file>.ready.<part> is written, and the process waits until <file>
     ! exists; without the key it returns at once
     subroutine wait_for_go
-        character(len=:), allocatable :: go
-        character(len=16)             :: part
-        real(real64)                  :: t0
-        integer                       :: u
-        integer(c_int)                :: rc
-        logical                       :: l_go
         if( .not. arg_given('go') ) return
-        go = arg_str('go', '')
-        write(part, '(i0)') arg_int('part', 1)
-        open(newunit=u, file=go//'.ready.'//trim(part), action='write', status='replace')
-        write(u,'(a)') 'ready'
-        close(u)
-        write(*,'(a)') '    ready; waiting for '//go
-        flush(6)
-        t0 = clock_s()
-        do
-            inquire(file=go, exist=l_go)
-            if( l_go ) exit
-            if( clock_s() - t0 > GO_WAIT_MAX )then
-                write(*,'(a)') 'bench_projector: no go file '//go//' appeared'
-                error stop 2
-            endif
-            rc = usleep(int(GO_POLL_US, c_int))
-        end do
+        call wait_for_go_file(arg_str('go', ''), arg_int('part', 1), 'bench_projector')
     end subroutine wait_for_go
-
-    ! each pattern enters by exclusive or and the state takes one 64-bit shift-register step
-    pure subroutine digest_bits( h, bits )
-        integer(int64), intent(inout) :: h
-        integer(int32), intent(in)    :: bits(:)
-        integer :: i
-        do i = 1, size(bits)
-            h = ieor(h, iand(int(bits(i), int64), 4294967295_int64))
-            h = ieor(h, ishft(h, 13))
-            h = ieor(h, ishft(h, -7))
-            h = ieor(h, ishft(h, 17))
-        end do
-    end subroutine digest_bits
 
     ! insertion sort, ascending (a few passes)
     pure subroutine sort_real( x )

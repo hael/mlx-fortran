@@ -283,7 +283,7 @@ layout does 2.9 million pairs per second on 24 cores; the target machine is an M
     - Ask: SIMPLE's gridding insertion adds every pixel of a plane, through a 27-point window, to two shared
       grids; planes overlap at every voxel. Through mlx-c we can write the update with `atomic_outputs`
       (`atomic_fetch_add_explicit` on `atomic<float>`), and a `threadgroup` array declared in the kernel's body
-      builds and gives correct results (a 64-element group sum), though MLX writes the kernel's signature and the
+      builds and gives correct results (measured below), though MLX writes the kernel's signature and the
       documentation does not mention threadgroup memory. Two questions: (1) is threadgroup memory declared in the
       body supported for kernels built by `metal_kernel` (and is its size limit the device's), so that a block of
       the grid can be accumulated in a fixed order and written once; (2) is there a way, short of a sort, to make
@@ -299,9 +299,21 @@ layout does 2.9 million pairs per second on 24 cores; the target machine is an M
       sequential single-precision sum (9.6e-3).
     - Where: MLX `docs/src/dev/custom_metal_kernels.rst` (atomic outputs, the gradient example);
       `mlx/backend/metal/custom_kernel.cpp` (the generated signature); mlx-c `mlx/c/fast.cpp`.
-    - Meanwhile: the probe (`mlxf_test_exec test=bench_insert_probe suite=probe`) records the numbers; the
-      insertion's plan (K6) chooses between the atomic kernel, `mlx_scatter_add` and a sorted, deterministic
-      form on its own repeatability gate.
+      Measured 2026-11-26 on MLX 0.32.4, mlx-c 0.8.0, M5 Ultra (`mlxf_test_exec test=bench_kernel_forms
+      suite=probe`, source `src/test/bench/mlxf_bench_kernel_forms_src.f90`): a `threadgroup float sh[1024]`
+      declared in the body gives exact group sums of small integers with `threadgroup_barrier` for groups of 32,
+      64, 256 and 1,024 threads, and wrong sums from 256 threads up without the barriers; `simd_sum`, `simd_min`,
+      `simd_prefix_inclusive_sum`, `simd_shuffle` and the attributes `thread_index_in_simdgroup`,
+      `simdgroup_index_in_threadgroup` and `threads_per_simdgroup` (32) are exact; a fixed tree on non-integer
+      values is bit-repeatable over runs and processes; the largest array that builds is 32,768 B, and 65,536 B is
+      refused at evaluation with status 1 and "Threadgroup memory size (65536) exceeds the maximum threadgroup
+      memory allowed (32768)". So part (1) holds in practice on this device, with the device's limit; whether
+      MLX supports it is still the question. A deterministic alternative to the atomics was measured too: one
+      thread per voxel pulling from every plane, its sums equal to the atomic kernel's within the atomics' own
+      run-to-run spread, is bit-repeatable but 14.5 times slower at n = 64 and 5.6 times at n = 96.
+    - Meanwhile: the probes (`mlxf_test_exec test=bench_insert_probe suite=probe`, `test=bench_kernel_forms
+      suite=probe` and `suite=insert`) record the numbers; the insertion's plan (K6) chooses between the atomic
+      kernel, `mlx_scatter_add` and a sorted or pulled, deterministic form on its own repeatability gate.
 
 ## L. Packaging: the version of mlx-c and a session without a GPU
 
@@ -445,6 +457,23 @@ layout does 2.9 million pairs per second on 24 cores; the target machine is an M
       plan's C3 preserves the exact fixtures and proposes explicit boundary validation.
     - Meanwhile: callers must validate input indices and slab extents before indexing. The existing lazy
       path stays unchecked; a local explicit validator is planned. Check current upstream reports first.
+
+36. **Is `argpartition` (and `argsort`) stable on the GPU, and may we rely on it?** Status: open, not sent;
+    measured 2026-11-26 with MLX 0.32.4 / mlx-c 0.8.0 on an M5 Ultra.
+    - Ask: selecting the K largest of each column of a 10,000 by 1,024 float32 table with `argpartition` at
+      the K-th position (K = 3 and 10), with 11 to 13 columns per case given a second element equal to the first
+      maximum and one equal to the K-th value, the K kept always included the lower index of the tied pair, as
+      a stable selection would, in every one of 12 cases (3 seeds, 2 values of K, 2 processes). The
+      documentation says nothing of the order among equal keys. Is the lower index on ties guaranteed for
+      `argpartition` and `argsort` on the GPU (and the CPU), or an artefact of the current kernel? If it is
+      guaranteed, the repair pass we run at the boundary (a running count of the equal values in index order)
+      can go.
+    - Where: MLX `mlx/ops.cpp` (`argpartition`, `argsort`) and the Metal sort kernels; reached through
+      `mlx_argpartition` in `src/core/ops/mlxf_ops_sort.f90`; the test is
+      `mlxf_test_exec test=bench_kernel_forms suite=select` (form `e1n`), source
+      `src/test/bench/mlxf_bench_kernel_forms.f90`.
+    - Meanwhile: the binding contract keeps "no stability" (section 10), and every selection that needs the
+      first-maximum rule repairs the boundary's ties or uses a kernel with strict comparison.
 
 ## For information (not Apple's to fix)
 

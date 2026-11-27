@@ -1,6 +1,7 @@
 !@descr: assertions, suite tracking and the summary of mlxf_test_exec
 ! Adapted from SIMPLE's simple_test_utils: same names and output, without SIMPLE's types.
 module mlxf_test_utils
+use, intrinsic :: iso_c_binding,   only: c_int
 use, intrinsic :: iso_fortran_env, only: output_unit, int32, int64, real32, real64
 use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
 use mlxf,             only: MLX_DEVICES, MLX_DTYPES, mlx_array, mlx_from, mlx_to, reshape, mlx_device_count, &
@@ -15,9 +16,13 @@ public :: begin_test_suite, end_test_suite, report_summary
 public :: tests_run, tests_failed
 public :: set_fixed_seed, bits_equal, test_devices, device_name, gpu_present, cpu_only_mlx, gpu_check_runs
 public :: gpu_only_skip
-public :: judge_error, find_tolerance, family_seeds, seeded_uniform, seeded_array, shaped_error
+public :: judge_error, find_tolerance, family_seeds, seeded_uniform, seeded_array, shaped_error, digest_bits
+public :: wait_for_go_file
 
 integer, parameter :: MSGLEN = 512
+! a part process polls for its go file this often (microseconds), and gives up after this many seconds
+integer,      parameter :: GO_POLL_US  = 10000
+real(real64), parameter :: GO_WAIT_MAX = 3600._real64
 
 type :: test_suite_result
     character(len=MSGLEN) :: name      = ''
@@ -53,6 +58,13 @@ integer :: tests_failed = 0
 integer :: active_suite = 0
 type(test_suite_result), allocatable :: suites(:)
 type(test_failure),      allocatable :: failures(:)
+
+interface
+    integer(c_int) function usleep( useconds ) bind(c, name='usleep')
+        import :: c_int
+        integer(c_int), value :: useconds
+    end function usleep
+end interface
 
 contains
 
@@ -182,6 +194,49 @@ contains
             if( trim(table(k)%name) == trim(name) ) t = table(k)
         end do
     end function find_tolerance
+
+    ! the digest after the bit patterns of bits, in order: each pattern enters by exclusive or and the state
+    ! then takes one 64-bit shift-register step, so a changed bit or a changed order changes the digest
+    pure subroutine digest_bits( h, bits )
+        integer(int64), intent(inout) :: h
+        integer(int32), intent(in)    :: bits(:)
+        integer :: i
+        do i = 1, size(bits)
+            h = ieor(h, iand(int(bits(i), int64), 4294967295_int64))
+            h = ieor(h, ishft(h, 13))
+            h = ieor(h, ishft(h, -7))
+            h = ieor(h, ishft(h, 17))
+        end do
+    end subroutine digest_bits
+
+    ! a part process of a split: writes <go>.ready.<part>, then waits until the launcher creates the go file; who
+    ! names the benchmark in the message when none appears within GO_WAIT_MAX
+    subroutine wait_for_go_file( go, part, who )
+        character(len=*), intent(in) :: go, who
+        integer,          intent(in) :: part
+        character(len=16) :: cpart
+        integer(int64)    :: c0, c1, rate
+        integer           :: u
+        integer(c_int)    :: rc
+        logical           :: l_go
+        write(cpart, '(i0)') part
+        open(newunit=u, file=go//'.ready.'//trim(cpart), action='write', status='replace')
+        write(u,'(a)') 'ready'
+        close(u)
+        write(*,'(a)') '    ready; waiting for '//go
+        flush(output_unit)
+        call system_clock(c0, rate)
+        do
+            inquire(file=go, exist=l_go)
+            if( l_go ) exit
+            call system_clock(c1)
+            if( real(c1 - c0, real64) / real(rate, real64) > GO_WAIT_MAX )then
+                write(*,'(a)') who//': no go file '//go//' appeared'
+                error stop 2
+            endif
+            rc = usleep(int(GO_POLL_US, c_int))
+        end do
+    end subroutine wait_for_go_file
 
     ! the seeds a calibrated family runs: the calibration seed, then the judged ones
     function family_seeds() result(seeds)
