@@ -160,8 +160,9 @@ holds is `doc/architecture_principles.md`; `scripts/check_tree.sh` checks what r
 - No `associate` over a derived-type parameter-array element under a runtime index.
 - A component section of a record array passed to an array dummy is a hidden copy-in/copy-out temporary.
 - Never pass the pointer result of a polymorphic type-bound function straight on as an actual argument.
-- A submodule never calls a private plain procedure of its module (gfortran before 16 does not link it;
-  `scripts/check_submodule_linkage.py`).
+- A submodule never calls a private procedure whose body is in its module, plain or separate (gfortran before 16
+  does not link a plain one, gfortran 15 on Linux not a separate one either); a separate module procedure a module
+  and its submodule share has its body in the submodule (`scripts/check_submodule_linkage.py`).
 - Keep function-like preprocessor macro invocations on one physical line.
 - gfortran warns about no unused imported name: delete an import with the code that used it.
 - `-Wfunction-elimination` (Release): an impure function as a later operand of `.and.` or `.or.` may be skipped,

@@ -135,8 +135,9 @@ is imported is how Fortran is written, built, tested, checked, documented and ha
   once and passed whole; exempt are the generated interfaces and `bind(c)` procedures whose signature C fixes.
   Checked (`check_rules.py`, rule `arity`), in `src/` and `test/`.
 - **Adopt (SIMPLE): no pointer result of a polymorphic type-bound function passed straight as an actual;
-  a submodule never calls a private plain procedure of its module** (gfortran before 16 does not link it;
-  `scripts/check_submodule_linkage.py`).
+  a submodule never calls a private procedure whose body is in its module, plain or separate** (gfortran before
+  16 does not link a plain one, gfortran 15 on Linux not a separate one either; a separate module procedure a
+  module and its submodule share has its body in the submodule; `scripts/check_submodule_linkage.py`).
 
 ## 4. C interoperability (new here)
 
