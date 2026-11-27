@@ -251,7 +251,10 @@ the style of the others and checked where reading can check them.
 
 ## 10. Agent workflow
 
-- **Adopt (both): git is read-only for agents**; all work stays in the unstaged diff; the owner commits.
+- **Adapt (both): git is read-only for agents unless the owner asks for a commit**; all work stays in the
+  unstaged diff by default. An interactive session commits when the owner asks for that commit (2026-11-27:
+  "when prompted you should be able to do so"), adding only the paths it covers; it never pushes, and an
+  unattended run never commits.
 - **Adopt (both): the dev cycle is the agent's**: it builds Debug and Release and runs the gate itself (in an
   unattended run on its own copy; interactively through the build bridge), reports what ran, and never claims
   a result it does not have.

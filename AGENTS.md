@@ -31,10 +31,12 @@ at the same sources.
 
 ## Git
 
-Git is read-only: only `log`, `status`, `diff`, `show`, `ls-files`, `grep`, `blame`, with
-`--no-optional-locks`. Never `add`, `commit`, `stash`, `mv`, `rm`, `checkout`, `reset`, `rebase`, branch or
-history operations; never `git add -A`. Every change stays in the unstaged diff, where the owner reviews it;
-a rename or deletion the change needs is done with `mv`/`rm` or described for the owner.
+Git is read-only by default: only `log`, `status`, `diff`, `show`, `ls-files`, `grep`, `blame`, with
+`--no-optional-locks`. Never `stash`, `mv`, `rm`, `checkout`, `reset`, `rebase`, `push`, branch or history
+operations. Every change stays in the unstaged diff, where the owner reviews it; a rename or deletion the
+change needs is done with `mv`/`rm` or described for the owner. `add` and `commit` only when the owner asks
+for that commit in the session: add the paths it covers, by name or with a pathspec that leaves the owner's
+own files out, and write no attribution line. An unattended run never commits.
 
 ## Development notes
 

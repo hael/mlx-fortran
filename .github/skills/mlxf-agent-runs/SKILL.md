@@ -19,9 +19,10 @@ Everything that needs the maintainer is collected into one request, made once, b
 - **Every decision carries a recommendation,** and the decisions of all the plans are put to the maintainer
   together. Decisions closed before launch are the ones that survive review
   (`doc/how2s/how2write_agent_plans.md`, section 1), so this is the moment to get them ruled.
-- **One commit request covers the batch.** `arun` copies tracked files only and git is read-only for agents, so
-  every plan file of the batch is named in one `git add` and one `git commit` the maintainer can paste. A run
-  never waits for a commit that could have been in that request.
+- **One commit request covers the batch.** `arun` copies tracked files only and agents commit only when the
+  maintainer asks, so every plan file of the batch is named in one `git add` and one `git commit`, which the
+  maintainer pastes or asks the session to run. A run never waits for a commit that could have been in that
+  request.
 - **Whatever else only the maintainer can do** (a login, data only they have, a first use of `dell`) is in the
   same request.
 
@@ -62,7 +63,7 @@ resumed (`arun resume`); only what the plan reserves goes to the maintainer.
 
 | It needs the maintainer | Done meanwhile |
 | --- | --- |
-| A commit (git is read-only; `arun` leaves untracked files out) | The exact commands go first in the report. If the machine the work needs is free, the work is done in the session or by a subagent instead of waiting for a launch |
+| A commit (agents commit only when asked; `arun` leaves untracked files out) | The exact commands go first in the report. If the machine the work needs is free, the work is done in the session or by a subagent instead of waiting for a launch |
 | A password, a login, an account | Everything that does not need it |
 | A destructive or outward-facing action | Prepared, not done |
 | What a plan reserves (the API read at a hold, a real-data read) | The result is verified and laid out for that read |

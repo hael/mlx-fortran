@@ -99,8 +99,10 @@ Skills live in `.claude/skills/` (a symlink to `.github/skills/`, shared with Co
 - After the maintainer says go, the work continues until the batch is done: a decision with a recommendation is
   taken and recorded, never asked; a finished run is fetched, rebuilt and reported in the turn it ends; no
   machine with work waiting is left idle (skill `mlxf-agent-runs`).
-- Never commit or push; git is read-only for agents. The maintainer decides what is committed and pushed:
-  leave changes in the working tree and say which are ready.
+- Never push; commit only when the maintainer asks for it, and git is otherwise read-only for agents. By
+  default, leave changes in the working tree and say which are ready. An asked-for commit adds the paths named
+  for it (never the maintainer's own `.claude/settings.json` unless asked) and carries no attribution line.
+  Unattended runs never commit.
 
 ## Fortran conventions (the skill has the full set)
 
