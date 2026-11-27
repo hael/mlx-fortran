@@ -3,8 +3,8 @@
 ! dimensions with extent 1. Positions are 1-based int32, and the position in a whole array is its subscripts.
 module mlxf_ops_reduce
 use, intrinsic :: iso_c_binding,   only: c_bool, c_int, c_size_t
-use, intrinsic :: iso_fortran_env, only: int64, int32
-use mlxf_c_array,         only: mlxc_array_new, mlxc_array_free
+use, intrinsic :: iso_fortran_env, only: int8, int16, int32, int64, real32, real64
+use mlxf_c_array,         only: mlxc_array_new, mlxc_array_free, mlxc_array_dtype
 use mlxf_c_ops,           only: mlxc_add, mlxc_floor_divide, mlxc_remainder, mlxc_stack, mlxc_argmax, mlxc_argmax_axis, &
                                 mlxc_argmin, mlxc_argmin_axis, mlxc_softmax, mlxc_softmax_axes, mlxc_softmax_axis, &
                                 mlxc_all, mlxc_all_axes, mlxc_all_axis, mlxc_any, mlxc_any_axes, mlxc_any_axis, &
@@ -24,15 +24,19 @@ use mlxf_defs,            only: MLX_DTYPES, mlxf_reduce_spec, mlxf_scan_spec
 use mlxf_error,           only: mlxf_fail, mlxf_check
 use mlxf_device,          only: mlxf_enter, mlxf_require_device, mlxf_default_stream
 use mlxf_array,           only: mlx_array, mlxf_handle, mlxf_adopt
-use mlxf_ops_elementwise, only: mlx_astype
-use mlxf_ops_shape,       only: mlx_zeros
+use mlxf_ops_elementwise, only: mlx_astype, merge, real, aimag, max
+use mlxf_ops_math,        only: abs, mlx_stop_gradient
+use mlxf_ops_logic,       only: mlx_isfinite
+use mlxf_ops_create,      only: mlx_full, mlx_ones_like
+use mlxf_ops_shape,       only: mlx_zeros, mlx_squeeze
 use mlxf_calls,           only: mlxf_check_dim, mlxf_axes_of, mlxf_binary, mlxf_list_op, mlxf_one_based, &
                                 mlxf_reduce_all_op, mlxf_reduce_dims_op
 use mlxf_transfer,        only: mlx_from
 implicit none
 
 public :: sum, minval, mlx_logsumexp, mlx_cumsum, minloc, product, maxval, all, any, count, maxloc, mlx_mean, &
-    &mlx_median, mlx_var, mlx_std, mlx_cumprod, mlx_cummax, mlx_cummin, mlx_logcumsumexp, mlx_softmax
+    &mlx_median, mlx_var, mlx_std, mlx_cumprod, mlx_cummax, mlx_cummin, mlx_logcumsumexp, mlx_softmax, mlxf_reduce_scale, &
+    &mlxf_reduced_dims, mlxf_empty_reduction, mlxf_scaled_reduction
 private
 
 interface sum
@@ -152,6 +156,10 @@ contains
         logical,         optional, intent(in) :: keepdims
         type(mlx_array) :: r
         call mlxf_enter('maxval')
+        if( mlxf_empty_reduction(a, mlxf_reduced_dims(a, dim=dim)) )then
+            r = extremum_identity(a, mlxf_reduced_dims(a, dim=dim), keepdims, .true.)
+            return
+        endif
         if( present(dim) )then
             call mlxf_reduce_op(r, mlxc_max_axis, a, reduce_spec(dim=dim, keepdims=keepdims), 'maxval')
         else
@@ -166,6 +174,10 @@ contains
         logical,         optional, intent(in) :: keepdims
         type(mlx_array) :: r
         call mlxf_enter('maxval')
+        if( mlxf_empty_reduction(a, dims) )then
+            r = extremum_identity(a, dims, keepdims, .true.)
+            return
+        endif
         call mlxf_reduce_dims_op(r, mlxc_max_axes, a, reduce_spec(dims=dims, keepdims=keepdims), 'maxval')
     end function maxval_dims
 
@@ -176,6 +188,10 @@ contains
         logical,         optional, intent(in) :: keepdims
         type(mlx_array) :: r
         call mlxf_enter('minval')
+        if( mlxf_empty_reduction(a, mlxf_reduced_dims(a, dim=dim)) )then
+            r = extremum_identity(a, mlxf_reduced_dims(a, dim=dim), keepdims, .false.)
+            return
+        endif
         if( present(dim) )then
             call mlxf_reduce_op(r, mlxc_min_axis, a, reduce_spec(dim=dim, keepdims=keepdims), 'minval')
         else
@@ -190,6 +206,10 @@ contains
         logical,         optional, intent(in) :: keepdims
         type(mlx_array) :: r
         call mlxf_enter('minval')
+        if( mlxf_empty_reduction(a, dims) )then
+            r = extremum_identity(a, dims, keepdims, .false.)
+            return
+        endif
         call mlxf_reduce_dims_op(r, mlxc_min_axes, a, reduce_spec(dims=dims, keepdims=keepdims), 'minval')
     end function minval_dims
 
@@ -271,11 +291,17 @@ contains
         integer,         optional, intent(in) :: dim
         logical,         optional, intent(in) :: keepdims
         type(mlx_array) :: r
+        type(mlx_array) :: x
         call mlxf_enter('mlx_mean')
+        x = statistic_operand(a, 'mlx_mean')
+        if( mlxf_scaled_reduction(a, mlxf_reduced_dims(a, dim=dim)) )then
+            r = scaled_mean(x, mlxf_reduced_dims(a, dim=dim), keepdims)
+            return
+        endif
         if( present(dim) )then
-            call mlxf_reduce_op(r, mlxc_mean_axis, a, reduce_spec(dim=dim, keepdims=keepdims), 'mlx_mean')
+            call mlxf_reduce_op(r, mlxc_mean_axis, x, reduce_spec(dim=dim, keepdims=keepdims), 'mlx_mean')
         else
-            call mlxf_reduce_all_op(r, mlxc_mean, a, reduce_spec(keepdims=keepdims), 'mlx_mean')
+            call mlxf_reduce_all_op(r, mlxc_mean, x, reduce_spec(keepdims=keepdims), 'mlx_mean')
         endif
     end function mean_array
 
@@ -285,8 +311,14 @@ contains
         integer,         intent(in)           :: dims(:)
         logical,         optional, intent(in) :: keepdims
         type(mlx_array) :: r
+        type(mlx_array) :: x
         call mlxf_enter('mlx_mean')
-        call mlxf_reduce_dims_op(r, mlxc_mean_axes, a, reduce_spec(dims=dims, keepdims=keepdims), 'mlx_mean')
+        x = statistic_operand(a, 'mlx_mean')
+        if( mlxf_scaled_reduction(a, dims) )then
+            r = scaled_mean(x, dims, keepdims)
+            return
+        endif
+        call mlxf_reduce_dims_op(r, mlxc_mean_axes, x, reduce_spec(dims=dims, keepdims=keepdims), 'mlx_mean')
     end function mean_dims
 
     ! the median, the mean of the two middle elements of an even count: along dim, or over every dimension without it
@@ -344,11 +376,13 @@ contains
         logical,         optional, intent(in) :: keepdims
         integer,         optional, intent(in) :: ddof
         type(mlx_array) :: r
+        type(mlx_array) :: x
         call mlxf_enter('mlx_var')
+        x = statistic_operand(a, 'mlx_var')
         if( present(dim) )then
-            call mlxf_var_op(r, mlxc_var_axis, a, reduce_spec(dim=dim, keepdims=keepdims, ddof=ddof), 'mlx_var')
+            call mlxf_var_op(r, mlxc_var_axis, x, reduce_spec(dim=dim, keepdims=keepdims, ddof=ddof), 'mlx_var')
         else
-            call mlxf_var_all_op(r, mlxc_var, a, reduce_spec(keepdims=keepdims, ddof=ddof), 'mlx_var')
+            call mlxf_var_all_op(r, mlxc_var, x, reduce_spec(keepdims=keepdims, ddof=ddof), 'mlx_var')
         endif
     end function var_array
 
@@ -359,8 +393,10 @@ contains
         logical,         optional, intent(in) :: keepdims
         integer,         optional, intent(in) :: ddof
         type(mlx_array) :: r
+        type(mlx_array) :: x
         call mlxf_enter('mlx_var')
-        call mlxf_var_dims_op(r, mlxc_var_axes, a, reduce_spec(dims=dims, keepdims=keepdims, ddof=ddof), 'mlx_var')
+        x = statistic_operand(a, 'mlx_var')
+        call mlxf_var_dims_op(r, mlxc_var_axes, x, reduce_spec(dims=dims, keepdims=keepdims, ddof=ddof), 'mlx_var')
     end function var_dims
 
     ! the standard deviation, the square root of mlx_var: along dim, or over every dimension without it
@@ -370,11 +406,13 @@ contains
         logical,         optional, intent(in) :: keepdims
         integer,         optional, intent(in) :: ddof
         type(mlx_array) :: r
+        type(mlx_array) :: x
         call mlxf_enter('mlx_std')
+        x = statistic_operand(a, 'mlx_std')
         if( present(dim) )then
-            call mlxf_var_op(r, mlxc_std_axis, a, reduce_spec(dim=dim, keepdims=keepdims, ddof=ddof), 'mlx_std')
+            call mlxf_var_op(r, mlxc_std_axis, x, reduce_spec(dim=dim, keepdims=keepdims, ddof=ddof), 'mlx_std')
         else
-            call mlxf_var_all_op(r, mlxc_std, a, reduce_spec(keepdims=keepdims, ddof=ddof), 'mlx_std')
+            call mlxf_var_all_op(r, mlxc_std, x, reduce_spec(keepdims=keepdims, ddof=ddof), 'mlx_std')
         endif
     end function std_array
 
@@ -385,9 +423,161 @@ contains
         logical,         optional, intent(in) :: keepdims
         integer,         optional, intent(in) :: ddof
         type(mlx_array) :: r
+        type(mlx_array) :: x
         call mlxf_enter('mlx_std')
-        call mlxf_var_dims_op(r, mlxc_std_axes, a, reduce_spec(dims=dims, keepdims=keepdims, ddof=ddof), 'mlx_std')
+        x = statistic_operand(a, 'mlx_std')
+        call mlxf_var_dims_op(r, mlxc_std_axes, x, reduce_spec(dims=dims, keepdims=keepdims, ddof=ddof), 'mlx_std')
     end function std_dims
+
+    ! the operand of mlx_mean, mlx_var and mlx_std: an integer or boolean array converted to float32 first, since
+    ! MLX sums such input in its own kind, where a large total wraps; a floating or complex array is a itself
+    function statistic_operand( a, proc ) result(x)
+        type(mlx_array),  intent(in) :: a
+        character(len=*), intent(in) :: proc
+        type(mlx_array) :: x
+        integer         :: k
+        k = int(mlxc_array_dtype(mlxf_handle(a, proc)))
+        if( any(k == [MLX_DTYPES%bool, MLX_DTYPES%int8, MLX_DTYPES%int16, MLX_DTYPES%int32, MLX_DTYPES%int64, &
+            &MLX_DTYPES%uint8, MLX_DTYPES%uint16, MLX_DTYPES%uint32, MLX_DTYPES%uint64]) )then
+            x = mlx_astype(a, MLX_DTYPES%float32)
+        else
+            x = a
+        endif
+    end function statistic_operand
+
+    ! the mean of a floating or complex x over the Fortran dimensions dims (kept when keepdims): s*mean(x/s), s the
+    ! largest magnitude, so that no partial sum overflows; the plain mean where s is zero or not finite
+    function scaled_mean( x, dims, keepdims ) result(r)
+        type(mlx_array),   intent(in) :: x
+        integer,           intent(in) :: dims(:)
+        logical, optional, intent(in) :: keepdims
+        type(mlx_array) :: r
+        type(mlx_array) :: s, ok, scaled, plain, xs
+        call mlxf_reduce_scale(x, dims, s, ok)
+        xs = x/s
+        call mlxf_reduce_dims_op(scaled, mlxc_mean_axes, xs, reduce_spec(dims=dims, keepdims=.true.), 'mlx_mean')
+        call mlxf_reduce_dims_op(plain, mlxc_mean_axes, x, reduce_spec(dims=dims, keepdims=.true.), 'mlx_mean')
+        r = merge(scaled*s, plain, ok)
+        if( .not. chosen_flag(keepdims) ) r = mlx_squeeze(r, dims)
+    end function scaled_mean
+
+    ! the scale of a reduction over dims (kept): the largest magnitude (of the real and imaginary parts of a complex
+    ! array), its gradient stopped; ok where it is finite and positive, and s is 1 elsewhere, a safe divisor
+    subroutine mlxf_reduce_scale( a, dims, s, ok )
+        type(mlx_array), intent(in)  :: a
+        integer,         intent(in)  :: dims(:)
+        type(mlx_array), intent(out) :: s, ok
+        type(mlx_array) :: m
+        if( a%kind() == MLX_DTYPES%complex64 )then
+            m = max(maxval(abs(real(a)), dims, keepdims=.true.), maxval(abs(aimag(a)), dims, keepdims=.true.))
+        else
+            m = maxval(abs(a), dims, keepdims=.true.)
+        endif
+        m = mlx_stop_gradient(m)
+        ok = mlx_isfinite(m) .and. m > 0._real32
+        s = merge(m, mlx_ones_like(m), ok)
+    end subroutine mlxf_reduce_scale
+
+    ! the Fortran dimensions a reduction takes: dim, the list dims, or every dimension of a
+    function mlxf_reduced_dims( a, dim, dims ) result(rd)
+        type(mlx_array),   intent(in) :: a
+        integer, optional, intent(in) :: dim, dims(:)
+        integer, allocatable :: rd(:)
+        integer              :: i
+        if( present(dim) )then
+            rd = [dim]
+        else if( present(dims) )then
+            rd = dims
+        else
+            rd = [(i, i = 1, a%ndim())]
+        endif
+    end function mlxf_reduced_dims
+
+    ! whether a reduction of a over the Fortran dimensions rd takes an extent of zero (false for an invalid list)
+    logical function mlxf_empty_reduction( a, rd )
+        type(mlx_array), intent(in) :: a
+        integer,         intent(in) :: rd(:)
+        integer, allocatable :: sh(:)
+        sh = a%shape()
+        mlxf_empty_reduction = .false.
+        if( any(rd < 1 .or. rd > size(sh)) ) return
+        mlxf_empty_reduction = any(sh(rd) == 0)
+    end function mlxf_empty_reduction
+
+    ! maxval (low) or minval over an extent of zero, as Fortran: the most negative or the largest finite value of a's
+    ! kind (false or true for booleans), in the reduction's shape (dimensions removed, or kept with extent 1)
+    function extremum_identity( a, rd, keepdims, low ) result(r)
+        type(mlx_array),   intent(in) :: a
+        integer,           intent(in) :: rd(:)
+        logical, optional, intent(in) :: keepdims
+        logical,           intent(in) :: low
+        type(mlx_array)      :: r, v
+        integer, allocatable :: sh(:)
+        integer              :: k
+        logical, allocatable :: kept(:)
+        k = a%kind()
+        select case( k )
+            case( MLX_DTYPES%float32 )
+                v = mlx_from(merge(-huge(1._real32), huge(1._real32), low))
+            case( MLX_DTYPES%float64 )
+                v = mlx_from(merge(-huge(1._real64), huge(1._real64), low))
+            case( MLX_DTYPES%float16, MLX_DTYPES%bfloat16 )
+                v = mlx_astype(mlx_from(merge(-1._real32, 1._real32, low)*merge(65504._real32, 3.38953139e38_real32, &
+                    &k == MLX_DTYPES%float16)), k)
+            case( MLX_DTYPES%int8 )
+                v = mlx_from(merge(-huge(1_int8)-1_int8, huge(1_int8), low))
+            case( MLX_DTYPES%int16 )
+                v = mlx_from(merge(-huge(1_int16)-1_int16, huge(1_int16), low))
+            case( MLX_DTYPES%int32 )
+                v = mlx_from(merge(-huge(1_int32)-1_int32, huge(1_int32), low))
+            case( MLX_DTYPES%int64 )
+                v = mlx_from(merge(-huge(1_int64)-1_int64, huge(1_int64), low))
+            case( MLX_DTYPES%uint8, MLX_DTYPES%uint16, MLX_DTYPES%uint32, MLX_DTYPES%uint64, MLX_DTYPES%bool )
+                ! 0 (false), or -1 converted: all bits set (true)
+                v = mlx_astype(mlx_from(merge(0_int64, -1_int64, low)), k)
+            case default
+                if( low )then
+                    call mlxf_reduce_dims_op(r, mlxc_max_axes, a, reduce_spec(dims=rd, keepdims=keepdims), 'maxval')
+                else
+                    call mlxf_reduce_dims_op(r, mlxc_min_axes, a, reduce_spec(dims=rd, keepdims=keepdims), 'minval')
+                endif
+                return
+        end select
+        sh = a%shape()
+        allocate(kept(size(sh)), source=.true.)
+        kept(rd) = .false.
+        if( chosen_flag(keepdims) )then
+            sh = merge(sh, 1, kept)
+        else
+            sh = pack(sh, kept)
+        endif
+        r = mlx_full(sh, v, k)
+    end function extremum_identity
+
+    ! whether a reduction of a over the Fortran dimensions rd is scaled: a floating or complex kind, a valid list of
+    ! distinct dimensions over nonzero extents (the plain form refuses an invalid list under the wrapper's name)
+    logical function mlxf_scaled_reduction( a, rd )
+        type(mlx_array), intent(in) :: a
+        integer,         intent(in) :: rd(:)
+        integer :: i
+        mlxf_scaled_reduction = .false.
+        if( size(rd) == 0 ) return
+        if( any(rd < 1) ) return
+        if( any(rd > a%ndim()) ) return
+        do i = 2, size(rd)
+            if( any(rd(i) == rd(1:i-1)) ) return
+        end do
+        if( .not. any(a%kind() == [MLX_DTYPES%float16, MLX_DTYPES%bfloat16, MLX_DTYPES%float32, MLX_DTYPES%float64, &
+            &MLX_DTYPES%complex64]) ) return
+        mlxf_scaled_reduction = .not. mlxf_empty_reduction(a, rd)
+    end function mlxf_scaled_reduction
+
+    ! an optional flag, false when absent
+    logical function chosen_flag( flag )
+        logical, optional, intent(in) :: flag
+        chosen_flag = .false.
+        if( present(flag) ) chosen_flag = flag
+    end function chosen_flag
 
     ! the running sum along dim; without dim, of the elements in array element order, rank 1.
     ! reverse scans from the last element; an exclusive scan leaves each element out of its own result

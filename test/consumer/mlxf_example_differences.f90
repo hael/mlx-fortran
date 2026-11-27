@@ -156,6 +156,16 @@ call mlx_to_alloc(u3, c)
 call row(20, c%kind() == MLX_DTYPES%float32 .and. all(abs(u1 - u2) <= 0.) .and. any(abs(r1 - u3) > 0.) &
     &.and. all(u1 >= 0.) .and. all(u1 < 1.))
 
+! D21: a default-integer scalar takes an integer array's kind exactly (a + 1 is int32) and a real array's kind
+! (2 * x stays float32); an integer scalar the array's kind cannot hold stops instead of wrapping
+a = mlx_from([1, 2, 3])
+c = a + 1
+call mlx_to_alloc(i1, c)
+f = 2 * mlx_from([0.5, 1.5])
+call mlx_to_alloc(r1, f)
+call row(21, c%kind() == MLX_DTYPES%int32 .and. all(i1 == [2, 3, 4]) .and. f%kind() == MLX_DTYPES%float32 &
+    &.and. all(abs(r1 - [1., 3.]) <= 0.))
+
 if( nfailed > 0 ) error stop 1
 write(*,'(a)') 'mlxf_example_differences: every row holds, on the '// &
     &merge('gpu', 'cpu', mlx_default_device() == MLX_DEVICES%gpu)

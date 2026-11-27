@@ -6,15 +6,18 @@
 ! shape, the triangle and the order of what comes back exactly. Determinants and norms are values, judged against
 ! real64 references by frozen tolerances.
 module mlxf_linalg_matrix_tester
-use, intrinsic :: ieee_arithmetic, only: ieee_value, ieee_positive_inf, ieee_negative_inf
+use, intrinsic :: ieee_arithmetic, only: ieee_value, ieee_positive_inf, ieee_negative_inf, ieee_quiet_nan, ieee_is_nan, &
+                                         ieee_is_finite
 use, intrinsic :: iso_fortran_env, only: output_unit, int32, real32, real64
 use mlxf,             only: mlx_array, mlx_from, mlx_to, mlx_set_default_device, mlx_default_device, MLX_DEVICES, &
                             MLX_DTYPES, mlx_inv, mlx_pinv, mlx_tri_inv, mlx_det, mlx_slogdet, mlx_cholesky, &
                             mlx_cholesky_inv, mlx_qr, mlx_lu, mlx_lu_factor, mlx_svd, mlx_eigh, mlx_eigvalsh, mlx_eig, &
-                            mlx_eigvals, mlx_solve, mlx_solve_triangular, mlx_norm, mlx_norm_matrix, norm2
-use mlxf_test_utils,  only: assert_true, test_devices, device_name, judge_error, find_tolerance, family_seeds, &
-                            seeded_uniform, seeded_array, shaped_error
-use mlxf_test_defs,   only: ELEM_CEILING, MATRIX_TOLERANCES, LINALG_RESIDUAL_FACTOR, elem_tolerance
+                            mlx_eigvals, mlx_solve, mlx_solve_triangular, mlx_norm, mlx_norm_matrix, norm2, reshape, &
+                            mlx_astype, mlx_zeros
+use mlxf_test_utils,  only: set_fixed_seed, assert_true, test_devices, device_name, judge_error, find_tolerance, &
+                            family_seeds, seeded_uniform, seeded_array, shaped_error
+use mlxf_test_defs,   only: ELEM_CEILING, MATRIX_TOLERANCES, LINALG_RESIDUAL_FACTOR, elem_tolerance, &
+                            ELEM_SEED_CALIBRATION
 use mlxf_test_reduce, only: nan_maxval, nan_max
 implicit none
 private
@@ -41,6 +44,112 @@ interface fro
 end interface fro
 
 contains
+
+    ! norm2 near the ends of the range, against the bounds frozen before the change: two equal values within 8
+    ! epsilons of sqrt(2)|x|, finite and nonzero (float32 1e20 and 1e-30 on every device, float64 1e200 and 1e-200
+    ! on the CPU), in every form; mixed magnitudes and signs within (n+2) epsilons of a real64 reference, relative,
+    ! never with an absolute floor; complex values with parts up to 1e30 within (n+4) epsilons; a half kind; zeros
+    ! and empty reductions exactly 0; a NaN NaN, an infinity +infinity
+    subroutine test_norm2_range
+        integer,      parameter   :: NMIX = 1024
+        real(real32)              :: x(NMIX), u(NMIX), m(2, 2)
+        real(real64)              :: eps, ref
+        real(real64), allocatable :: y(:)
+        complex(real32)           :: z(2)
+        type(mlx_array)           :: a, r
+        integer                   :: k
+        integer,      allocatable :: sh(:)
+        real(real32), parameter   :: SMALL_BIG(2) = [1.e20_real32, 1.e-30_real32]
+        write(*,'(a)') 'test_norm2_range'
+        eps = real(epsilon(1._real32), real64)
+        do k = 1, 2
+            a = mlx_from([SMALL_BIG(k), SMALL_BIG(k)])
+            ref = sqrt(2._real64)*real(SMALL_BIG(k), real64)
+            call near(norm2(a), ref, 8._real64*eps, 'norm2 of two float32 values')
+            call near(norm2(a, dim=1), ref, 8._real64*eps, 'norm2 along dimension 1')
+            call near(norm2(a, keepdims=.true.), ref, 8._real64*eps, 'norm2 kept')
+            call near(norm2(a, [1]), ref, 8._real64*eps, 'norm2 over the list [1]')
+        end do
+        if( mlx_default_device() == MLX_DEVICES%cpu )then
+            call near(norm2(mlx_from([1.e200_real64, 1.e200_real64])), sqrt(2._real64)*1.e200_real64, &
+                &8._real64*epsilon(1._real64), 'norm2 of two float64 values 1e200')
+            call near(norm2(mlx_from([1.e-200_real64, 1.e-200_real64])), sqrt(2._real64)*1.e-200_real64, &
+                &8._real64*epsilon(1._real64), 'norm2 of two float64 values 1e-200')
+        endif
+        m = 1.e20_real32
+        call near(norm2(mlx_from(m), [1, 2]), 2.e20_real64*real(1.e20_real32, real64)/1.e20_real64, 8._real64*eps, &
+            &'the Frobenius norm of a (2, 2) matrix of 1e20')
+        call near(norm2(mlx_from(m), dim=2), sqrt(2._real64)*real(1.e20_real32, real64), 8._real64*eps, &
+            &'its norm along dimension 2')
+        call set_fixed_seed(ELEM_SEED_CALIBRATION)
+        call random_number(u)
+        x = real(10._real64**(-30._real64+67._real64*real(u, real64)), real32)
+        call random_number(u)
+        x = merge(x, -x, u > 0.5_real32)
+        call near(norm2(mlx_from(x)), sqrt(sum(real(x, real64)**2)), real(NMIX+2, real64)*eps, &
+            &'norm2 of 1024 values of mixed magnitudes (1e-30 to 1e37) and signs')
+        call near(norm2(mlx_from(x(1:16)*1.e-30_real32)), sqrt(sum(real(x(1:16)*1.e-30_real32, real64)**2)), &
+            &18._real64*eps, 'and of 16 of them scaled to the bottom of the range')
+        z = cmplx(1.e30_real32, 1.e30_real32, real32)
+        call near(norm2(mlx_from(z)), 2._real64*real(1.e30_real32, real64), 6._real64*eps, &
+            &'norm2 of two complex values with parts 1e30')
+        z = [cmplx(3._real32, 4._real32, real32), cmplx(0._real32, 0._real32, real32)]
+        call near(norm2(mlx_from(z)), 5._real64, 6._real64*eps, 'norm2 of the complex values 3+4i and 0')
+        r = norm2(mlx_astype(mlx_from([300._real32, 300._real32]), MLX_DTYPES%float16))
+        call near(r, sqrt(2._real64)*300._real64, 8._real64*real(2._real32**(-10), real64), &
+            &'norm2 of two float16 values 300, whose squares float16 cannot hold')
+        call exactly(norm2(mlx_from([0._real32, 0._real32])), 0._real64, 'norm2 of zeros is 0')
+        call exactly(norm2(mlx_zeros([0])), 0._real64, 'norm2 of an empty array is 0')
+        r = norm2(mlx_zeros([0, 3]), dim=1)
+        call fetch_values(r, y)
+        sh = r%shape()
+        call assert_true(size(sh) == 1 .and. size(y) == 3 .and. all(abs(y) <= 0._real64), &
+            &'norm2 over an extent of zero is 0, in the reduction''s shape')
+        call fetch_values(norm2(mlx_from([ieee_value(1._real32, ieee_quiet_nan), 1._real32])), y)
+        call assert_true(ieee_is_nan(y(1)), 'a NaN makes norm2 NaN')
+        call fetch_values(norm2(mlx_from([ieee_value(1._real32, ieee_positive_inf), 1._real32])), y)
+        call assert_true(.not. ieee_is_finite(y(1)) .and. y(1) > 0._real64, 'an infinity makes norm2 +infinity')
+    contains
+        subroutine near( res, want, rel, label )
+            type(mlx_array),  intent(in) :: res
+            real(real64),     intent(in) :: want, rel
+            character(len=*), intent(in) :: label
+            real(real64), allocatable :: v(:)
+            call fetch_values(res, v)
+            call assert_true(size(v) > 0 .and. all(ieee_is_finite(v)) .and. all(v > 0._real64) .and. &
+                &all(abs(v-want) <= rel*want), &
+                &label//' is finite, nonzero and within its relative bound')
+        end subroutine near
+
+        subroutine exactly( res, want, label )
+            type(mlx_array),  intent(in) :: res
+            real(real64),     intent(in) :: want
+            character(len=*), intent(in) :: label
+            real(real64), allocatable :: v(:)
+            call fetch_values(res, v)
+            call assert_true(size(v) == 1 .and. all(abs(v-want) <= 0._real64), label)
+        end subroutine exactly
+
+    end subroutine test_norm2_range
+
+    ! the values of a real result of any floating kind as real64, in array element order
+    subroutine fetch_values( r, y )
+        type(mlx_array),           intent(in)  :: r
+        real(real64), allocatable, intent(out) :: y(:)
+        type(mlx_array)           :: flat
+        real(real32), allocatable :: y32(:)
+        integer                   :: n
+        n = int(r%size())
+        allocate(y(n))
+        flat = reshape(r, [n])
+        if( r%kind() == MLX_DTYPES%float64 )then
+            call mlx_to(y, flat)
+        else
+            allocate(y32(n))
+            call mlx_to(y32, mlx_astype(flat, MLX_DTYPES%float32))
+            y = real(y32, real64)
+        endif
+    end subroutine fetch_values
 
     subroutine run_all_linalg_matrix_tests
         integer, allocatable :: devs(:)
@@ -69,6 +178,7 @@ contains
             call test_solve
             call test_solve_triangular
             call test_norms
+            call test_norm2_range
             call test_matrix_norms
         end do
         call mlx_set_default_device(original)

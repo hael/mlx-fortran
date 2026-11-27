@@ -2,8 +2,12 @@
 ! On disk the bytes are MLX's: a Fortran (m, n) array is the C-order (n, m) array of a NumPy reader, the same
 ! bytes in the same order, and it reads back as (m, n). Files are read on the CPU's stream, where MLX reads them,
 ! whatever the default device. Every procedure here is checked: with status a failure returns with MLX usable.
+! A save is a transaction: the kinds are checked and the arrays evaluated before any file is touched, the file is
+! written to a temporary sibling, and only a complete write is renamed over the destination; a failure leaves the
+! destination as it was. That covers a save that returns; nothing is flushed with fsync, so it is no promise against a
+! crash or a power loss, after which the hidden temporary file may remain.
 module mlxf_io
-use, intrinsic :: iso_c_binding,   only: c_int, c_ptr, c_null_ptr, c_null_char, c_associated
+use, intrinsic :: iso_c_binding,   only: c_int, c_int16_t, c_ptr, c_null_ptr, c_null_char, c_associated
 use, intrinsic :: iso_fortran_env, only: output_unit
 use mlxf_c_graph_utils, only: mlxc_node_namer_new, mlxc_node_namer_free, mlxc_print_graph, mlxc_export_to_dot
 use mlxf_c_io,          only: mlxc_load, mlxc_save, mlxc_load_safetensors, mlxc_save_safetensors, mlxc_load_gguf, &
@@ -19,16 +23,21 @@ use mlxf_c_stream,      only: mlxc_stream_free
 use mlxf_c_types,       only: mlxc_stream, mlxc_vector_array, mlxc_map_string_to_array, mlxc_map_string_to_string, &
                               mlxc_map_string_to_string_iterator, mlxc_io_gguf, mlxc_node_namer
 use mlxf_c_vector,      only: mlxc_vector_array_new, mlxc_vector_array_free
-use mlxf_defs,          only: MLXF_MAP_END
-use mlxf_array,         only: mlx_array, mlx_is_live, mlxf_handle, mlxf_vector_export
+use mlxf_c_array,       only: mlxc_array_dtype
+use mlxf_defs,          only: MLXF_MAP_END, MLX_DTYPES, mlxf_file_info, mlxf_save_target
+use mlxf_array,         only: mlx_array, mlx_is_live, mlxf_handle, mlxf_vector_export, mlx_eval
 use mlxf_device,        only: mlxf_require_device
 use mlxf_error,         only: mlxf_check, mlxf_report
-use mlxf_libc,          only: c_fopen, c_fclose, c_dup, c_fdopen, c_string_copy
+use mlxf_libc,          only: c_fopen, c_fclose, c_dup, c_fdopen, c_string_copy, c_rename, c_unlink, c_chmod, c_getpid, &
+                              c_geteuid, c_file_info
 use mlxf_calls,         only: mlxf_cpu_stream
 implicit none
 public :: mlx_save, mlx_load, mlx_save_safetensors, mlx_load_safetensors, mlx_save_gguf, mlx_load_gguf, mlx_print_graph, &
-    &mlx_export_to_dot
+    &mlx_export_to_dot, mlxf_save_begin, mlxf_save_end
 private
+
+! the attempts at a fresh temporary name beside the destination before the save gives up
+integer, parameter :: TEMP_ATTEMPTS = 100
 
 ! the signature helpers of the io procedures, implemented in mlxf_io_calls
 interface
@@ -57,14 +66,23 @@ end interface
 
 contains
 
-    ! writes a, evaluated, to file in NumPy's .npy format; MLX adds '.npy' to a name that does not end with it
+    ! writes a, evaluated, to file in NumPy's .npy format; '.npy' is added to a name that does not end with it.
+    ! The file is replaced only by a complete write (mlxf_save_begin)
     subroutine mlx_save( file, a, status )
         character(len=*),  intent(in)  :: file
         type(mlx_array),   intent(in)  :: a
         integer, optional, intent(out) :: status
+        type(mlxf_save_target) :: t
+        integer                :: st
         call mlxf_require_device('mlx_save')
         if( .not. live_arrays([a], 'mlx_save', status) ) return
-        call mlxf_check(mlxc_save(trim(file)//c_null_char, mlxf_handle(a, 'mlx_save')), 'mlx_save', status)
+        call mlx_eval(a, status=st)
+        if( st == 0 ) call mlxf_save_begin(file, '.npy', 'mlx_save', t, st)
+        if( st == 0 )then
+            call mlxf_check(mlxc_save(t%temp//c_null_char, mlxf_handle(a, 'mlx_save')), 'mlx_save', status=st)
+            call mlxf_save_end(t, 'mlx_save', st)
+        endif
+        call mlxf_check(int(st, c_int), 'mlx_save', status)
     end subroutine mlx_save
 
     ! the array of a .npy file, whose name is given whole; with status, a failure returns an empty array. The
@@ -77,7 +95,8 @@ contains
     end function mlx_load
 
     ! writes arrays under their names to a safetensors file, with metadata, pairs of strings (1, i) and (2, i),
-    ! when given. Trailing blanks of names and strings are not written
+    ! when given. Trailing blanks of names and strings are not written; '.safetensors' is added to a name that does
+    ! not end with it. float64 is refused before anything is written; the file is replaced only by a complete write
     subroutine mlx_save_safetensors( file, names, arrays, metadata, status )
         character(len=*),  intent(in)           :: file, names(:)
         type(mlx_array),   intent(in)           :: arrays(:)
@@ -85,6 +104,7 @@ contains
         integer, optional, intent(out)          :: status
         type(mlxc_map_string_to_array)  :: m
         type(mlxc_map_string_to_string) :: meta
+        type(mlxf_save_target)          :: t
         integer                         :: st, cleanup, i
         call mlxf_require_device('mlx_save_safetensors')
         if( .not. named_arrays(names, arrays, 'mlx_save_safetensors', status) ) return
@@ -93,6 +113,19 @@ contains
                 call mlxf_report('mlx_save_safetensors', 'metadata are pairs: a (2, n) array of strings', status)
                 return
             endif
+        endif
+        do i = 1, size(arrays)
+            if( dtype_of(arrays(i), 'mlx_save_safetensors') == MLX_DTYPES%float64 )then
+                call mlxf_report('mlx_save_safetensors', 'safetensors has no float64 in MLX; nothing was written', &
+                    &status)
+                return
+            endif
+        end do
+        call mlx_eval(arrays, status=st)
+        if( st == 0 ) call mlxf_save_begin(file, '.safetensors', 'mlx_save_safetensors', t, st)
+        if( st /= 0 )then
+            call mlxf_check(int(st, c_int), 'mlx_save_safetensors', status)
+            return
         endif
         m = mlxc_map_string_to_array_new()
         meta = mlxc_map_string_to_string_new()
@@ -107,12 +140,13 @@ contains
                     &trim(metadata(2, i))//c_null_char), 'mlx_save_safetensors', status=st)
             end do
         endif
-        if( st == 0 ) call mlxf_check(mlxc_save_safetensors(trim(file)//c_null_char, m, meta), 'mlx_save_safetensors', &
+        if( st == 0 ) call mlxf_check(mlxc_save_safetensors(t%temp//c_null_char, m, meta), 'mlx_save_safetensors', &
             &status=st)
         call mlxf_check(mlxc_map_string_to_array_free(m), 'mlx_save_safetensors cleanup', status=cleanup)
         if( st == 0 ) st = cleanup
         call mlxf_check(mlxc_map_string_to_string_free(meta), 'mlx_save_safetensors cleanup', status=cleanup)
         if( st == 0 ) st = cleanup
+        call mlxf_save_end(t, 'mlx_save_safetensors', st)
         call mlxf_check(int(st, c_int), 'mlx_save_safetensors', status)
     end subroutine mlx_save_safetensors
 
@@ -148,24 +182,42 @@ contains
         call mlxf_check(int(st, c_int), 'mlx_load_safetensors', status)
     end subroutine mlx_load_safetensors
 
-    ! writes arrays under their names to a GGUF file, without metadata; MLX writes the kinds GGUF has
+    ! writes arrays under their names to a GGUF file, without metadata; '.gguf' is added to a name that does not end
+    ! with it. A kind GGUF lacks in MLX (any but int8, int16, int32, float16 and float32) is refused before anything
+    ! is written; the file is replaced only by a complete write
     subroutine mlx_save_gguf( file, names, arrays, status )
         character(len=*),  intent(in)  :: file, names(:)
         type(mlx_array),   intent(in)  :: arrays(:)
         integer, optional, intent(out) :: status
-        type(mlxc_io_gguf) :: g
-        integer            :: st, cleanup, i
+        type(mlxc_io_gguf)     :: g
+        type(mlxf_save_target) :: t
+        integer                :: st, cleanup, i
         call mlxf_require_device('mlx_save_gguf')
         if( .not. named_arrays(names, arrays, 'mlx_save_gguf', status) ) return
+        do i = 1, size(arrays)
+            if( .not. any(dtype_of(arrays(i), 'mlx_save_gguf') == [MLX_DTYPES%int8, MLX_DTYPES%int16, MLX_DTYPES%int32, &
+                &MLX_DTYPES%float16, MLX_DTYPES%float32]) )then
+                call mlxf_report('mlx_save_gguf', 'GGUF in MLX takes int8, int16, int32, float16 and float32 only; '//&
+                    &'nothing was written', status)
+                return
+            endif
+        end do
+        call mlx_eval(arrays, status=st)
+        if( st == 0 ) call mlxf_save_begin(file, '.gguf', 'mlx_save_gguf', t, st)
+        if( st /= 0 )then
+            call mlxf_check(int(st, c_int), 'mlx_save_gguf', status)
+            return
+        endif
         g = mlxc_io_gguf_new()
         st = 0
         do i = 1, size(arrays)
             if( st == 0 ) call mlxf_check(mlxc_io_gguf_set_array(g, trim(names(i))//c_null_char, &
                 &mlxf_handle(arrays(i), 'mlx_save_gguf')), 'mlx_save_gguf', status=st)
         end do
-        if( st == 0 ) call mlxf_check(mlxc_save_gguf(trim(file)//c_null_char, g), 'mlx_save_gguf', status=st)
+        if( st == 0 ) call mlxf_check(mlxc_save_gguf(t%temp//c_null_char, g), 'mlx_save_gguf', status=st)
         call mlxf_check(mlxc_io_gguf_free(g), 'mlx_save_gguf cleanup', status=cleanup)
         if( st == 0 ) st = cleanup
+        call mlxf_save_end(t, 'mlx_save_gguf', st)
         call mlxf_check(int(st, c_int), 'mlx_save_gguf', status)
     end subroutine mlx_save_gguf
 
@@ -254,6 +306,92 @@ contains
         if( closed /= 0 .and. st == 0 ) call mlxf_report(proc, 'the file could not be closed', status=st)
         call mlxf_check(int(st, c_int), proc, status)
     end subroutine write_graph
+
+    ! the first step of a save, before anything is written: the destination's name settled (suffix added where
+    ! missing), the destination refused when it is a symbolic link, not a regular file, a file with other hard links
+    ! or another user's file (a rename could not replace it as it is), its permission bits kept, and a fresh
+    ! temporary sibling created, hidden, ending with the suffix. A failure is reported (status 1) with no file made
+    subroutine mlxf_save_begin( file, suffix, proc, t, status )
+        character(len=*),       intent(in)  :: file, suffix, proc
+        type(mlxf_save_target), intent(out) :: t
+        integer,                intent(out) :: status
+        type(mlxf_file_info) :: info
+        character(len=16)    :: pid, attempt
+        type(c_ptr)          :: f
+        integer(c_int)       :: ierr
+        integer              :: cut, k
+        status = 0
+        t%dest = trim(file)
+        if( len(t%dest) == 0 )then
+            call mlxf_report(proc, 'the file name is empty', status)
+            return
+        endif
+        if( len(t%dest) < len(suffix) )then
+            t%dest = t%dest//suffix
+        else if( t%dest(len(t%dest)-len(suffix)+1:) /= suffix )then
+            t%dest = t%dest//suffix
+        endif
+        info = c_file_info(t%dest)
+        if( info%exists )then
+            if( info%link )then
+                call mlxf_report(proc, 'the destination is a symbolic link; save to the file it names', status)
+            else if( .not. info%regular )then
+                call mlxf_report(proc, 'the destination exists and is not a regular file', status)
+            else if( info%nlink > 1 )then
+                call mlxf_report(proc, 'the destination has other hard links, which a replacement would not update', &
+                    &status)
+            else if( info%uid /= int(c_geteuid()) )then
+                call mlxf_report(proc, 'the destination belongs to another user, whose ownership a replacement '//&
+                    &'would not keep', status)
+            endif
+            if( status /= 0 ) return
+            t%existed = .true.
+            t%mode = info%mode
+        endif
+        cut = index(t%dest, '/', back=.true.)
+        write(pid, '(i0)') c_getpid()
+        do k = 1, TEMP_ATTEMPTS
+            write(attempt, '(i0)') k
+            t%temp = t%dest(1:cut)//'.'//t%dest(cut+1:)//'.mlxf'//trim(pid)//'-'//trim(attempt)//'.tmp'//suffix
+            f = c_fopen(t%temp//c_null_char, 'wx'//c_null_char)
+            if( c_associated(f) )then
+                if( c_fclose(f) /= 0 )then
+                    ierr = c_unlink(t%temp//c_null_char)
+                    call mlxf_report(proc, 'the temporary file could not be closed', status)
+                endif
+                return
+            endif
+            info = c_file_info(t%temp)
+            if( .not. info%exists ) exit
+        end do
+        call mlxf_report(proc, 'a temporary file could not be created beside the destination '//t%dest, status)
+    end subroutine mlxf_save_begin
+
+    ! the last step of a save begun by mlxf_save_begin: after a complete write (status 0 on entry) the temporary
+    ! file takes the destination's permission bits, if it existed, and is renamed over it; after any failure, on
+    ! entry or here, the temporary file is removed. The destination itself is never removed
+    subroutine mlxf_save_end( t, proc, status )
+        type(mlxf_save_target), intent(in)    :: t
+        character(len=*),       intent(in)    :: proc
+        integer,                intent(inout) :: status
+        integer(c_int) :: ierr
+        if( status == 0 .and. t%existed )then
+            if( c_chmod(t%temp//c_null_char, int(t%mode, c_int16_t)) /= 0 ) &
+                call mlxf_report(proc, 'the permissions of the destination could not be given to the new file', status)
+        endif
+        if( status == 0 )then
+            if( c_rename(t%temp//c_null_char, t%dest//c_null_char) /= 0 ) &
+                call mlxf_report(proc, 'the destination could not be replaced; it is unchanged', status)
+        endif
+        if( status /= 0 ) ierr = c_unlink(t%temp//c_null_char)
+    end subroutine mlxf_save_end
+
+    ! the dtype of a live array, its handle checked under proc's name
+    integer function dtype_of( a, proc )
+        type(mlx_array),  intent(in) :: a
+        character(len=*), intent(in) :: proc
+        dtype_of = int(mlxc_array_dtype(mlxf_handle(a, proc)))
+    end function dtype_of
 
     ! whether every array is live; an empty or stale one is reported (the status, or a stop)
     logical function live_arrays( arrays, proc, status )

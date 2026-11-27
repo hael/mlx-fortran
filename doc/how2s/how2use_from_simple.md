@@ -1,5 +1,9 @@
 # Use the installed library from Fortran
 
+The general guide is [how2use_installed.md](how2use_installed.md) (requirements, precision and devices, errors,
+ownership, threads, costs) and every name is in the [API reference](../api_reference.md); this page keeps the
+installation details and the notes for an integration in SIMPLE.
+
 Build with GNU Fortran 14 or newer and CMake 3.25 or newer, with shared mlx-c available as described in
 [the setup guide](how2set_up_dev.md). The installed package records its producing compiler ID and full
 version and the mlx-c version it was built with: a consumer must use that same compiler version and find
@@ -43,6 +47,20 @@ producer, OpenMP. Set `MLXC_ROOT` to the compatible dependency prefix if it is o
 paths. Keep the MLX/mlx-c shared libraries installed at runtime. CMake supplies the consumer build's
 runtime search path; an application that installs its own executable should also preserve dependency
 search paths, for example with `CMAKE_INSTALL_RPATH_USE_LINK_PATH=ON`.
+
+Before porting code, read the quickstart's [limits of the present library](../quickstart.md#limits-of-the-present-library-and-what-to-write-instead):
+unchecked indices, handle lists and long unevaluated loops each have a safe spelling there, run by `test/consumer/mlxf_example_user_safety.f90`.
+
+The package installs a lifetime checker for your own sources, `<prefix>/share/mlxf/check_consumer.py` (Python 3.7,
+standard library): it reports the handle forms gfortran leaks or copies bitwise (`[a, exp(b)]`, `v = exp(a)`,
+`call mlx_view(exp(a), p)`, ...) with their file, line and safe spelling, and `--rules` lists what it cannot see.
+In CMake, `mlxf_check_lifetime(my_application)` runs it on the target's sources before each build:
+
+```cmake
+find_package(mlxf CONFIG REQUIRED)
+target_link_libraries(my_application PRIVATE mlxf::mlxf)
+mlxf_check_lifetime(my_application)
+```
 
 Import only `mlxf` with an explicit `only:` list. The installation contains the static Fortran library,
 `mlxf.mod`, CMake package files and pkg-config metadata. Internal, generated and test modules are private.

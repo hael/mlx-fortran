@@ -57,6 +57,7 @@ contains
             call test_leak_gate(devs(i))
             call test_operation_leaks
             call test_compiled_leak
+            call test_integer_scalars
             call test_small_integer_kinds(devs(i))
             call test_item(devs(i))
             call test_device_dtypes(devs(i))
@@ -65,6 +66,82 @@ contains
         call mlx_set_default_device(original)
         call test_zero_copy_table
     end subroutine run_all_array_tests
+
+    ! the arithmetic operators with a default-integer scalar on either side, against the matrix frozen before the
+    ! change: exact in an integer array's kind (int8, uint8, int64 near their limits), true division to float32, the
+    ! integer power, int32 with booleans, the real and complex kinds kept, rank 0 kept; and native integer
+    ! expressions unchanged
+    subroutine test_integer_scalars
+        type(mlx_array)             :: k, r
+        integer(int64), allocatable :: got(:)
+        real(real64),   allocatable :: val(:)
+        integer                     :: n(3), host
+        write(*,'(a)') 'test_integer_scalars'
+        k = mlx_from([-7, 0, 7])
+        call exact(k+2, MLX_DTYPES%int32, [-5_int64, 2_int64, 9_int64], 'int32 + 2')
+        call exact(2+k, MLX_DTYPES%int32, [-5_int64, 2_int64, 9_int64], '2 + int32')
+        call exact(k-2, MLX_DTYPES%int32, [-9_int64, -2_int64, 5_int64], 'int32 - 2')
+        call exact(2-k, MLX_DTYPES%int32, [9_int64, 2_int64, -5_int64], '2 - int32')
+        call exact(k*2, MLX_DTYPES%int32, [-14_int64, 0_int64, 14_int64], 'int32 * 2')
+        call exact(2*k, MLX_DTYPES%int32, [-14_int64, 0_int64, 14_int64], '2 * int32')
+        call exact(k**2, MLX_DTYPES%int32, [49_int64, 0_int64, 49_int64], 'int32 ** 2')
+        call exact(2**mlx_from([0, 1, 3]), MLX_DTYPES%int32, [1_int64, 2_int64, 8_int64], '2 ** int32')
+        call real_values(k/2, MLX_DTYPES%float32, [-3.5_real64, 0._real64, 3.5_real64], 'int32 / 2, true division')
+        call real_values(14/mlx_from([4, -7]), MLX_DTYPES%float32, [3.5_real64, -2._real64], '14 / int32, true division')
+        call exact(mlx_astype(mlx_from([100, -100]), MLX_DTYPES%int8)+27, MLX_DTYPES%int8, [127_int64, -73_int64], &
+            &'int8 [100, -100] + 27, in int8')
+        call exact(mlx_astype(mlx_from([200]), MLX_DTYPES%uint8)+55, MLX_DTYPES%uint8, [255_int64], 'uint8 200 + 55')
+        call exact(mlx_from([2_int64**40])+1, MLX_DTYPES%int64, [1099511627777_int64], 'int64 2**40 + 1, exact')
+        call exact(mlx_from([.true._c_bool, .false._c_bool])+1, MLX_DTYPES%int32, [2_int64, 1_int64], &
+            &'boolean + 1 promotes to int32')
+        call real_values(mlx_from([0.5_real32])+1, MLX_DTYPES%float32, [1.5_real64], 'float32 + 1 stays float32')
+        call real_values(1-mlx_astype(mlx_from([0.25_real32]), MLX_DTYPES%float16), MLX_DTYPES%float16, &
+            &[0.75_real64], '1 - float16 stays float16')
+        r = mlx_from([(1._real32, 2._real32)])*2
+        call assert_int(MLX_DTYPES%complex64, r%kind(), 'complex64 * 2 stays complex64')
+        if( mlx_default_device() == MLX_DEVICES%cpu )then
+            call real_values(mlx_from([0.5_real64])/2, MLX_DTYPES%float64, [0.25_real64], 'float64 / 2 stays float64')
+        endif
+        r = mlx_from(5)-2
+        call assert_int(0, r%ndim(), 'a rank-0 array minus 2 stays rank 0')
+        ! native integer expressions on intrinsic types are untouched
+        n = [1, 2, 3]
+        host = sum(n+1)*2
+        call assert_int(18, host, 'a native integer array plus an integer still compiles and computes on the host')
+    contains
+        subroutine exact( res, kind, want, label )
+            type(mlx_array),  intent(in) :: res
+            integer,          intent(in) :: kind
+            integer(int64),   intent(in) :: want(:)
+            character(len=*), intent(in) :: label
+            integer :: rk
+            rk = res%kind()
+            allocate(got(size(want)))
+            call mlx_to(got, mlx_astype(res, MLX_DTYPES%int64))
+            call assert_true(rk == kind .and. all(got == want), label//': exact, in the expected kind')
+            deallocate(got)
+        end subroutine exact
+
+        subroutine real_values( res, kind, want, label )
+            type(mlx_array),  intent(in) :: res
+            integer,          intent(in) :: kind
+            real(real64),     intent(in) :: want(:)
+            character(len=*), intent(in) :: label
+            real(real32), allocatable :: v32(:)
+            integer                   :: rk
+            rk = res%kind()
+            allocate(val(size(want)), v32(size(want)))
+            if( kind == MLX_DTYPES%float64 )then
+                call mlx_to(val, res)
+            else
+                call mlx_to(v32, mlx_astype(res, MLX_DTYPES%float32))
+                val = real(v32, real64)
+            endif
+            call assert_true(rk == kind .and. all(abs(val-want) <= 0._real64), label//': exact, in the expected kind')
+            deallocate(val)
+        end subroutine real_values
+
+    end subroutine test_integer_scalars
 
     ! ---- the leak gate -------------------------------------------------------------------------------------
 

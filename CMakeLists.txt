@@ -96,6 +96,9 @@ if(USE_OPENMP)
 endif()
 configure_file(cmake/mlxf.pc.in "${PROJECT_BINARY_DIR}/mlxf.pc" @ONLY)
 install(FILES "${PROJECT_BINARY_DIR}/mlxf.pc" DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig" COMPONENT mlxf)
+# the lifetime checker consumers run on their own sources, with the analysis module the repository's rules share
+install(PROGRAMS scripts/check_consumer.py DESTINATION "${CMAKE_INSTALL_DATADIR}/mlxf" COMPONENT mlxf)
+install(FILES scripts/mlxf_consumer_checks.py DESTINATION "${CMAKE_INSTALL_DATADIR}/mlxf" COMPONENT mlxf)
 
 # ------------------------------------------------------------------------------
 # Testing

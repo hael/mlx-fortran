@@ -3,12 +3,13 @@
 ! elements it took. Indices and positions are 1-based in every call; shapes and values are exact.
 module mlxf_ops_index_tester
 use, intrinsic :: iso_c_binding,   only: c_bool
-use, intrinsic :: iso_fortran_env, only: int32, real32
+use, intrinsic :: iso_fortran_env, only: int8, int16, int32, int64, real32
 use mlxf,            only: mlx_array, mlx_from, mlx_to, mlx_set_default_device, mlx_default_device, MLX_DTYPES, &
                            mlx_astype, reshape, mlx_take, mlx_take_along_dim, mlx_gather, mlx_scatter, mlx_scatter_add, &
                            mlx_scatter_max, mlx_scatter_min, mlx_scatter_prod, mlx_put_along_dim, mlx_masked_scatter, &
                            mlx_searchsorted, mlx_unique, mlx_slice, mlx_slice_update, mlx_slice_update_add, &
-                           mlx_slice_update_max, mlx_slice_update_min, mlx_slice_update_prod
+                           mlx_slice_update_max, mlx_slice_update_min, mlx_slice_update_prod, mlx_check_indices, &
+                           mlx_last_error, mlx_zeros
 use mlxf_test_utils, only: assert_true, assert_int, test_devices, device_name
 implicit none
 private
@@ -32,9 +33,128 @@ contains
             call test_along_dim
             call test_section_updates
             call test_search_and_unique
+            call test_index_check
         end do
         call mlx_set_default_device(original)
     end subroutine run_all_ops_index_tests
+
+    ! mlx_check_indices against the exact accept/reject matrix: elements and slab starts, every integer kind, empty
+    ! lists and extents, duplicates, dimension lists, refused kinds, overflow-prone values; the message names the
+    ! problem; a refused index never reaches the operation, and the unchecked operations stay unchecked and lazy
+    subroutine test_index_check
+        type(mlx_array)               :: x, idx, r, lists(2), slabs(2)
+        real(real32)                  :: y(2)
+        integer                       :: st
+        character(len=:), allocatable :: msg
+        write(*,'(a)') 'test_index_check'
+        x = mlx_from([10._real32, 20._real32, 30._real32, 40._real32, 50._real32])
+        ! elements of an extent of 5
+        call accept(mlx_from([1]), 5, 'the first index, 1')
+        call accept(mlx_from([5]), 5, 'the last index, 5')
+        call accept(mlx_from([1, 5, 3, 3, 1]), 5, 'duplicates')
+        call accept(mlx_from(reshape([2, 4, 1, 5], [2, 2])), 5, 'a (2, 2) array of indices')
+        call refuse(mlx_from([0]), 5, 'index 0, which the operations wrap', 'below 1: 0')
+        call refuse(mlx_from([3, -1]), 5, 'a negative index', 'below 1: -1')
+        call refuse(mlx_from([1, 6]), 5, 'extent + 1', 'above 5: 6')
+        call refuse(mlx_from([huge(1_int32)]), 5, 'the largest int32', 'above 5')
+        call refuse(mlx_from([2_int64**40]), 5, 'int64 2**40', 'above 5')
+        call refuse(mlx_from([-huge(1_int64)-1_int64]), 5, 'the smallest int64', 'below 1')
+        call accept(mlx_from([5_int8]), 5, 'an int8 index')
+        call refuse(mlx_from([0_int16]), 5, 'an int16 index 0', 'below 1')
+        call accept(mlx_astype(mlx_from([5]), MLX_DTYPES%uint8), 5, 'a uint8 index')
+        call refuse(mlx_astype(mlx_from([255]), MLX_DTYPES%uint8), 5, 'uint8 255', 'above 5: 255')
+        call refuse(mlx_astype(mlx_from([4000000000_int64]), MLX_DTYPES%uint32), 5, 'uint32 4e9', 'above 5: 4000000000')
+        call accept(mlx_astype(mlx_from([3_int64]), MLX_DTYPES%uint64), 5, 'a uint64 index')
+        call refuse(mlx_astype(mlx_from([-huge(1_int64)-1_int64]), MLX_DTYPES%uint64), 5, 'uint64 2**63', '2**62')
+        call accept(mlx_zeros([0], MLX_DTYPES%int32), 5, 'an empty list of indices')
+        call accept(mlx_zeros([0], MLX_DTYPES%int32), 0, 'an empty list into an empty extent')
+        call refuse(mlx_from([1]), 0, 'an index into an extent of 0', 'extent of 0')
+        call refuse(mlx_from([1]), -1, 'a negative extent', 'negative')
+        call refuse(mlx_from([1._real32]), 5, 'float32 indices', 'not an integer array')
+        call refuse(mlx_from([1]) > 0._real32, 5, 'boolean indices', 'not an integer array')
+        ! slab starts: extent 5, slabs of 2
+        call mlx_check_indices(mlx_from([1, 4]), 5, 2, st)
+        call assert_int(0, st, 'slab starts 1 and 4 of 2 in 5: the last slab ends at the boundary')
+        call mlx_check_indices(mlx_from([5]), 5, 2, st)
+        msg = mlx_last_error()
+        call assert_true(st /= 0 .and. index(msg, 'slab start is above 4: 5') > 0, &
+            &'a slab of 2 starting at 5 in 5 ends one past it: refused')
+        call mlx_check_indices(mlx_from([0]), 5, 2, st)
+        call assert_true(st /= 0, 'a slab start 0: refused')
+        call mlx_check_indices(mlx_from([1]), 5, 6, st)
+        msg = mlx_last_error()
+        call assert_true(st /= 0 .and. index(msg, 'slab size 6 is above the extent 5') > 0, &
+            &'a slab larger than the extent: refused')
+        call mlx_check_indices(mlx_from([1]), 5, 0, st)
+        call assert_true(st /= 0, 'a slab of 0: refused')
+        call mlx_check_indices(mlx_from([1]), 5, 5, st)
+        call assert_int(0, st, 'a slab of the whole extent at 1')
+        call mlx_check_indices(mlx_from([2]), 5, 5, st)
+        call assert_true(st /= 0, 'a slab of the whole extent at 2: refused')
+        call mlx_check_indices(mlx_from([int(huge(1_int32), int64)]), huge(1_int32), 1, st)
+        call assert_int(0, st, 'the last start of the largest default-integer extent, no overflow')
+        call mlx_check_indices(mlx_from([int(huge(1_int32), int64)+1_int64]), huge(1_int32), 1, st)
+        call assert_true(st /= 0, 'one past it: refused')
+        call mlx_check_indices(mlx_from([huge(1_int64)]), huge(1_int32), huge(1_int32), st)
+        call assert_true(st /= 0, 'the largest int64 as a start: refused')
+        ! lists of dimensions
+        lists(1) = mlx_from([1, 5])
+        lists(2) = mlx_from([3, 1])
+        call mlx_check_indices(lists, [5, 3], st)
+        call assert_int(0, st, 'two index arrays, each within its own extent')
+        lists(2) = mlx_from([4])
+        call mlx_check_indices(lists, [5, 3], st)
+        msg = mlx_last_error()
+        call assert_true(st /= 0 .and. index(msg, 'index array 2') > 0, &
+            &'the second outside its extent: refused, the message names it')
+        call mlx_check_indices(lists, [5], st)
+        call assert_true(st /= 0, 'a list with one extent short: refused')
+        slabs(1) = mlx_from([1, 3])
+        slabs(2) = mlx_from([2])
+        call mlx_check_indices(slabs, [4, 3], [2, 2], st)
+        call assert_int(0, st, 'two arrays of slab starts, each within its own extent')
+        call mlx_check_indices(slabs, [4, 2], [2, 2], st)
+        msg = mlx_last_error()
+        call assert_true(st /= 0 .and. index(msg, 'index array 2') > 0, 'the second one past: refused')
+        ! a refused index never reaches the operation: the guard that index 100000000 would have crashed on the CPU
+        idx = mlx_from([100000000])
+        call mlx_check_indices(idx, 5, st)
+        if( st == 0 ) r = mlx_take(x, idx)
+        call assert_true(st /= 0, 'index 100000000 is refused before mlx_take')
+        idx = mlx_from([5, 1])
+        call mlx_check_indices(idx, 5, st)
+        if( st == 0 )then
+            r = mlx_take(x, idx)
+            call mlx_to(y, r)
+        endif
+        call assert_true(st == 0 .and. all(abs(y-[50._real32, 10._real32]) <= 0._real32), &
+            &'accepted indices, reused unchanged, take the elements they name')
+        ! the unchecked route is unchanged: index 0 still wraps, and a far index builds a graph without a check
+        r = mlx_take(x, mlx_from([0, 1]))
+        call mlx_to(y, r)
+        call assert_true(all(abs(y-[50._real32, 10._real32]) <= 0._real32), 'mlx_take still wraps index 0 unchecked')
+        r = mlx_take(x, mlx_from([100000000]))
+        call assert_true(all(r%shape() == [1]), 'and builds a take of a far index lazily, without evaluating it')
+        call r%kill()
+    contains
+        subroutine accept( indices, extent, label )
+            type(mlx_array),  intent(in) :: indices
+            integer,          intent(in) :: extent
+            character(len=*), intent(in) :: label
+            call mlx_check_indices(indices, extent, st)
+            call assert_int(0, st, 'accepted: '//label)
+        end subroutine accept
+
+        subroutine refuse( indices, extent, label, reason )
+            type(mlx_array),  intent(in) :: indices
+            integer,          intent(in) :: extent
+            character(len=*), intent(in) :: label, reason
+            call mlx_check_indices(indices, extent, st)
+            call assert_true(st /= 0, 'refused: '//label)
+            call assert_true(index(mlx_last_error(), reason) > 0, 'with the reason "'//reason//'": '//mlx_last_error())
+        end subroutine refuse
+
+    end subroutine test_index_check
 
     ! element (i, j, k) is i + 10 j + 100 k
     subroutine fixture( x )

@@ -1,33 +1,43 @@
 !@descr: gathers, scatters, section updates, searches and unique values through the array signature helpers
 ! Index values and positions are 1-based for the user and shifted here, inside the graph, to MLX's 0-based ones;
 ! MLX checks no index against the extents. A gathered or scattered slab keeps a's dimensions in order and the
-! dimensions of the index arrays follow it, which is MLX's layout read in Fortran order.
+! dimensions of the index arrays follow it, which is MLX's layout read in Fortran order. mlx_check_indices is the
+! explicit check a caller runs once on untrusted indices before they reach these operations; none of them checks.
 module mlxf_ops_index
-use, intrinsic :: iso_c_binding, only: c_null_char, c_null_ptr, c_bool, c_int, c_size_t
-use mlxf_c_array,      only: mlxc_array_new, mlxc_array_free
-use mlxf_c_ops,        only: mlxc_gather, mlxc_gather_single, mlxc_masked_scatter, mlxc_put_along_axis, mlxc_scatter, &
-                             mlxc_scatter_add, mlxc_scatter_add_axis, mlxc_scatter_add_single, mlxc_scatter_max, &
-                             mlxc_scatter_max_single, mlxc_scatter_min, mlxc_scatter_min_single, mlxc_scatter_prod, &
-                             mlxc_scatter_prod_single, mlxc_scatter_single, mlxc_searchsorted, mlxc_slice_update, &
-                             mlxc_slice_update_add, mlxc_slice_update_dynamic, mlxc_slice_update_max, &
-                             mlxc_slice_update_min, mlxc_slice_update_prod, mlxc_unique
-use mlxf_c_signatures, only: mlxc_gather_op, mlxc_gather_single_op, mlxc_put_op, mlxc_scatter_op, mlxc_slice_update_op, &
-                             mlxc_ternary_vector_op, mlxc_text_op, mlxc_unique_op
-use mlxf_c_stream,     only: mlxc_stream_free
-use mlxf_c_types,      only: mlxc_array, mlxc_stream, mlxc_vector_array
-use mlxf_c_vector,     only: mlxc_vector_array_free, mlxc_vector_array_new
-use mlxf_defs,         only: mlxf_slice_spec, mlxf_index_spec
-use mlxf_error,        only: mlxf_fail, mlxf_check
-use mlxf_device,       only: mlxf_enter, mlxf_require_device, mlxf_default_stream
-use mlxf_array,        only: mlx_array, mlxf_vector_import, mlxf_handle, mlxf_adopt, mlxf_vector_of
-use mlxf_ops_shape,    only: axis_of, axes_of
-use mlxf_calls,        only: mlxf_slice_bounds, mlxf_one_based, mlxf_ternary_op, mlxf_zero_based
+use, intrinsic :: iso_c_binding,   only: c_null_char, c_null_ptr, c_bool, c_int, c_size_t
+use, intrinsic :: iso_fortran_env, only: int64
+use mlxf_c_array,         only: mlxc_array_new, mlxc_array_free, mlxc_array_dtype
+use mlxf_c_ops,           only: mlxc_gather, mlxc_gather_single, mlxc_masked_scatter, mlxc_put_along_axis, &
+                                mlxc_scatter, mlxc_scatter_add, mlxc_scatter_add_axis, mlxc_scatter_add_single, &
+                                mlxc_scatter_max, mlxc_scatter_max_single, mlxc_scatter_min, mlxc_scatter_min_single, &
+                                mlxc_scatter_prod, mlxc_scatter_prod_single, mlxc_scatter_single, mlxc_searchsorted, &
+                                mlxc_slice_update, mlxc_slice_update_add, mlxc_slice_update_dynamic, &
+                                mlxc_slice_update_max, mlxc_slice_update_min, mlxc_slice_update_prod, mlxc_unique
+use mlxf_c_signatures,    only: mlxc_gather_op, mlxc_gather_single_op, mlxc_put_op, mlxc_scatter_op, &
+                                mlxc_slice_update_op, mlxc_ternary_vector_op, mlxc_text_op, mlxc_unique_op
+use mlxf_c_stream,        only: mlxc_stream_free
+use mlxf_c_types,         only: mlxc_array, mlxc_stream, mlxc_vector_array
+use mlxf_c_vector,        only: mlxc_vector_array_free, mlxc_vector_array_new
+use mlxf_defs,            only: mlxf_slice_spec, mlxf_index_spec, MLX_DTYPES
+use mlxf_error,           only: mlxf_fail, mlxf_check, mlxf_report
+use mlxf_device,          only: mlxf_enter, mlxf_require_device, mlxf_default_stream
+use mlxf_array,           only: mlx_array, mlxf_vector_import, mlxf_handle, mlxf_adopt, mlxf_vector_of, mlx_eval
+use mlxf_transfer,        only: mlx_item, mlx_from
+use mlxf_ops_elementwise, only: mlx_astype
+use mlxf_ops_logic,       only: mlx_right_shift
+use mlxf_ops_reduce,      only: maxval, minval
+use mlxf_ops_shape,       only: axis_of, axes_of
+use mlxf_calls,           only: mlxf_slice_bounds, mlxf_one_based, mlxf_ternary_op, mlxf_zero_based
 implicit none
 
 public :: mlx_gather, mlx_scatter, mlx_scatter_add, mlx_scatter_max, mlx_scatter_min, mlx_scatter_prod, &
     &mlx_put_along_dim, mlx_masked_scatter, mlx_searchsorted, mlx_unique, mlx_slice_update, mlx_slice_update_add, &
-    &mlx_slice_update_max, mlx_slice_update_min, mlx_slice_update_prod
+    &mlx_slice_update_max, mlx_slice_update_min, mlx_slice_update_prod, mlx_check_indices
 private
+
+interface mlx_check_indices
+    module procedure check_indices_one, check_slabs_one, check_indices_list, check_slabs_list
+end interface mlx_check_indices
 
 interface mlx_slice_update
     module procedure slice_update_static, slice_update_dynamic
@@ -338,6 +348,156 @@ contains
         call mlxf_zero_based(shifted, ops(2), proc)
         call mlxf_put_op(r, f, [ops(1), shifted, ops(3)], axis_of(ops(1)%ndim(), dim, proc), proc)
     end subroutine scatter_single
+
+    ! whether every value of indices, an integer array of any kind and shape, is a one-based index into extent:
+    ! status 0 when 1 <= i <= extent for all of them (an empty array included), 1 otherwise, with the reason in
+    ! mlx_last_error(). It evaluates the smallest and largest index once, a wait for the device: run it on untrusted
+    ! input before the indices reach a graph, never inside a compiled or traced callback, and reuse the indices it
+    ! accepted unchanged. Index 0, which the operations wrap to the last element, is refused here
+    subroutine check_indices_one( indices, extent, status )
+        type(mlx_array), intent(in)  :: indices
+        integer,         intent(in)  :: extent
+        integer,         intent(out) :: status
+        character(len=:), allocatable :: why
+        call mlxf_enter('mlx_check_indices')
+        call index_problem(indices, extent, 0, why, status)
+        if( status == 0 .and. len(why) > 0 ) call mlxf_report('mlx_check_indices', why, status)
+    end subroutine check_indices_one
+
+    ! whether every value of indices is a one-based start of a slab of size elements inside extent:
+    ! 1 <= i <= extent-size+1, after size is checked against extent (1 <= size <= extent); status as above
+    subroutine check_slabs_one( indices, extent, size, status )
+        type(mlx_array), intent(in)  :: indices
+        integer,         intent(in)  :: extent, size
+        integer,         intent(out) :: status
+        character(len=:), allocatable :: why
+        call mlxf_enter('mlx_check_indices')
+        if( size < 1 )then
+            call mlxf_report('mlx_check_indices', 'a slab size is below 1', status)
+            return
+        endif
+        call index_problem(indices, extent, size, why, status)
+        if( status == 0 .and. len(why) > 0 ) call mlxf_report('mlx_check_indices', why, status)
+    end subroutine check_slabs_one
+
+    ! the element check of each array of a list against its own extent (the index arrays of mlx_gather and the
+    ! scatters over a list of dimensions); the first failure is reported with its place in the list
+    subroutine check_indices_list( indices, extents, status )
+        type(mlx_array), intent(in)  :: indices(:)
+        integer,         intent(in)  :: extents(:)
+        integer,         intent(out) :: status
+        character(len=:), allocatable :: why
+        integer                       :: i
+        call mlxf_enter('mlx_check_indices')
+        status = 0
+        if( size(extents) /= size(indices) )then
+            call mlxf_report('mlx_check_indices', 'one extent per index array is needed', status)
+            return
+        endif
+        do i = 1, size(indices)
+            call index_problem(indices(i), extents(i), 0, why, status)
+            if( status /= 0 ) return
+            if( len(why) > 0 )then
+                call mlxf_report('mlx_check_indices', 'index array '//text(int(i, int64))//': '//why, status)
+                return
+            endif
+        end do
+    end subroutine check_indices_list
+
+    ! the slab check of each array of a list against its own extent and slab size
+    subroutine check_slabs_list( indices, extents, sizes, status )
+        type(mlx_array), intent(in)  :: indices(:)
+        integer,         intent(in)  :: extents(:), sizes(:)
+        integer,         intent(out) :: status
+        character(len=:), allocatable :: why
+        integer                       :: i
+        call mlxf_enter('mlx_check_indices')
+        status = 0
+        if( size(extents) /= size(indices) .or. size(sizes) /= size(indices) )then
+            call mlxf_report('mlx_check_indices', 'one extent and one slab size per index array are needed', status)
+            return
+        endif
+        if( any(sizes < 1) )then
+            call mlxf_report('mlx_check_indices', 'a slab size is below 1', status)
+            return
+        endif
+        do i = 1, size(indices)
+            call index_problem(indices(i), extents(i), sizes(i), why, status)
+            if( status /= 0 ) return
+            if( len(why) > 0 )then
+                call mlxf_report('mlx_check_indices', 'index array '//text(int(i, int64))//': '//why, status)
+                return
+            endif
+        end do
+    end subroutine check_slabs_list
+
+    ! what is wrong with indices against extent, as text (empty when nothing is): elements when size is 0, else
+    ! slab starts. The extent and the slab size are checked first; then the indices must be integers, and empty or
+    ! within 1 through the last valid value. The smallest and largest value are taken in the indices' own kind and
+    ! moved to int64, which holds every signed value and every unsigned one below 2**62; a uint64 index at or above
+    ! 2**62 is refused first (no extent of a real array reaches it). status is nonzero only when the evaluation
+    ! fails, with MLX's message as the last error
+    subroutine index_problem( indices, extent, size, why, status )
+        type(mlx_array),               intent(in)  :: indices
+        integer,                       intent(in)  :: extent, size
+        character(len=:), allocatable, intent(out) :: why
+        integer,                       intent(out) :: status
+        type(mlx_array)               :: lo, hi, big
+        integer(int64)                :: vlo, vhi, vbig, upper
+        integer                       :: k
+        character(len=:), allocatable :: what
+        status = 0
+        why = ''
+        what = 'an index'
+        upper = int(extent, int64)
+        if( size > 0 )then
+            what = 'a slab start'
+            upper = int(extent, int64)-int(size, int64)+1_int64
+        endif
+        k = int(mlxc_array_dtype(mlxf_handle(indices, 'mlx_check_indices')))
+        if( extent < 0 )then
+            why = 'the extent is negative'
+        else if( size > extent )then
+            why = 'the slab size '//text(int(size, int64))//' is above the extent '//text(int(extent, int64))
+        else if( .not. any(k == [MLX_DTYPES%int8, MLX_DTYPES%int16, MLX_DTYPES%int32, MLX_DTYPES%int64, &
+            &MLX_DTYPES%uint8, MLX_DTYPES%uint16, MLX_DTYPES%uint32, MLX_DTYPES%uint64]) )then
+            why = 'the indices are not an integer array'
+        endif
+        if( len(why) > 0 ) return
+        if( indices%size() == 0_int64 ) return
+        if( upper < 1_int64 )then
+            why = 'no '//what//' fits an extent of 0'
+            return
+        endif
+        lo = mlx_astype(minval(indices), MLX_DTYPES%int64)
+        hi = mlx_astype(maxval(indices), MLX_DTYPES%int64)
+        if( k == MLX_DTYPES%uint64 )then
+            big = mlx_astype(maxval(mlx_right_shift(indices, 62)), MLX_DTYPES%int64)
+        else
+            big = mlx_from(0_int64)
+        endif
+        call mlx_eval([lo, hi, big], status=status)
+        if( status == 0 ) call mlx_item(lo, vlo, status=status)
+        if( status == 0 ) call mlx_item(hi, vhi, status=status)
+        if( status == 0 ) call mlx_item(big, vbig, status=status)
+        if( status /= 0 ) return
+        if( vbig /= 0_int64 )then
+            why = what//' is at or above 2**62, beyond '//text(upper)
+        else if( vlo < 1_int64 )then
+            why = what//' is below 1: '//text(vlo)
+        else if( vhi > upper )then
+            why = what//' is above '//text(upper)//': '//text(vhi)
+        endif
+    end subroutine index_problem
+
+    ! an integer as text
+    function text( n ) result(s)
+        integer(int64), intent(in) :: n
+        character(len=:), allocatable :: s
+        character(len=24)             :: buf
+        write(buf, '(i0)') n
+        s = trim(buf)
+    end function text
 
     ! the bounds record of a section, stride 1 by default
     function section( lower, upper, stride ) result(spec)

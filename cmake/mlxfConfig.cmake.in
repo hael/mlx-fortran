@@ -60,4 +60,31 @@ if(@USE_OPENMP@)
     endif()
 endif()
 include("${CMAKE_CURRENT_LIST_DIR}/mlxfTargets.cmake")
+
+# the lifetime checker (Python 3.7 or newer, standard library): `check_consumer.py --rules` lists what it reports
+# and what it cannot see. mlxf_check_lifetime(<target>) runs it on the target's Fortran sources before the target
+# is built, and a finding fails the build; without a Python 3.7 it warns and checks nothing
+set(mlxf_LIFETIME_CHECKER "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_DATADIR@/mlxf/check_consumer.py")
+function(mlxf_check_lifetime target)
+    find_package(Python3 3.7 QUIET COMPONENTS Interpreter)
+    if(NOT Python3_Interpreter_FOUND)
+        message(WARNING "mlxf_check_lifetime(${target}): no Python 3.7 or newer found; the lifetime check is skipped")
+        return()
+    endif()
+    get_target_property(_mlxf_sources ${target} SOURCES)
+    get_target_property(_mlxf_dir ${target} SOURCE_DIR)
+    set(_mlxf_files "")
+    foreach(_mlxf_source IN LISTS _mlxf_sources)
+        if(_mlxf_source MATCHES "\\.[Ff](90|95|03|08)$")
+            get_filename_component(_mlxf_path "${_mlxf_source}" ABSOLUTE BASE_DIR "${_mlxf_dir}")
+            list(APPEND _mlxf_files "${_mlxf_path}")
+        endif()
+    endforeach()
+    if(_mlxf_files)
+        add_custom_target(${target}_mlxf_lifetime
+            COMMAND Python3::Interpreter "${mlxf_LIFETIME_CHECKER}" ${_mlxf_files}
+            COMMENT "mlxf lifetime check of ${target}" VERBATIM)
+        add_dependencies(${target} ${target}_mlxf_lifetime)
+    endif()
+endfunction()
 check_required_components(mlxf)

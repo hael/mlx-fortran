@@ -245,4 +245,24 @@ type :: mlx_metal_kernel_spec
     logical                       :: ensure_row_contiguous = .true., atomic_outputs = .false., verbose = .false.
 end type mlx_metal_kernel_spec
 
+! what lstat says of a path (mlxf_libc's c_file_info), the link itself and not what it names: whether it exists,
+! is a symbolic link or a regular file, its permission bits (with set-id and sticky), its hard links and its owner
+type :: mlxf_file_info
+    logical :: exists  = .false.
+    logical :: link    = .false.
+    logical :: regular = .false.
+    integer :: mode    = 0
+    integer :: nlink   = 0
+    integer :: uid     = -1
+end type mlxf_file_info
+
+! a save in progress (mlxf_io's mlxf_save_begin and mlxf_save_end): the destination, its name settled once (MLX's
+! suffix added where it is missing), the temporary sibling written first, and whether the destination existed, with
+! its permission bits
+type :: mlxf_save_target
+    character(len=:), allocatable :: dest, temp
+    logical                       :: existed = .false.
+    integer                       :: mode    = 0
+end type mlxf_save_target
+
 end module mlxf_defs

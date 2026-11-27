@@ -7,25 +7,28 @@
 ! of the singular values.
 module mlxf_linalg_matrix
 use, intrinsic :: iso_c_binding, only: c_double, c_bool, c_int, c_null_char, c_size_t
-use mlxf_c_array,      only: mlxc_array_free, mlxc_array_new
-use mlxf_c_linalg,     only: mlxc_linalg_cholesky, mlxc_linalg_cholesky_inv, mlxc_linalg_det, mlxc_linalg_eig, &
-                             mlxc_linalg_eigh, mlxc_linalg_eigvals, mlxc_linalg_eigvalsh, mlxc_linalg_inv, &
-                             mlxc_linalg_lu, mlxc_linalg_lu_factor, mlxc_linalg_norm, mlxc_linalg_norm_l2, &
-                             mlxc_linalg_norm_matrix, mlxc_linalg_pinv, mlxc_linalg_qr, mlxc_linalg_slogdet, &
-                             mlxc_linalg_solve, mlxc_linalg_solve_triangular, mlxc_linalg_svd, mlxc_linalg_tri_inv
-use mlxf_c_ops,        only: mlxc_conjugate, mlxc_flatten, mlxc_reshape, mlxc_swapaxes
-use mlxf_c_signatures, only: mlxc_binary_op, mlxc_compare_op, mlxc_flag_op, mlxc_norm_op, mlxc_norm_text_op, &
-                             mlxc_pair_op, mlxc_pair_text_op, mlxc_unary_op, mlxc_unary_text_op, mlxc_unstack_op, &
-                             mlxc_vector_flag_op
-use mlxf_c_stream,     only: mlxc_stream_free
-use mlxf_c_types,      only: mlxc_array, mlxc_stream, mlxc_vector_array
-use mlxf_c_vector,     only: mlxc_vector_array_free, mlxc_vector_array_new
-use mlxf_defs,         only: MLX_DTYPES, mlxf_reduce_spec, mlxf_norm_spec
-use mlxf_array,        only: mlx_array, mlxf_handle, mlxf_vector_import, mlxf_adopt
-use mlxf_device,       only: mlxf_enter, mlxf_default_stream, mlxf_require_device
-use mlxf_error,        only: mlxf_fail, mlxf_check
-use mlxf_calls,        only: mlxf_axes_of, mlxf_cpu_stream, mlxf_int2_op, mlxf_one_based, mlxf_reduce_dims_op, &
-                             mlxf_unary, mlxf_vector_op
+use mlxf_c_array,         only: mlxc_array_free, mlxc_array_new
+use mlxf_c_linalg,        only: mlxc_linalg_cholesky, mlxc_linalg_cholesky_inv, mlxc_linalg_det, mlxc_linalg_eig, &
+                                mlxc_linalg_eigh, mlxc_linalg_eigvals, mlxc_linalg_eigvalsh, mlxc_linalg_inv, &
+                                mlxc_linalg_lu, mlxc_linalg_lu_factor, mlxc_linalg_norm, mlxc_linalg_norm_l2, &
+                                mlxc_linalg_norm_matrix, mlxc_linalg_pinv, mlxc_linalg_qr, mlxc_linalg_slogdet, &
+                                mlxc_linalg_solve, mlxc_linalg_solve_triangular, mlxc_linalg_svd, mlxc_linalg_tri_inv
+use mlxf_c_ops,           only: mlxc_conjugate, mlxc_flatten, mlxc_reshape, mlxc_swapaxes
+use mlxf_c_signatures,    only: mlxc_binary_op, mlxc_compare_op, mlxc_flag_op, mlxc_norm_op, mlxc_norm_text_op, &
+                                mlxc_pair_op, mlxc_pair_text_op, mlxc_unary_op, mlxc_unary_text_op, mlxc_unstack_op, &
+                                mlxc_vector_flag_op
+use mlxf_c_stream,        only: mlxc_stream_free
+use mlxf_c_types,         only: mlxc_array, mlxc_stream, mlxc_vector_array
+use mlxf_c_vector,        only: mlxc_vector_array_free, mlxc_vector_array_new
+use mlxf_defs,            only: MLX_DTYPES, mlxf_reduce_spec, mlxf_norm_spec
+use mlxf_array,           only: mlx_array, mlxf_handle, mlxf_vector_import, mlxf_adopt
+use mlxf_device,          only: mlxf_enter, mlxf_default_stream, mlxf_require_device
+use mlxf_error,           only: mlxf_fail, mlxf_check
+use mlxf_calls,           only: mlxf_axes_of, mlxf_cpu_stream, mlxf_int2_op, mlxf_one_based, mlxf_reduce_dims_op, &
+                                mlxf_unary, mlxf_vector_op
+use mlxf_ops_elementwise, only: real, aimag, sqrt, merge
+use mlxf_ops_reduce,      only: sum, mlxf_reduce_scale, mlxf_reduced_dims, mlxf_scaled_reduction
+use mlxf_ops_shape,       only: mlx_squeeze
 implicit none
 public :: mlx_inv, mlx_pinv, mlx_tri_inv, mlx_det, mlx_slogdet, mlx_cholesky, mlx_cholesky_inv, mlx_qr, mlx_lu
 public :: mlx_lu_factor, mlx_svd, mlx_eigh, mlx_eigvalsh, mlx_eig, mlx_eigvals, mlx_solve, mlx_solve_triangular
@@ -326,15 +329,45 @@ contains
     end function mlx_norm_matrix
 
     ! the Euclidean norm along dimension dim, as Fortran's norm2 (of magnitudes for a complex array); without dim,
-    ! of every element
+    ! of every element. A floating or complex array is scaled first (scaled_norm2), so that the norm of values near
+    ! the ends of the kind's range is computed where it is representable
     function norm2_dim( a, dim, keepdims ) result(r)
+        type(mlx_array), intent(in)           :: a
+        integer,         optional, intent(in) :: dim
+        logical,         optional, intent(in) :: keepdims
+        type(mlx_array) :: r
+        call mlxf_enter('norm2')
+        if( mlxf_scaled_reduction(a, mlxf_reduced_dims(a, dim=dim)) )then
+            r = scaled_norm2(a, mlxf_reduced_dims(a, dim=dim), plain_norm2_dim(a, dim, .true.), keepdims)
+        else
+            r = plain_norm2_dim(a, dim, keepdims)
+        endif
+    end function norm2_dim
+
+    ! the Euclidean norm over one or two dimensions (the Frobenius norm of the matrices they span)
+    function norm2_dims( a, dims, keepdims ) result(r)
+        type(mlx_array), intent(in)           :: a
+        integer,         intent(in)           :: dims(:)
+        logical,         optional, intent(in) :: keepdims
+        type(mlx_array) :: r
+        call mlxf_enter('norm2')
+        if( size(dims) < 1 ) call mlxf_fail('norm2', 'one or two dimensions are needed')
+        if( mlxf_scaled_reduction(a, dims) )then
+            r = scaled_norm2(a, dims, plain_norm2_dims(a, dims, .true.), keepdims)
+        else
+            r = plain_norm2_dims(a, dims, keepdims)
+        endif
+    end function norm2_dims
+
+    ! MLX's Euclidean norm along dim, or of every element (it squares before it sums: it overflows above about
+    ! sqrt(huge) and underflows below about sqrt(tiny))
+    function plain_norm2_dim( a, dim, keepdims ) result(r)
         type(mlx_array), intent(in)           :: a
         integer,         optional, intent(in) :: dim
         logical,         optional, intent(in) :: keepdims
         type(mlx_array)        :: r, flat, whole
         type(mlxf_reduce_spec) :: spec
         integer                :: i
-        call mlxf_enter('norm2')
         if( present(dim) )then
             spec%dims = [dim]
             spec%keepdims = chosen(keepdims)
@@ -349,21 +382,44 @@ contains
         else
             call mlxf_reduce_dims_op(r, mlxc_linalg_norm_l2, flat, spec, 'norm2')
         endif
-    end function norm2_dim
+    end function plain_norm2_dim
 
-    ! the Euclidean norm over one or two dimensions (the Frobenius norm of the matrices they span)
-    function norm2_dims( a, dims, keepdims ) result(r)
-        type(mlx_array), intent(in)           :: a
-        integer,         intent(in)           :: dims(:)
-        logical,         optional, intent(in) :: keepdims
+    ! MLX's Euclidean norm over the dimensions dims
+    function plain_norm2_dims( a, dims, keepdims ) result(r)
+        type(mlx_array),   intent(in) :: a
+        integer,           intent(in) :: dims(:)
+        logical, optional, intent(in) :: keepdims
         type(mlx_array)        :: r
         type(mlxf_reduce_spec) :: spec
-        call mlxf_enter('norm2')
-        if( size(dims) < 1 ) call mlxf_fail('norm2', 'one or two dimensions are needed')
         spec%dims = dims
         spec%keepdims = chosen(keepdims)
         call mlxf_reduce_dims_op(r, mlxc_linalg_norm_l2, a, spec, 'norm2')
-    end function norm2_dims
+    end function plain_norm2_dims
+
+    ! the Euclidean norm of a over the Fortran dimensions rd: s*sqrt(sum((a/s)**2)), s the largest magnitude of the
+    ! reduced elements (of their real and imaginary parts for a complex array), each squared term at most 1 (2 for
+    ! a complex one), so that nothing overflows or underflows where the norm is representable. Where s is zero or
+    ! not finite the plain norm stands (0 for zeros; infinity, or NaN with a NaN). s's gradient is stopped: the
+    ! derivative is a/norm2(a), as for the plain norm, away from zero (where neither has one)
+    function scaled_norm2( a, rd, plain, keepdims ) result(r)
+        type(mlx_array),   intent(in) :: a
+        integer,           intent(in) :: rd(:)
+        type(mlx_array),   intent(in) :: plain
+        logical, optional, intent(in) :: keepdims
+        type(mlx_array) :: r
+        type(mlx_array) :: s, ok, y, re, im, q
+        call mlxf_reduce_scale(a, rd, s, ok)
+        y = a/s
+        if( a%kind() == MLX_DTYPES%complex64 )then
+            re = real(y)
+            im = aimag(y)
+            q = sum(re*re+im*im, rd, keepdims=.true.)
+        else
+            q = sum(y*y, rd, keepdims=.true.)
+        endif
+        r = merge(sqrt(q)*s, plain, ok)
+        if( .not. chosen(keepdims) ) r = mlx_squeeze(r, rd)
+    end function scaled_norm2
 
     ! the transpose of every matrix of a, dimensions 1 and 2 exchanged: a view
     subroutine transposed( r, a, proc )

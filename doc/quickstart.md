@@ -3,8 +3,9 @@
 `mlxf` keeps Fortran's view (column-major arrays, 1-based dimensions and indices, intrinsic names), but the
 arithmetic is MLX's. This page lists what a Fortran programmer meets first, with the program that proves each
 row, and then what the library enforces against what is left to the caller. The full contract is
-[`doc/policies/binding_contract_policy.md`](policies/binding_contract_policy.md); a first program is in the
-[README](../README.md).
+[`doc/policies/binding_contract_policy.md`](policies/binding_contract_policy.md), every name has its entry in the
+[API reference](api_reference.md), the requirements and the precision, error and cost tables are in
+[installed use](how2s/how2use_installed.md); a first program is in the [README](../README.md).
 
 ## Dtypes and results
 
@@ -38,9 +39,59 @@ float64, `m` boolean.
 | D18 | `x > 1.5` | a logical array | a boolean array; copied out as `logical(c_bool)` | same | D18 |
 | D19 | `matmul(a3, b3)`, `transpose(a3)` of rank 3 | not allowed (rank 2 only) | batched over dimensions 3 and up | different | D19 |
 | D20 | `call random_number(x)` against `mlx_random_uniform(shape, key=key)` | the processor's generator, its state hidden | float32, a function of the key and the shape: the same key gives the same sample; without a key MLX's global key, which `mlx_random_seed` sets and each draw advances | different | D20 |
+| D21 | `a + 1`, `2 * x`, an integer array or a real one with a default integer | integer arithmetic; a real result | the scalar takes the array's kind: int32 + 1 is int32 (exact, never through real32), 2 * float32 stays float32, a boolean array with 1 gives int32; a value the array's integer kind cannot hold (int8 with 300, an unsigned kind with -1) stops instead of wrapping | same, and a stop where Fortran would overflow | D21 |
 
 Scalars are weak in every binary operation that takes one (arithmetic, comparisons, `max`, `min`, `atan2`,
-`modulo`, ...): a real64 literal never makes a float64 graph. Integer arrays with a real scalar give float32.
+`modulo`, ...): a real64 literal never makes a float64 graph. Integer arrays with a real scalar give float32; with a
+default-integer scalar (`k + 1`, `2 * k`, `k > 0`) they keep their kind, exactly (row D21).
+
+## Limits of the present library, and what to write instead
+
+These are behaviours of the library as it is today (MLX 0.32.4, mlx-c 0.8.0, GNU Fortran 16.2), measured on both
+devices; rows marked fixed say what the library now does, and for the others, until their fixes land, the spelling
+in the last column is the safe one. Each row is a
+block `! S<n>` of [`test/consumer/mlxf_example_user_safety.f90`](../test/consumer/mlxf_example_user_safety.f90),
+which the consumer check compiles and runs against the installed package.
+
+| row | what goes wrong today | write instead |
+| --- | --- | --- |
+| S1 | (fixed) `mlx_mean`, `mlx_var` and `mlx_std` convert integer and boolean input to float32 before the arithmetic, so a large total no longer wraps; int64 and uint64 values beyond 2^24 are rounded to float32 first, so the statistics have float32's precision, not integer exactness | `mlx_mean(k)` directly |
+| S2 | (fixed) a save is written to a temporary file beside its destination and renamed over it only when complete: a refused or failed save (safetensors float64, GGUF other than int8, int16, int32, float16, float32, an evaluation or a write that fails) leaves the old file byte for byte; a symbolic link, a hard-linked file, a directory or another user's file is refused as destination | save over the checkpoint; the promise covers a save that returns a failure, not a crash or a power loss (nothing is flushed to disk with fsync), after which a hidden temporary file may remain |
+| S3 | an index outside 1 through the extent is not checked by the operations: `mlx_take` of index 6 from five values returns 0 with status 0; on the CPU device a far index (1000000) returns another value or ends the process, and so may a negative one; index 0 wraps to the last element (row D17) | `call mlx_check_indices(ix, extent, status)` once on untrusted indices, before they reach a graph (never inside a compiled callback); the binding policy's section 10 gives the check for each index-taking operation |
+| S4 | a function result inside an array constructor of handles, `[a, exp(b)]` or `[a, b*2.0]`, and a function result assigned to a whole array of handles, `v = exp(a)`, are never finalized by gfortran: 1000 rounds keep 1000 handles and 250 MiB alive, silently | name the result first (`t = exp(b)`, then `[a, t]`); assign arrays of handles element by element; run the installed `share/mlxf/check_consumer.py` on your sources, or `mlxf_check_lifetime(<target>)` in CMake, which reports these forms with their line (and lists what it cannot see) |
+| S5 | a loop that never evaluates keeps every step and every scalar operand alive: `a = a*0.999 + 0.001` evaluates after 100000 steps and stops while it is built at 300000 on an M5 Ultra's GPU (`[metal::malloc] Resource limit (499000) exceeded`) | evaluate at a batch boundary (`call mlx_eval(t)` every 1000 steps); the limit depends on the machine and the graph, so never rely on a count |
+| S6 | a reduction is a rank-0 array, not a Fortran logical: `if( all(a > 0.) )` does not compile | `call mlx_item(all(x > 0.), positive, status=status)`, then test `positive` |
+| S7 | (fixed) `norm2` and `mlx_mean` of floating and complex arrays scale by the largest magnitude before they sum, so two float32 values of 1e20 (or 1e-30) have a finite, nonzero norm and two of 2e38 a finite mean (MLX alone gave infinity, 0 and infinity); `maxval` and `minval` of an empty extent return Fortran's `-huge` and `huge` (for integers -huge-1 and huge) in the operand's kind, where they stopped | `norm2(x)`, `mlx_mean(x)` and `maxval(x)` directly; the gradient of `norm2` at zero is not finite, as for any Euclidean norm |
+
+Errors while a graph is built stop the program (`error stop 86`) and cannot be caught by a later `status`; a
+caller that must survive bad input validates it before building (S3), and float64 work is placed on the CPU device
+(row D15). Integer statistics need no conversion:
+
+<!-- example: test/consumer/mlxf_example_user_safety.f90 -->
+```fortran
+raw = 2000000000
+k = mlx_from(raw)
+m = mlx_mean(k)
+```
+
+Untrusted indices are checked once, and a function result is named before it joins a list:
+
+<!-- example: test/consumer/mlxf_example_user_safety.f90 -->
+```fortran
+ix = mlx_from([2, 1])
+call mlx_check_indices(ix, 2, status)
+if( status /= 0 ) error stop 'mlxf_example_user_safety: S3 '//mlx_last_error()
+t = mlx_take(x, ix)
+```
+
+<!-- example: test/consumer/mlxf_example_user_safety.f90 -->
+```fortran
+t = exp(x)
+c = mlx_concatenate([x, t])
+do i = 1, 2
+    v(i) = exp(x)
+end do
+```
 
 ## Obligations and what is enforced
 

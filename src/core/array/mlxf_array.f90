@@ -35,68 +35,90 @@ type :: mlx_array
     procedure, private, pass(rhs) :: add_sa
     procedure, private            :: add_ad
     procedure, private, pass(rhs) :: add_da
+    procedure, private            :: add_ai
+    procedure, private, pass(rhs) :: add_ia
     procedure, private            :: pos_array
-    generic                       :: operator(+) => add_aa, add_as, add_sa, add_ad, add_da, pos_array
+    generic                       :: operator(+) => add_aa, add_as, add_sa, add_ad, add_da, add_ai, add_ia, pos_array
     procedure, private            :: sub_aa
     procedure, private            :: sub_as
     procedure, private, pass(rhs) :: sub_sa
     procedure, private            :: sub_ad
     procedure, private, pass(rhs) :: sub_da
-    generic                       :: operator(-) => sub_aa, sub_as, sub_sa, sub_ad, sub_da, negate_array
+    procedure, private            :: sub_ai
+    procedure, private, pass(rhs) :: sub_ia
+    generic                       :: operator(-) => sub_aa, sub_as, sub_sa, sub_ad, sub_da, sub_ai, sub_ia, negate_array
     procedure, private            :: mul_aa
     procedure, private            :: mul_as
     procedure, private, pass(rhs) :: mul_sa
     procedure, private            :: mul_ad
     procedure, private, pass(rhs) :: mul_da
-    generic                       :: operator(*) => mul_aa, mul_as, mul_sa, mul_ad, mul_da
+    procedure, private            :: mul_ai
+    procedure, private, pass(rhs) :: mul_ia
+    generic                       :: operator(*) => mul_aa, mul_as, mul_sa, mul_ad, mul_da, mul_ai, mul_ia
     procedure, private            :: div_aa
     procedure, private            :: div_as
     procedure, private, pass(rhs) :: div_sa
     procedure, private            :: div_ad
     procedure, private, pass(rhs) :: div_da
-    generic                       :: operator(/) => div_aa, div_as, div_sa, div_ad, div_da
+    procedure, private            :: div_ai
+    procedure, private, pass(rhs) :: div_ia
+    generic                       :: operator(/) => div_aa, div_as, div_sa, div_ad, div_da, div_ai, div_ia
     procedure, private            :: pow_aa
     procedure, private            :: pow_as
     procedure, private, pass(rhs) :: pow_sa
     procedure, private            :: pow_ad
     procedure, private, pass(rhs) :: pow_da
-    generic                       :: operator(**) => pow_aa, pow_as, pow_sa, pow_ad, pow_da
+    procedure, private            :: pow_ai
+    procedure, private, pass(rhs) :: pow_ia
+    generic                       :: operator(**) => pow_aa, pow_as, pow_sa, pow_ad, pow_da, pow_ai, pow_ia
     procedure, private            :: lt_aa
     procedure, private            :: lt_as
     procedure, private, pass(rhs) :: lt_sa
     procedure, private            :: lt_ad
     procedure, private, pass(rhs) :: lt_da
-    generic                       :: operator(<) => lt_aa, lt_as, lt_sa, lt_ad, lt_da
+    procedure, private            :: lt_ai
+    procedure, private, pass(rhs) :: lt_ia
+    generic                       :: operator(<) => lt_aa, lt_as, lt_sa, lt_ad, lt_da, lt_ai, lt_ia
     procedure, private            :: le_aa
     procedure, private            :: le_as
     procedure, private, pass(rhs) :: le_sa
     procedure, private            :: le_ad
     procedure, private, pass(rhs) :: le_da
-    generic                       :: operator(<=) => le_aa, le_as, le_sa, le_ad, le_da
+    procedure, private            :: le_ai
+    procedure, private, pass(rhs) :: le_ia
+    generic                       :: operator(<=) => le_aa, le_as, le_sa, le_ad, le_da, le_ai, le_ia
     procedure, private            :: gt_aa
     procedure, private            :: gt_as
     procedure, private, pass(rhs) :: gt_sa
     procedure, private            :: gt_ad
     procedure, private, pass(rhs) :: gt_da
-    generic                       :: operator(>) => gt_aa, gt_as, gt_sa, gt_ad, gt_da
+    procedure, private            :: gt_ai
+    procedure, private, pass(rhs) :: gt_ia
+    generic                       :: operator(>) => gt_aa, gt_as, gt_sa, gt_ad, gt_da, gt_ai, gt_ia
     procedure, private            :: ge_aa
     procedure, private            :: ge_as
     procedure, private, pass(rhs) :: ge_sa
     procedure, private            :: ge_ad
     procedure, private, pass(rhs) :: ge_da
-    generic                       :: operator(>=) => ge_aa, ge_as, ge_sa, ge_ad, ge_da
+    procedure, private            :: ge_ai
+    procedure, private, pass(rhs) :: ge_ia
+    generic                       :: operator(>=) => ge_aa, ge_as, ge_sa, ge_ad, ge_da, ge_ai, ge_ia
     procedure, private            :: eq_aa
     procedure, private            :: eq_as
     procedure, private, pass(rhs) :: eq_sa
     procedure, private            :: eq_ad
     procedure, private, pass(rhs) :: eq_da
-    generic                       :: operator(==) => eq_aa, eq_as, eq_sa, eq_ad, eq_da
+    procedure, private            :: eq_ai
+    procedure, private, pass(rhs) :: eq_ia
+    generic                       :: operator(==) => eq_aa, eq_as, eq_sa, eq_ad, eq_da, eq_ai, eq_ia
     procedure, private            :: ne_aa
     procedure, private            :: ne_as
     procedure, private, pass(rhs) :: ne_sa
     procedure, private            :: ne_ad
     procedure, private, pass(rhs) :: ne_da
-    generic                       :: operator(/=) => ne_aa, ne_as, ne_sa, ne_ad, ne_da
+    procedure, private            :: ne_ai
+    procedure, private, pass(rhs) :: ne_ia
+    generic                       :: operator(/=) => ne_aa, ne_as, ne_sa, ne_ad, ne_da, ne_ai, ne_ia
     procedure, private            :: land_aa
     generic                       :: operator(.and.) => land_aa
     procedure, private            :: lor_aa
@@ -247,6 +269,18 @@ interface
         type(mlx_array) :: r
     end function add_da
 
+    module function add_ai( lhs, rhs ) result(r)
+        class(mlx_array), intent(in) :: lhs
+        integer,          intent(in) :: rhs
+        type(mlx_array) :: r
+    end function add_ai
+
+    module function add_ia( lhs, rhs ) result(r)
+        integer,          intent(in) :: lhs
+        class(mlx_array), intent(in) :: rhs
+        type(mlx_array) :: r
+    end function add_ia
+
     module function sub_aa( lhs, rhs ) result(r)
         class(mlx_array), intent(in) :: lhs, rhs
         type(mlx_array) :: r
@@ -275,6 +309,18 @@ interface
         class(mlx_array), intent(in) :: rhs
         type(mlx_array) :: r
     end function sub_da
+
+    module function sub_ai( lhs, rhs ) result(r)
+        class(mlx_array), intent(in) :: lhs
+        integer,          intent(in) :: rhs
+        type(mlx_array) :: r
+    end function sub_ai
+
+    module function sub_ia( lhs, rhs ) result(r)
+        integer,          intent(in) :: lhs
+        class(mlx_array), intent(in) :: rhs
+        type(mlx_array) :: r
+    end function sub_ia
 
     module function mul_aa( lhs, rhs ) result(r)
         class(mlx_array), intent(in) :: lhs, rhs
@@ -305,6 +351,18 @@ interface
         type(mlx_array) :: r
     end function mul_da
 
+    module function mul_ai( lhs, rhs ) result(r)
+        class(mlx_array), intent(in) :: lhs
+        integer,          intent(in) :: rhs
+        type(mlx_array) :: r
+    end function mul_ai
+
+    module function mul_ia( lhs, rhs ) result(r)
+        integer,          intent(in) :: lhs
+        class(mlx_array), intent(in) :: rhs
+        type(mlx_array) :: r
+    end function mul_ia
+
     module function div_aa( lhs, rhs ) result(r)
         class(mlx_array), intent(in) :: lhs, rhs
         type(mlx_array) :: r
@@ -333,6 +391,18 @@ interface
         class(mlx_array), intent(in) :: rhs
         type(mlx_array) :: r
     end function div_da
+
+    module function div_ai( lhs, rhs ) result(r)
+        class(mlx_array), intent(in) :: lhs
+        integer,          intent(in) :: rhs
+        type(mlx_array) :: r
+    end function div_ai
+
+    module function div_ia( lhs, rhs ) result(r)
+        integer,          intent(in) :: lhs
+        class(mlx_array), intent(in) :: rhs
+        type(mlx_array) :: r
+    end function div_ia
 
     module function lt_aa( lhs, rhs ) result(r)
         class(mlx_array), intent(in) :: lhs, rhs
@@ -363,6 +433,18 @@ interface
         type(mlx_array) :: r
     end function lt_da
 
+    module function lt_ai( lhs, rhs ) result(r)
+        class(mlx_array), intent(in) :: lhs
+        integer,          intent(in) :: rhs
+        type(mlx_array) :: r
+    end function lt_ai
+
+    module function lt_ia( lhs, rhs ) result(r)
+        integer,          intent(in) :: lhs
+        class(mlx_array), intent(in) :: rhs
+        type(mlx_array) :: r
+    end function lt_ia
+
     module function le_aa( lhs, rhs ) result(r)
         class(mlx_array), intent(in) :: lhs, rhs
         type(mlx_array) :: r
@@ -391,6 +473,18 @@ interface
         class(mlx_array), intent(in) :: rhs
         type(mlx_array) :: r
     end function le_da
+
+    module function le_ai( lhs, rhs ) result(r)
+        class(mlx_array), intent(in) :: lhs
+        integer,          intent(in) :: rhs
+        type(mlx_array) :: r
+    end function le_ai
+
+    module function le_ia( lhs, rhs ) result(r)
+        integer,          intent(in) :: lhs
+        class(mlx_array), intent(in) :: rhs
+        type(mlx_array) :: r
+    end function le_ia
 
     module function gt_aa( lhs, rhs ) result(r)
         class(mlx_array), intent(in) :: lhs, rhs
@@ -421,6 +515,18 @@ interface
         type(mlx_array) :: r
     end function gt_da
 
+    module function gt_ai( lhs, rhs ) result(r)
+        class(mlx_array), intent(in) :: lhs
+        integer,          intent(in) :: rhs
+        type(mlx_array) :: r
+    end function gt_ai
+
+    module function gt_ia( lhs, rhs ) result(r)
+        integer,          intent(in) :: lhs
+        class(mlx_array), intent(in) :: rhs
+        type(mlx_array) :: r
+    end function gt_ia
+
     module function ge_aa( lhs, rhs ) result(r)
         class(mlx_array), intent(in) :: lhs, rhs
         type(mlx_array) :: r
@@ -449,6 +555,18 @@ interface
         class(mlx_array), intent(in) :: rhs
         type(mlx_array) :: r
     end function ge_da
+
+    module function ge_ai( lhs, rhs ) result(r)
+        class(mlx_array), intent(in) :: lhs
+        integer,          intent(in) :: rhs
+        type(mlx_array) :: r
+    end function ge_ai
+
+    module function ge_ia( lhs, rhs ) result(r)
+        integer,          intent(in) :: lhs
+        class(mlx_array), intent(in) :: rhs
+        type(mlx_array) :: r
+    end function ge_ia
 
     module function eq_aa( lhs, rhs ) result(r)
         class(mlx_array), intent(in) :: lhs, rhs
@@ -479,6 +597,18 @@ interface
         type(mlx_array) :: r
     end function eq_da
 
+    module function eq_ai( lhs, rhs ) result(r)
+        class(mlx_array), intent(in) :: lhs
+        integer,          intent(in) :: rhs
+        type(mlx_array) :: r
+    end function eq_ai
+
+    module function eq_ia( lhs, rhs ) result(r)
+        integer,          intent(in) :: lhs
+        class(mlx_array), intent(in) :: rhs
+        type(mlx_array) :: r
+    end function eq_ia
+
     module function ne_aa( lhs, rhs ) result(r)
         class(mlx_array), intent(in) :: lhs, rhs
         type(mlx_array) :: r
@@ -507,6 +637,18 @@ interface
         class(mlx_array), intent(in) :: rhs
         type(mlx_array) :: r
     end function ne_da
+
+    module function ne_ai( lhs, rhs ) result(r)
+        class(mlx_array), intent(in) :: lhs
+        integer,          intent(in) :: rhs
+        type(mlx_array) :: r
+    end function ne_ai
+
+    module function ne_ia( lhs, rhs ) result(r)
+        integer,          intent(in) :: lhs
+        class(mlx_array), intent(in) :: rhs
+        type(mlx_array) :: r
+    end function ne_ia
 
     module function land_aa( lhs, rhs ) result(r)
         class(mlx_array), intent(in) :: lhs, rhs
@@ -551,6 +693,18 @@ interface
         class(mlx_array), intent(in) :: rhs
         type(mlx_array) :: r
     end function pow_da
+
+    module function pow_ai( lhs, rhs ) result(r)
+        class(mlx_array), intent(in) :: lhs
+        integer,          intent(in) :: rhs
+        type(mlx_array) :: r
+    end function pow_ai
+
+    module function pow_ia( lhs, rhs ) result(r)
+        integer,          intent(in) :: lhs
+        class(mlx_array), intent(in) :: rhs
+        type(mlx_array) :: r
+    end function pow_ia
 
     module function eqv_aa( lhs, rhs ) result(r)
         class(mlx_array), intent(in) :: lhs, rhs

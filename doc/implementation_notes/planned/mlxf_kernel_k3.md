@@ -1,27 +1,39 @@
 # K3: arbitrary reference sets for polar matching (A2), with the toy driver `eul_prob_tab_neigh` (run `mlxf_kernel_k3`, on the M5 Ultra)
 
-Status, 2026-11-26: planned, not ruled. Base: the commit that holds this plan (the maintainer commits it with
-the pending work; the run pins the hash in Phase 0 and records it). The code this note was checked against is
-`6f1af0d` with the working tree of 2026-11-26 (the toys in the shape of SIMPLE's integration, run
-`mlxf_toy_seam`; parity Phases 5 to 9, run `mlxf_parity_rest`). SIMPLE is read at `d354efee2`. MLX's source was
-read in `~/src/mlx` at `v0.32.4-141-g5c8989446`, with `mlx/backend/metal/matmul.cpp` compared at tag `v0.32.4`
-(the installed MLX is 0.32.4). Machine: the M5 Ultra only (30 cores, 103.1 GB, the only GPU and the only
-machine that builds the library), in the session, in a copy of the checkout, one run at a time. Supersedes:
-none. Depends on:
+Status, 2026-11-26: planned; ruled as recommended by Hans, 2026-11-26 ("Rule as recommended"), every decision of section 3 and the run order K4, K3, K5, K6, K7; revised after ranks 2d to 2f (runs `mlxf_refactor`, `mlxf_toy_layout`,
+`mlxf_kernel_forms`). Base: the commit that holds this plan, after rank 2g's result and K4's (the user-facing hardening,
+`mlxf_user_hardening.md`; the maintainer commits this plan with the pending work, and the run pins the hash in
+Phase 0 and records it). The revision was checked against `ae7d623` (ranks 2d to 2f committed) with the three
+uncommitted document edits of 2026-11-26; the draft was written at `b2c43a4`. SIMPLE is pinned at `28c753993`,
+the mirror ledger's pin since rank 2e, and every SIMPLE fact below was re-read there with `git show` and
+`git grep`. MLX's source was read in `~/src/mlx` at `v0.32.4-141-g5c8989446`, with
+`mlx/backend/metal/matmul.cpp` compared at tag `v0.32.4` (the installed MLX is 0.32.4). Machine: the M5 Ultra
+only (30 cores, 103.1 GB, the only GPU and the only machine that builds the library), in the session, in a copy
+of the checkout, one run at a time. Supersedes: none. Depends on:
 
-- the polar toy `polarft_calc` with its driver `eul_prob_tab`, its host kernel and K1's fused tail (validated:
-  yes, runs `mlxf_kernel_k1` and `mlxf_toy_seam`, `unit_kernels` 1,955; **not** validated: any reference list
-  but 1..nrefs on the MLX backend, which `score_block_posterior_mlx` refuses today);
+- the polar toy `polarft_calc` on SIMPLE's memo layout (one reference memo `ft_ref_terms (2nk, pftsz+1, nrefs,
+  2)`, the particle terms `ft_ptcl_wterms`, device tiles made by `memoize_refs`) with its driver `eul_prob_tab`,
+  its host kernel and K1's fused tail (validated: yes, runs `mlxf_kernel_k1`, `mlxf_toy_seam` and
+  `mlxf_toy_layout`, `unit_kernels` 1,953 at `ae7d623`; **not** validated: any reference list but 1..nrefs on
+  the MLX backend, which `score_block_posterior_mlx` refuses today);
 - `mlx_gather_mm`, `mlx_take`, `mlx_argsort`, `mlx_cumsum` (validated: yes, `unit_linalg` 632 and `unit_ops`
-  2,462; **not** validated: `mlx_gather_mm` at the dense score's shapes or against `matmul` bit for bit;
-  `mlx_argsort`'s stability, which MLX does not document, binding contract policy);
+  2,462 at `ae7d623`, counts rank 2g may raise; **not** validated: `mlx_gather_mm` at the dense score's shapes
+  or against `matmul` bit for bit; `mlx_argsort`'s stability, which MLX does not document, binding contract
+  policy and Apple question 36);
+- the measured kernel forms of run `mlxf_kernel_forms` (`completed/mlxf_kernel_forms_report.md`, "What the K
+  plans take"): sizes in an int32 input (suite `sizes`), one wait per pass with a persistent capacity (suite
+  `waits`, measured at this plan's own tile), threadgroup memory and SIMD-group functions (suite `probe`);
 - the oracle `mlxf_oracle_polar` (validated: yes, sub-suites `polarft_calc`, `eul_prob_tab` and the bench's
   `suite=accuracy`; it scores every reference, and a listed pair's oracle row is the dense row of that pair);
 - `scripts/run_parts.sh` (validated: `bench_polar_table suite=time`, and other benches through
   `RUN_PARTS_BENCH`, `RUN_PARTS_SUITE`, `RUN_PARTS_UNIT`; **not** validated for a new suite of the polar bench);
-- the custom Metal kernel wrapper `type(mlx_metal_kernel)` (validated: yes, parity Phase 10, K1 and K2;
-  nothing this plan designs needs `threadgroup` memory, `threadgroup_barrier` or `simd_sum`);
-- the roadmap's decisions 7, 8, 9, 11, 12 and 15.
+- the custom Metal kernel wrapper `type(mlx_metal_kernel)` (validated: yes, parity Phase 10, K1, K2 and run
+  `mlxf_kernel_forms`: `threadgroup` arrays up to 32,768 B with `threadgroup_barrier`, and `simd_sum`,
+  `simd_min`, `simd_prefix_inclusive_sum`, `simd_shuffle`, exact and repeatable through the wrapper, Apple
+  question 26; the list route needs none of them, candidate B of decision 10 may);
+- rank 2g's result (validated when its report is read in Phase 0: it changes `src/core/` and may add
+  assertions to unit areas, section 2, "The queue");
+- the roadmap's decisions 7, 8, 9, 11, 12, 15, 16 and 17.
 
 ## 1. Why
 
@@ -58,28 +70,39 @@ none. Depends on:
   decisions 9 and 10; (5) a report.
 - **Exit as accepted** (families note, section 8, row K3): listed pairs equal the dense kernel's (decision 7
   says in which sense); occupancy and rate reported for cone-shaped sets, with and without orientation order.
-- **Toy code only.** New code is in `src/test/` as `mlxf_toy_<stem>` modules written against the public module
-  `mlxf`. No file under `src/core/` or `src/defs/` changes. A missing wrapper is a stop with a report.
+- **Toy code only.** New code is in `src/test/toys/polar/` as `mlxf_toy_<stem>` modules written against the
+  public module `mlxf`, its oracle in `src/test/oracles/`, its bench suite in `src/test/bench/` (rank 2d's test
+  tree). No file under `src/core/` or `src/defs/` changes. A missing wrapper is a stop with a report. Every new
+  Fortran file opens with its `!@descr:` line, its folder's `.inf` names it where the description lists files,
+  and `doc/code_base_map.md` is regenerated with `scripts/generate_codeoverview.py` in the phase that adds it
+  (the static gate checks the map).
 - **Builds:** hand-configured trees with `-DMLXF_WERROR=ON -DFORTLS=OFF -DBUILD_TESTS=ON`, Debug and Release,
   as the delivered plans prescribe. Nothing else is built while a step is timed.
 - **SIMPLE is not measured.** Its numbers come from the notes; where none is in hand the comparison stays open.
   No production data.
 
-### What the check found (2026-11-26)
+### What the check found (2026-11-26, re-read at `ae7d623`)
 
-The toy as it stands:
+The toy as it stands (rank 2e put it on SIMPLE's memo layout; the paths are rank 2d's,
+`src/test/toys/polar/`):
 
 - **The host kernel already takes any list.** `mlxf_toy_polarft_block.f90`, `score_block_posterior`: any
   `irefs` inside 1..nrefs, at most `PFTC_BLOCK_NB` (16) particles, tiles of `PFTC_BLOCK_NR` (32) references
-  gathered element by element, the draw keyed by `keyed_variate(seed, iptcls(b), ref_full(iref))`.
+  whose terms are read in place from the memo `ft_ref_terms(:, bin, iref, parity)`, the particle terms from
+  `ft_ptcl_wterms` (or a seed bank of shape (2nk, pftsz+1, nb) where `l_bank`), the draw keyed by
+  `keyed_variate(seed, iptcls(b), ref_full(iref))`.
 - **The MLX route refuses every list but the memoized one.** `mlxf_toy_polarft_block_mlx.f90`,
   `score_block_posterior_mlx`: unless `nr == nrefs` and `irefs` is 1..nr it sets "the block's reference list
   is not the memoized one". No tester asserts that message (searched in `src/test/`).
-- **The device computes whole tiles.** `mlxf_toy_polarft_workspace_score.f90`, `polarft_workspace_submit`: per
-  particle tile and reference tile one packed real product `matmul(pt, g)` with `pt` (bt, 4nk, pftsz+1) and
-  `g` (4nk, 2rt, pftsz+1) cut from the resident tiles by `mlx_slice`, then `inverse_transform`, `apply_tail`
-  and one `mlx_async_eval` per tile. Its header says tiles are always full (padded), "so a pair's entry
-  depends on its tile position only". `check_block` requires variates of shape (nrefs, nb).
+- **The device computes whole tiles.** `mlxf_toy_polarft_workspace_score.f90`, `polarft_workspace_submit`: the
+  block's particle terms (the calculator's `ft_ptcl_wterms`, or the seed bank where `l_bank`) are gathered on
+  the host into (2nk, pftsz+1, bpad) and uploaded; per particle tile and reference tile one packed real product
+  `matmul(pt, g)` with `pt` (bt, 4nk, pftsz+1) and `g` (4nk, 2rt, pftsz+1) cut from the resident tiles by
+  `mlx_slice`, then the inverse transform, the tail and one `mlx_async_eval` per tile. The resident tiles are
+  made by `memoize_refs` and packed on the host straight from the conjugated memo `ft_ref_terms`
+  (`polarft_workspace_new`, rank 2e's measured fallback), or from the device memo on the device route
+  (`new_from_memos`). Its header says tiles are always full (padded), "so a pair's entry depends on its tile
+  position only". `check_block` requires variates of shape (nrefs, nb).
 - **The driver draws a variate for every reference.** `mlxf_toy_eul_prob_tab.f90`, `fill_tab_range`,
   contained `process_block`: `u(r, b)` from the global IDs for all `nrefs`, then `set_block_variates` and
   `submit_block`. The keys are global on both backends, so a listed pair's variate is the dense pair's.
@@ -111,13 +134,27 @@ MLX's gathered product (`mlx/ops.cpp`, `gather_mm`; `mlx/backend/metal/matmul.cp
   (binding contract policy). A dropped block of a product is a dropped tile part; it does not select
   references inside a tile. `mlx_segmented_mm` is rank 2 only. Neither is used by this plan's default form.
 
-SIMPLE at `d354efee2`:
+SIMPLE at `28c753993` (the draft read `d354efee2`; `simple_eul_prob_tab_neigh.f90` changed since by
+`23eb95cc2`, one memo layout, and `c1f255d20`, `cont_view` through `prob_neigh_mode=geom`; what follows is
+re-read at the pin, and the two changes are named where they act):
 
+- **What changed between the pins.** `23eb95cc2` removed `memoize_ref_bins` and the `block_memo` argument of
+  `new_pipeline` and `new_neigh_pipeline` (the block kernel reads `ft_ref_terms` in place), and every seed
+  bank is now a particle's terms of shape (2nk, pftsz+1, slots) (`alloc_seed_bank`, the state mode's banks,
+  `score_block_posterior`'s `banks`). `c1f255d20` added a branch at the head of `fill_tab_neigh_range`: with
+  `l_cont_view` and mode `geom`, `fill_geom_views` takes per particle the `topk` nearest cone views
+  (`nearest_cone_views`, `simple_eul_prob_tab_utils.f90`) and refines each continuously
+  (`strategy3D_srch%refine_extra_pose_continuously`), with no block kernel and no per-pair cone scan;
+  `assign_geom_views` merges the solved views into basins. `refine3D_local` with `refine=prob_neigh` now sets
+  `geom` only when no mode is given and admits `state` when `cont_view` is active. Neither change touches the
+  block kernel's interface, the `state` fill's stages, or `geom` without `cont_view`, which this plan models;
+  the `cont_view` branch is a declared difference (decision 11).
 - **differs** (design note, section 3, "per-particle lists, covered by tiles"): SIMPLE's
   neighbourhood driver never sends a per-particle list through the block kernel. In
-  `simple_eul_prob_tab_neigh.f90`, `fill_tab_neigh_range` dispatches on `prob_neigh_mode`:
+  `simple_eul_prob_tab_neigh.f90`, `fill_tab_neigh_range` dispatches on `prob_neigh_mode` (after the
+  `cont_view` branch above):
   - `state` (the parameter's default, and what `exec_classify3D_refs` of `simple_commanders_refine3D.f90`
-    sets when none is given; `refine3D_local` with `refine=prob_neigh` forces `geom`):
+    sets when none is given; `refine3D_local` with `refine=prob_neigh` sets `geom` when none is given):
     `fill_tab_subspace_range`, contained `cut_blocks_state` orders the batch by half and by the subspace cell
     of the previous direction and cuts blocks of at most `PFTC_BLOCK_NB`; `process_block_state` calls
     `score_block_posterior` with `rep_full`, every active state's subspace representatives in the order
@@ -155,7 +192,8 @@ SIMPLE at `d354efee2`:
 - **SIMPLE's block kernel promises more than the device does.** `simple_polarft_block.f90`,
   `score_block_posterior`: the product always has the shape `PFTC_BLOCK_NB` x `PFTC_BLOCK_NR`, so that "a
   pair's value depends on neither its block nor its thread" (its header). A full tile of consecutive
-  references is read in place; any other tile is gathered bin by bin.
+  references is read in place from `ft_ref_terms`, a bin's columns one reference apart; any other tile is
+  gathered bin by bin (at `28c753993`; the entries are unchanged bit for bit by `23eb95cc2`, its message).
 - **SIMPLE has measured tiles on lists, on the CPU.** `simple_polar_matching_bench.f90`, type
   `polar_neigh_bench`: `neigh_blocks` cuts production's blocks (by half and previous cell, at most
   `PFTC_BLOCK_NB`); contained `block_cells` then calls the block kernel once per block and cell, with every
@@ -168,18 +206,35 @@ SIMPLE at `d354efee2`:
 
 ### The queue
 
-- K3 is the first run of the batch K3, K4, K5, K6, K7; it launches from the commit that holds this plan. No
-  earlier run of the batch can change its premises. What can: the commit itself (the working tree as the
-  maintainer commits it). Phase 0 re-checks exactly these: the unit counts of decision 21; the dense route's
-  digest lines of decision 20; the dummy lists of `score_block_posterior`, `submit_block` and `collect_block`
-  in `mlxf_toy_polarft_calc.f90`; the members of `POLARFT_TAILS`; `SUITE_KEYS`; the 26 lines of
-  `scripts/toy_seam.txt` (18 host and glue files) and `SEAM_PENDING` 0.
+- **The order after rank 2g.** Ranks 2d, 2e and 2f are delivered and committed (`ae7d623`); rank 2g, the
+  user-facing hardening, runs next and before this batch (roadmap decision 17). Then the batch K3, K4, K5, K6,
+  K7, one run at a time on the M5, each from the commit that holds the previous run's verified result. K3 is
+  the first of the batch; it launches from the commit that holds this plan and rank 2g's result. No earlier
+  run of the batch can change its premises. What can: rank 2g and the commit itself.
+- **What rank 2g may change.** It changes `src/core/` and no toy file: integer `mean`, `var` and `std`
+  promoted before the arithmetic, the Euclidean norms and floating means in a scaled form, empty `maxval` and
+  `minval` given Fortran's identities, integer-scalar operators, failed saves that keep the file, and an index
+  validator; it may add assertions to unit areas (`unit_ops`, `unit_io`, `unit_linalg`, `unit_array`,
+  `unit_core`). So the area counts of decision 21 may rise, and a toy path that reduces with one of those
+  operations may change its bits. Phase 0 reads 2g's report, records every area's count as found (they
+  replace decision 21's), and records the identity digests twice on the base: the 364-line identity set of
+  runs `mlxf_toy_layout` and `mlxf_kernel_forms` (SHA-256 `e2d65e88...4d33dba5` at `ae7d623`) and decision
+  20's lines. A digest that differs from `ae7d623`'s is recorded with the operation 2g's report names and is
+  the base from then on; one that differs with no such operation named is a stop.
+- Phase 0 re-checks exactly these: the unit counts of decision 21; the dense route's digest lines of decision
+  20; the dummy lists of `score_block_posterior`, `submit_block`, `collect_block` and `set_block_banks` in
+  `mlxf_toy_polarft_calc.f90` (banks of shape (2nk, pftsz+1, nb), particle terms, since rank 2e); the members
+  of `POLARFT_TAILS`; `SUITE_KEYS` (6 rows of length 96); the 26 lines of `scripts/toy_seam.txt` (18 host
+  and glue files) and `SEAM_PENDING` 0; `AREAS` (12), `BENCHES` (6) and `NAMED_ONLY` (4) of the registry; the
+  last Apple question's number (36 at `ae7d623`).
 - If the order is changed and K4 or K7 runs first, the same list is re-checked, and K3 reads that run's
   report before Phase 2: K4 edits the map stage of the same driver and workspace; K7 adds tail forms.
 - **What K3 leaves for the later runs.** K4 and K7 edit `mlxf_toy_polarft_*`, `mlxf_toy_eul_prob_tab*` and
   `mlxf_bench_polar_table.f90` after it. K3 changes no existing dummy list and no existing suite's keys; the
   dense digests do not move (decision 20). K7's tail forms must also serve list tiles: K3's report names the
-  one place where the tail is applied to them.
+  one place where the tail is applied to them. Run `mlxf_kernel_forms` measured K1's tail written a SIMD group
+  per pair 3.3 times faster than K1's one thread per pair; whether K1's default moves to that form is K7's
+  decision 27, so K3 uses K1's tail as it is, and a list route kept here inherits whatever K7 keeps.
 - **K7 and the peaks.** Choosing a particle's best `npeaks` cells is the best-k reduction K7 plans for the
   device. In K3 it is a host step between the two stages of a `state` fill (decision 25), in one procedure
   of the driver, with its seconds reported; K7's plan decides whether it moves to the device.
@@ -341,21 +396,39 @@ recommendation stands. Decisions 11 to 24 are defaults taken without a question.
       which the product and the transform are 1.14 - 0.65 = 0.49 s), below the rule. It is built only if the
       ceiling measured on the canonical configuration (a null tail in a scratch copy, K1's method) is at
       least 1.30.
-    - **Candidate B, the pair-list kernel:** one thread per listed pair and bin computes the product row from
-      the resident tiles and the block's particle terms; `mlx_irfft` and the tail follow on the listed rows
-      only. Occupancy is 1 for any list and no order matters. The pair list and its count are int32 inputs,
-      not template parameters (mlx3D proposal 4), so one object serves a capacity. Its ceiling is the
-      canonical pass over the same pass at occupancy 1 (a shared list of the same size). It is built only
-      if that ceiling is at least 1.30 and a scratch probe of its product alone predicts a canonical pass at
-      least 1.30 times shorter than the list route's.
+    - **Candidate B, the pair-list kernel** (revised 2026-11-26 by run `mlxf_kernel_forms`): the product row
+      of each listed pair and bin from the resident tiles and the block's particle terms; `mlx_irfft` and the
+      tail follow on the listed rows only. Occupancy is 1 for any list and no order matters.
+      - *Sizes:* the pair list's count and the capacity reach the kernel in an int32 input of fewer than 8
+        elements, never as template integers: equal per launch and 3.05 / 2.62 ms against 42.7 / 42.0 ms per
+        new value (*measured*, suite `sizes`, on K2's gather and the insertion kernel). Capacities need not be
+        powers of two (the draft's rule, withdrawn with the cost it bounded).
+      - *Buffers:* the pair list lives in a persistent buffer of a fixed capacity (the largest count of seed 1
+        times 1.25), its tail masked by a sentinel against the count on the device, with one host wait per
+        pass, never one per tile or block: 2.42 / 2.38 times faster than a wait per tile at this plan's own
+        tile (183 bins of 64 by 244 by 500, *measured*, suite `waits`); it holds 2.6 times the per-tile form's
+        MLX peak, which is reported and is no reason to reject it. A count above the capacity redoes the
+        pass at a larger capacity and is counted.
+      - *Launch shape:* the scratch probe of its product times two forms, a thread per (pair, bin) and a
+        SIMD group per (pair, bin) summing the 2nk shell terms with `simd_sum`; the faster is the candidate.
+        Reasons: every per-item reduction run `mlxf_kernel_forms` measured was faster a SIMD group per item
+        (3.3 for K1's tail, 2 to 4 for the selection), and mlx3D found a per-thread fused matrix-vector product
+        slower than MLX's matrix products (lessons note, section 2), which is B's risk.
+      - Its ceiling is the canonical pass over the same pass at occupancy 1 (a shared list of the same size).
+        It is built only if that ceiling is at least 1.30 and the probe of its product alone predicts a
+        canonical pass at least 1.30 times shorter than the list route's.
     - The ceilings are measured on both configurations of decision 9, and a kernel is judged and kept per
       mode. If both candidates qualify, the larger ceiling is tried first and the other is not built. If
       neither qualifies, Phase 5 is recorded as entered and not built, with the ceilings.
     - A kernel that is built is kept only at 1.30 on the canonical driver by decision 18's protocol, under
       decision 7's gates with (c) frozen on seed 1 for it, and decision 16.
-    - The wrapper's facts kept to (*measured*, parity Phase 10, K1, K2): no float64; a threadgroup of 64,
-      below the 1,024 where an evaluation fails; one object per launch configuration (0.2 ms, 60 ms a new
-      source), so B's capacities are powers of two; no `threadgroup` memory, barrier or `simd_sum`: no probe.
+    - The wrapper's facts kept to (*measured*, parity Phase 10, K1, K2 and run `mlxf_kernel_forms`): no
+      float64; threadgroups up to 1,024 threads (an evaluation above fails); MLX's kernel library is keyed by
+      the source and never by the launch configuration, a new object of an existing source costs 2.6 to 3.1
+      ms at its first evaluation and a new source about 42 ms; `threadgroup` arrays up to 32,768 B with
+      `threadgroup_barrier`, and the SIMD-group functions, exact and bit-repeatable through the wrapper (Apple
+      question 26). No probe of these features is planned: a kernel of this plan that uses one re-checks it in
+      its own gates (decision 16's repeatability and gate 7(a)), not in a phase of its own.
     - MLX issue #4603 (wrong rows from a custom kernel under the default math mode on another machine) is
       a risk for both tails on list tiles: gate 7(a) and decision 16 are run on the GPU for each.
 
@@ -368,7 +441,9 @@ recommendation stands. Decisions 11 to 24 are defaults taken without a question.
     by a direct distance to every direction); the directions and the previous orientations come from the
     fixture through a setter, SIMPLE reads `build%eulspace` and `build%spproj_field`; the fill hands its
     listed entries over, SIMPLE keeps a table for its assignment (`open_assignment`, `assign_batch`,
-    `close_assignment` are not modelled).
+    `close_assignment` are not modelled); the `cont_view` branch of `geom` (`fill_geom_views`,
+    `assign_geom_views`, added by `c1f255d20`) is not modelled: it solves continuous views per particle and
+    sends nothing through a block kernel.
 
 12. **Files and classes** (seam ledger; toy policy, section 8).
     - Host, new: `mlxf_toy_eul_prob_tab_neigh`, `mlxf_toy_eul_prob_tab_utils`, `mlxf_toy_srchspace_map`. They
@@ -456,16 +531,21 @@ recommendation stands. Decisions 11 to 24 are defaults taken without a question.
     never a reason to reject a faster form.
 
 20. **The dense route does not move.** Phase 0 records, twice, the digest lines of `suite=accuracy` (both
-    devices, both tails on the GPU) and of `suite=time case=2500_4 bt=64 rt=250 passes=3` (both tails); every
-    later phase reproduces them. A digest that moves is a stop.
+    devices, both tails on the GPU) and of `suite=time case=2500_4 bt=64 rt=250 passes=3` (both tails), on
+    rank 2e's layout: the tiles made by `memoize_refs` from `ft_ref_terms` and packed on the host, the driver
+    refusing untiled references (`ref_tiles_current`). They are the base's lines, after rank 2g (section 2,
+    "The queue"), not the draft's; every later phase reproduces them. A digest that moves is a stop.
 
-21. **Counts.** The unit areas keep their counts in Debug and Release: core 215 or 216, array 193, ops 2,462,
-    fft 194, linalg 632, compile 63, fast 152, random 486, transforms 274, io 846, distributed 55. In
-    `unit_kernels` (1,955) the ten sub-suites other than `seam` keep theirs (`polarft_calc` 327,
-    `polar_shiftmap` 794, `eul_prob_tab` 105, `polarft_tail` 55, `oracle_projection` 44, `projector` 100,
-    `projector_chain` 99, `pcg_solver` 86, `reconstructor_pcg` 192, `polarft_host` 65); `seam` grows from 88;
-    the new sub-suites `eul_prob_tab_neigh` and `oracle_neigh` add theirs. Each phase records the new total.
-    The fast gate keeps 13 entries and stays under 38.74 s; the new sub-suites may add 2 s (*guessed*).
+21. **Counts.** The unit areas keep the counts Phase 0 finds on the base in Debug and Release. At `ae7d623`
+    (*measured*, runs `mlxf_refactor`, `mlxf_toy_layout` and `mlxf_kernel_forms`): core 214 to 216 (the
+    allocator decides two checks), array 193, ops 2,462, fft 194, linalg 632, compile 63, fast 152, random
+    486, transforms 274, io 846, distributed 55; rank 2g may raise ops, io, linalg, array and core, and Phase
+    0's counts replace these. In `unit_kernels` (1,953 at `ae7d623`) the ten sub-suites other than `seam` keep
+    theirs (`polarft_calc` 333, `polar_shiftmap` 794, `eul_prob_tab` 105, `polarft_tail` 55,
+    `oracle_projection` 44, `projector` 100, `projector_chain` 91, `pcg_solver` 86, `reconstructor_pcg` 192,
+    `polarft_host` 65); `seam` grows from 88; the new sub-suites `eul_prob_tab_neigh` and `oracle_neigh` add
+    theirs. Each phase records the new total. The fast gate keeps 13 entries and stays under 38.74 s (10.44 to
+    10.51 s in Release, *measured*, run `mlxf_kernel_forms`); the new sub-suites may add 2 s (*guessed*).
 
 22. **The small fixture** is `mlxf_polarft_host_fixture`'s (pftsz 16, 6 shells, 40 references, 44 particles),
     with the references' directions and the particles' previous orientations added from hash streams of their
@@ -485,10 +565,11 @@ recommendation stands. Decisions 11 to 24 are defaults taken without a question.
     judges accuracy on the 64,000-pair block as `suite=accuracy` does and times nothing.
 
 24. **Probes and records.** Probes are scratch programs under the run's `scratch/probe/`, linked against the
-    installed library, never added to the repository. A finding about MLX or mlx-c becomes entry 32 and
-    following in `doc/collaboration/apple_questions.md`, written and not sent: expected are the sorted
-    route's reach (one row, one list, and a wide route for 16-bit floats only: is a grouped route for larger
-    left operands planned) and, if a sort is used, `argsort`'s stability.
+    installed library, never added to the repository. A finding about MLX or mlx-c becomes an entry after the
+    last one Phase 0 finds in `doc/collaboration/apple_questions.md` (37 and following at `ae7d623`), written
+    and not sent: expected is the sorted route's reach (one row, one list, and a wide route for 16-bit floats
+    only: is a grouped route for larger left operands planned). If a sort is used, its stability is question
+    36's, amended with what the run measured, not a new entry; no gate relies on it.
 
 ### Added by amendment, 2026-11-26
 
@@ -544,8 +625,10 @@ recommendation stands. Decisions 11 to 24 are defaults taken without a question.
 | 6 | documentation | the report; the last-phase gates; `git status` shows file-table paths only |
 
 Every phase ends with Debug and Release built from scratch with `-DMLXF_WERROR=ON` and no warning, the fast
-gate in both, `scripts/check_tree.sh` passing, `scripts/restyle_fortran.py` and `scripts/format_use_blocks.py`
-run on every Fortran file touched (the second with explicit file names), and decision 21's counts. The last
+gate in both, `scripts/check_tree.sh` passing (since rank 2d it also checks rule `publist`, rule `size`, every
+folder's `.inf` description and `doc/code_base_map.md`), `scripts/restyle_fortran.py` and
+`scripts/format_use_blocks.py` run on every Fortran file touched (the second with explicit file names), and
+decision 21's counts. The last
 phase adds `scripts/check_embed.sh`, `scripts/check_toy_offstate.sh --exec`, `scripts/check_install.sh`,
 `scripts/release_gate.sh --allow-dirty` and the Release fast gate 10 times of 10.
 
@@ -593,7 +676,8 @@ phase adds `scripts/check_embed.sh`, `scripts/check_toy_offstate.sh --exec`, `sc
 - a tolerance measured on seed 1 is above decision 14's ceiling;
 - a gate of decision 7 fails on the unplanted code after one attempt to find the fault in the toy (the
   existing oracle is not edited: a suspected oracle fault is a stop with the evidence);
-- a digest of decision 16 or 20 moves;
+- a digest of decision 16 or 20 moves; or Phase 0 finds an identity digest that differs from `ae7d623`'s
+  with no operation of rank 2g's report to explain it (section 2, "The queue");
 - the `state` fill's listed pairs differ by more than 1 % between the list route and the dense baseline;
 - SIMPLE's code contradicts a decision of section 3 in a way no declared difference resolves;
 - one bench process exceeds `POLAR_BUDGET_SHARE` of the machine's memory, or the one-process bench cannot run;
@@ -611,10 +695,13 @@ graph form kept; the repeatability gate for every form that is kept; the dense r
 1. Record the base's hash, `uptime`, the compiler and the versions of MLX and mlx-c. Build Debug and Release
    from scratch in the run's trees; no warning.
 2. Run the fast gate in both and every unit area; record decision 21's counts and the fast gate's seconds.
+   Read rank 2g's report and record what it changed of the queue's list (section 2).
 3. Copy `polar_case.txt` of run `mlxf_toy_arch` (`~/agent_runs/mlxf_toy_arch/scratch/keep/`, SHA-256
    `90a974fa...f1d9`) into the run's `scratch/keep/`; check the sum.
-4. Record decision 20's digests twice, and the dense pass of `2500_4` at bt 16 and 64 with rt 64 and 250, both
-   tails, `passes=9` (L1's rates, and the baseline of decision 9).
+4. Record decision 20's digests and the 364-line identity set (its script from run `mlxf_toy_layout`) twice,
+   and the dense pass of `2500_4` at bt 16 and 64 with rt 64 and 250, both tails, `passes=9` (L1's rates, and
+   the baseline of decision 9; rank 2e made these passes 4 to 10 % shorter than K1's report, so K1's numbers
+   in section 1 are context only).
 5. Re-check the queue's list (section 2).
 
 Exit: the counts, the digests and the rates are in Progress; the premises hold.
@@ -713,28 +800,30 @@ Exit: `scripts/check_tree.sh` passes; `git status` shows paths of the file table
 
 | File | What | Phases |
 | --- | --- | --- |
-| `src/test/mlxf_toy_eul_prob_tab_neigh.f90` (new) | the toy driver `eul_prob_tab_neigh`: the cones, the two stages of `state`, the pool | 3, 4 |
-| `src/test/mlxf_toy_eul_prob_tab_utils.f90` (new) | `cone_view_dist` | 3 |
-| `src/test/mlxf_toy_srchspace_map.f90` (new) | the toy `srchspace_map` | 3 |
-| `src/test/mlxf_toy_polarft_workspace_lists.f90` (new) | the list tiles, the list form of `submit`, a kernel of decision 10 | 2, 4, 5 |
-| `src/test/mlxf_toy_eul_prob_tab_neigh_tester.f90` (new) | sub-suite `eul_prob_tab_neigh` | 2, 3, 5 |
-| `src/test/mlxf_oracle_neigh.f90` (new) | the oracle of the lists and of the pool | 3 |
-| `src/test/mlxf_oracle_neigh_tester.f90` (new) | sub-suite `oracle_neigh` | 3 |
-| `src/test/mlxf_toy_polarft_calc.f90` | the interfaces of `set_block_refs` and of the list's glue | 2 |
-| `src/test/mlxf_toy_polarft_block.f90` | the host side of `set_block_refs`; the refusals of a list | 2 |
-| `src/test/mlxf_toy_polarft_block_mlx.f90` | the list crosses to the workspace; the refusal goes | 2 |
-| `src/test/mlxf_toy_polarft_workspace.f90` | the interfaces of the list submodule; the list tiles' handles | 2, 5 |
-| `src/test/mlxf_toy_polarft_workspace_score.f90` | the tile's graph shared with the list form | 2 |
-| `src/test/mlxf_toy_polarft_workspace_lifecycle.f90` | the list tiles released with the others | 2 |
-| `src/test/mlxf_toy_polarft_workspace_tail.f90` | the tail on list tiles; candidate A's mask if built | 2, 5 |
-| `src/test/mlxf_toy_polarft_memo.f90`, `src/test/mlxf_toy_polarft_memo_mlx.f90` | only if L1 wins decision 3: the references' order | 2 |
-| `src/test/mlxf_toy_eul_prob_tab.f90` | what the extension needs visible, no dummy list changed | 3 |
-| `src/test/mlxf_polarft_host_fixture.f90` | the directions, the orientations, the cone table and its lines | 2, 3 |
-| `src/test/mlxf_toy_seam_tester.f90` | the driver's cycles and refusals | 3 |
-| `src/test/mlxf_bench_polar_table.f90` | suite `neigh` | 4, 5 |
-| `src/test/mlxf_test_defs.f90` | the tolerances, the fixture's members, `parameters`' new members, the modes | 2, 3, 4, 5 |
-| `src/test/mlxf_test_registry.f90` | the two sub-suites' rows | 2, 3 |
-| `src/test/test.inf` | the directory's description | 2, 3 |
+| `src/test/toys/polar/mlxf_toy_eul_prob_tab_neigh.f90` (new) | the toy driver `eul_prob_tab_neigh`: the cones, the two stages of `state`, the pool | 3, 4 |
+| `src/test/toys/polar/mlxf_toy_eul_prob_tab_utils.f90` (new) | `cone_view_dist` | 3 |
+| `src/test/toys/polar/mlxf_toy_srchspace_map.f90` (new) | the toy `srchspace_map` | 3 |
+| `src/test/toys/polar/mlxf_toy_polarft_workspace_lists.f90` (new) | the list tiles, the list form of `submit`, a kernel of decision 10 | 2, 4, 5 |
+| `src/test/toys/polar/mlxf_toy_eul_prob_tab_neigh_tester.f90` (new) | sub-suite `eul_prob_tab_neigh` | 2, 3, 5 |
+| `src/test/oracles/mlxf_oracle_neigh.f90` (new) | the oracle of the lists and of the pool | 3 |
+| `src/test/oracles/mlxf_oracle_neigh_tester.f90` (new) | sub-suite `oracle_neigh` | 3 |
+| `src/test/toys/polar/mlxf_toy_polarft_calc.f90` | the interfaces of `set_block_refs` and of the list's glue | 2 |
+| `src/test/toys/polar/mlxf_toy_polarft_block.f90` | the host side of `set_block_refs`; the refusals of a list | 2 |
+| `src/test/toys/polar/mlxf_toy_polarft_block_mlx.f90` | the list crosses to the workspace; the refusal goes | 2 |
+| `src/test/toys/polar/mlxf_toy_polarft_workspace.f90` | the interfaces of the list submodule; the list tiles' handles | 2, 5 |
+| `src/test/toys/polar/mlxf_toy_polarft_workspace_score.f90` | the tile's graph shared with the list form | 2 |
+| `src/test/toys/polar/mlxf_toy_polarft_workspace_lifecycle.f90` | the list tiles released with the others | 2 |
+| `src/test/toys/polar/mlxf_toy_polarft_workspace_tail.f90` | the tail on list tiles; candidate A's mask if built | 2, 5 |
+| `src/test/toys/polar/mlxf_toy_polarft_memo.f90`, `src/test/toys/polar/mlxf_toy_polarft_memo_mlx.f90` | only if L1 wins decision 3: the references' order | 2 |
+| `src/test/toys/polar/mlxf_toy_eul_prob_tab.f90` | what the extension needs visible, no dummy list changed | 3 |
+| `src/test/toys/polar/mlxf_polarft_host_fixture.f90` | the directions, the orientations, the cone table and its lines | 2, 3 |
+| `src/test/toys/mlxf_toy_seam_tester.f90` | the driver's cycles and refusals | 3 |
+| `src/test/bench/mlxf_bench_polar_table.f90` | suite `neigh` | 4, 5 |
+| `src/test/framework/mlxf_test_defs.f90` | the tolerances, the fixture's members, `parameters`' new members, the modes | 2, 3, 4, 5 |
+| `src/test/framework/mlxf_test_registry.f90` | the two sub-suites' rows | 2, 3 |
+| `src/test/toys/polar/polar.inf` | the folder's description: the second driver and its helpers | 2, 3 |
+| `src/test/oracles/oracles.inf` | the folder's description: the oracle of lists | 3 |
+| `doc/code_base_map.md` | regenerated by `scripts/generate_codeoverview.py` for every new Fortran file and `.inf` change, and for a file deleted (the static gate checks it) | 2, 3, 4, 5 |
 | `test/CMakeLists.txt` | the comment on the area `kernels`, if it names the sub-suites | 3 |
 | `test/offstate/mlxf_offstate_exec.f90` | the cone table on the host route; the driver's refusal | 3 |
 | `test/offstate/CMakeLists.txt` | only if a source outside the ledger is needed | 3 |

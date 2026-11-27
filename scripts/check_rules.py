@@ -27,7 +27,7 @@ Rules:
              `private`, and no `public` attribute on a declaration (installed .mod files make every public
              name API)
   cbind      `bind(c, name='mlx_...')` only in the generated layer (build/gen, never in src/)
-  libc       a binding to the C library (strlen, memcpy, memset, posix_memalign, malloc, free) only in
+  libc       a binding to the C library (LIBC_NAMES: strlen, memcpy, ..., rename, lstat, ...) only in
              src/core/runtime/mlxf_libc.f90
   reexport   no module under src/core uses mlxf, the user module (test code may); mlxf.f90 re-exports no
              mlxc_ name of the generated layer
@@ -147,6 +147,14 @@ import os
 import re
 import sys
 
+# no bytecode cache beside the sources: the release gate holds the source tree unchanged by a build
+sys.dont_write_bytecode = True
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# the lifetime analysis the installed consumer checker shares (scripts/mlxf_consumer_checks.py): one implementation
+from mlxf_consumer_checks import (HANDLE_TYPES, HANDLE_DECL, PROC_HEAD, code_of, logical_lines,  # noqa: E402
+                                  statements, constructors, split_top, matching, handle_names, handle_functions,
+                                  imported_names, ctorcall_findings, ctorexpr_findings)
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TOPS = ('src', 'test')
 CORE = 'src/core/'
@@ -193,13 +201,6 @@ ENTRY_EXEMPT = {
     'mlxf_build_description': 'pure: returns build constants, touches no state and calls no MLX function',
 }
 USER_MODULE = CORE + 'mlxf.f90'
-HANDLE_TYPES = ('mlx_array', 'mlx_function', 'mlx_metal_kernel', 'mlx_grad_function', 'mlx_function_exporter',
-                'mlx_imported_function', 'mlx_stream', 'mlx_group')
-HANDLE_DECL = re.compile(r'^(type|class)\s*\(\s*(' + '|'.join(HANDLE_TYPES) + r')\s*\)(.*)$', re.I)
-HANDLE_PREFIX = re.compile(r'\b(type|class)\s*\(\s*(' + '|'.join(HANDLE_TYPES) + r')\s*\)', re.I)
-HANDLE_GETTERS = ('shape', 'ndim', 'size', 'kind')
-INQUIRY = re.compile(r'(?<![%\w])(size|lbound|ubound|shape|rank|allocated|present|storage_size|is_contiguous|'
-                     r'same_type_as|extends_type_of)\s*\(', re.I)
 FIND_PACKAGE = re.compile(r'\bfind_package\s*\(([^)]*)\)', re.I)
 PARITY_LEDGER = 'scripts/mlxc_parity.txt'
 PARITY_PLAN = 'doc/implementation_notes/planned/mlxf_mlxc_parity.md'
@@ -242,24 +243,6 @@ def read(root, rel):
         return h.read()
 
 
-def code_of(line):
-    """the line without its comment and with string contents blanked"""
-    out, quote = [], None
-    for c in line:
-        if quote:
-            out.append(c if c == quote else ' ')
-            if c == quote:
-                quote = None
-        elif c in '\'"':
-            quote = c
-            out.append(c)
-        elif c == '!':
-            break
-        else:
-            out.append(c)
-    return ''.join(out)
-
-
 BLOCK = re.compile(r'^\s*(\w+\s*:\s*)?block\s*$', re.I)
 GOTO = re.compile(r'\bgo\s*to\b', re.I)
 IF_OPEN = re.compile(r'^\s*(else\s*)?if\((?!\s)', re.I)
@@ -272,13 +255,10 @@ LITERAL = re.compile(r"('[^']*')+|(\"[^\"]*\")+")
 STOP = re.compile(r'(^\s*|\)\s*)(error\s+)?stop\b|\bTHROW_(HARD|WARN)\b', re.I)
 PRINT = re.compile(r'\bwrite\s*\(\s*(unit\s*=\s*)?(\*|6|0|output_unit|error_unit)\s*[,)]|\bprint\s*(\*|[\'"(]|\w+\s*,)', re.I)
 BIND_MLX = re.compile(r'\bbind\s*\(\s*c\s*,\s*name\s*=\s*[\'"]mlx_', re.I)
-LIBC_NAMES = ('strlen', 'memcpy', 'memset', 'posix_memalign', 'malloc', 'free', 'fopen', 'fclose', 'dup', 'fdopen')
+LIBC_NAMES = ('strlen', 'memcpy', 'memset', 'posix_memalign', 'malloc', 'free', 'fopen', 'fclose', 'dup', 'fdopen',
+              'rename', 'unlink', 'chmod', 'lstat', 'getpid', 'geteuid', 'symlink', 'link', 'mkdir', 'rmdir')
 BIND_LIBC = re.compile(r'\bbind\s*\(\s*c\s*,\s*name\s*=\s*[\'"](' + '|'.join(LIBC_NAMES) + r')[\'"]', re.I)
 USE_MLXF = re.compile(r'^\s*use\s+mlxf\s*(,|$)', re.I)
-PROC_HEAD = re.compile(r'^\s*(?!end\b)(?:(?:pure|impure|elemental|recursive|module)\s+)*'
-                       r'(?:(?:integer|real|logical|complex|character|type|class|double\s+precision)\s*'
-                       r'(?:\([^()]*(?:\([^()]*\))?[^()]*\))?\s+)?'
-                       r'(?:(?:pure|impure|elemental|recursive)\s+)*(subroutine|function)\s+(\w+)', re.I)
 PROC_END = re.compile(r'^\s*end\s*(subroutine|function)\b', re.I)
 
 
@@ -298,28 +278,6 @@ def raw_code(line):
         else:
             out.append(c)
     return ''.join(out)
-
-
-def logical_lines(codes):
-    """(first line number, joined statement) over `&` continuations; a blank, comment-only or preprocessor
-    line inside a continuation is skipped, as the compiler skips it"""
-    out, buf, start = [], '', None
-    for n, code in enumerate(codes, 1):
-        part = code.rstrip()
-        if buf and (not part.strip() or part.lstrip().startswith('#')):
-            continue
-        if buf:
-            part = part.lstrip()
-            if part.startswith('&'):
-                part = part[1:]
-        else:
-            start = n
-        if part.endswith('&'):
-            buf += part[:-1]
-            continue
-        out.append((start, buf + part))
-        buf = ''
-    return out
 
 
 def check_layout(rel, lines, out):
@@ -396,27 +354,6 @@ def check_inf(root, files, out):
         path = os.path.join(root, inf)
         if not os.path.isfile(path) or not read(root, inf).strip():
             out.append('%s: inf: missing or empty (one line describing the directory)' % inf)
-
-
-def statements(lines):
-    """the module's statements, continuations joined, comments and preprocessor lines dropped"""
-    stmts, buf = [], ''
-    for raw in lines:
-        if raw.lstrip().startswith('#'):
-            continue
-        s = code_of(raw).strip()
-        if buf:
-            s = s[1:].lstrip() if s.startswith('&') else s
-            buf += ' ' + s
-        else:
-            buf = s
-        if buf.endswith('&'):
-            buf = buf[:-1]
-            continue
-        if buf:
-            stmts.append(buf)
-        buf = ''
-    return stmts
 
 
 def check_surface(rel, lines, out):
@@ -556,206 +493,15 @@ def public_names(root):
     return names
 
 
-def constructors(stmt):
-    """the contents of the array constructors [...] and (/.../) of a statement (strings already blanked)"""
-    out, i = [], 0
-    while i < len(stmt):
-        if stmt[i] == '[' or stmt.startswith('(/', i):
-            close = ']' if stmt[i] == '[' else '/)'
-            j, depth = i + (1 if close == ']' else 2), 1
-            while j < len(stmt) and depth:
-                if stmt.startswith(close, j) and depth == 1:
-                    depth = 0
-                    break
-                if stmt[j] in '([':
-                    depth += 1
-                elif stmt[j] in ')]':
-                    depth -= 1
-                j += 1
-            out.append(stmt[i + 1:j])
-            i = j + 1
-        else:
-            i += 1
-    return out
-
-
 def library_functions(api):
     """the public names ctorcall matches: the library's own, not the generics named after intrinsics"""
     return set(n for n in api if n.startswith(('mlx_', 'mlxf_')))
 
 
 def check_ctorcall(rel, lines, api, out):
-    names = library_functions(api)
-    for start, stmt in logical_lines([code_of(l) for l in lines]):
-        for body in constructors(stmt):
-            for m in re.finditer(r'(?<![%\w])([a-z_]\w*)\s*\(', body, re.I):
-                if m.group(1).lower() in names:
-                    out.append('%s:%d: ctorcall: %s(...) inside an array constructor (a function result there is '
-                               'never finalized: assign it to a variable first)' % (rel, start, m.group(1)))
-
-
-def split_top(text):
-    """text split at the commas outside parentheses and brackets"""
-    parts, depth, cur = [], 0, []
-    for c in text:
-        if c in '([':
-            depth += 1
-        elif c in ')]':
-            depth -= 1
-        if c == ',' and depth == 0:
-            parts.append(''.join(cur))
-            cur = []
-        else:
-            cur.append(c)
-    parts.append(''.join(cur))
-    return parts
-
-
-def matching(text, i):
-    """the index of the bracket closing the one at text[i], or -1"""
-    depth = 0
-    for j in range(i, len(text)):
-        if text[j] in '([':
-            depth += 1
-        elif text[j] in ')]':
-            depth -= 1
-            if depth == 0:
-                return j
-    return -1
-
-
-def handle_names(lines):
-    """the lower-case names a file declares of a handle type: variables, dummies and components"""
-    names = set()
-    for s in statements(lines):
-        m = HANDLE_DECL.match(s)
-        if not m:
-            continue
-        rest = m.group(3)
-        if re.match(r'\s*(function|subroutine|pure|impure|elemental|recursive|module)\b', rest, re.I):
-            continue
-        if '::' in rest:
-            rest = rest.split('::', 1)[1]
-        elif rest.lstrip().startswith(','):
-            continue
-        for ent in split_top(rest):
-            n = re.match(r'\s*([a-z_]\w*)', ent, re.I)
-            if n:
-                names.add(n.group(1).lower())
-    return names
-
-
-def handle_functions(lines, handles):
-    """the lower-case names of the functions a file defines or declares whose result is a handle"""
-    names = set()
-    for s in statements(lines):
-        m = PROC_HEAD.match(s)
-        if not m or m.group(1).lower() != 'function':
-            continue
-        name = m.group(2).lower()
-        r = re.search(r'\bresult\s*\(\s*(\w+)\s*\)', s, re.I)
-        result = r.group(1).lower() if r else name
-        if HANDLE_PREFIX.search(s[:m.start(1)]) or result in handles:
-            names.add(name)
-    return names
-
-
-def blank_inquiries(expr):
-    """expr with the argument lists of inquiry intrinsics blanked (their result is an integer or logical)"""
-    out = expr
-    for m in INQUIRY.finditer(expr):
-        j = matching(expr, m.end() - 1)
-        if j > 0:
-            out = out[:m.end()] + ' ' * (j - m.end()) + out[j:]
-    return out
-
-
-def handle_refs(expr, handles, functions=()):
-    """the identifiers of expr that refer to a handle, or call a function whose result is one"""
-    expr = blank_inquiries(expr)
-    refs = []
-    for m in re.finditer(r'[a-z_]\w*', expr, re.I):
-        k = m.start()
-        if k > 0 and (expr[k - 1].isalnum() or expr[k - 1] == '_'):
-            continue
-        if k > 1 and expr[k - 1] == '.' and expr[k - 2].isdigit():
-            continue
-        name = m.group(0).lower()
-        if name not in handles and name not in functions:
-            continue
-        after = expr[m.end():]
-        if re.match(r'\s*=(?!=)', after):
-            continue
-        rest = after.lstrip()
-        if rest.startswith('('):
-            j = matching(rest, 0)
-            rest = rest[j + 1:] if j > 0 else rest
-        g = re.match(r'\s*%\s*([a-z_]\w*)\s*\(', rest, re.I)
-        if g and g.group(1).lower() in HANDLE_GETTERS:
-            continue
-        refs.append(m.group(0))
-    return refs
-
-
-def designator_parts(expr):
-    """[(name, subscripts), ...] of a designator name[(...)][%name[(...)]]..., or None"""
-    e, parts = expr.strip(), []
-    while True:
-        m = re.match(r'([a-z_]\w*)\s*', e, re.I)
-        if not m:
-            return None
-        e, sub = e[m.end():], ''
-        if e.startswith('('):
-            j = matching(e, 0)
-            if j < 0:
-                return None
-            e, sub = e[j + 1:].lstrip(), e[1:j]
-        parts.append((m.group(1).lower(), sub))
-        if not e:
-            return parts
-        if not e.startswith('%'):
-            return None
-        e = e[1:].lstrip()
-
-
-def implied_do_items(elem):
-    """the items of an implied-do (items, i = a, b), or None when elem is not one"""
-    e = elem.strip()
-    if not e.startswith('(') or matching(e, 0) != len(e) - 1:
-        return None
-    inner = split_top(e[1:-1])
-    for k, part in enumerate(inner):
-        if k > 0 and re.match(r'\s*[a-z_]\w*\s*=(?!=)', part, re.I):
-            return inner[:k]
-    return None
-
-
-def ctor_violations(body, handles, functions=()):
-    """the elements of a constructor body that refer to a handle without being a bare designator"""
-    body = body.strip()
-    if body.startswith('/'):
-        body = body[1:]
-    top = split_top(body)
-    if top and '::' in top[0]:
-        top[0] = top[0].split('::', 1)[1]
-    bad = []
-    for elem in top:
-        e = elem.strip()
-        items = implied_do_items(e)
-        if items is not None:
-            bad += ctor_violations(','.join(items), handles, functions)
-            continue
-        if e.startswith('[') and matching(e, 0) == len(e) - 1:
-            bad += ctor_violations(e[1:-1], handles, functions)
-            continue
-        if not handle_refs(e, handles, functions):
-            continue
-        parts = designator_parts(e)
-        if parts and parts[-1][0] in handles and parts[-1][0] not in functions and \
-                not any(handle_refs(sub, handles, functions) for _, sub in parts):
-            continue
-        bad.append(e)
-    return bad
+    for start, name in ctorcall_findings(lines, library_functions(api)):
+        out.append('%s:%d: ctorcall: %s(...) inside an array constructor (a function result there is '
+                   'never finalized: assign it to a variable first)' % (rel, start, name))
 
 
 def exported_handle_functions(lines):
@@ -775,26 +521,10 @@ def exported_handle_functions(lines):
     return names
 
 
-def imported_names(lines):
-    """the lower-case names a file imports through `use ..., only:` lists (a renamed one under its local name)"""
-    names = set()
-    for s in statements(lines):
-        m = re.match(r'^use\b.*\bonly\s*:(.*)$', s, re.I)
-        if m:
-            names |= set(n.split('=>')[0].strip().lower() for n in m.group(1).split(',') if n.strip())
-    return names
-
-
 def check_ctorexpr(rel, lines, out, tree_functions=()):
-    handles = handle_names(lines)
-    if not handles:
-        return
-    functions = handle_functions(lines, handles) | (set(tree_functions) & imported_names(lines))
-    for start, stmt in logical_lines([code_of(l) for l in lines]):
-        for body in constructors(stmt):
-            for e in ctor_violations(body, handles, functions):
-                out.append('%s:%d: ctorexpr: %s inside an array constructor refers to a handle and is not a bare '
-                           'designator (its result is never finalized: assign it to a variable first)' % (rel, start, e))
+    for start, e in ctorexpr_findings(lines, set(tree_functions) & imported_names(lines)):
+        out.append('%s:%d: ctorexpr: %s inside an array constructor refers to a handle and is not a bare '
+                   'designator (its result is never finalized: assign it to a variable first)' % (rel, start, e))
 
 
 def check_reexport_mlxc(root, out):

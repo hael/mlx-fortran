@@ -5,11 +5,12 @@
 ! positions among the inputs, the results' shapes and the refusals are exact.
 module mlxf_transforms_tester
 use, intrinsic :: iso_fortran_env, only: real32, real64, int64
+use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
 use mlxf,             only: mlx_array, mlx_function, mlx_grad_function, mlx_value_and_grad, mlx_vjp, mlx_jvp, &
                             mlx_custom_vjp, mlx_custom_function, mlx_checkpoint, mlx_depends, mlx_stop_gradient, &
                             mlx_compile, mlx_from, mlx_to, mlx_live_count, mlx_last_error, mlx_set_default_device, &
                             mlx_default_device, MLX_DEVICES, sum, exp, matmul, mlx_eval, mlx_synchronize, &
-                            mlx_active_memory, mlx_function_exporter, mlx_imported_function
+                            mlx_active_memory, mlx_function_exporter, mlx_imported_function, norm2, mlx_mean
 use mlxf_test_utils,  only: assert_true, assert_int, test_devices, device_name, bits_equal, judge_error, &
                             find_tolerance, family_seeds, seeded_uniform, seeded_array, shaped_error
 use mlxf_test_defs,   only: ELEM_CEILING, GRAD_TOLERANCES, elem_tolerance
@@ -40,7 +41,9 @@ contains
             do s = 1, size(seeds)
                 call test_value_and_grad(seeds(s), .false.)
                 call test_products(seeds(s), .false.)
+                call test_scaled_gradients(seeds(s), .false.)
                 if( devs(i) == MLX_DEVICES%cpu )then
+                    call test_scaled_gradients(seeds(s), .true.)
                     call test_value_and_grad(seeds(s), .true.)
                     call test_products(seeds(s), .true.)
                 endif
@@ -82,6 +85,54 @@ contains
         hcopy = h
         call hcopy%kill()
     end subroutine empty_grad_scope
+
+    ! the gradients of the scaled reductions, whose graphs hold a stopped scale: norm2's is x/norm2(x) and the
+    ! mean's 1/n, judged by the frozen tolerance of mlx_value_and_grad; norm2's also for x scaled by 1e20 in float32
+    ! (1e200 in float64), where the plain norm's square overflowed. At zero neither norm has a derivative: the
+    ! gradient there is printed, not judged
+    subroutine test_scaled_gradients( seed, wide )
+        integer, intent(in) :: seed
+        logical, intent(in) :: wide
+        type(mlx_function)           :: f
+        type(mlx_grad_function)      :: g
+        type(mlx_array)              :: x
+        type(mlx_array), allocatable :: values(:), grads(:)
+        type(elem_tolerance)         :: tol
+        real(real64)                 :: xs(NV), err, limit, nrm, big
+        real(real32)                 :: gz(NV)
+        write(*,'(a,i0,a,l1)') 'test_scaled_gradients seed=', seed, ' wide=', wide
+        tol = find_tolerance(GRAD_TOLERANCES, 'mlx_value_and_grad')
+        limit = merge(tol%f64, tol%f32, wide)
+        err = 0._real64
+        xs = seeded_uniform(NV, seed+500)
+        nrm = sqrt(sum(xs**2))
+        f = mlx_function(norm_value)
+        g = mlx_value_and_grad(f)
+        x = seeded_array(xs, wide)
+        call g%apply([x], values, grads)
+        err = nan_max(err, shaped_error(values(1), nrm, nrm))
+        err = nan_max(err, shaped_error(grads(1), xs/nrm, abs(xs)/nrm))
+        big = merge(1.e200_real64, 1.e20_real64, wide)
+        x = seeded_array(xs*big, wide)
+        call g%apply([x], values, grads)
+        err = nan_max(err, shaped_error(values(1)*(1._real64/big), nrm, nrm))
+        err = nan_max(err, shaped_error(grads(1), xs/nrm, abs(xs)/nrm))
+        f = mlx_function(mean_value)
+        g = mlx_value_and_grad(f)
+        x = seeded_array(xs, wide)
+        call g%apply([x], values, grads)
+        err = nan_max(err, shaped_error(values(1), sum(xs)/NV, sum(abs(xs))/NV))
+        err = nan_max(err, shaped_error(grads(1), spread(1._real64/NV, 1, NV), spread(1._real64/NV, 1, NV)))
+        call judge_error(err, limit, 'scaled norm2 and mean gradients', merge('float64', 'float32', wide), seed)
+        if( .not. wide .and. seed == 1 )then
+            f = mlx_function(norm_value)
+            g = mlx_value_and_grad(f)
+            x = seeded_array(spread(0._real64, 1, NV), wide)
+            call g%apply([x], values, grads)
+            call mlx_to(gz, grads(1))
+            write(*,'(a,l1)') '    the gradient of norm2 at zero is finite: ', all(ieee_is_finite(gz))
+        endif
+    end subroutine test_scaled_gradients
 
     ! values and gradients of the three functions; float64 operands (wide) for the polynomial and the chain,
     ! which MLX computes in float64 on the CPU device
@@ -573,6 +624,26 @@ contains
         outputs(1) = exp(inputs(1)*inputs(2))
         status = 0
     end subroutine exp_each
+
+    ! norm2 of the one input
+    subroutine norm_value( inputs, outputs, status )
+        type(mlx_array), intent(in)               :: inputs(:)
+        type(mlx_array), allocatable, intent(out) :: outputs(:)
+        integer,         intent(out)              :: status
+        status = 0
+        allocate(outputs(1))
+        outputs(1) = norm2(inputs(1))
+    end subroutine norm_value
+
+    ! mlx_mean of the one input
+    subroutine mean_value( inputs, outputs, status )
+        type(mlx_array), intent(in)               :: inputs(:)
+        type(mlx_array), allocatable, intent(out) :: outputs(:)
+        integer,         intent(out)              :: status
+        status = 0
+        allocate(outputs(1))
+        outputs(1) = mlx_mean(inputs(1))
+    end subroutine mean_value
 
     ! sum(exp(a x)) of the two inputs
     subroutine exp_sum( inputs, outputs, status )

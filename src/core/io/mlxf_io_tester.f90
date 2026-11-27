@@ -4,12 +4,15 @@
 ! deleted.
 module mlxf_io_tester
 use, intrinsic :: iso_fortran_env, only: int8, int16, int32, int64, real32, real64
-use, intrinsic :: iso_c_binding,   only: c_bool
+use, intrinsic :: iso_c_binding,   only: c_bool, c_int16_t, c_null_char
+use mlxf_defs,       only: mlxf_file_info, mlxf_save_target
 use mlxf,            only: mlx_array, mlx_from, mlx_to, mlx_astype, mlx_is_live, mlx_live_count, mlx_last_error, &
                            mlx_active_memory, mlx_eval, mlx_set_default_device, mlx_default_device, MLX_DEVICES, &
                            MLX_DTYPES, reshape, transpose, mlx_save, mlx_load, mlx_save_safetensors, &
                            mlx_load_safetensors, mlx_save_gguf, mlx_load_gguf, mlx_print_graph, mlx_export_to_dot, &
-                           mlx_buffer_size
+                           mlx_buffer_size, mlx_zeros, mlx_device_info_size
+use mlxf_io,         only: mlxf_save_begin, mlxf_save_end
+use mlxf_libc,       only: c_file_info, c_chmod, c_getpid, c_symlink, c_link, c_mkdir, c_rmdir
 use mlxf_test_utils, only: assert_true, assert_int, test_devices, device_name, bits_equal
 implicit none
 private
@@ -47,6 +50,7 @@ contains
             call test_gguf
             call test_name_order
             call test_failures
+            call test_replacement(devs(i))
             call test_no_growth
             call test_sizes
             call test_graph_text
@@ -401,6 +405,209 @@ contains
             call remove(trim(FILES(format)))
         end do
     end subroutine test_name_order
+
+    ! a save replaces its file only by a complete write: after every refused or failed save the old bytes are still
+    ! there and no temporary file is left; a successful save writes the bytes a save to a fresh name writes and keeps
+    ! the old file's permission bits; a symbolic link, a hard-linked file and a directory are refused as destinations
+    subroutine test_replacement( device )
+        integer, intent(in) :: device
+        type(mlx_array)               :: a, b, wide, big, beyond
+        type(mlxf_save_target)        :: t
+        type(mlxf_file_info)          :: info
+        character(len=:), allocatable :: old, oldg, made
+        character(len=4)              :: triple(3, 1)
+        integer                       :: st, k, unit, mode0
+        integer(int64)                :: maxbuf
+        logical                       :: there, facts(3)
+        character(len=*), parameter   :: CKPT = 'mlxf_io_ckpt.safetensors', GG = 'mlxf_io_ckpt.gguf'
+        write(*,'(a)') 'test_replacement'
+        triple = 'none'
+        a = mlx_from([1._real32, 2._real32, 3._real32])
+        b = mlx_from([4._real32, 5._real32])
+        call mlx_save_safetensors(CKPT, ['w'], [a], status=st)
+        call assert_int(0, st, 'a checkpoint is written')
+        old = contents(CKPT)
+        call mlx_save_gguf(GG, ['w'], [a], status=st)
+        call assert_int(0, st, 'and a GGUF file')
+        oldg = contents(GG)
+        ! refusals found before anything is written
+        if( device == MLX_DEVICES%cpu )then
+            wide = mlx_astype(a, MLX_DTYPES%float64)
+            call mlx_save_safetensors(CKPT, ['w'], [wide], status=st)
+            facts(1) = same(contents(CKPT), old)
+            call assert_true(st /= 0 .and. facts(1), 'a float64 safetensors save over the checkpoint is '//&
+                &'refused, and the checkpoint keeps its bytes')
+        endif
+        big = mlx_astype(a, MLX_DTYPES%int64)
+        call mlx_save_gguf(GG, ['w'], [big], status=st)
+        facts(1) = same(contents(GG), oldg)
+        call assert_true(st /= 0 .and. facts(1), 'an int64 GGUF save is refused, and the file keeps its bytes')
+        call assert_true(index(mlx_last_error(), 'nothing was written') > 0, 'and the message says nothing was written')
+        call mlx_save_safetensors(CKPT, ['w', 'w'], [a, b], status=st)
+        facts(1) = same(contents(CKPT), old)
+        call assert_true(st /= 0 .and. facts(1), 'a name given twice: refused, bytes kept')
+        call mlx_save_safetensors(CKPT, ['w'], [a], metadata=triple, status=st)
+        facts(1) = same(contents(CKPT), old)
+        call assert_true(st /= 0 .and. facts(1), 'metadata that are not pairs: refused, bytes kept')
+        ! an evaluation that fails (one buffer beyond the GPU's maximum length) fails before the file is touched
+        if( device == MLX_DEVICES%gpu )then
+            maxbuf = mlx_device_info_size(MLX_DEVICES%gpu, 'max_buffer_length')
+            beyond = mlx_zeros([65536, int(maxbuf/(4_int64*65536_int64))+1])
+            call mlx_save_safetensors(CKPT, ['w'], [beyond], status=st)
+            facts(1) = same(contents(CKPT), old)
+            call assert_true(st /= 0 .and. facts(1), 'a failed evaluation: refused, bytes kept')
+            call mlx_save(GG, beyond, status=st)
+            facts(1) = exists(GG//'.npy')
+            call assert_true(st /= 0 .and. .not. facts(1), 'and no .npy file is made')
+            call beyond%kill()
+        endif
+        ! a failed write: the transaction's steps driven one by one, a partial temporary file, the writer's status 1
+        call mlxf_save_begin(CKPT, '.safetensors', 'test', t, st)
+        facts(1) = exists(t%temp)
+        call assert_true(st == 0 .and. t%existed .and. facts(1), 'a save begun over the checkpoint has its own '//&
+            &'temporary file')
+        call assert_true(t%dest == CKPT .and. index(t%temp, '/') == 0 .and. t%temp(1:1) == '.', &
+            &'a hidden sibling of the destination')
+        open(newunit=unit, file=t%temp, access='stream', form='unformatted', status='old', action='write')
+        write(unit) 'partial'
+        close(unit)
+        st = 1
+        call mlxf_save_end(t, 'test', st)
+        facts(1) = exists(t%temp)
+        facts(2) = same(contents(CKPT), old)
+        call assert_true(st /= 0 .and. .not. facts(1) .and. facts(2), &
+            &'a failed write removes the temporary file and leaves the checkpoint''s bytes')
+        ! a failed replacement: the temporary file gone before its permissions and rename
+        call mlxf_save_begin(CKPT, '.safetensors', 'test', t, st)
+        call remove(t%temp)
+        call mlxf_save_end(t, 'test', st)
+        facts(1) = same(contents(CKPT), old)
+        call assert_true(st /= 0 .and. facts(1), 'a failed replacement leaves the checkpoint''s bytes')
+        call remove('mlxf_io_absent.safetensors')
+        call mlxf_save_begin('mlxf_io_absent', '.safetensors', 'test', t, st)
+        call assert_true(st == 0 .and. .not. t%existed .and. t%dest == 'mlxf_io_absent.safetensors', &
+            &'a save to a new name settles its suffix once')
+        call remove(t%temp)
+        call mlxf_save_end(t, 'test', st)
+        facts(1) = exists('mlxf_io_absent.safetensors')
+        call assert_true(st /= 0 .and. .not. facts(1), &
+            &'and a failed rename leaves no destination where there was none')
+        ! temporary names already taken: the next free one is used; all of them taken, the save is refused
+        do k = 1, 3
+            call touch(temp_name(CKPT, '.safetensors', k))
+        end do
+        call mlx_save_safetensors(CKPT, ['w'], [a], status=st)
+        facts(1) = exists(temp_name(CKPT, '.safetensors', 4))
+        call assert_true(st == 0 .and. .not. facts(1), &
+            &'with three temporary names taken the save uses the fourth and leaves it no more')
+        do k = 4, 100
+            call touch(temp_name(CKPT, '.safetensors', k))
+        end do
+        call mlx_save_safetensors(CKPT, ['w'], [b], status=st)
+        facts(1) = same(contents(CKPT), old)
+        call assert_true(st /= 0 .and. facts(1), 'with every temporary name taken: refused, bytes kept')
+        do k = 1, 100
+            call remove(temp_name(CKPT, '.safetensors', k))
+        end do
+        ! success: the replaced file holds what a save to a fresh name holds, under the old file's permissions
+        k = int(c_chmod(CKPT//c_null_char, int(o'640', c_int16_t)))
+        call assert_int(0, k, 'the checkpoint''s mode is set to 640')
+        call mlx_save_safetensors(CKPT, ['w'], [b], status=st)
+        call mlx_save_safetensors('mlxf_io_fresh.safetensors', ['w'], [b], status=k)
+        facts(1) = same(contents(CKPT), contents('mlxf_io_fresh.safetensors'))
+        facts(2) = same(contents(CKPT), old)
+        call assert_true(st == 0 .and. k == 0 .and. facts(1) .and. &
+            &.not. facts(2), 'a save over the checkpoint writes the bytes of a save to a fresh name')
+        info = c_file_info(CKPT)
+        call assert_int(int(o'640'), info%mode, 'and keeps the checkpoint''s permission bits, 640')
+        facts(1) = exists(temp_name(CKPT, '.safetensors', 1))
+        call assert_true(.not. facts(1), 'leaving no temporary file')
+        call touch('mlxf_io_made.txt')
+        info = c_file_info('mlxf_io_made.txt')
+        mode0 = info%mode
+        info = c_file_info('mlxf_io_fresh.safetensors')
+        call assert_int(mode0, info%mode, 'a new file has the permission bits of a file the program creates')
+        ! .npy's suffix and a name with spaces
+        call remove('mlxf io spaced.npy')
+        call mlx_save('mlxf io spaced', a, status=st)
+        made = contents('mlxf io spaced.npy')
+        call mlx_save('mlxf io spaced.npy', b, status=k)
+        facts(1) = same(contents('mlxf io spaced.npy'), made)
+        call assert_true(st == 0 .and. k == 0 .and. len(made) > 0 .and. .not. facts(1), &
+            &'a name with spaces gets .npy, and the full name replaces that file')
+        facts(1) = exists(temp_name('mlxf io spaced.npy', '.npy', 1))
+        facts(2) = exists('mlxf io spaced.npy.npy')
+        call assert_true(.not. facts(1) .and. &
+            &.not. facts(2), 'with no temporary file and no second suffix left')
+        ! destinations refused: a symbolic link, a file with a second hard link, a directory
+        call remove('mlxf_io_link.safetensors')
+        k = int(c_symlink(CKPT//c_null_char, 'mlxf_io_link.safetensors'//c_null_char))
+        made = contents(CKPT)
+        call mlx_save_safetensors('mlxf_io_link.safetensors', ['w'], [a], status=st)
+        info = c_file_info('mlxf_io_link.safetensors')
+        facts(1) = same(contents(CKPT), made)
+        call assert_true(k == 0 .and. st /= 0 .and. info%link .and. facts(1), &
+            &'a symbolic link as destination is refused, the link and the file it names unchanged')
+        call assert_true(index(mlx_last_error(), 'symbolic link') > 0, 'and the message says why')
+        call remove('mlxf_io_link.safetensors')
+        call remove('mlxf_io_hard.safetensors')
+        k = int(c_link(CKPT//c_null_char, 'mlxf_io_hard.safetensors'//c_null_char))
+        call mlx_save_safetensors(CKPT, ['w'], [a], status=st)
+        facts(1) = same(contents(CKPT), made)
+        call assert_true(k == 0 .and. st /= 0 .and. facts(1), &
+            &'a file with a second hard link is refused, its bytes kept')
+        call remove('mlxf_io_hard.safetensors')
+        call mlx_save_safetensors(CKPT, ['w'], [a], status=st)
+        call assert_int(0, st, 'and saved once the second link is gone')
+        k = int(c_rmdir('mlxf_io_dir.npy'//c_null_char))
+        k = int(c_mkdir('mlxf_io_dir.npy'//c_null_char, int(o'700', c_int16_t)))
+        call mlx_save('mlxf_io_dir.npy', a, status=st)
+        info = c_file_info('mlxf_io_dir.npy')
+        call assert_true(k == 0 .and. st /= 0 .and. info%exists .and. .not. info%regular, &
+            &'a directory as destination is refused and stays')
+        k = int(c_rmdir('mlxf_io_dir.npy'//c_null_char))
+        call mlx_save('mlxf_no_such_directory/a', a, status=st)
+        call assert_true(st /= 0, 'a destination in a directory that does not exist is refused')
+        inquire(file='mlxf_no_such_directory/a.npy', exist=there)
+        call assert_true(.not. there, 'and makes nothing')
+        call remove(CKPT)
+        call remove(GG)
+        call remove('mlxf_io_fresh.safetensors')
+        call remove('mlxf_io_made.txt')
+        call remove('mlxf io spaced.npy')
+    end subroutine test_replacement
+
+    ! the temporary sibling a save of dest (its suffix settled) tries k-th: hidden, ending with the suffix
+    function temp_name( dest, suffix, k ) result(name)
+        character(len=*), intent(in) :: dest, suffix
+        integer,          intent(in) :: k
+        character(len=:), allocatable :: name
+        character(len=16)             :: pid, attempt
+        write(pid, '(i0)') c_getpid()
+        write(attempt, '(i0)') k
+        name = '.'//dest//'.mlxf'//trim(pid)//'-'//trim(attempt)//'.tmp'//suffix
+    end function temp_name
+
+    ! whether two byte strings are the same, length included
+    pure logical function same( x, y )
+        character(len=*), intent(in) :: x, y
+        same = len(x) == len(y)
+        if( same ) same = x == y
+    end function same
+
+    ! whether a file of that name exists
+    logical function exists( file )
+        character(len=*), intent(in) :: file
+        inquire(file=file, exist=exists)
+    end function exists
+
+    ! creates an empty file of that name
+    subroutine touch( file )
+        character(len=*), intent(in) :: file
+        integer :: unit
+        open(newunit=unit, file=file, status='replace', action='write')
+        close(unit)
+    end subroutine touch
 
     ! round trips repeated through the three formats leave the memory MLX holds for arrays where it was
     subroutine test_no_growth

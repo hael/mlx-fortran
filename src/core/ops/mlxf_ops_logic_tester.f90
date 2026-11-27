@@ -72,6 +72,7 @@ contains
             call test_predicate_family
             call test_closeness_and_equality
             call test_integer_family
+            call test_integer_comparisons
             call test_integer_conventions
         end do
         call mlx_set_default_device(original)
@@ -177,6 +178,44 @@ contains
         character(len=*), intent(in) :: msg
         call assert_true(.not. logical(x), msg)
     end subroutine assert_false_c
+
+    ! the six comparisons with a default-integer scalar on either side, against the frozen matrix: boolean results,
+    ! the scalar exact in the array's integer kind (int8 near its limit, int64 beyond float32's integers), a
+    ! float32 array compared as float32, a boolean array as int32
+    subroutine test_integer_comparisons
+        type(mlx_array) :: k
+        write(*,'(a)') 'test_integer_comparisons'
+        k = mlx_from([-7, 0, 7])
+        call flags(k < 0, [.true., .false., .false.], 'int32 < 0')
+        call flags(0 < k, [.false., .false., .true.], '0 < int32')
+        call flags(k <= 0, [.true., .true., .false.], 'int32 <= 0')
+        call flags(0 <= k, [.false., .true., .true.], '0 <= int32')
+        call flags(k > 0, [.false., .false., .true.], 'int32 > 0')
+        call flags(0 > k, [.true., .false., .false.], '0 > int32')
+        call flags(k >= 7, [.false., .false., .true.], 'int32 >= 7')
+        call flags(7 >= k, [.true., .true., .true.], '7 >= int32')
+        call flags(k == 0, [.false., .true., .false.], 'int32 == 0')
+        call flags(0 == k, [.false., .true., .false.], '0 == int32')
+        call flags(k /= 0, [.true., .false., .true.], 'int32 /= 0')
+        call flags(0 /= k, [.true., .false., .true.], '0 /= int32')
+        call flags(mlx_astype(mlx_from([127, -128]), MLX_DTYPES%int8) == 127, [.true., .false.], 'int8 == 127')
+        call flags(mlx_from([16777217_int64, 16777216_int64]) == 16777217, [.true., .false.], &
+            &'int64 == 16777217, which float32 cannot tell from 16777216')
+        call flags(mlx_from([0.5_real32, 1._real32]) >= 1, [.false., .true.], 'float32 >= 1')
+        call flags(mlx_from([.true._c_bool, .false._c_bool]) == 1, [.true., .false.], 'boolean == 1, as int32')
+    contains
+        subroutine flags( res, want, label )
+            type(mlx_array),  intent(in) :: res
+            logical,          intent(in) :: want(:)
+            character(len=*), intent(in) :: label
+            logical(c_bool) :: got(size(want))
+            integer         :: rk
+            rk = res%kind()
+            call mlx_to(got, res)
+            call assert_true(rk == MLX_DTYPES%bool .and. all(logical(got) .eqv. want), label//': boolean, exact')
+        end subroutine flags
+
+    end subroutine test_integer_comparisons
 
     ! every integer function against Fortran's intrinsic on seeded int32 and int64 operands
     subroutine test_integer_family

@@ -1,9 +1,10 @@
 !@descr: the operators of mlx_array: arithmetic, powers, comparisons, boolean operators, unary signs, and exp
 submodule (mlxf_array) mlxf_array_elementwise
-use mlxf_c_ops, only: mlxc_add, mlxc_subtract, mlxc_multiply, mlxc_divide, mlxc_less, mlxc_less_equal, mlxc_greater, &
-                      mlxc_greater_equal, mlxc_equal, mlxc_not_equal, mlxc_logical_and, mlxc_logical_or, mlxc_negative, &
-                      mlxc_logical_not, mlxc_exp, mlxc_logical_xor, mlxc_positive, mlxc_power
-use mlxf_calls, only: mlxf_binary, mlxf_unary, mlxf_weak_scalar
+use mlxf_c_ops,  only: mlxc_add, mlxc_subtract, mlxc_multiply, mlxc_divide, mlxc_less, mlxc_less_equal, mlxc_greater, &
+                       mlxc_greater_equal, mlxc_equal, mlxc_not_equal, mlxc_logical_and, mlxc_logical_or, &
+                       mlxc_negative, mlxc_logical_not, mlxc_exp, mlxc_logical_xor, mlxc_positive, mlxc_power
+use mlxf_calls,  only: mlxf_binary, mlxf_unary, mlxf_weak_scalar, mlxf_integer_scalar
+use mlxf_device, only: mlxf_enter
 implicit none
 
 contains
@@ -47,6 +48,26 @@ contains
         call mlxf_binary(r, mlxc_add, s, rhs, 'operator(+)')
     end function add_da
 
+    ! a default-integer scalar: exact in an integer array's kind (out of range, a stop), int32 with booleans, weak
+    ! otherwise (mlxf_integer_scalar)
+    module function add_ai( lhs, rhs ) result(r)
+        class(mlx_array), intent(in) :: lhs
+        integer,          intent(in) :: rhs
+        type(mlx_array) :: r, s
+        call mlxf_enter('operator(+)')
+        call mlxf_integer_scalar(s, lhs, rhs, 'operator(+)')
+        call mlxf_binary(r, mlxc_add, lhs, s, 'operator(+)')
+    end function add_ai
+
+    module function add_ia( lhs, rhs ) result(r)
+        integer,          intent(in) :: lhs
+        class(mlx_array), intent(in) :: rhs
+        type(mlx_array) :: r, s
+        call mlxf_enter('operator(+)')
+        call mlxf_integer_scalar(s, rhs, lhs, 'operator(+)')
+        call mlxf_binary(r, mlxc_add, s, rhs, 'operator(+)')
+    end function add_ia
+
     module function sub_aa( lhs, rhs ) result(r)
         class(mlx_array), intent(in) :: lhs, rhs
         type(mlx_array) :: r
@@ -85,6 +106,26 @@ contains
         call mlxf_binary(r, mlxc_subtract, s, rhs, 'operator(-)')
     end function sub_da
 
+    ! a default-integer scalar: exact in an integer array's kind (out of range, a stop), int32 with booleans, weak
+    ! otherwise (mlxf_integer_scalar)
+    module function sub_ai( lhs, rhs ) result(r)
+        class(mlx_array), intent(in) :: lhs
+        integer,          intent(in) :: rhs
+        type(mlx_array) :: r, s
+        call mlxf_enter('operator(-)')
+        call mlxf_integer_scalar(s, lhs, rhs, 'operator(-)')
+        call mlxf_binary(r, mlxc_subtract, lhs, s, 'operator(-)')
+    end function sub_ai
+
+    module function sub_ia( lhs, rhs ) result(r)
+        integer,          intent(in) :: lhs
+        class(mlx_array), intent(in) :: rhs
+        type(mlx_array) :: r, s
+        call mlxf_enter('operator(-)')
+        call mlxf_integer_scalar(s, rhs, lhs, 'operator(-)')
+        call mlxf_binary(r, mlxc_subtract, s, rhs, 'operator(-)')
+    end function sub_ia
+
     module function mul_aa( lhs, rhs ) result(r)
         class(mlx_array), intent(in) :: lhs, rhs
         type(mlx_array) :: r
@@ -122,6 +163,26 @@ contains
         call mlxf_weak_scalar(s, rhs, real(lhs, real64), 'operator(*)')
         call mlxf_binary(r, mlxc_multiply, s, rhs, 'operator(*)')
     end function mul_da
+
+    ! a default-integer scalar: exact in an integer array's kind (out of range, a stop), int32 with booleans, weak
+    ! otherwise (mlxf_integer_scalar)
+    module function mul_ai( lhs, rhs ) result(r)
+        class(mlx_array), intent(in) :: lhs
+        integer,          intent(in) :: rhs
+        type(mlx_array) :: r, s
+        call mlxf_enter('operator(*)')
+        call mlxf_integer_scalar(s, lhs, rhs, 'operator(*)')
+        call mlxf_binary(r, mlxc_multiply, lhs, s, 'operator(*)')
+    end function mul_ai
+
+    module function mul_ia( lhs, rhs ) result(r)
+        integer,          intent(in) :: lhs
+        class(mlx_array), intent(in) :: rhs
+        type(mlx_array) :: r, s
+        call mlxf_enter('operator(*)')
+        call mlxf_integer_scalar(s, rhs, lhs, 'operator(*)')
+        call mlxf_binary(r, mlxc_multiply, s, rhs, 'operator(*)')
+    end function mul_ia
 
     ! division, with the scalar forms of + - *
     module function div_aa( lhs, rhs ) result(r)
@@ -162,6 +223,26 @@ contains
         call mlxf_binary(r, mlxc_divide, s, rhs, 'operator(/)')
     end function div_da
 
+    ! a default-integer scalar: exact in an integer array's kind (out of range, a stop), int32 with booleans, weak
+    ! otherwise (mlxf_integer_scalar)
+    module function div_ai( lhs, rhs ) result(r)
+        class(mlx_array), intent(in) :: lhs
+        integer,          intent(in) :: rhs
+        type(mlx_array) :: r, s
+        call mlxf_enter('operator(/)')
+        call mlxf_integer_scalar(s, lhs, rhs, 'operator(/)')
+        call mlxf_binary(r, mlxc_divide, lhs, s, 'operator(/)')
+    end function div_ai
+
+    module function div_ia( lhs, rhs ) result(r)
+        integer,          intent(in) :: lhs
+        class(mlx_array), intent(in) :: rhs
+        type(mlx_array) :: r, s
+        call mlxf_enter('operator(/)')
+        call mlxf_integer_scalar(s, rhs, lhs, 'operator(/)')
+        call mlxf_binary(r, mlxc_divide, s, rhs, 'operator(/)')
+    end function div_ia
+
     ! comparisons give boolean arrays; a scalar operand is weak
     module function lt_aa( lhs, rhs ) result(r)
         class(mlx_array), intent(in) :: lhs, rhs
@@ -201,6 +282,26 @@ contains
         call mlxf_binary(r, mlxc_less, s, rhs, 'operator(<)')
     end function lt_da
 
+    ! a default-integer scalar: exact in an integer array's kind (out of range, a stop), int32 with booleans, weak
+    ! otherwise (mlxf_integer_scalar)
+    module function lt_ai( lhs, rhs ) result(r)
+        class(mlx_array), intent(in) :: lhs
+        integer,          intent(in) :: rhs
+        type(mlx_array) :: r, s
+        call mlxf_enter('operator(<)')
+        call mlxf_integer_scalar(s, lhs, rhs, 'operator(<)')
+        call mlxf_binary(r, mlxc_less, lhs, s, 'operator(<)')
+    end function lt_ai
+
+    module function lt_ia( lhs, rhs ) result(r)
+        integer,          intent(in) :: lhs
+        class(mlx_array), intent(in) :: rhs
+        type(mlx_array) :: r, s
+        call mlxf_enter('operator(<)')
+        call mlxf_integer_scalar(s, rhs, lhs, 'operator(<)')
+        call mlxf_binary(r, mlxc_less, s, rhs, 'operator(<)')
+    end function lt_ia
+
     module function le_aa( lhs, rhs ) result(r)
         class(mlx_array), intent(in) :: lhs, rhs
         type(mlx_array) :: r
@@ -238,6 +339,26 @@ contains
         call mlxf_weak_scalar(s, rhs, real(lhs, real64), 'operator(<=)')
         call mlxf_binary(r, mlxc_less_equal, s, rhs, 'operator(<=)')
     end function le_da
+
+    ! a default-integer scalar: exact in an integer array's kind (out of range, a stop), int32 with booleans, weak
+    ! otherwise (mlxf_integer_scalar)
+    module function le_ai( lhs, rhs ) result(r)
+        class(mlx_array), intent(in) :: lhs
+        integer,          intent(in) :: rhs
+        type(mlx_array) :: r, s
+        call mlxf_enter('operator(<=)')
+        call mlxf_integer_scalar(s, lhs, rhs, 'operator(<=)')
+        call mlxf_binary(r, mlxc_less_equal, lhs, s, 'operator(<=)')
+    end function le_ai
+
+    module function le_ia( lhs, rhs ) result(r)
+        integer,          intent(in) :: lhs
+        class(mlx_array), intent(in) :: rhs
+        type(mlx_array) :: r, s
+        call mlxf_enter('operator(<=)')
+        call mlxf_integer_scalar(s, rhs, lhs, 'operator(<=)')
+        call mlxf_binary(r, mlxc_less_equal, s, rhs, 'operator(<=)')
+    end function le_ia
 
     module function gt_aa( lhs, rhs ) result(r)
         class(mlx_array), intent(in) :: lhs, rhs
@@ -277,6 +398,26 @@ contains
         call mlxf_binary(r, mlxc_greater, s, rhs, 'operator(>)')
     end function gt_da
 
+    ! a default-integer scalar: exact in an integer array's kind (out of range, a stop), int32 with booleans, weak
+    ! otherwise (mlxf_integer_scalar)
+    module function gt_ai( lhs, rhs ) result(r)
+        class(mlx_array), intent(in) :: lhs
+        integer,          intent(in) :: rhs
+        type(mlx_array) :: r, s
+        call mlxf_enter('operator(>)')
+        call mlxf_integer_scalar(s, lhs, rhs, 'operator(>)')
+        call mlxf_binary(r, mlxc_greater, lhs, s, 'operator(>)')
+    end function gt_ai
+
+    module function gt_ia( lhs, rhs ) result(r)
+        integer,          intent(in) :: lhs
+        class(mlx_array), intent(in) :: rhs
+        type(mlx_array) :: r, s
+        call mlxf_enter('operator(>)')
+        call mlxf_integer_scalar(s, rhs, lhs, 'operator(>)')
+        call mlxf_binary(r, mlxc_greater, s, rhs, 'operator(>)')
+    end function gt_ia
+
     module function ge_aa( lhs, rhs ) result(r)
         class(mlx_array), intent(in) :: lhs, rhs
         type(mlx_array) :: r
@@ -314,6 +455,26 @@ contains
         call mlxf_weak_scalar(s, rhs, real(lhs, real64), 'operator(>=)')
         call mlxf_binary(r, mlxc_greater_equal, s, rhs, 'operator(>=)')
     end function ge_da
+
+    ! a default-integer scalar: exact in an integer array's kind (out of range, a stop), int32 with booleans, weak
+    ! otherwise (mlxf_integer_scalar)
+    module function ge_ai( lhs, rhs ) result(r)
+        class(mlx_array), intent(in) :: lhs
+        integer,          intent(in) :: rhs
+        type(mlx_array) :: r, s
+        call mlxf_enter('operator(>=)')
+        call mlxf_integer_scalar(s, lhs, rhs, 'operator(>=)')
+        call mlxf_binary(r, mlxc_greater_equal, lhs, s, 'operator(>=)')
+    end function ge_ai
+
+    module function ge_ia( lhs, rhs ) result(r)
+        integer,          intent(in) :: lhs
+        class(mlx_array), intent(in) :: rhs
+        type(mlx_array) :: r, s
+        call mlxf_enter('operator(>=)')
+        call mlxf_integer_scalar(s, rhs, lhs, 'operator(>=)')
+        call mlxf_binary(r, mlxc_greater_equal, s, rhs, 'operator(>=)')
+    end function ge_ia
 
     module function eq_aa( lhs, rhs ) result(r)
         class(mlx_array), intent(in) :: lhs, rhs
@@ -353,6 +514,26 @@ contains
         call mlxf_binary(r, mlxc_equal, s, rhs, 'operator(==)')
     end function eq_da
 
+    ! a default-integer scalar: exact in an integer array's kind (out of range, a stop), int32 with booleans, weak
+    ! otherwise (mlxf_integer_scalar)
+    module function eq_ai( lhs, rhs ) result(r)
+        class(mlx_array), intent(in) :: lhs
+        integer,          intent(in) :: rhs
+        type(mlx_array) :: r, s
+        call mlxf_enter('operator(==)')
+        call mlxf_integer_scalar(s, lhs, rhs, 'operator(==)')
+        call mlxf_binary(r, mlxc_equal, lhs, s, 'operator(==)')
+    end function eq_ai
+
+    module function eq_ia( lhs, rhs ) result(r)
+        integer,          intent(in) :: lhs
+        class(mlx_array), intent(in) :: rhs
+        type(mlx_array) :: r, s
+        call mlxf_enter('operator(==)')
+        call mlxf_integer_scalar(s, rhs, lhs, 'operator(==)')
+        call mlxf_binary(r, mlxc_equal, s, rhs, 'operator(==)')
+    end function eq_ia
+
     module function ne_aa( lhs, rhs ) result(r)
         class(mlx_array), intent(in) :: lhs, rhs
         type(mlx_array) :: r
@@ -390,6 +571,26 @@ contains
         call mlxf_weak_scalar(s, rhs, real(lhs, real64), 'operator(/=)')
         call mlxf_binary(r, mlxc_not_equal, s, rhs, 'operator(/=)')
     end function ne_da
+
+    ! a default-integer scalar: exact in an integer array's kind (out of range, a stop), int32 with booleans, weak
+    ! otherwise (mlxf_integer_scalar)
+    module function ne_ai( lhs, rhs ) result(r)
+        class(mlx_array), intent(in) :: lhs
+        integer,          intent(in) :: rhs
+        type(mlx_array) :: r, s
+        call mlxf_enter('operator(/=)')
+        call mlxf_integer_scalar(s, lhs, rhs, 'operator(/=)')
+        call mlxf_binary(r, mlxc_not_equal, lhs, s, 'operator(/=)')
+    end function ne_ai
+
+    module function ne_ia( lhs, rhs ) result(r)
+        integer,          intent(in) :: lhs
+        class(mlx_array), intent(in) :: rhs
+        type(mlx_array) :: r, s
+        call mlxf_enter('operator(/=)')
+        call mlxf_integer_scalar(s, rhs, lhs, 'operator(/=)')
+        call mlxf_binary(r, mlxc_not_equal, s, rhs, 'operator(/=)')
+    end function ne_ia
 
     ! .and. and .or. of boolean arrays
     module function land_aa( lhs, rhs ) result(r)
@@ -469,6 +670,26 @@ contains
         call mlxf_weak_scalar(s, rhs, lhs, 'operator(**)')
         call mlxf_binary(r, mlxc_power, s, rhs, 'operator(**)')
     end function pow_da
+
+    ! a default-integer scalar: exact in an integer array's kind (out of range, a stop), int32 with booleans, weak
+    ! otherwise (mlxf_integer_scalar)
+    module function pow_ai( lhs, rhs ) result(r)
+        class(mlx_array), intent(in) :: lhs
+        integer,          intent(in) :: rhs
+        type(mlx_array) :: r, s
+        call mlxf_enter('operator(**)')
+        call mlxf_integer_scalar(s, lhs, rhs, 'operator(**)')
+        call mlxf_binary(r, mlxc_power, lhs, s, 'operator(**)')
+    end function pow_ai
+
+    module function pow_ia( lhs, rhs ) result(r)
+        integer,          intent(in) :: lhs
+        class(mlx_array), intent(in) :: rhs
+        type(mlx_array) :: r, s
+        call mlxf_enter('operator(**)')
+        call mlxf_integer_scalar(s, rhs, lhs, 'operator(**)')
+        call mlxf_binary(r, mlxc_power, s, rhs, 'operator(**)')
+    end function pow_ia
 
     ! .eqv. and .neqv. of boolean arrays
     module function eqv_aa( lhs, rhs ) result(r)

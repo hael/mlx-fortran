@@ -42,33 +42,16 @@ cmake -S test/consumer -B build_examples -Dmlxf_DIR="$PWD/install/lib/cmake/mlxf
 cmake --build build_examples --target mlxf_example_first && build_examples/mlxf_example_first
 ```
 
-Next: [quickstart](doc/quickstart.md), [installed use](doc/how2s/how2use_from_simple.md), [consumer](test/consumer/mlxf_consumer.f90), [contributing](CONTRIBUTING.md).
+Next: [quickstart](doc/quickstart.md), [installed use](doc/how2s/how2use_installed.md) (requirements, precision, errors,
+ownership, threads, costs), the [API reference](doc/api_reference.md), [consumer](test/consumer/mlxf_consumer.f90),
+[contributing](CONTRIBUTING.md); SIMPLE's integration notes: [how2use_from_simple](doc/how2s/how2use_from_simple.md).
 
-**Status: milestone 1 closed; the library is growing toward parity with mlx-c.** mlx-c 0.8.0 is bound at the
-C level, generated at build time from the headers that are linked: 673 interfaces, and 7 names skipped with a
-reason (variadic functions and structs that are not handles), checked against an independent list of the
-headers' 680 names. That check is name coverage; the ABI is checked by an echo probe, C functions compiled by
-Apple's clang that return what they receive, for every class of argument and result the generator maps (in a
-register and on the stack), with the layout of every struct and the value of every enumerator (`unit_core`, sub-suite
-`abi`; each class's line of the mapping table, mutated, fails the gate). On top of it, the Fortran layer has the
-`mlx_array` type and its lifetime, data movement, evaluation and errors, plus the first operations: elementwise
-arithmetic and comparisons, shape and indexing operations, reductions and scans, batched `matmul`, 1D and 2D
-FFTs, and graph compilation of Fortran callbacks. That set covers the first SIMPLE-shaped pipeline (scoring
-and shift maps of the polar table), measured on the M2 and M5 Ultra
-([report](doc/implementation_notes/completed/mlxf_milestone1_report.md)); its test-only model is a miniature of
-SIMPLE's `polarft_calc` with the table driver `eul_prob_tab`
-([report](doc/implementation_notes/completed/mlxf_toy_architecture_report.md)), now with a fused tail of its dense
-score ([K1](doc/implementation_notes/completed/mlxf_kernel_k1_report.md)) and a miniature of SIMPLE's `projector`
-that reprojects the references on the GPU in a graph and a fused form and hands them to the calculator without
-leaving the device ([K2](doc/implementation_notes/completed/mlxf_kernel_k2_report.md)), and a miniature of SIMPLE's PCG
-reconstruction (`reconstructor_pcg` with its engine) that assembles and solves one half on the GPU
-([K8](doc/implementation_notes/completed/mlxf_kernel_k8_report.md)). The three models have the file layout an
-integration in SIMPLE would have: host files that build without MLX, glue submodules beside them and device
-modules behind one opaque component
-([report](doc/implementation_notes/completed/mlxf_toy_seam_report.md)). The API is still growing, so expect
-it to change. The work to come is ranked in the
-[roadmap](doc/implementation_notes/planned/mlxf_roadmap.md).
-See the [implementation-notes index](doc/implementation_notes/README.md) for active work and completed records.
+**Before relying on it.** A few uses of the present library give a wrong answer, crash or leak without an
+error: indices outside the array (check untrusted ones with `mlx_check_indices`), a function result inside a list of
+handles (`[a, exp(b)]`; the installed `share/mlxf/check_consumer.py` reports such forms), long loops that never
+evaluate. The quickstart's
+[limits](doc/quickstart.md#limits-of-the-present-library-and-what-to-write-instead) give the safe spelling of each,
+in a program the consumer check runs.
 
 ## What it is for
 
@@ -136,6 +119,34 @@ The full contract is [`doc/policies/binding_contract_policy.md`](doc/policies/bi
 
 Fortran intrinsics that the library extends (`matmul`, `sum`, `exp`, ...) keep their names. Everything that
 is MLX-specific is `mlx_<x>`.
+
+## Status
+
+**Status: milestone 1 closed; the library is growing toward parity with mlx-c.** mlx-c 0.8.0 is bound at the
+C level, generated at build time from the headers that are linked: 673 interfaces, and 7 names skipped with a
+reason (variadic functions and structs that are not handles), checked against an independent list of the
+headers' 680 names. That check is name coverage; the ABI is checked by an echo probe, C functions compiled by
+Apple's clang that return what they receive, for every class of argument and result the generator maps (in a
+register and on the stack), with the layout of every struct and the value of every enumerator (`unit_core`, sub-suite
+`abi`; each class's line of the mapping table, mutated, fails the gate). On top of it, the Fortran layer has the
+`mlx_array` type and its lifetime, data movement, evaluation and errors, plus the first operations: elementwise
+arithmetic and comparisons, shape and indexing operations, reductions and scans, batched `matmul`, 1D and 2D
+FFTs, and graph compilation of Fortran callbacks. That set covers the first SIMPLE-shaped pipeline (scoring
+and shift maps of the polar table), measured on the M2 and M5 Ultra
+([report](doc/implementation_notes/completed/mlxf_milestone1_report.md)); its test-only model is a miniature of
+SIMPLE's `polarft_calc` with the table driver `eul_prob_tab`
+([report](doc/implementation_notes/completed/mlxf_toy_architecture_report.md)), now with a fused tail of its dense
+score ([K1](doc/implementation_notes/completed/mlxf_kernel_k1_report.md)) and a miniature of SIMPLE's `projector`
+that reprojects the references on the GPU in a graph and a fused form and hands them to the calculator without
+leaving the device ([K2](doc/implementation_notes/completed/mlxf_kernel_k2_report.md)), and a miniature of SIMPLE's PCG
+reconstruction (`reconstructor_pcg` with its engine) that assembles and solves one half on the GPU
+([K8](doc/implementation_notes/completed/mlxf_kernel_k8_report.md)). The three models have the file layout an
+integration in SIMPLE would have: host files that build without MLX, glue submodules beside them and device
+modules behind one opaque component
+([report](doc/implementation_notes/completed/mlxf_toy_seam_report.md)). The API is still growing, so expect
+it to change. The work to come is ranked in the
+[roadmap](doc/implementation_notes/planned/mlxf_roadmap.md).
+See the [implementation-notes index](doc/implementation_notes/README.md) for active work and completed records.
 
 ## Building
 

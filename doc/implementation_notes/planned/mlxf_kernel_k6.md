@@ -1,21 +1,33 @@
 # K6, family C: the insertion of particle planes into the Fourier volume as a toy `reconstructor` (run `mlxf_kernel_k6`, on the M5 Ultra)
 
-Status, 2026-11-26: planned, not ruled.
-Base: the commit that holds this plan (the run pins its hash in Phase 0 and records it); the plan was checked
-against `6f1af0d` with the working tree of 2026-11-26, the maintainer's uncommitted work included. SIMPLE is
-read at `d354efee2` with `git -C ~/src/SIMPLE show d354efee2:<path>`, never its working tree, and is never
-edited. Supersedes: none. Depends on:
+Status, 2026-11-26: planned; ruled as recommended by Hans, 2026-11-26 ("Rule as recommended"), every decision of section 3 and the run order K4, K3, K5, K6, K7; revised after ranks 2d to 2f (runs `mlxf_refactor`, `mlxf_toy_layout`,
+`mlxf_kernel_forms`).
+Base: the commit that holds this plan, after rank 2g's result and K5's (the run pins its hash in Phase 0 and
+records it). The revision was checked against `ae7d623` (ranks 2d to 2f committed) with the three uncommitted
+document edits of 2026-11-26; the draft was written at `b2c43a4`. SIMPLE is pinned at `28c753993`, the mirror
+ledger's pin since rank 2e, read with `git -C ~/src/SIMPLE show 28c753993:<path>`, never its working tree, and
+never edited; none of the SIMPLE files this plan reads changed between the draft's pin `d354efee2` and this one
+(checked with `git diff -w`). Supersedes: none. Depends on:
 - `type(mlx_metal_kernel)` and `mlx_metal_kernel_spec` (validated: yes, `unit_fast` 152; complex64 inputs and
-  outputs, float32 atomic outputs and rank-2 outputs *measured* in K2's Phase 0; an int32 input that carries a
-  size, and a launch grid that is not a multiple of the threadgroup, never run: Phase 0);
+  outputs, float32 atomic outputs and rank-2 outputs *measured* in K2's Phase 0; an int32 input that carries
+  sizes, on the insertion kernel and on a pull of one thread per voxel at n = 64 and 96, `threadgroup` arrays
+  up to 32,768 B with barriers, *measured* by run `mlxf_kernel_forms`, `completed/mlxf_kernel_forms_report.md`,
+  suites `sizes`, `insert` and `probe`; a launch grid that is not a multiple of the threadgroup, never run:
+  Phase 0);
 - `mlx_scatter_add`, `mlx_take`, `mlx_async_eval`, `mlx_argsort` (validated: public in `src/core/mlxf.f90`;
   `mlx_scatter_add` with complex64 updates and 1.4e8 positions never run on either device: Phase 0);
 - `mlxf_oracle_gridding` and `mlxf_oracle_projection` (validated: yes, standalone under GNU Fortran 16.2 at
   `-O0` and `-O2`, 13 checks of `oracle_grid_selfcheck`; only `mlxf_bench_insert_probe` calls the gridding
   oracle's lattice today, no tester does);
-- `mlxf_bench_insert_probe` (validated: K2's Phase 5, the table in `mlxf_kernel_k2.md`'s Progress);
-- the roadmap's decisions 8, 9, 11, 14 (ruled B, 2026-11-25) and 15, the toy-example policy with both ledgers,
-  and `mlxf_toy_device_work` (validated: the seam run's report, `SEAM_PENDING` = 0).
+- `mlxf_bench_insert_probe` (validated: K2's Phase 5, the table in `mlxf_kernel_k2.md`'s Progress; since run
+  `mlxf_kernel_forms` its `probe_spec`, `seeded_case` and `window_coefficients` are public and
+  `mlxf_bench_kernel_forms.f90` imports them, and its `probe_case` record lives in `mlxf_test_defs.f90`);
+- the measured forms of the insertion at small n (run `mlxf_kernel_forms`, suite `insert`): the atomic push
+  (D0), a pull with one thread per voxel (D1) and that pull with each plane's patch staged in `threadgroup`
+  memory (D2), section 1 and decisions 7, 8 and 24;
+- rank 2g's result (read in Phase 0: it changes `src/core/` and may add assertions to unit areas);
+- the roadmap's decisions 8, 9, 11, 14 (ruled B, 2026-11-25), 15, 16 and 17, the toy-example policy with both
+  ledgers, and `mlxf_toy_device_work` (validated: the seam run's report, `SEAM_PENDING` = 0).
 
 ## 1. Why
 
@@ -29,25 +41,36 @@ shape, a graph form as reference, the pull as the candidate to keep, and measure
 against the atomic kernel. SIMPLE's own insertion is not measured here and no record of it is in hand, so the
 run reports rates and claims no gain over SIMPLE.
 
-The expected outcome, before the decisions. SIMPLE's cost as derived, 0.05 s per batch of 500 on 30 threads at
-perfect scaling (unmeasured, decision 26), is close to the atomic kernel's *measured* 0.037 s. The pull is
-expected at about 3 to 4 times the push's arithmetic with the stencil pre-pass and the tile lists (*derived*,
-decisions 7 and 24), so the plan expects a deterministic insertion that adds GPU capacity to busy cores, not
-one that outruns them.
+The expected outcome, before the decisions (revised 2026-11-26 by run `mlxf_kernel_forms`). SIMPLE's cost as
+derived, 0.05 s per batch of 500 on 30 threads at perfect scaling (unmeasured, decision 26), is close to the
+atomic kernel's *measured* 0.037 s. The plain pull (one thread per voxel, 8 x 8 x 8 tiles, a slab test per
+plane that a tile's threads take alike, the 6 x 6 scan) was measured at small n: exact against the push
+within the push's own noise (1.8e-6 of a voxel's |terms| against the push's 1.4e-6 against itself) and
+repeatable, but 14.5 times slower than the push at n = 64 and 5.6 times at n = 96 (*measured*, suite
+`insert`, 500 planes); staging each plane's patch in `threadgroup` memory made it 9 to 47 % slower still. The
+factor shrinks with n: extrapolated, 68.8 ms against 41.5 ms a batch at n = 160, a factor of 1.66 (*derived*
+from the two sizes; the push grew as n^3 between them, the pull far slower than its n^3 walk; the
+extrapolation lies outside the bounds that run froze, so it is read, not judged). The plan therefore expects
+a deterministic insertion within a small multiple of the atomic kernel at n = 160, which this run measures;
+the draft's derived 3 to 4 times with the pre-pass and the lists, and 27 times for the plain pull, are
+withdrawn as predictions (decision 24).
 
 ## 2. Contract
 
 - The run works on the M5 Ultra only (30 cores, 103.1 GB, the only GPU), in the session, in a copy of the
   checkout, one run at a time. Builds are hand-configured trees with `-DMLXF_WERROR=ON -DFORTLS=OFF
   -DBUILD_TESTS=ON`. Git is read-only.
-- Toy code lives in `src/test/` only, as `mlxf_toy_<stem>` under SIMPLE's names, against the public `mlxf`. No
-  file under `src/core/` or `src/defs/` changes. A missing wrapper is a stop, not a workaround.
+- Toy code lives in `src/test/` only (rank 2d's tree): the toy in `src/test/toys/recon/` as `mlxf_toy_<stem>`
+  under SIMPLE's names, its fixture in `src/test/oracles/`, its bench in `src/test/bench/`, against the public
+  `mlxf`. No file under `src/core/` or `src/defs/` changes. A missing wrapper is a stop, not a workaround.
+  Every new Fortran file opens with its `!@descr:` line, and `doc/code_base_map.md` is regenerated in the
+  phase that adds or removes one (the static gate checks it).
 - The toy has the integration shape from its first build: host files that compile without the library, glue
   `<unit>_mlx` with stubs under `#else`, device modules behind one `class(device_work)`, both ledgers, cycles
   and refusals in sub-suite `seam`, and the off-state program asking the new class for the MLX backend.
 - Results are judged against `mlxf_oracle_gridding` in double precision. The toy imports no oracle. The oracle
   is not edited.
-- Tolerances are measured on seed 1 on both devices, frozen in `src/test/mlxf_test_defs.f90` and in Progress
+- Tolerances are measured on seed 1 on both devices, frozen in `src/test/framework/mlxf_test_defs.f90` and in Progress
   before seeds 2 and 3 are run, and judged on seeds 2 and 3. Every gate has a planted violation shown to fail.
 - A form is kept only if it is repeatable bit for bit on one GPU configuration and tile shape, over repeats
   and over two invocations (roadmap decision 14, ruled B).
@@ -60,14 +83,15 @@ one that outruns them.
 
 ### What the check found (2026-11-26)
 
-Read in SIMPLE at `d354efee2` and in the working tree. A premise of the design notes that the
-code contradicts is marked **differs**.
+Read in SIMPLE at `d354efee2` and in the working tree of `b2c43a4`; re-read at `28c753993` (no file read here
+changed) and at `ae7d623` (items 4, 10, 12 and 13 revised). A premise of the design notes that the code
+contradicts is marked **differs**.
 
 1. `reconstructor` (`src/main/volume/simple_reconstructor.f90`) extends `image`. `alloc_rho` sets the Friedel
    limits `lims = loop_lims(2)` and the expanded bounds `ldim_exp(1,:) = [lims(1,1) - wdim, dim]`,
    `ldim_exp(2:3,:) = [-dim, dim]` with `dim = maxval(abs(lims)) + ceiling(KBWINSZ)`. `cmat_exp` and `rho_exp`
    are public ("only made public for the sake of GPU implementation"). The oracle's lattice
-   (`lattice_insert` of `src/test/mlxf_oracle_gridding.f90`) holds h from -3 to n/2 + 2 and k, m from
+   (`lattice_insert` of `src/test/oracles/mlxf_oracle_gridding.f90`) holds h from -3 to n/2 + 2 and k, m from
    -(n/2 + 2) to n/2 + 2, a shape of (n/2 + 6, n + 5, n + 5): 86 x 165 x 165 = 2,341,350 voxels at n = 160
    (*exact*, the probe's count). The values behind `loop_lims(2)` were taken from the oracle's layout, not read
    in `simple_ftiter.f90` beyond the procedure's modes.
@@ -87,7 +111,7 @@ code contradicts is marked **differs**.
    `insert_slices_batch` (`src/main/volume/simple_reconstructor_openmpoffload.f90`) forms `loc` by repeated
    addition of `r2` along k, divides by the sums, multiplies `wx(i) * (wyz * comp)`, takes its composite rows as
    `rotmats(:,:,i)` times `symmats(:,:,isym)`, and carries no per-plane weight `w`. The probe's kernel
-   (`SRC_HEAD` of `src/test/mlxf_bench_insert_probe.f90`) forms `h * rot[..] + k * rot[.. + 1]` with the
+   (`SRC_HEAD` of `src/test/bench/mlxf_bench_insert_probe.f90`) forms `h * rot[..] + k * rot[.. + 1]` with the
    contraction left to the compiler, divides by the sums and multiplies `w[0][a] * w[1][j] * w[2][l]`.
 5. **differs.** `sampl_dens_correct` is not part of a part's work. `calc_3Drec`
    (`src/main/strategies/search/simple_matcher_3Drec.f90`) ends a state's half with
@@ -103,52 +127,66 @@ code contradicts is marked **differs**.
    `src/main/image/simple_image_ctf.f90`) holds `cmplx_plane` and `ctfsq_plane` on the native lattice for
    k <= 0 only, zero beyond the Nyquist shell, with `frlims`, `shconst` and `nyq`.
 8. **differs.** K6's output does not feed K8's `set_raw_accum`. `set_raw_accum` of
-   `src/test/mlxf_toy_reconstructor_pcg.f90` refuses arrays that are not `(box + 1, boxpd, boxpd)`: the padded
+   `src/test/toys/recon/mlxf_toy_reconstructor_pcg.f90` refuses arrays that are not `(box + 1, boxpd, boxpd)`: the padded
    lattice, filled in SIMPLE by `reconstructor_pcg`'s own scatter (`scatter_window_pair`, coordinate
    `2 (h, k, 0) R`, wrap, numerator scale 8, disc `nyq*nyq`, as `oracle_recon_fixture_accum` states it). The
    gridding accumulators are `(n/2 + 1, n, n)` on the native lattice with scale 4 and a halo instead of a wrap.
 9. **differs.** The insertion is not the adjoint of K2's projector on K2's grids. The projector's cube
-   (`src/test/mlxf_toy_projector_workspace.f90`) is the full `(M + 5)**3` on the padded lattice. The gather
+   (`src/test/toys/projector/mlxf_toy_projector_workspace.f90`) is the full `(M + 5)**3` on the padded lattice. The gather
    that is adjoint to the insertion in SIMPLE is the reconstructor's own (`project_fplane`), which no toy
    models. The adjoint identity is therefore tested against an explicit host matrix (decision 20).
 10. **differs.** The mlx3D note's arithmetic for the pull (its section 3) is corrected in decision 7: 4,851
     tiles, not about 4,600; 1.24e9 plane tests a batch when every thread tests every plane, not 2.3e6; 2.84e5
     weighted pairs a plane, not 5.5e5; about 4.7e4 reached voxels a plane, not 1e5; and a cost the note does
-    not count, the 27-fold repetition of the window's arithmetic, which makes the stencil pre-pass the expected
-    faster form by several times.
+    not count, the 27-fold repetition of the window's arithmetic, which made the stencil pre-pass the expected
+    faster form by several times. Run `mlxf_kernel_forms` then measured the plain pull itself (section 1): its
+    time is not its flop count's, so the pre-pass's gain is measured here, not expected (decisions 7 and 24).
 11. `mlx_scatter_add` was read in `~/src/mlx` at `5c8989446`, which may not be the installed 0.32.4:
     `mlx/backend/cpu/indexing.cpp` copies the source and loops over the updates in order;
     `mlx/backend/metal/indexing.cpp` copies the source and its kernels add with
     `mlx_atomic_fetch_add_explicit`. Expected: repeatable on the CPU device, not on the GPU. Not measured.
 12. mlx3D was read in `~/src/mlx3D` at `7101ec3`. What the mlx3D note says of its code holds where it was
     checked: sizes in an int32 input `iparams` (`splatting/tiles.py`, `splatting/fast.py`); `threadgroup`
-    memory with `threadgroup_barrier` in production kernels (`ops/knn.py`, `splatting/rasterize.py`).
-13. The tree: `unit_kernels` 1,955 checks; fast gate 13 entries, 10.7 s today, bound 38.74 s; `BENCHES(4)` and
-    `NAMED_ONLY(4)` in `src/test/mlxf_test_registry.f90`; `scripts/toy_seam.txt` 26 files;
+    memory with `threadgroup_barrier` in production kernels (`ops/knn.py`, `splatting/rasterize.py`). Run
+    `mlxf_kernel_forms` corrected the note (P3, the waits, is the viewer's path; mlx3D uses no SIMD-group
+    function) and measured both features through our wrapper (Apple question 26).
+13. The tree at `ae7d623`: `unit_kernels` 1,953 checks; fast gate 13 entries, 10.44 to 10.51 s in Release
+    (run `mlxf_kernel_forms`), bound 38.74 s; `BENCHES(6)` and `NAMED_ONLY(4)` in
+    `src/test/framework/mlxf_test_registry.f90`; `scripts/toy_seam.txt` 26 files;
     `test/offstate/mlxf_offstate_exec.f90` asks `polarft_calc`, `projector` and `reconstructor_pcg`;
     `scripts/check_toy_offstate.sh --exec` compares the table of the one sub-suite `polarft_host`; test sources
-    are found by a glob in `src/CMakeLists.txt`; the last Apple question is 31.
+    are found by a glob in `src/CMakeLists.txt`; the test tree's folders (`framework/`, `oracles/`,
+    `toys/{polar,projector,recon}/`, `bench/`) each have an `.inf` the static gate checks; the last Apple
+    question is 36.
 
 ### The queue
 
-The five kernel plans run in the order K3, K4, K5, K6, K7, one at a time, each on the tree the earlier ones
-left. K3, K4 and K7 edit the polar toy; K5 and K6 bring new classes. All five edit
-`src/test/mlxf_test_defs.f90`, `src/test/mlxf_test_registry.f90`, `src/test/test.inf`,
-`scripts/toy_mirror.txt`, `scripts/toy_seam.txt`, `test/offstate/` and the families note.
+Ranks 2d, 2e and 2f are delivered and committed (`ae7d623`); rank 2g, the user-facing hardening, runs next and
+before this batch (roadmap decision 17). Then the five kernel plans run in the order K3, K4, K5, K6, K7, one at
+a time, each on the tree the earlier ones left. K3, K4 and K7 edit the polar toy; K5 and K6 bring new classes.
+All five edit `src/test/framework/mlxf_test_defs.f90`, `src/test/framework/mlxf_test_registry.f90`, the
+folders' `.inf` files, `doc/code_base_map.md`, `scripts/toy_mirror.txt`, `scripts/toy_seam.txt`,
+`test/offstate/` and the families note.
 
-K6 reads no file of the polar toy, so K3 and K4 change no design premise of this plan. They and K5 may change
-these, and Phase 0 re-checks exactly these and records each value it finds:
-- the count of `unit_kernels` (1,955 today), the fast gate's entries and seconds, and the other areas' counts;
+Rank 2g changes `src/core/` and no test file: integer statistics, the Euclidean norms and floating means in a
+scaled form, empty extrema, integer-scalar operators, saves that keep a file on failure, an index validator.
+It may raise the counts of `unit_ops`, `unit_io`, `unit_linalg`, `unit_array` and `unit_core`; it changes no
+operation this plan calls (`mlx_scatter_add`, `mlx_take`, the kernels). K6 reads no file of the polar toy, so
+K3 and K4 change no design premise of this plan. Rank 2g, they and K5 may change these, and Phase 0 re-checks
+exactly these and records each value it finds:
+- rank 2g's report: what it changed of the list below;
+- the count of `unit_kernels` (1,953 at `ae7d623`), the fast gate's entries and seconds, and the other areas'
+  counts;
 - the sizes of `BENCHES` and `NAMED_ONLY` and the rows of area `kernels` in the registry;
 - the members of `parameters` and the constants of `mlxf_test_defs.f90` (a name this plan adds may be taken);
 - the line format and the line counts of both ledgers, and `SEAM_PENDING` = 0;
 - the classes the off-state program asks, and what `scripts/check_toy_offstate.sh --exec` compares;
 - the settings of `scripts/run_parts.sh` (`RUN_PARTS_BENCH`, `RUN_PARTS_SUITE`, `RUN_PARTS_UNIT`,
   `RUN_PARTS_LOAD`, `RUN_PARTS_MEM`) and the columns of its BENCH.tsv;
-- the last number in `doc/collaboration/apple_questions.md`, and whether K5 answered question 26 by using
-  `threadgroup` memory or `simd_sum` in a toy (then decision 12's probe reads K5's result first);
-- that `src/test/mlxf_bench_insert_probe.f90`, `mlxf_oracle_gridding.f90` and `mlxf_toy_device_work.f90` are
-  as this plan read them (the procedures named in "What the check found").
+- the last number in `doc/collaboration/apple_questions.md` (36 at `ae7d623`);
+- that `src/test/bench/mlxf_bench_insert_probe.f90`, `mlxf_oracle_gridding.f90` and `mlxf_toy_device_work.f90`
+  are as this plan read them (the procedures named in "What the check found"), and which files import the
+  probe's public names (`mlxf_bench_kernel_forms.f90` at `ae7d623`, decision 18).
 
 ## 3. Decisions and rulings
 
@@ -235,26 +273,42 @@ batch of 500 planes.
   nine weights stored per pixel, 48 B x 20,336 x 500 = 0.49e9 B, which agrees with the note) the pull is about
   1e10 (*derived*: 3.2e9 for the pre-pass over all 20,336 pixels, 9.9e8 candidate reads x 5, 1.42e8 pairs
   x 10), a factor of about 3. The operation counts are *guessed* per item. The plain pull is built first
-  because it is the smaller, and the pre-pass is expected to be the form that is kept.
+  because it is the smaller.
+- *Measured since* (run `mlxf_kernel_forms`, suite `insert`, 500 planes, *measured*): the plain pull took 37.3
+  ms against the push's 2.56 ms at n = 64 (14.5 times) and 48.9 ms against 8.79 ms at n = 96 (5.6 times), with
+  1.66 extrapolated to n = 160 (section 1). The arithmetic above predicts neither the factor nor its fall with
+  n, so it no longer ranks the forms: the draft's expectation that the pre-pass is the form kept is withdrawn,
+  and the pre-pass is kept only by decision 24's measured verdict on the driver at n = 160.
 
 **8. The forms, and the order that lets a cheap negative end one early (maintainer).** Recommended:
 - G, the graph form: coordinates, bases, weights and the 27 products from library operations in tiles of 50
   planes (*derived*: 27 x 20,336 x 16 B = 8.8e6 B of deposits a plane, 0.44e9 B a tile), added with
   `mlx_scatter_add`. It is the reference and the form of the CPU device. Built first, Phase 1.
-- A, the atomic kernel: stays in `mlxf_bench_insert_probe`, never enters the toy, a speed reference only.
-- P, the pull (decision 10), Phase 2: the deterministic GPU form ruling B asks for, kept on accuracy,
-  repeatability and the identities, with no speed rule against the graph form (decision 16). Then its variants
-  in Phase 3, in this order: the stencil pre-pass (decision 13), the tile lists (decision 12), a tile shape
-  other than the default (decision 11), each kept only above 30 % over the form kept so far (decision 24).
+- A, the atomic kernel (the push): stays in `mlxf_bench_insert_probe`, never enters the toy, the fast reference
+  only (revised 2026-11-26: it was 5.6 to 14.5 times faster than the plain pull at n = 64 and 96, *measured*,
+  suite `insert`; its seconds per batch are measured beside the pull's in the same session, decision 27).
+- P, the pull (decision 10), Phase 2: the deterministic GPU form ruling B asks for, measured at n = 160 on its
+  own gates (the run that measured it at small n left n = 160 to this plan), kept on accuracy, repeatability
+  and the identities, with no speed rule against the graph form (decision 16). Then its variants in Phase 3,
+  in this order: the stencil pre-pass (decision 13), the tile lists (decision 12), a tile shape other than the
+  default (decision 11), each kept only above 30 % over the form kept so far (decision 24).
+- Staging each plane's needed patch in `threadgroup` memory (the mlx3D note's P1 refinement, D2 of suite
+  `insert`): dropped, not a variant. It equalled the plain pull bit for bit and was 9 to 14 % slower at n = 64
+  and 39 to 47 % slower at n = 96 (*measured*): staging costs more than the reads it saves.
 - S, sort then one thread per voxel reading its run of sorted deposits: the fallback named in advance, built
-  only if the pull fails its repeatability or accuracy gate after two attempts at a diagnosis. Phase 0 times
-  `mlx_argsort` of 1.42e8 uint32 keys once, so the fallback's floor is known before it is needed.
+  only if the pull fails its repeatability or accuracy gate after two attempts at a diagnosis. Its buffers take
+  a persistent capacity (the largest count of seed 1 times 1.25) with the tail masked by a sentinel against a
+  count on the device and one host wait per pass, never per tile: 2.42 / 2.38 times faster than a wait per
+  tile (*measured*, suite `waits`); its sort does not rely on `mlx_argsort`'s stability (Apple question 36).
+  Phase 0 times `mlx_argsort` of 1.42e8 uint32 keys once, so the fallback's floor is known before it is
+  needed.
 - Rejected on arithmetic: segmented sums by differences of `mlx_cumsum` (a float32 running sum over 1.4e8 terms
   loses the small segments), and 36 collision-free scatters a plane by (h mod 6, k mod 6) (deterministic by
   construction, but each scatter copies the grids: 28.1e6 B x 36 x 500 = 0.5e12 B a batch, *derived*).
 - Early ends. If the plain pull's null walk (Phase 0) costs more than 10 times the atomic kernel's 0.037 s
-  (expected about 2.6 times, decision 24's arithmetic), Phase 2 builds the pull with tile lists from the start,
-  the plain walk is not built, and the lists are then part of the pull, not a variant. If the variants'
+  (not expected: the whole plain pull is extrapolated at 1.66 times the push at n = 160, section 1), Phase 2
+  builds the pull with tile lists from the start, the plain walk is not built, and the lists are then part of
+  the pull, not a variant. If the variants'
   ceiling of decision 24 is below 1.30, Phase 3 is not entered. If the insertion costs more than decision 24's
   multiple of the atomic kernel's seconds, the run stops for a ruling (section 7).
 
@@ -277,10 +331,14 @@ and `dens` (float32); the batch's planes as SIMPLE packs them, k <= 0 with the m
 ((n/2 + 1) x (n + 1) x 12 B x 500 = 78e6 B a batch at n = 160, *derived*); the composite rows
 `rot (2, 3, ncopies)` in the order plane, then symmetry copy; the weights; `coef(17)`; and `iparams`, an int32
 input with the count of plane copies (decision 28). Template integers carry the box only. The thread walks the
-plane copies in order; for each, a slab test `|v . n| <= 2.599` with the normal n = r1 x r2, then the 6 x 6
-candidates in SIMPLE's order (colour of h, then k ascending), each tested by the header's one stencil function;
-a contributing pixel's term is added to a register that starts from the stored value. Each voxel is written
-once. The kernel uses registers and device memory only: no `threadgroup` memory, no barrier, no `simd_sum`.
+plane copies in order; for each, the test of decision 12 (a), then the voxel's slab test `|v . n| <= 2.599`
+with the normal n = r1 x r2, then the 6 x 6 candidates in SIMPLE's order (colour of h, then k ascending), each
+tested by the header's one stencil function; a contributing pixel's term is added to a register that starts
+from the stored value. Each voxel is written once. The kernel uses registers and device memory only: no
+`threadgroup` memory, no barrier, no `simd_sum` (the features are available, Apple question 26, but staging
+measured slower, decision 8). This is the pull run `mlxf_kernel_forms` measured as D1 at n = 64 and 96 (its
+source, `insert_pull_spec` in `src/test/bench/mlxf_bench_kernel_forms_src.f90`, is read, not imported: the
+toy writes its own kernel in SIMPLE's colour order and with decision 6's pinned coordinate).
 Rounding to the nearest integer is `round` (half away from zero, as `nint`), never `rint`.
 
 **11. Tile shape, batch size, and how a batch adds to the resident grids (maintainer for the default).**
@@ -292,23 +350,27 @@ and writing new ones (28.1e6 B a half, *derived*: 2,341,350 x 12 B), the registe
 value: no graph addition, and the sum of two batches has the order of one batch of all the planes. The gate:
 1,000 planes in batches of 500, of 250 and of 1 give the same bits.
 
-**12. The plane walk.** Three ways, in this order. (a) Every thread tests every plane copy: no extra input,
-1.24e9 slab tests a batch (*derived*). (b) Tile lists from the host: per tile the plane copies whose slab meets
+**12. The plane walk.** Three ways, in this order. (a) Every thread tests every plane copy against its
+tile's centre, a test the tile's threads take alike so nothing diverges (the walk of suite `insert`'s D1,
+*measured* exact and repeatable at n = 64 and 96), then against its own voxel: no extra input, 1.24e9 tile
+tests a batch (*derived*). (b) Tile lists from the host: per tile the plane copies whose slab meets
 it, in order, as int32 inputs `tcount (ntiles)` and `tlist (ncopies, ntiles)` (9.7e6 B a batch at 8 x 8 x 8,
 *derived*: 4,851 x 500 x 4 B), made on the host from the rotations alone (2.43e6 tests in double precision, no
 device wait); a thread walks its tile's about 38 copies (9.4e7 slab tests a batch, *derived*). The list's tile
 and the launch's threadgroup are equal by default and need not be. (c) Lists built in `threadgroup` memory:
-not in this plan (Apple question 26, MLX issue #4603); it is proposed in the report only if (b)'s host time is
-above 10 % of the driver (*guessed*). Variant (b) is judged second, after the pre-pass, against the form
-kept so far (decision 24).
+not in this plan. The feature works through the wrapper (Apple question 26, *measured*), but staging per tile
+in `threadgroup` memory was slower than the plain pull at small n (decision 8), and MLX issue #4603 stays a
+risk; it is proposed in the report only if (b)'s host time is above 10 % of the driver (*guessed*). Variant (b)
+is judged second, after the pre-pass, against the form kept so far (decision 24).
 
 **13. The stencil pre-pass.** A second kernel, one thread per pixel and plane copy, writes the base
 `t0 (3, npix, ncopies)` as int32 and the nine normalised weights `w9 (9, npix, ncopies)` as float32 from the
 same header (0.49e9 B a batch of 500, *derived*; times `nsym` with symmetry, so the batch of the pre-pass is
 cut to `PROJ_BUDGET_B`). The pull then reads a candidate's base, compares, and reads three weights. The bits
 equal the plain pull's, since both call one function with the same inputs, and that equality is a gate. It
-is the variant judged first, against the plain pull (decision 24), because decision 7 expects the largest
-gain from it. If a rank-3 output is refused, the outputs are rank 2 (*measured* to work, K2 Phase 0).
+is the variant judged first, against the plain pull (decision 24): decision 7's arithmetic gives it the
+largest gain, though the measured pull no longer follows that arithmetic, so the gain is the verdict's to
+find. If a rank-3 output is refused, the outputs are rank 2 (*measured* to work, K2 Phase 0).
 
 **14. The seam: what lives where (maintainer).** Recommended:
 - On the device from `new_accumulator` to `kill`: the two expanded grids of the half (28.1e6 B at n = 160), the
@@ -358,13 +420,23 @@ n = 6,509 terms a voxel, *measured*, and e = 6.0e-8). The tolerance is the error
 (`POLAR_ROW_FACTOR`'s rule) and must lie under the ceiling. The error against the double oracle is reported
 beside the coordinates' floor (1.07e-4, *measured*, K2 Phase 5) and is not gated. If the one-orientation
 fixture exceeds its ceiling, the register becomes a compensated sum (two more registers; determinism kept,
-SIMPLE's order of bits given up) and the report says so: named in advance, not built otherwise.
+SIMPLE's order of bits given up) and the report says so: named in advance, not built otherwise. The basis of
+the choice (run `mlxf_kernel_forms`, *measured*): the plain pull differed from the push by 1.8e-6 of a voxel's
+|terms| at n = 64 on seed 1 (`FORMS_INSERT_TOL` = 3.6e-6, twice that), the size of the push's own spread
+(1.4e-6 between two of its runs); compensation costs 2.8 % where a kernel is bound by other work and 14 %
+where the sums are the kernel, for 50 to 90 times the accuracy. The pull adds about 6 terms a voxel and plane
+behind a stencil test, so a compensated register would cost little; it stays the fallback because it
+gives up the bits of SIMPLE's order (decision 9).
 
 **18. Fixtures and seeds.** A new test module `mlxf_oracle_insert_fixture` takes the probe's fixture out of
 `mlxf_bench_insert_probe` (`disc_pixels`, `fill_pixels`, `drop_ties`, `oracle_case`, `seeded_case`,
 `oracle_insert`, `coordinate_floor`) with the seed as an argument, and adds symmetry copies and the packing of
 planes for k <= 0. The probe imports it and keeps `PROBE_SEED` = 17; its exit is its own table again: 284,313,105
-and 281,043,000 deposits (*exact*) and the errors to the printed digits. Small fixtures, in the fast gate: the
+and 281,043,000 deposits (*exact*) and the errors to the printed digits. Since run `mlxf_kernel_forms` the
+probe's `seeded_case` and `window_coefficients` are public and `mlxf_bench_kernel_forms.f90` imports them with
+`probe_spec`, and the record `probe_case` lives in `mlxf_test_defs.f90`: a name that moves keeps its public
+spelling, the kernel-forms bench's import is re-pointed in the same phase, and `bench_kernel_forms
+suite=insert` reproduces its digests (n = 64, seed 1, `69E0B77A01359E6B`, *measured*) after the move. Small fixtures, in the fast gate: the
 oracle's three planes at n = 8; 64 seeded planes at n = 16 with weights, both halves and two symmetry copies
 (a twofold axis). Bench fixtures: n = 160, 1,000 seeded planes and 1,000 planes of one orientation. Seed 1
 calibrates, seeds 2 and 3 judge (`ELEM_SEED_CALIBRATION`, `ELEM_SEEDS_JUDGED`). A pixel within
@@ -385,6 +457,9 @@ seeds 2 and 3 run. Each row is per form and device, for the numerator and the de
 
 For T5 an element whose density is within a factor 1 +- 1e-3 of `COMPRESS_FLOOR` or `RHO_FLOOR` is counted,
 not judged (*guessed* margin). The error against the double oracle at n = 160 is reported in every row's line.
+A reference point for T3 and T4, not a bound (*measured*, run `mlxf_kernel_forms`, n = 64, seed 1): the plain
+pull against the atomic push differed by 1.8e-6 of a voxel's |terms|, the push against itself by 1.4e-6; the
+accumulation stays a plain float32 register in SIMPLE's order unless decision 17's fallback is taken.
 
 **20. The identities.** (a) Adjoint: for seeded planes z and a seeded volume y at n = 8 and 16,
 `<G z, y> = <z, W y>` with W the explicit matrix the tester builds in double precision from the public
@@ -435,20 +510,21 @@ construction. Suites: `probe` (Phase 0), `sweep` (tile shapes, batch of the pre-
   last exit), beside (a) the atomic kernel's seconds per batch *measured* in the same session, which is what
   determinism costs; (b) the graph form's on both devices; (c) SIMPLE's cost as decision 26 derives it,
   labelled derived and unmeasured.
-- One line registered now for the report, not a gate: the factor between the kept form's insertion split and
-  the atomic kernel's seconds per batch. The estimate, from decision 7's arithmetic with the plane walk added
-  at 6 flop a slab test (*guessed*) and both kernels at the atomic kernel's rate of 2.9e9 flop / 0.037 s =
-  7.8e10 flop/s (*derived*): about 27 for the plain pull (7.7e10 flop, 1.0 s a batch), about 6 with the
-  pre-pass (1.7e10 flop, 0.22 s), about 3.5 with the pre-pass and the tile lists (1.0e10 flop, 0.13 s). If
-  the atomic kernel is bound by its atomic additions and not by arithmetic, every factor is higher. The report
-  says whether the estimate held.
+- One line registered for the report, not a gate: the factor between the kept form's insertion split and
+  the atomic kernel's seconds per batch. The estimate (revised 2026-11-26): 1.66 for the plain pull at n = 160
+  (*derived* by run `mlxf_kernel_forms` from its measured 14.5 at n = 64 and 5.6 at n = 96; read, not judged,
+  as that run left it). The draft's estimate from decision 7's arithmetic (about 27 for the plain pull, 6 with
+  the pre-pass, 3.5 with the pre-pass and the tile lists, at the atomic kernel's 7.8e10 flop/s) is kept
+  beside it as the refuted prediction it is at small n. The report says which estimate held at n = 160.
 - The early stop, a stop for a ruling and never a silent end. The mark is 40 times the atomic kernel's seconds
   per batch *measured* in the session (1.5 s at 0.037 s): the cost of the batch on one SIMPLE thread as
   decision 26 derives it, above which the whole GPU inserts slower than one core by the only figures in hand.
   After Phase 2: if the plain pull's insertion split is above 180 times (40 x 4.5, the pre-pass's *derived*
   gain 27 / 6), no variant is built. After the pre-pass: if the best form is above 40 times, the tile lists and
   the tile shapes are not built. In both cases the run finishes the accuracy and repeatability gates of what
-  is built, lays out this decision's table at one process, and stops (section 7).
+  is built, lays out this decision's table at one process, and stops (section 7). The marks stand as the
+  maintainer's; the measured small-n factors (5.6 at n = 96, falling with n) put both far away, so the stop is
+  not expected.
 
 **25. Parts.** `scripts/run_parts.sh` with 1, 3 and 6 processes of `bench_reconstructor suite=driver`, 30, 10
 and 5 threads, its memory guard on. Reported: the total rate, the rate per process, one process's footprint
@@ -468,16 +544,21 @@ of a gate. The probe's
 kernel sources and its printed table are not changed (decision 18 moves its fixture only).
 
 **28. The mlx3D note's proposal 4: sizes that change per call go in an int32 input, not a template
-(maintainer).** Recommended: yes. K6 measures it: batches of 500, 250, 3 and 1 plane copies through one kernel
-object with `iparams`, against the same sizes through the template (a new source each, about 60 ms,
-*measured* in parity Phase 10, against 0.2 ms for another grid). The workspace counts the kernel objects it
-builds. The line for the skill `mlxf-binding` is proposed in the report with the measurement; the run edits no
-skill. Not verified here: that an input of fewer than 8 elements arrives as the contract's section 12 says
-when it is int32, and that inputs of another shape need no new object (Phase 0).
+(maintainer).** Recommended: yes, now *measured* (revised 2026-11-26): on the insertion probe's kernel and on
+K2's gather, sizes in an int32 input of fewer than 8 elements gave the same bits and the same time per launch
+as template integers, and a new value cost 3.05 / 2.62 ms against 42.7 / 42.0 ms as a template (run
+`mlxf_kernel_forms`, suite `sizes`; MLX keys its kernel library by the source, never by the launch
+configuration). So K6 does not measure the template form again: batches of 500, 250, 3 and 1 plane copies go
+through one kernel object with `iparams`, and the workspace counts the kernel objects it builds and the
+seconds of their first evaluations. Capacities need not be powers of two. The skill line for `mlxf-binding`
+is run `mlxf_kernel_forms`'s proposal, which the report cites with K6's counts; the run edits no skill. Not
+verified here: that inputs of another shape through the same object need no new object (Phase 0).
 
 **29. The mlx3D note's proposal 5: `apply` with its own launch waits for a measured cost of rebuilding
-(maintainer).** Recommended: wait. K6 measures the kernel objects built per driver and the seconds spent
-building them. The proposal is raised again only if that exceeds 1 % of the driver (*guessed*).
+(maintainer).** Recommended: wait. A new object of an existing source costs 2.6 to 3.1 ms at its first
+evaluation (*measured*, run `mlxf_kernel_forms`), which is what an `apply` would save per configuration. K6
+counts the kernel objects built per driver and the seconds spent building them. The proposal is raised again
+only if that exceeds 1 % of the driver (*guessed*).
 
 **30. No chained test with K8 (maintainer).** Item 8 of the check: the gridding accumulators are not what
 `set_raw_accum` takes. Recommended: no chained test in this plan; the report says what the pull would need to
@@ -487,16 +568,18 @@ disc `nyq*nyq`) as a follow-up for the roadmap.
 **31. Protected.** No oracle and no existing `mlxf_toy_*` file is edited, except
 `mlxf_toy_seam_tester.f90`, which gains the new class's cycles and refusals and loses none of its checks.
 `mlxf_bench_insert_probe.f90` changes only by decision 18. The run may add a row to the file table for a new
-`src/test/mlxf_toy_reconstructor_*.f90` submodule it needs, with the reason in Progress and both ledgers
+`src/test/toys/recon/mlxf_toy_reconstructor_*.f90` submodule it needs, with the reason in Progress and both ledgers
 updated in the same step.
 
 **32. Apple questions.** The run writes, and never sends: an amendment of question 12 (deterministic
 scatter-add) with the measured cost of the pull against the atomic kernel; an entry on the repeatability of
 `mlx_scatter_add` per device if Phase 0 measures something the documentation does not say; an entry on
 contraction in a kernel's source (whether an explicit `fma` is honoured and whether `a * b + c` is contracted
-in the mode mlx-c compiles in, beside question 21) if Phase 0's coordinate probe finds a difference; an
-amendment of question 26 only if decision 12 (c) is probed. New entries start at the number after the last
-one Phase 0 finds (32 today).
+in the mode mlx-c compiles in, beside question 21) if Phase 0's coordinate probe finds a difference. Question
+26 already carries run `mlxf_kernel_forms`'s measurements and is not amended unless this run measures
+something new of `threadgroup` memory (it plans no such measurement). A sorted fallback relies on no
+stability of `mlx_argsort` (question 36). New entries start at the number after the last one Phase 0 finds
+(37 at `ae7d623`).
 
 **33. Time boxes.** Each phase has a box in minutes. At the box the run writes what is done and what is not,
 and either finishes within a quarter of the box more or stops with the diagnosis. A box is never met by
@@ -514,20 +597,25 @@ loosening a gate.
 
 ### The choices that are the maintainer's
 
-7 (the pull with the corrected arithmetic), 8 (the forms and their order), 9 (repeatability, not identity), 11
+7 (the pull with the corrected arithmetic, its prediction withdrawn by the measured pull), 8 (the forms and
+their order: the atomic push the fast reference, the pull the deterministic form measured at n = 160, staging
+dropped, a sorted fallback with a persistent capacity), 9 (repeatability, not identity), 11
 (the default tile; other shapes as variants), 14 (what resides, what crosses, where the host waits), 15 (a host
 route), 16 (the graph form kept always, the pull kept on its gates, no speed rule between them), 17 (the
 reference and its ceilings), 24 (the mark of the early stop, 40 times the atomic kernel's seconds per batch, and
 the table from which the maintainer judges whether the insertion is worth a plan for SIMPLE), 28, 29, and 30 (no
-chained test with K8). Each stands as recommended unless ruled otherwise before the go.
+chained test with K8). Each stands as recommended unless ruled otherwise before the go. Revised 2026-11-26
+by run `mlxf_kernel_forms`: 7, 8, 12, 24 (the estimates), 28 (now measured) and 29.
 
 ## 4. Not in this plan
 
 - Any change to `src/core/`, `src/defs/`, a skill, a rule of a policy, or SIMPLE. The toy and test policies
   gain only the lines that list the new toy, its sub-suites and its bench (Phase 5).
 - The insertion of `reconstructor_pcg` on the padded lattice (decision 30), and a chained test with K8.
-- `threadgroup` memory, `threadgroup_barrier` and `simd_sum` in a toy (decision 12 (c)).
-- The sorted form, unless decision 8's condition is met; the compensated register, unless decision 17's is.
+- `threadgroup` memory, `threadgroup_barrier` and `simd_sum` in a toy: staging measured slower (decision 8),
+  lists in `threadgroup` memory not built (decision 12 (c)).
+- The sorted form, unless decision 8's condition is met; the compensated register, unless decision 17's is;
+  staging a plane's patch in `threadgroup` memory (measured slower, decision 8).
 - The preparation of planes (`prep_imgs4rec`, `gen_fplane4rec`), several states, `insert_extra_poses`.
 - The division by the density in the driver (item 5 of the check), `restore_base` and the regularisation.
 - A box other than n = 160 in the bench. A measurement of SIMPLE. Production data.
@@ -536,10 +624,12 @@ chained test with K8). Each stands as recommended unless ruled otherwise before 
 
 Every phase ends with: Debug and Release from scratch in hand-configured trees with `-DMLXF_WERROR=ON
 -DFORTLS=OFF -DBUILD_TESTS=ON`, zero warnings; the fast gate in both; `scripts/check_tree.sh`;
-`scripts/restyle_fortran.py` and `scripts/format_use_blocks.py` on every touched Fortran file; and the unit
-areas at their counts (core 215 or 216, array 193, ops 2,462, fft 194, linalg 632, compile 63, fast 152,
-random 486, transforms 274, io 846, distributed 55, or what Phase 0 found), with `unit_kernels` at Phase 0's
-count plus the checks this run adds, the sum recorded per phase.
+`scripts/restyle_fortran.py` and `scripts/format_use_blocks.py` on every touched Fortran file (the static gate
+includes rank 2d's rules `publist` and `size`, the folders' `.inf` descriptions and the code-base map); and
+the unit areas at the counts Phase 0 finds (at `ae7d623`, *measured*: core 214 to 216, array 193, ops 2,462,
+fft 194, linalg 632, compile 63, fast 152, random 486, transforms 274, io 846, distributed 55, kernels 1,953;
+rank 2g, K3, K4 and K5 may have changed them), with `unit_kernels` at Phase 0's count plus the checks this run
+adds, the sum recorded per phase.
 
 | Change | Gate beyond the common ones |
 |---|---|
@@ -576,7 +666,8 @@ count plus the checks this run adds, the sum recorded per phase.
    footprints and `uptime`, beside the atomic kernel's seconds per batch of the same session, the graph form's
    on both devices and SIMPLE's derived cost labelled as such; and the registered line, the measured factor
    beside the estimate.
-9. Decisions 28 and 29 have their measurements; the proposed line for the skill is in the report.
+9. Decisions 28 and 29 have their counts; the report cites run `mlxf_kernel_forms`'s proposed skill line
+   with them.
 10. The Apple questions of decision 32 are written. The families note's section 5 (family C), its section 8
     row K6 and the roadmap's item for K6 carry the results, the corrected premises (items 5, 8, 9 of the
     check) and the ruling's outcome; `doc/history/2026-11.md` has the batch.
@@ -608,7 +699,7 @@ count plus the checks this run adds, the sum recorded per phase.
   per batch of the same session, or the best form after the pre-pass is above 40 times; the run stops for a
   ruling with the table at one process, the gates of what is built passed;
 - a process of `run_parts.sh` is refused by the memory guard at 3 processes;
-- a change to `src/core/`, `src/defs/`, a rule of a policy or SIMPLE would be needed; SIMPLE at `d354efee2`
+- a change to `src/core/`, `src/defs/`, a rule of a policy or SIMPLE would be needed; SIMPLE at `28c753993`
   contradicts a decision; the static gate fails on something the run did not touch.
 
 **Gates no ruling may waive:** no warning in Debug or Release; the static gate; the library untouched; the
@@ -617,7 +708,7 @@ judge; repeatability of every kept form; the 30 % rule for a second path; the le
 
 ## 8. Phases
 
-### Phase 0, the base, the queue's premises and the probes (box: 120 min)
+### Phase 0, the base, the queue's premises and the probes (box: 110 min)
 
 Pin the base hash. Re-check the list of "The queue" and record each value. Build Debug and Release from
 scratch and run every unit area and the fast gate; record the counts. Then the probes, in a suite `probe` of
@@ -626,9 +717,9 @@ the new bench (the file's first content), each with its number in Progress:
    repeatability on each device over three runs and two invocations, complex64 updates accepted, seconds.
 2. The coordinate bits (decision 6): a kernel with the header's `fma` form and one with the plain expression,
    against the host's two statements, on 1e6 seeded triples; counts of differing bits.
-3. The kernel object's inputs (decisions 10 and 28): an int32 input of one element read as a size; a second
-   call with inputs of another shape through the same object; a grid of (86, 165, 165) with a threadgroup of
-   (8, 8, 8); complex64 input and output of 2,341,350 elements.
+3. The kernel object's inputs (decisions 10 and 28; the int32 size input is measured, run
+   `mlxf_kernel_forms`): a second call with inputs of another shape through the same object; a grid of (86,
+   165, 165) with a threadgroup of (8, 8, 8); complex64 input and output of 2,341,350 elements.
 4. The null walk (decision 8): a kernel of one thread per voxel that runs the 500 slab tests and writes the
    stored value, timed at n = 160, with and without tile lists.
 5. `mlx_argsort` of 1.42e8 uint32 keys, seconds and peak memory, once.
@@ -679,8 +770,8 @@ shape); no code of a rejected variant left in the tree; section 5's gates.
 Suites `accuracy` and `repeat` on the kept form, seeds 2 and 3. Suite `driver` for the kept form and for the
 graph form on both devices, two invocations each, then the kept form at 3 and 6 processes with
 `run_parts.sh`. The probe's atomic kernel under the same load rule in the same session. The measurements of
-decisions 28 and 29. Decision 24's table and its registered line, written with the estimate beside the
-measurement before the table is tidied.
+decisions 28 and 29 (the kernel objects' counts and first evaluations). Decision 24's table and its
+registered line, written with both estimates beside the measurement before the table is tidied.
 
 Exit: acceptance 8 and 9; the table in Progress with both invocations' numbers and no verdict on the
 insertion's worth; section 5's gates.
@@ -688,8 +779,8 @@ insertion's worth; section 5's gates.
 ### Phase 5, the record (box: 60 min)
 
 The Apple questions of decision 32. The families note, the roadmap's item, the history, the index, the toy
-and test policies' lists, `src/test/test.inf`
-and the plan's Progress. The last-phase gates of section 5. The report in the how-to's order: what was
+and test policies' lists, the folders' `.inf` files and `doc/code_base_map.md` for what was kept, and the
+plan's Progress. The last-phase gates of section 5. The report in the how-to's order: what was
 learned, what changed per phase, decisions under delegation, deviations, evidence, left open, the commit
 message naming every new file.
 
@@ -699,20 +790,24 @@ Exit: acceptance 10 and 11.
 
 | File | What | Phases |
 |---|---|---|
-| `src/test/mlxf_toy_reconstructor.f90` | new, host: the class, its host route if ruled | 1, 2 |
-| `src/test/mlxf_toy_reconstructor_mlx.f90` | new, glue: `<name>_mlx` procedures and stubs | 1, 2, 3 |
-| `src/test/mlxf_toy_reconstructor_workspace.f90` | new, device: the type, lifecycle, sources' header | 1, 2, 3 |
-| `src/test/mlxf_toy_reconstructor_workspace_graph.f90` | new, device: graph insertion, compression, correction | 1 |
-| `src/test/mlxf_toy_reconstructor_workspace_pull.f90` | new, device: the pull and its variants | 2, 3 |
-| `src/test/mlxf_toy_matcher_3Drec.f90` | new, host: `calc_3Drec` and its steps | 1, 2 |
-| `src/test/mlxf_toy_reconstructor_tester.f90` | new: the suites of decisions 19 to 22 | 1, 2, 3 |
-| `src/test/mlxf_toy_seam_tester.f90` | the new class's cycles and refusals in sub-suite `seam` | 1, 2 |
-| `src/test/mlxf_oracle_insert_fixture.f90` | new: the probe's fixture, copies, packing, references | 1, 2 |
-| `src/test/mlxf_bench_reconstructor.f90` | new: `probe`, `sweep`, `accuracy`, `repeat`, `driver` | 0, 1, 2, 3, 4 |
-| `src/test/mlxf_bench_insert_probe.f90` | imports the fixture; nothing else | 1 |
-| `src/test/mlxf_test_defs.f90` | records of decision 3, `REC_INS_*`, form constants | 1, 2, 3, 4 |
-| `src/test/mlxf_test_registry.f90` | the bench in `BENCHES` and `NAMED_ONLY`; the suites of `kernels` | 0, 1, 2 |
-| `src/test/test.inf` | the new modules | 1, 5 |
+| `src/test/toys/recon/mlxf_toy_reconstructor.f90` | new, host: the class, its host route if ruled | 1, 2 |
+| `src/test/toys/recon/mlxf_toy_reconstructor_mlx.f90` | new, glue: `<name>_mlx` procedures and stubs | 1, 2, 3 |
+| `src/test/toys/recon/mlxf_toy_reconstructor_workspace.f90` | new, device: the type, lifecycle, sources' header | 1, 2, 3 |
+| `src/test/toys/recon/mlxf_toy_reconstructor_workspace_graph.f90` | new, device: graph insertion, compression, correction | 1 |
+| `src/test/toys/recon/mlxf_toy_reconstructor_workspace_pull.f90` | new, device: the pull and its variants | 2, 3 |
+| `src/test/toys/recon/mlxf_toy_matcher_3Drec.f90` | new, host: `calc_3Drec` and its steps | 1, 2 |
+| `src/test/toys/recon/mlxf_toy_reconstructor_tester.f90` | new: the suites of decisions 19 to 22 | 1, 2, 3 |
+| `src/test/toys/mlxf_toy_seam_tester.f90` | the new class's cycles and refusals in sub-suite `seam` | 1, 2 |
+| `src/test/oracles/mlxf_oracle_insert_fixture.f90` | new: the probe's fixture, copies, packing, references | 1, 2 |
+| `src/test/bench/mlxf_bench_reconstructor.f90` | new: `probe`, `sweep`, `accuracy`, `repeat`, `driver` | 0, 1, 2, 3, 4 |
+| `src/test/bench/mlxf_bench_insert_probe.f90` | imports the fixture; nothing else | 1 |
+| `src/test/bench/mlxf_bench_kernel_forms.f90` | its import of the probe's public names re-pointed if decision 18 moves them; nothing else | 1 |
+| `src/test/framework/mlxf_test_defs.f90` | records of decision 3, `REC_INS_*`, form constants | 1, 2, 3, 4 |
+| `src/test/framework/mlxf_test_registry.f90` | the bench in `BENCHES` and `NAMED_ONLY`; the suites of `kernels` | 0, 1, 2 |
+| `src/test/toys/recon/recon.inf` | the folder's description: the gridding reconstructor and its driver | 1, 5 |
+| `src/test/oracles/oracles.inf` | the folder's description: the insertion's fixture | 1 |
+| `src/test/bench/bench.inf` | the folder's description: the new bench | 0, 5 |
+| `doc/code_base_map.md` | regenerated by `scripts/generate_codeoverview.py` in each phase that adds or removes a Fortran file or edits an `.inf` (the static gate checks it) | 0, 1, 2, 3, 5 |
 | `scripts/toy_mirror.txt` | header sentence for the files read; a line per public name | 1, 2, 3 |
 | `scripts/toy_seam.txt` | a line per new toy file | 1, 2 |
 | `test/offstate/mlxf_offstate_exec.f90` | asks `reconstructor` for the MLX backend; the host table if ruled | 1 |

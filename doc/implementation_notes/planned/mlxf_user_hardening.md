@@ -1,7 +1,9 @@
 # User-facing hardening: consolidated review and prioritized plan
 
-Status, 2026-11-26: **planned, for review; implementation has not started**. Hans requested the consolidation
-and this plan; that request does not constitute a ruling on the proposed API changes or a launch instruction.
+Status, 2026-11-26: **Phases 0 to 6 carried out by run `mlxf_user_hardening` on the M5 Ultra, in the working tree,
+under rulings R0 to R2; release readiness open** on the one item this run could not do, the second Metal GPU
+architecture (decision 12). Report: [`completed/mlxf_user_hardening_report.md`](../completed/mlxf_user_hardening_report.md).
+The plan stays here until that check passes. Originally planned the same day at Hans's request.
 Written against `96c5c5c272af7b688047f841897dfc98e9f30fdf`, with the existing working-tree RoPE test adjustment
 and Claude review. The implementation pins its actual base in Phase 0. Supersedes: no implementation plan;
 this note is the single owner of the two user reviews' follow-up work. Related work:
@@ -92,8 +94,12 @@ release access (must be confirmed, not inferred from a prior report).
 
 ## 3. Decisions and recommendations
 
-Only decision 1 records a user instruction. Decisions 2–13 are **recommendations**, not claimed owner rulings;
-the implementation records any accepted amendments here before changing a public contract.
+Decision 1 records a user instruction. Decisions 3 to 9 were **ruled as recommended** by Hans on 2026-11-26
+("Yes, as recommended", on the list: integer statistics in float32; saves through a temporary file renamed into
+place, symlink destinations refused and permissions kept; a public index validator returning a status, no
+automatic check; a consumer lifetime checker; scaled norms and empty extrema; default-integer scalar operators;
+recoverable graph construction as a design with examples only). Decisions 2 and 10 to 13 stand as recommended.
+The implementation records any later amendment here before changing a public contract.
 
 1. (2026-11-26, Hans) Consolidate both reviews and write a prioritized plan distinguishing library,
    upstream and documentation work. Deliver this note and its index/roadmap/history links; no fixes launched.
@@ -347,20 +353,30 @@ future implementation phases, not claims that these files changed in this planni
 | `src/core/io/mlxf_io.f90`, `src/core/io/mlxf_io_tester.f90` | Save transaction and failure-preservation tests | 1 |
 | `src/core/runtime/mlxf_libc.f90` | Temporary-file/rename/cleanup calls, if needed | 1 |
 | `src/core/ops/mlxf_ops_index.f90`, `src/core/ops/mlxf_ops_index_tester.f90` | Explicit bounds validation API and fixtures | 2 |
+| `src/core/ops/mlxf_ops_index.f90` (Phase 5) | one comment Phase 2 left above the validator, moved back above `section`, which it describes (found by the reference generator) | 5 |
 | `src/core/array/mlxf_array.f90`, `src/core/array/mlxf_array_elementwise.f90`, `src/core/array/mlxf_calls.f90`, `src/core/array/mlxf_calls_elementwise.f90` | Integer scalar bindings and shared helpers; no general ownership rewrite | 4; 1, 2, 3 only if shared signature/helper changes are needed |
 | `src/core/array/mlxf_array_tester.f90`, `src/core/ops/mlxf_ops_logic_tester.f90`, `src/core/ops/mlxf_ops_math_tester.f90` | Scalar promotion/native-intrinsic controls; use actual owning tester after Phase 0 mapping | 4 |
-| `src/defs/mlxf_defs.f90`, `src/core/mlxf.f90` | Validator spec if needed; explicit new public exports | 2, 4 |
-| `src/test/framework/mlxf_test_defs.f90`, `src/test/framework/mlxf_test_registry.f90` | Shared frozen bounds and area/guard registration, only if needed | 1, 2, 3, 4, 6 |
+| `src/defs/mlxf_defs.f90` | Validator spec if needed; Phase 1's behaviourless types shared by modules (a file's facts, a save in progress: rule `defs`) | 1, 2, 4 |
+| `src/core/mlxf.f90` | Explicit new public exports | 2, 4 |
+| `src/test/framework/mlxf_test_defs.f90`, `src/test/framework/mlxf_test_registry.f90` | Shared frozen bounds and area/guard registration, only if needed; Phase 5 registers the named-only benchmark `bench_user_costs` | 1, 2, 3, 4, 5, 6 |
 | `src/core/transforms/mlxf_transforms_tester.f90` or existing transform owner selected in Phase 0 | Derivative controls for changed compositions, if needed | 3 |
 | `scripts/check_rules.py`, `scripts/check_consumer.py`, `scripts/mlxf_consumer_checks.py` (last two new) | Shared lifetime analysis, consumer entry point, planted-rule self-tests | 2 |
-| `CMakeLists.txt`, `cmake/mlxfConfig.cmake.in`, `scripts/check_install.sh` | Install/check consumer tooling and new examples; optional CMake helper | 2, 4, 5, 6 |
+| `CMakeLists.txt`, `cmake/mlxfConfig.cmake.in` | Install/check consumer tooling and new examples; optional CMake helper | 2, 4, 5, 6 |
+| `scripts/check_install.sh` | Runs the consumer examples, Phase 0's safety example from its first appearance | 0, 2, 4, 5, 6 |
 | `README.md`, `doc/quickstart.md`, `doc/how2s/how2use_from_simple.md`, `doc/how2s/how2use_installed.md` (new) | Immediate guidance, compatible general-user entry, architecture/precision limits | 0, 1, 2, 3, 4, 5, 6 |
-| `doc/policies/binding_contract_policy.md`, `doc/policies/test_environment_policy.md`, `doc/architecture_principles.md` | Current contract with implemented changes; two-architecture release rule only when adopted | 1, 2, 3, 4, 5, 6 |
+| `doc/policies/binding_contract_policy.md` | Current contract with implemented changes; Phase 0 names the present limits (C1, C2, C3, C5, C6, C10) | 0, 1, 2, 3, 4, 5, 6 |
+| `doc/policies/test_environment_policy.md`, `doc/architecture_principles.md` | Current contract with implemented changes; two-architecture release rule only when adopted | 1, 2, 3, 4, 5, 6 |
 | `test/consumer/mlxf_example_user_safety.f90` (new), `test/consumer/CMakeLists.txt`, existing examples if needed | Installed compile/run evidence for guidance and API additions | 0, 1, 2, 3, 4, 5 |
+| `test/consumer/mlxf_api_names.f90` | the public API list of rank 2d: every new public name in the same change (ruling R1) | 2, 4 |
+| `test/consumer/mlxf_example_differences.f90` | the quickstart's D rows a phase adds, run by rule `docex` (ruling R2) | 0, 1, 2, 3, 4, 5 |
+| `doc/code_base_map.md` (generated by `scripts/generate_codeoverview.py`) | Regenerated when a phase adds a Fortran file | 0, 1, 2, 3, 4, 5, 6 |
 | `scripts/generate_api_reference.py`, `doc/api_reference.md` (new), rank-2d API inventory tool | Source-derived signatures, coverage and semantic links | 5 |
 | `scripts/check_tree.sh` | Shared checker/reference checks and planted negative controls | 2, 5 |
 | `src/test/bench/mlxf_bench_user_costs.f90` (new, only missing cases after 2d/2f) | Named-only timings; no new executable or CTest process | 5 |
+| `src/test/bench/bench.inf` | the bench directory's description names the new benchmark | 5 |
 | `scripts/release_gate.sh`, `test/CMakeLists.txt` | Record/check release evidence and keep process budget, if needed | 6 |
+| `scripts/check_rules.py`, `scripts/check_consumer.py`, `scripts/generate_api_reference.py` (Phase 6) | write no bytecode cache beside the sources when they import their sibling modules (the release gate found `scripts/__pycache__` in its snapshot) | 6 |
+| `src/core/ops/mlxf_ops_reduce_tester.f90`, `src/core/io/mlxf_io_tester.f90`, `src/core/linalg/mlxf_linalg_matrix_tester.f90`, `src/core/transforms/mlxf_transforms_tester.f90`, `src/core/ops/mlxf_ops_logic_tester.f90` (Phase 6) | the review of the new tests: exact reads of integer extrema, size checks against vacuous passes, exact-sum constant fixtures, ddof on varying data, an unchecked status, a framework seed, two misplaced comments; no bound relaxed | 6 |
 | `doc/implementation_notes/completed/mlxf_user_hardening_report.md` (new at closure) | Findings, phase results, rulings, deviations, evidence and unresolved limitations | 6 |
 
 ## Progress
@@ -380,3 +396,695 @@ phase exits. Hashes confirmed that the owner's two modified Fortran files and Cl
 edits to the existing Apple tracker and notes index were insertion-only. No compilation or numerical tests
 were rerun for this documentation-only change. Historical build/test results above belong to the preceding
 investigation and are not a substitute for Phase 0.
+
+### 2026-11-26 — Phase 0: base pinned, defects reproduced, bounds frozen, guidance published (Claude, run `mlxf_user_hardening`)
+
+**Machine and base.** Apple M5 Ultra (30 cores, 96 GB), GPU `applegpu_g17d`, macOS 27.2.1; Homebrew GNU Fortran
+16.2.0 (`gfortran-16`), CMake 4.5.1, MLX 0.32.4 and mlx-c 0.8.0 (shared, Homebrew). Base
+`ae7d62367facaffc88a2262f8cb9b34ffcd88cfc` (rank 2f's result); dirty at the start, preserved: this note, the roadmap
+and `doc/history/2026-11.md` (the owner's ruling R0 and its records). Ruling R0 (decisions 3 to 9 as recommended) is
+already recorded in section 3; Phase 0 changes no decision. Evidence is under
+`/Users/hael/agent_runs/mlxf_user_hardening/scratch/keep/` (below `keep/`).
+
+**Rank 2d reconciled.** Ranks 2d, 2e and 2f are delivered (commits `6a1a03e`, `bb59c21`, `ae7d623`): every path of the
+file table exists at the base under the name it gives (checked one by one), so no row is remapped. Owners selected
+here: the derivative controls of Phase 3 go to `src/core/transforms/mlxf_transforms_tester.f90`; Phase 4's scalar
+promotion tests to `src/core/array/mlxf_array_tester.f90` (operators) and `src/core/ops/mlxf_ops_logic_tester.f90`
+(comparisons). Two rows gained Phase 0 before their edit: `scripts/check_install.sh` (it names the examples it runs)
+and `doc/policies/binding_contract_policy.md` (Phase 0 names the present limits in the contract, as its text asks).
+
+**Base builds and gates** (the run's recipe: hand-configured trees, `-DMLXF_WERROR=ON -DFORTLS=OFF`, `-j 12`): Debug
+and Release built with 0 warnings, fast gate 13 of 13 (Release 12.1 s of its 60 s budget, *measured*), installed;
+`scripts/check_install.sh` passed on Debug and on Release with `--require-gpu` (`base_check_install.log`).
+`mlxf_test_exec test=unit_core` sees 1 GPU device. No base failure. The toys' 364-line identity set (run
+`mlxf_kernel_forms`' `identity.sh`, paths changed, copied to `keep/tools/`) run twice on the base Release build:
+`identity/identity_ab.log`, compared with that run's Phase 5 copy (SHA-256 `e2d65e88...4d33dba5`).
+
+**Reproductions on the base** (each run twice per build; Debug and Release agree except where marked). Fortran
+programs against the installed package in `keep/repro/` (`run_repro.sh`; logs `base_repro_{release,debug}_run{1,2}.log`),
+direct mlx-c probes `scripts/probes/user_statistics_probe.c` and `user_range_probe.c` (`c1_direct_probe_run{1,2}.log`,
+`c5_c6_direct_probe_run{1,2}.log`, the two runs identical), compile probes `keep/repro/c9/` (`base_c9_compile.log`),
+GCC controls (`base_gcc_c4_controls.log`).
+
+| Row | Holds on the base? | Observed (*measured*) |
+| --- | --- | --- |
+| C1 | yes, both devices, both builds, and through mlx-c alone | image 4096: mean 0, var 16777216, std 4096, also dim/dims/keepdims/ddof=1; pair 2e9: mean -147483648, var 4.61168602e18 (9.22337204e18 with ddof=1), std 2.14748365e9. Direct C: int32, uint32, int64, uint64 wrong in mean, mean_axis, var, std; int8, int16, uint8, uint16, bool right; every case right after a float32 conversion; signed cancellation right. 36 WRONG cases of `repro_numeric` are C1 + C5 |
+| C2 | yes | safetensors 99 B → 0 B after a float64 save, GGUF 80 B → 24 B after an int64 save, status 1 each |
+| C3 | yes; the CPU's out-of-range read is not deterministic | GPU: Fortran indices 6 to 100000000 and -5 give 0, status 0. CPU: 6 to 10000 give 0; 1000000 gave 8.86e11 (3 runs) or SIGSEGV (1); -5 SIGBUS in 3 of 4 runs (0 once); 100000000 SIGSEGV in 4 of 4. 0 and -1 wrap as documented |
+| C4 | yes (gfortran, not MLX) | 1000 rounds: `[a, exp(b)]`, `[a, b*2.0]`, `v = exp(a)` each +1000 live, +250 MiB; the three supported counterparts +0, +0 MiB. GCC issues 2 and 3 reproduce at -O0 with checks and at -O3 |
+| C5 | yes, both devices; direct C too | norm2 f32 [1e20,1e20] inf, [1e-30,1e-30] 0 (all and dim=1 forms); f64 CPU 1e200 inf, 1e-200 0; mean f32 [2e38,2e38] inf. Direct C adds f32 2e38 and f64 1e308 norms, f64 1e308 mean; the scaled controls are within 8 epsilons everywhere |
+| C6 | yes | `maxval`/`minval` of (0,3), dim=1, `error stop 86` ("Cannot max reduce over axis 1 with size 0"); MLX refuses it directly too. gfortran gives -huge/+huge for reals, -huge-1/+huge for integers, shape (3) (`c6_gfortran_empty_identities.log`) |
+| C7 | yes (the documented policy) | (3)+(4) stops 86 at `operator(+)` before any later `status` |
+| C8 | yes | sin f64 on CPU: float64 kind, largest error 4.6e-7 on [0.01, 10]; irfft(rfft(f64)) float32, refused into real64 ("differ in kind"), 2.4e-6 into real32; solve f64 residual 4.4e-16; sin f64 on the GPU stops 86 |
+| C9 | yes | refused by gfortran: `a + 1`, `2 * a`, int32 array + `1_int32`, int32 array + `1`, `print *, a`, `if( all(a > 0.) )`, `a(2:3)`, `mlx_from` of complex(real64); the controls (real scalars, assignment) compile |
+| C10 | yes | 100000 steps evaluate; 300000 stop 86 at `operator(+)`: `[metal::malloc] Resource limit (499000) exceeded` |
+| C11 | not rerun | a cost model, not a defect; measured in Phase 5 under its timing protocol |
+| C12, C13 | yes (reading) | README leads with status; the install guide is `how2use_from_simple.md`; GNU Fortran only, the exact-version refusals pass in `check_install.sh` |
+| C14 | on the M5 only | `unit_fast` (RoPE) passes here; the second architecture is not available to this run (Phase 6) |
+
+**Bounds frozen before any fix** (origin in brackets; they judge Phases 1 and 3 and do not move):
+
+- C1 exact fixtures (image 4096, pair 2e9, every form above, both devices): |result - answer| ≤ eps32·max(1, |answer|)
+  (*derived*: the values, every partial sum and the divisions by 2^20 and 2 are exact in float32, so one epsilon is
+  margin for a reciprocal multiply). Signed cancellation [2e9,-2e9,2e9,-2e9]: mean the same bound, var and std
+  ≤ eps32·|answer| (*derived*: one rounding of 4e18). Every integer dtype (int8 to int64, uint8 to uint64, bool):
+  oracle = each element converted to float32, then the statistic in real64 on the host; bound eps32·max(1, |answer|)
+  for constant fixtures (*derived*), and the existing `REDUCE_TOLERANCES` rows of `mlx_mean`, `mlx_var`, `mlx_std`
+  for general integer fixtures (*existing frozen bound*). The result dtype stays float32.
+- C5: two equal values (f32 1e20, 1e-30; CPU f64 1e200, 1e-200): finite, nonzero, |r - sqrt(2)|x|| ≤ 8·eps_k·sqrt(2)|x|
+  (*derived*, the plan's). f32 mean [2e38,2e38] within 8 eps32 (*derived*). General finite real vectors of n ≤ 1024
+  elements, any magnitudes: relative error ≤ (n + 2)·eps_k against a real64 (for f64: scaled real64) host oracle
+  (*derived*: recursive summation of n squares, (n-1)·eps, halved by the square root, plus the scale's division and
+  product), never an absolute floor; zeros → exactly 0; empty → exactly 0 (Fortran's `norm2`); a NaN → NaN; an
+  infinity and no NaN → +inf. Complex: the same bound with 2 more epsilons for the magnitude, inputs up to 1e30 in
+  each part without overflow of the scale. Floating mean of n ≤ 1024 values: |r - mean| ≤ (n + 2)·eps_k·mean(|x|)
+  (*derived*, the summation bound relative to the magnitudes, which covers cancellation). The normal-range rows of
+  `REDUCE_TOLERANCES` and `MATRIX_TOLERANCES` (`norm2`) stay in force (*existing frozen bound*).
+- C6: exact. maxval/minval of a zero extent equal gfortran's intrinsic on the same-kind zero-size array: real32 and
+  real64 -huge/+huge, int8 to int64 -huge-1/+huge; device-only dtypes by their own limits (uint: 0 and the largest
+  value; float16, bfloat16: minus and plus their largest finite value; bool: false and true); shape and rank exact,
+  also for the all-dimension, keepdims and list forms (*exact*, `c6_gfortran_empty_identities.log`).
+- C2: byte-for-byte equality of the destination after every returned failure (*exact*). C3, C4, C9: the matrices of
+  section 6, exact (*exact*; C4's counts are fixture counts).
+
+**C rows assigned** (closure owner; upstream entries open and unsent):
+
+| Row | Phase | Closure |
+| --- | --- | --- |
+| C1 | 1 | promote before mean/var/std; regression fixtures above; Apple 33 |
+| C2 | 1 | transactional array saves; Apple 31(a) |
+| C3 | 2 | explicit validator; Phase 0 guidance S3; Apple 35 |
+| C4 | 2 | consumer lifetime checker; guidance S4; GCC issues 2 and 3 |
+| C5, C6 | 3 | scaled norms and means, empty extrema; guidance S7; Apple 34 |
+| C7 | 4 | design and disposition only (decision 9) |
+| C8 | 5 | precision/device matrix (contract and quickstart rows D15, D16 now) |
+| C9 | 4 | default-integer scalar operators; S6's `mlx_item` spelling now |
+| C10 | 5 | bounded-loop example and instrumentation; guidance S5 and contract section 8 now |
+| C11 | 5 | cost model, timing protocol |
+| C12, C13 | 5 | reference, neutral install entry, compatibility table |
+| C14 | 6 | two-architecture evidence; owner's RoPE patch untouched; Apple 32 |
+
+**Guidance published.** The quickstart's new section "Limits of the present library, and what to write instead"
+(rows S1 to S7: integer statistics, saves over a file, unchecked indices, handle lists, long loops, host decisions,
+wide-range norms and empty extrema), each a block of the new `test/consumer/mlxf_example_user_safety.f90`, which
+`test/consumer/CMakeLists.txt` builds and `scripts/check_install.sh` runs (from its scratch directory, since the
+example writes two files); its three quoted blocks are checked verbatim by rule `docex`. The README points to it
+before its status text; the install guide too. The contract names the present limits where they live: unchecked
+indices read outside the buffer (section 10), the integer-statistics defect and empty extrema (reductions), the
+norm and mean range (norms), the checkpoint advice (section 17) and the unevaluated-graph limit (section 8). The
+Apple tracker's 31, 33, 34, 35 carry this run's reproductions and point to the two probes (the `/tmp` evidence is
+gone); `doc/compiler_issues/README.md` records issues 2 and 3 observed again on the M5. Nothing was sent.
+
+**Decisions taken under delegation.** (1) The failing reproducers stay outside the fast suite and the test
+executable: Fortran programs in the run's `keep/repro/` and the two C probes (run by hand, exit 0, their output the
+finding); Phase 1 and 3 admit them as assertions with their fixes. (2) The example's checkpoint advice is "save
+under a new name": Fortran has no standard rename, and a later phase makes the saves replace atomically. (3) C11's
+costs are not re-measured here (a timing protocol belongs to Phase 5). (4) The guidance quotes measured behaviour
+with its versions rather than predicting later fixes.
+
+**Exit.** Baseline facts and frozen bounds: above. All C rows assigned: above. Reproducible fixtures admitted: the
+probes in `scripts/probes/`, the example in `test/consumer/`, the reproducers in the run's `keep/repro/`, each failing
+(or printing the defect) on the base. Immediate guidance verified: see the closing builds below. GPU: present.
+
+**Closing builds** (Phase 0's tree, from scratch with the recipe): Debug and Release 0 warnings, fast gate 13 of 13
+on both (Release 10.5 s, *measured*; `phase0_fast_gate_{debug,release}.log`, after `doc/code_base_map.md` was
+regenerated for the new example, which the first gate run caught: `phase0_build_*.log`); `scripts/check_install.sh`
+passed on Debug and on Release with `--require-gpu`, running `mlxf_example_user_safety` on the GPU
+(`phase0_check_install_{debug,release}.log`); `scripts/check_tree.sh` passed (`phase0_check_tree.log`; its only
+warning is the untracked new example, which the maintainer's commit resolves); `scripts/check_rules.py` holds every
+rule, `docex` included; both formatters leave the example unchanged; `git diff --check` clean. No library source
+changed, so the toy identity set needs no rerun.
+
+**Files changed:** `README.md`, `doc/quickstart.md`, `doc/how2s/how2use_from_simple.md`,
+`doc/policies/binding_contract_policy.md`, `doc/collaboration/apple_questions.md`, `doc/compiler_issues/README.md`,
+`doc/code_base_map.md`, `scripts/check_install.sh`, `test/consumer/CMakeLists.txt`, this note; new:
+`scripts/probes/user_statistics_probe.c`, `scripts/probes/user_range_probe.c`,
+`test/consumer/mlxf_example_user_safety.f90`.
+
+**What it means, in short.** Every defect of C1 to C10 still holds on the pinned base, four of them now shown through
+mlx-c alone or through gfortran alone; the CPU's out-of-range read is worse than reported (a plausible nonzero value,
+or a crash, from run to run). The numbers Phases 1 and 3 will be judged by are frozen above, and a user reading the
+README or quickstart today meets each hazard with a spelling that the consumer check proves works.
+
+### 2026-11-26 — Phase 1: integer statistics corrected, array saves made transactional (Claude, run `mlxf_user_hardening`)
+
+Machine, toolchain and base as Phase 0 (M5 Ultra `applegpu_g17d`, GNU Fortran 16.2.0, MLX 0.32.4, mlx-c 0.8.0, base
+`ae7d623` with Phase 0's tree). Evidence under `/Users/hael/agent_runs/mlxf_user_hardening/scratch/keep/phase1/`
+(below `phase1/`). Ruling R0's decisions 3 and 4 are what this phase implements, as recommended; no other decision
+changed.
+
+**C1 (decision 3).** `mlxf_ops_reduce` gains one private helper, `statistic_operand`, called by the six specifics
+of `mlx_mean`, `mlx_var` and `mlx_std`: a boolean, signed or unsigned integer operand is converted to float32
+(`mlx_astype`) before the reduction; real and complex operands pass unchanged; `sum` and `product` are untouched; the
+result stays float32. `test_integer_statistics` (`mlxf_ops_reduce_tester.f90`, every device) asserts Phase 0's frozen
+C1 bounds: the image of 4096 and the pair 2e9 in all/dim/dims/keepdims/ddof=1 forms, signed cancellation, a constant
+of each of the nine integer and boolean kinds (int64 2^62, uint32 4e9, uint64 2^63 included), each within one float32
+epsilon of max(1, |answer|) (*derived* bound), the result kind float32; general int32 and int64 fixtures in
+[-2e9, 2e9] (float32-exact integers, the family's seeds) against the family's oracle, judged by the frozen
+`REDUCE_TOLERANCES` on the data scaled by 1e-9, which maps them onto the family's domain [-2, 2] (*existing frozen
+bound*, unchanged). Largest errors, both builds and devices: mean 1.40, std 1.58, var 2.76 float32 epsilons
+(*measured*), against 4, 4 and 7.08.
+
+**C2 (decision 4).** Semantics fixed before the code, as recommended: the three array saves keep their signatures;
+each checks names/metadata and the format's kinds (safetensors: no float64; GGUF: int8, int16, int32, float16,
+float32 only) and refuses with "nothing was written", evaluates its arrays, settles the destination's name once (the
+suffix `.npy`, `.safetensors` or `.gguf` added where missing, as MLX does for all three), refuses a symbolic link, a
+non-regular file, a file with another hard link and another user's file, creates a hidden sibling
+`.<name>.mlxf<pid>-<k>.tmp<suffix>` with `fopen(..., "wx")` (first free k of 100), lets MLX write it, gives it the
+old file's permission bits and renames it over the destination; any failure unlinks the sibling and never the
+destination. No fsync: the promise is preservation on a returned failure, not durability (decision 4). New libc
+bindings in `mlxf_libc` (rename, unlink, chmod, lstat, getpid, geteuid; symlink, link, mkdir, rmdir for the tests),
+all non-variadic; `c_file_info` reads macOS arm64's `struct stat` at its checked offsets (mode at byte 4, links at 6,
+owner at 16; verified with clang's `offsetof`, and the tests read back a mode of 640). The two steps are
+`mlxf_save_begin` and `mlxf_save_end` of `mlxf_io`, module-public but not exported by `mlxf`: the test seam the
+plan names, driven by the tester, with no switch or global state. `mlx_function_exporter` is unchanged and keeps its
+incomplete-file warning. `test_replacement` (`mlxf_io_tester.f90`, every device) checks the original bytes after a
+refused kind, names, metadata, a failed evaluation (GPU: one buffer beyond `max_buffer_length`), a failed write, a
+failed rename (existing and absent destination) and exhausted temporary names; canonical bytes on success; mode 640
+kept; a new file's mode equal to a program-created file's; `.npy` added once to a name with spaces; symlink, hard link
+and directory refused; no temporary file left. Another user's file is not testable without a second account.
+
+**Plants** (a patched copy built apart, `plants/plant.sh`, logs `plants/plant_c{1,2}_*.log`): C1 with the conversion
+removed fails 70 of 2636 `unit_ops` assertions; C2 with the transaction and the kind preflights removed fails 17 of
+901 `unit_io` assertions. Both on the final tests.
+
+**Gates** (from scratch with the recipe): Debug and Release 0 warnings, fast gate 13 of 13 (Release 12.1 s,
+*measured*), installed; `check_install.sh` passed on Debug and on Release with `--require-gpu` (the example's S1 and
+S2 now exercise the fixed behaviour); every unit area passed in both builds (`units_{debug,release}_*.log`); the
+static gate passed (`check_tree.log`); both formatters on every touched Fortran file. A first Release build failed on
+`-Werror=function-elimination` (impure `contents`/`exists` as operands of `.and.` in the new io test), fixed by
+evaluating them into variables (`p1_build_try1.log`). Phase 0's installed reproducers against the new Release
+install (`repro_after_release.log`): every C1 case correct on both devices, both refused saves leave 99 and 80 bytes
+intact; the 12 remaining WRONG cases are C5's (Phase 3). The toy identity set is byte for byte the base's (364 lines,
+SHA-256 `e2d65e88...4d33dba5`, `identity.log`).
+
+**Costs** (decision 13; `timing/costs.f90`, `timing/costs.log`; median of 5 repeats after 3 warm-ups, two
+interleaved before/after rounds, GPU, Release, one-minute load 3.7 to 3.9 before each, *measured*): `mlx_mean` of a
+1024×1024 int32 array with its evaluation 162 to 227 µs before, 170 to 171 µs after (the float32 control 158 µs both);
+`mlx_var` 189 to 192 µs both; a 16-byte safetensors save over a file 46 to 54 µs before, 131 to 133 µs after (about
+80 µs of lstat, temporary file, permissions and rename); a 4 MiB save 381 to 385 µs after against 422 to 450 µs before
+(safetensors), 352 to 380 against 421 to 423 (npy): writing a fresh file and renaming it is not slower here than
+truncating and rewriting the old one. These are measurements, not floors.
+
+**Decisions taken under delegation.** (1) A hard-linked destination is refused (a rename would leave the other links
+with the old bytes), and another user's file too (its ownership cannot be kept); recorded in the contract. (2) A save
+into a directory the program cannot write now fails even over a writable file (the sibling lives there). (3) The
+kinds MLX 0.32.4 refuses are checked by the library before writing; MLX's main branch (commit `1c141875c`, after
+0.32.4) has its own temporary-file save, which follows symlinks: noted in Apple question 31, whose request (a) is to be
+narrowed to its release. (4) The transaction's steps are the test seam (no failure switch). (5) Two behaviourless
+types (`mlxf_file_info`, `mlxf_save_target`) live in `src/defs/mlxf_defs.f90` as rule `defs` requires; the file-table
+row gained Phase 1 before the edit. (6) The general integer fixtures reuse the family's tolerances on scaled data
+rather than new bounds.
+
+**Files changed:** `src/core/ops/mlxf_ops_reduce.f90`, `src/core/ops/mlxf_ops_reduce_tester.f90`,
+`src/core/io/mlxf_io.f90`, `src/core/io/mlxf_io_tester.f90`, `src/core/runtime/mlxf_libc.f90`, `src/defs/mlxf_defs.f90`,
+`test/consumer/mlxf_example_user_safety.f90`, `doc/policies/binding_contract_policy.md`, `doc/quickstart.md`,
+`README.md`, `doc/how2s/how2use_from_simple.md`, `doc/collaboration/apple_questions.md`, `doc/code_base_map.md`, this
+note. No new file.
+
+**Exit.** C1/C2 acceptance passes on the CPU and the GPU in both builds; the regression fails with each fix removed;
+the contract, quickstart, README, install guide and example describe the new behaviour; no serialization format
+changed (every existing byte-level round trip and the canonical-bytes check pass) and no other area's result
+changed.
+
+**What it means, in short.** Integer statistics are now right wherever float32 can represent the answer, and a failed
+save no longer costs the old checkpoint: the two P1 defects that could hurt a user silently are closed locally,
+with tests that fail if either fix is removed.
+
+### 2026-11-26 — Phase 2: an explicit index check and a consumer lifetime checker (Claude, run `mlxf_user_hardening`)
+
+Machine, toolchain and base as Phase 0, with Phases 0 and 1 in the tree. Evidence under
+`/Users/hael/agent_runs/mlxf_user_hardening/scratch/keep/phase2/` (below `phase2/`). Ruling R0's decisions 5 and 6
+are what this phase implements, as recommended.
+
+**C3: the validator's API, frozen here** (R0: names frozen in Phase 2, listed for the maintainer's read). One new
+public generic, **`mlx_check_indices`**, in `mlxf_ops_index`, exported by `mlxf`:
+`call mlx_check_indices(indices, extent, status)` (elements, `1 <= i <= extent`),
+`call mlx_check_indices(indices, extent, size, status)` (slab starts, `1 <= i <= extent - size + 1`, after
+`1 <= size <= extent`), and the list forms `(indices(:), extents(:), status)` and
+`(indices(:), extents(:), sizes(:), status)`, each array against its own extent (the first failure named). `indices`
+is an `mlx_array` of any integer kind, signed or unsigned, and any shape; extents and sizes are default integers;
+`status` is required (it never stops on bad values; a stale or empty handle stops as everywhere). It reduces the
+indices to their smallest and largest value in their own kind, moves both to int64 (a uint64 value at or above 2^62
+is refused first, by a shift), evaluates once and compares on the host: no narrowing, no overflow. Empty index arrays
+pass without an evaluation; index 0 is refused; a nonempty array into an extent of 0, a negative extent and a
+non-integer array are refused. It is not to be called inside a compiled or traced callback (a host wait). The
+operations themselves are unchanged: no validation, no evaluation, no global switch. The recipes and the coverage
+(take, take/put along a dimension, gather and the scatters with one index array or a list, the dynamic slice and
+its update, `mlx_gather_mm`, `mlx_segmented_mm`, `mlx_cross_entropy`'s classes), with `mlx_as_strided` left to its
+own unsafe contract, are in the binding policy's section 10. `test_index_check` (`mlxf_ops_index_tester.f90`,
+every device) runs the C3 matrix of section 6: 112 checks, `ops_index` 88 → 200 (*exact*), including index
+100000000 kept from the CPU's `mlx_take`, accepted indices reused, and `mlx_take` still unchecked and lazy.
+
+**C4: the consumer checker.** The lifetime analysis of `check_rules.py` (statements, constructors, a file's handles,
+rules `ctorcall` and `ctorexpr`) moved verbatim into `scripts/mlxf_consumer_checks.py`; `check_rules.py` imports it,
+so the repository's rules and the consumer checker are one implementation (old and new `check_rules.py` give the
+same findings on a tree with planted `ctorcall` and `ctorexpr` violations: `plant_rules_{old,new}.txt`). The module
+adds the consumer rules, with names resolved in each procedure's scope: `ctorcall` (for names imported from `mlxf`,
+renamed imports and a whole `use mlxf` included), `ctorexpr`, `wholefunc`, `viewexpr`, `overlap`, `alloccomp`,
+`allocsrc`, `arrayintr`, `selfassign`; its docstring and the binding policy (section 3) give the coverage matrix and
+what is not detected (other files' handles, aliasing, macros and inactive preprocessor branches, fixed form, OpenMP
+copies). `scripts/check_consumer.py FILE...` reports file, line, rule and safe spelling, exits 1 on a finding,
+`--rules` prints the limits and every run's summary states them; `--self-test` runs 21 planted fixtures (every
+rule's unsafe form found and its safe form clean, renamed imports, a whole `use mlxf`, scopes, a component view,
+the preprocessor's limit, another file's handles unseen). Installed into `<prefix>/share/mlxf/` with its module;
+`mlxf_check_lifetime(<target>)` in the package config runs it before a target builds (a finding fails the build).
+`check_tree.sh` runs the self-test and the consumer programs (clean); `check_install.sh` runs the installed copy
+with `python3 -I` from the scratch prefix (no repository file reachable): self-test, consumer programs, a planted
+leak reported as `leak.f90:4: ctorexpr`, and the same leak failing a project's build through `mlxf_check_lifetime`;
+the consumer project itself now builds through it. On Phase 0's runtime reproducer it reports exactly the three
+forms that leak at run time and none of the three supported ones (`checker_on_repro_lifetime.log`,
+`repro_lifetime_after.log`: supported forms +0 live, +0 MiB over 1000 rounds; *measured*). Run over this
+repository's own sources (not part of any gate) it finds 6 forms, all genuine: three deliberate bitwise-copy guard
+tests and three test classes with allocatable handle components that are never assigned. `check_rules.py`'s rule
+`libc` now also names Phase 1's bindings (rename, unlink, chmod, lstat, getpid, geteuid, symlink, link, mkdir,
+rmdir).
+
+**Plants** (`plants/`): the validator without its lower-bound refusal fails 18 of 200 `ops_index` assertions; the
+shared `ctorexpr` analysis disabled fails the checker's self-test and silences `check_rules.py` on a planted
+`[x, x*2.0]`: the two tools share one implementation.
+
+**Gates** (from scratch with the recipe, `build_chain.log`): Debug and Release 0 warnings, fast gate 13 of 13
+(Release 10.6 s, *measured*), installed; `check_install.sh` passed on Debug and on Release with `--require-gpu`; every
+unit area passed in both builds (`units_*`); `check_tree.sh` passed; both formatters on every touched Fortran file;
+`list_public_api.py --check` holds (`test/consumer/mlxf_api_names.f90` regenerated, 316 names). A first Release build
+failed on `-Werror=function-elimination` (`indices%size()` as an operand of `.or.`), fixed by a separate test
+(`try1/`). The toy identity set is byte for byte the base's (`identity.log`).
+
+**Costs** (decision 13; `timing/costs.f90`, `timing/costs.log`; GPU, Release, median of 5 after 3 warm-ups, two
+rounds, one-minute load 3.6 before, *measured*): `mlx_check_indices` 145 to 152 µs on 16 indices and 169 to 173 µs on
+1048576, against 150 µs and 161 µs for the `mlx_take` it guards with its evaluation: one check costs about one
+evaluated take, dominated by the wait, which is why it is explicit and done once.
+
+**Decisions taken under delegation.** (1) One generic name with four forms rather than separate element/slab names;
+`status` required. (2) Extents are default integers, as every shape argument of the library; a flat position in an
+array of more than `huge(1)` elements is checked per dimension instead (documented). (3) The validator takes an
+`mlx_array` (the data the operations take), not a host array, which a caller checks with `any` already. (4) uint64
+values at or above 2^62 are refused without a comparison against the extent (no real extent reaches 2^62). (5) The
+consumer checker resolves names per scope; the repository's two rules keep their file-wide reading unchanged. (6) The
+checker is installed under `share/mlxf/`; the CMake helper is a function of the package config, optional to call.
+
+**Found, outside the plan's rows.** `mlx_from` of a zero-size host array stops ("Attempting to allocate
+18446744073709551612 bytes", on the CPU device as well): an unsigned underflow in the transfer of an empty array.
+`mlxf_transfer` is in no phase's file table; the test builds its empty index array with `mlx_zeros([0])`. Left for
+the report as a follow-up.
+
+**Files changed:** `src/core/ops/mlxf_ops_index.f90`, `src/core/ops/mlxf_ops_index_tester.f90`, `src/core/mlxf.f90`,
+`scripts/check_rules.py`, `scripts/check_install.sh`, `scripts/check_tree.sh`, `CMakeLists.txt`,
+`cmake/mlxfConfig.cmake.in`, `test/consumer/CMakeLists.txt`, `test/consumer/mlxf_api_names.f90`,
+`test/consumer/mlxf_example_user_safety.f90`, `doc/policies/binding_contract_policy.md`, `doc/quickstart.md`,
+`README.md`, `doc/how2s/how2use_from_simple.md`, `doc/collaboration/apple_questions.md`, `doc/compiler_issues/README.md`,
+this note; new: `scripts/check_consumer.py`, `scripts/mlxf_consumer_checks.py`.
+
+**Exit.** C3: the matrix passes on both devices in both builds; a refused index never reaches the operation. C4: the
+static plants fail and the safe forms pass, the supported forms hold their live count and memory; the old unchecked
+route adds no validation or evaluation (the operations' code is unchanged); the installed consumer runs the
+checker, from the shell and through CMake; every diagnostic and `--rules` state what was not checked. No compiler
+fix is needed.
+
+**What it means, in short.** A user now has one explicit call that keeps untrusted indices from reading outside an
+array, and a checker, installed with the package, that turns the silent gfortran leaks into build-time messages
+with the line and the fix, while saying plainly what it cannot see.
+
+**Ruling R1 (2026-11-26, after the fence stop of Phase 2).** The driver's file fence refused
+`test/consumer/mlxf_api_names.f90`, which rank 2d's API check (`list_public_api.py --check`) requires to list every
+new public name, and which the file table remapped after rank 2d had omitted. Hans ruled that a row assigns it to
+Phases 2 and 4 (added to the file table by the controller); Phase 2's work stands. Applied: the tree was left as it
+was, the row is in the table, and the gates were re-run on the unchanged sources after the ruling: both builds up to
+date with no recompilation, fast gate 13 of 13 in Debug and Release, `check_install.sh --require-gpu` passed on
+Release (`phase2/r1_*.log`). The fence's report named no other file.
+
+### 2026-11-26 — Phase 3: scaled Euclidean norms and floating means, Fortran's empty extrema (Claude, run `mlxf_user_hardening`)
+
+Machine, toolchain and base as Phase 0, with Phases 0 to 2 in the tree. Evidence under
+`/Users/hael/agent_runs/mlxf_user_hardening/scratch/keep/phase3/` (below `phase3/`). Ruling R0's decision 7 is what
+this phase implements, as recommended; the bounds are Phase 0's, frozen before this change.
+
+**C5.** One scale, shared: `mlxf_reduce_scale` in `mlxf_ops_reduce` (module-public, not exported) takes the largest
+magnitude over the reduced dimensions, of the real and imaginary parts for a complex array so that the scale itself
+cannot overflow, stops its gradient, and marks where it is finite and positive (elsewhere the divisor is 1).
+`norm2` (`mlxf_linalg_matrix`, every form) is `s*sqrt(sum((a/s)**2))` and the floating or complex `mlx_mean`
+(`mlxf_ops_reduce`) is `s*mean(a/s)`; where the scale is zero or not finite MLX's plain result stands (0, +infinity,
+NaN as IEEE arithmetic gives them). Integer operands, the integer-converted means of Phase 1, `mlx_norm` of every
+order, an invalid dimension list (refused under the wrapper's own name) and empty reductions keep MLX's path. One
+implementation: no fast unscaled default is retained (decision 7). Tests, each against Phase 0's bounds:
+`test_norm2_range` (`linalg_matrix` 400 → 442 checks): two equal values 1e20 and 1e-30 (float32, every device) and
+1e200 and 1e-200 (float64, CPU) within 8 epsilons in all/dim/keepdims/list forms, a (2, 2) Frobenius and row case,
+1024 values of mixed magnitudes (1e-30 to 1e37) and signs within (n+2) epsilons of a real64 reference, relative, 16
+values near the bottom of the range, complex parts 1e30 and 3+4i within (n+4) epsilons, float16 values whose squares
+float16 cannot hold, zeros and empty reductions exactly 0, NaN NaN, an infinity +infinity. `test_mean_range`
+(`ops_reduce`): float32 2e38 pairs in five forms and float64 1e308 within 8 epsilons, 1024 mixed values (eight of
+3e38) within (n+2) epsilons of the mean of the magnitudes, signed cancellation, complex parts at 2e38, zeros, NaN,
+infinities, and the empty mean NaN (not a refusal). The normal-range family bounds (`REDUCE_TOLERANCES`,
+`MATRIX_TOLERANCES`) hold unchanged: largest float32 errors mean 1.1–1.3 and norm2 0.69–0.97 epsilons (*measured*).
+
+**Derivatives** (`mlxf_transforms_tester.f90`, `test_scaled_gradients`, every seed, both devices, float64 on the
+CPU): the gradient of `norm2` is `x/norm2(x)` and of `mlx_mean` `1/n`, within `mlx_value_and_grad`'s frozen tolerance
+(largest 0.88 float32 epsilons, *measured*), also for `x` scaled by 1e20 (float32) and 1e200 (float64), where the
+plain norm's square overflowed. At zero the gradient of `norm2` is not finite (printed, not judged): a Euclidean norm
+has no derivative there, MLX's included; stated in the contract.
+
+**C6.** `maxval` and `minval` over an extent of zero (`dim`, a list, or the whole array, kept or not) return
+Fortran's identities in the operand's kind and the reduction's shape: -huge/+huge for float32 and float64,
+-huge-1/+huge for int8 to int64, 0 and the largest value for uint8 to uint64, ∓65504 for float16, ∓3.38953139e38 for
+bfloat16, false/true for booleans; a complex operand is refused as before; a reduction over nonzero extents of an
+empty array keeps MLX's empty result. `test_empty_extrema`: the thirteen ordered kinds in every form, exactly
+(`ops_reduce` 560 → 764 checks with the mean tests). **The empty-slice decision** (this phase records it): no API
+change; documentation is the closure. Along an extent of zero no bound is valid, the dimension is used whole, and no
+bound outside 1 through extent is admitted (contract, section 10).
+
+**Plants** (`plants/`, built apart): the scale forced to 1 (MLX's plain sums) fails 28 of 442 `linalg_matrix` and
+17 of 764 `ops_reduce` assertions; the empty-extremum identity skipped makes `ops_reduce` stop with 86, the base's
+behaviour. (They ran on the tree before two Release-only fixes below, which reorder operands and change no
+semantics.)
+
+**Gates** (from scratch with the recipe, `build_chain.log`): Debug and Release 0 warnings, fast gate 13 of 13
+(Release 10.6 s, *measured*), installed; `check_install.sh` passed on Debug and on Release with `--require-gpu` (the
+example's S7 now calls `norm2` of 1e20 and `maxval` of an empty array directly); every unit area passed in both
+builds; `check_tree.sh` passed; both formatters on every touched Fortran file. The first Release build failed on
+`-Werror=function-elimination` twice over (`a%ndim()` and `r%shape()`/`r%kind()` as later operands of `.or.`/`.and.`),
+fixed by separate tests (`try1/`). Phase 0's installed reproducers (`repro_after_release.log`): 0 WRONG cases (every
+C5 case correct on both devices), `maxval`/`minval` of (0, 3) no longer stop. The toy identity set is byte for byte
+the base's (`identity.log`): the toys' device `minval` calls take non-empty extents, whose path is unchanged.
+
+**Costs** (decision 13; `timing/costs.f90`, `timing/costs.log`; the before binary built from the Phase 2 library;
+GPU, Release, a 1024×1024 float32 array, each call with its evaluation, median of 5 after 3 warm-ups, two
+interleaved rounds, one-minute load 3.8 before, *measured*): `norm2` of every element 163–208 µs before, 231–233 µs
+after; along dimension 1 162–163 → 221–236 µs; `mlx_mean` 159 → 228–234 µs; along dimension 1 155–156 → 222–227 µs;
+`maxval` along dimension 1, the control, 152–154 µs both. The scaled forms cost about one more reduction pass, some
+70 µs per evaluated call here (about +45 %), against a wrong answer at the ends of the range. Not floors.
+
+**Decisions taken under delegation.** (1) The scale of a complex array is taken from its real and imaginary parts
+(not `abs`), which cannot overflow. (2) The scale's gradient is stopped, which makes the derivative exact without
+differentiating the maximum. (3) Non-finite or zero scales fall back to MLX's plain result inside the same
+implementation, so IEEE behaviour for zeros, NaN and infinities is MLX's. (4) Half kinds keep their own arithmetic
+(no float32 accumulation added). (5) `mlxf_ops_reduce.f90` reached the size limit of 1000 lines exactly; my additions
+were compacted rather than the limit raised (rule `size`, no ledger entry). (6) The empty-slice item is closed by
+documentation.
+
+**Files changed:** `src/core/ops/mlxf_ops_reduce.f90`, `src/core/ops/mlxf_ops_reduce_tester.f90`,
+`src/core/linalg/mlxf_linalg_matrix.f90`, `src/core/linalg/mlxf_linalg_matrix_tester.f90`,
+`src/core/transforms/mlxf_transforms_tester.f90`, `test/consumer/mlxf_example_user_safety.f90`,
+`doc/policies/binding_contract_policy.md`, `doc/quickstart.md`, `README.md`, `doc/how2s/how2use_from_simple.md`,
+`doc/collaboration/apple_questions.md`, this note. No new file.
+
+**Exit.** C5/C6 mathematical, non-finite and shape cases pass on both devices in both builds; normal-range and toy
+checks keep their bounds and bytes; the local cost is reported; the backend difference (MLX's plain sums, question
+34) and the Fortran-compatibility change (empty extrema) are in the contract.
+
+**What it means, in short.** Norms and means near the ends of the floating range are now right instead of infinite
+or zero, at the cost of one extra reduction pass, and an empty maxval or minval gives what a Fortran programmer
+expects instead of stopping the program.
+
+### 2026-11-26 — Phase 4, frozen before coding: the default-integer scalar matrix (C9, decision 8)
+
+Ruling R0's decision 8, as recommended. Frozen here, before the first line of code, and judged as written:
+
+- **Surface.** The type-bound generics `operator(+)`, `(-)`, `(*)`, `(/)`, `(**)`, `(<)`, `(<=)`, `(>)`, `(>=)`,
+  `(==)` and `(/=)` of `mlx_array` gain a default-integer scalar on either side: 22 private specifics
+  (`add_ai`/`add_ia` and their siblings). **No new public name**: the operators are the public surface, so
+  `test/consumer/mlxf_api_names.f90` does not change. Other integer kinds (`int64` scalars) are not admitted.
+- **Integer arrays** (int8 to int64, uint8 to uint64): the scalar is made in the array's own kind, never through
+  real32, so the result keeps the array's kind (`+ - * **`) or is boolean (comparisons); `/` is MLX's true division,
+  float32, as `a / b` of two integer arrays is (quickstart D1). A scalar outside the kind's range (int8 with 300,
+  any unsigned kind with a negative value, uint8 with 256, uint16 with 65536) is not wrapped: the operator stops
+  with `error stop 86` and says so, as every graph-building error does. A negative integer exponent follows MLX
+  (documented, not judged).
+- **Real and complex arrays** (float16, bfloat16, float32, float64, complex64): the scalar is weak, as a real one is
+  today: it takes the array's kind (`h + 1` stays float16, `z + 1` complex64, `d + 1` float64 on the CPU).
+- **Boolean arrays**: the scalar is int32 and MLX promotes the booleans to int32 (`m + 1` is int32; `m == 1`
+  compares as int32).
+- **Matrix judged** (exact values and kinds, both operand orders, every device; `unit_array` and `unit_ops`'s
+  logic sub-suite): int32 `[-7, 0, 7]` with 2 for the five arithmetic operators (`/` gives `[-3.5, 0, 3.5]` float32,
+  `**` gives `[49, 0, 49]`, `2 ** [0, 1, 3]` gives `[1, 2, 8]`) and the six comparisons; int8 `[100, -100] + 27` →
+  `[127, -73]` int8; uint8 `[200] + 55` → 255 uint8; int64 `[2**40] + 1` → 1099511627777 int64 exactly; float32,
+  float16, complex64 and (CPU) float64 arrays keep their kind; boolean `[T, F] + 1` → `[2, 1]` int32; a rank-0 array
+  stays rank 0; the stops for int8 with 300, uint8 with -1 and uint8 with 256 are guards of `object_contracts`.
+  Native Fortran expressions on intrinsic types (`1 + 2`, an integer array plus an integer, `count`, `matmul` of
+  real arrays) keep compiling and giving Fortran's results, in the tester and in the installed consumer.
+
+### 2026-11-26 — Phase 4, C7: recoverable graph construction, the design and its disposition (decision 9)
+
+Ruling R0: a design with examples only; no second public graph-building surface is implemented. What follows is
+that design, a prototype's assessment, and the decision it leaves to the maintainer.
+
+**Where errors arise today.** Building a graph (every operator and function) stops with `error stop 86` on any
+MLX error: a shape mismatch, a float64 operation on the GPU, a slice bound outside the array, a dtype outside
+`MLX_DTYPES`. Evaluation, transfer, files, callbacks' `apply`, devices and memory limits are checked procedures that
+return a status. A callback of `mlx_function` must never stop (C++ calls it), so today it may use only operations
+that cannot fail on its inputs. That is the strongest case for C7: the embedding host and the callback writer need
+the construction step to report, not stop.
+
+**Two designs, each with its own failure contract.**
+
+- *A, checked procedures.* A small set of subroutines with an explicit result and a required status, beside the
+  operators, which keep their fail-fast contract (no global mode):
+  `call mlx_add_checked(a, b, r, status)` and `mlx_subtract_checked`, `mlx_multiply_checked`, `mlx_divide_checked`
+  (each also with a real or default-integer scalar for `b`), `call mlx_slice_checked(a, lower, upper, r, status)`
+  (a stride through the static `mlx_slice` only, to stay within five arguments), and
+  `call mlx_from_checked(x, r, status)` for the transfer kinds (an allocation that fails). On failure: `r` keeps
+  what it held (a fresh `r` stays empty, `mlx_is_live(r)` false), the inputs are untouched, no partial node exists,
+  `status` is 1 and `mlx_last_error()` holds MLX's message until the next failure. An empty `r` passed on to an
+  ordinary operator stops, as every empty array does: there is no silent propagation of empty results.
+- *B, validators.* In the style of Phase 2's `mlx_check_indices`, checks of metadata only, without an evaluation,
+  run before the ordinary operators: `call mlx_check_broadcast(a, b, status)` (Fortran's leading dimensions
+  aligned), `call mlx_check_section(a, lower, upper, status)` and `call mlx_check_device(a, status)` (a float64 array
+  with the GPU as the default device). Their limit: they cover the failures the library can predict, not every
+  error MLX may raise.
+
+**Callback safety, message lifetime, recovery.** Inside an `mlx_function` callback a checked form lets the callback
+return the status it got: the callback never stops, as the contract requires. The message needs one rule the
+prototype exposed: mlx-c replaces the callback's own message with "mlx_closure returned a non-zero value", so a
+design must keep the callback's message (the first error of a failed `apply`, or both). After any failure the
+library and MLX stay usable; a failed construction leaves no live handle.
+
+**Example** (the host-embedding pattern the design serves; design A's names, not part of the library):
+
+```text
+call mlx_add_checked(a, b, r, status)        ! a user-supplied shape that may not broadcast
+if( status /= 0 )then
+    call report_to_host(mlx_last_error())     ! the host keeps running; a and b are unchanged
+    return
+endif
+call mlx_eval(r, status=status)              ! evaluation keeps its own checked form
+```
+
+**Prototype assessment** (scratch only, never in the library: `phase4/c7_prototype/`, a copy of the library with a
+module holding `proto_add_checked` and `proto_check_broadcast`; `prototype_run.log`, *measured* on the M5's GPU):
+(3) + (4) returned status 1 with MLX's broadcast message and left `r` empty; float64 + float64 on the GPU returned
+status 1; the next (3) + (3) evaluated to 2, 4, 6; the validator refused (3) with (4) without an evaluation; a
+callback built on the checked add returned status 1 from `apply` (the message was mlx-c's, the gap noted above); no
+live handle was left. A checked form costs one binding per operation over the existing helpers (`mlxf_check`
+already takes a status); a validator costs a host comparison of shapes.
+
+**Disposition.** Deferred: implementing either design is a second public surface that R0 excludes from this run.
+Recommended to the maintainer as a follow-up, in this order: B's three validators first (they extend Phase 2's
+pattern, add no second form of any operation, and cover the three failures a user meets first), then A's checked
+binary operations for callback writers once a SIMPLE callback needs them, with the message rule above. Its rows, if
+ruled: `src/core/ops/mlxf_ops_shape.f90` and `mlxf_ops_elementwise.f90` (or a new `mlxf_ops_checked.f90`),
+`src/core/mlxf.f90`, `test/consumer/mlxf_api_names.f90`, the shape and elementwise testers, the contract's section 6;
+its acceptance: each validator's accept/reject matrix exact, no evaluation added, the guards unchanged. Until then
+the quickstart and the contract keep saying what holds today: construction errors stop. This is not recoverable-
+error support, and the report says so.
+
+**Host printing and host logical helpers** (decided here, as the phase asks): **deferred**. A `write(formatted)`
+for `mlx_array` would evaluate inside an I/O statement, where an MLX failure can neither stop cleanly nor return a
+status; a logical `all`/`any` would hide a wait for the device inside an expression that reads as lazy, against the
+rule that reductions stay lazy and evaluation is explicit. `mlx_item` (and `mlx_to`) remain the documented path, as
+row S6 of the quickstart shows.
+
+### 2026-11-26 — Phase 4: default-integer scalar operators delivered; C7 designed and deferred (Claude, run `mlxf_user_hardening`)
+
+Machine, toolchain and base as Phase 0, with Phases 0 to 3 in the tree. Evidence under
+`/Users/hael/agent_runs/mlxf_user_hardening/scratch/keep/phase4/` (below `phase4/`). Ruling R0's decisions 8 and 9 as
+recommended; the C9 matrix was frozen above before coding; R1's row for `mlxf_api_names.f90` was not needed (no
+public name added).
+
+**C9.** `mlxf_integer_scalar` (`mlxf_calls`, implemented in `mlxf_calls_elementwise`) makes the scalar: exact in an
+integer array's kind (built from int32 through `mlx_from` and converted, never through a real kind; out of range a
+stop naming the value), int32 with a boolean array, weak (`mlxf_weak_scalar`) with a real or complex one. The 22
+specifics (`add_ai`, `add_ia`, ... `ne_ia`) are bound to the eleven operator generics of `mlx_array`
+(`mlxf_array.f90`, bodies in `mlxf_array_elementwise.f90`), each opening with `mlxf_enter` (rule `entry`). The
+frozen matrix passes on both devices in both builds: `test_integer_scalars` (`unit_array` 193 → 232 checks: the
+five arithmetic operators both orders, int8/uint8/int64 at their limits, true division, the integer power, booleans
+to int32, float32/float16/complex64/float64 kept, rank 0, a native integer expression unchanged) and
+`test_integer_comparisons` (`ops_logic` 217 → 249: the six comparisons both orders, int8 at 127, int64 16777217 told
+from 16777216, float32, booleans); three guards (`guard_scalar_int8`, `guard_scalar_unsigned`, `guard_scalar_uint8`,
+`object_contracts` 30 → 33 members, one CTest entry as before). Installed consumer: quickstart row D21 with its block
+in `mlxf_example_differences.f90`, run by `check_install.sh` on both builds; Phase 0's compile probes
+(`c9_compile_after.log` against `base_c9_compile.log`): `a + 1`, `2 * a`, an int32 array plus `1_int32` and plus `1`
+now compile, as the four forms the base refused; `print *, a`, `if( all(a > 0.) )`, `a(2:3)` and `mlx_from` of
+complex(real64) are still refused (deferred or upstream, below). Plant (`plants/`): the range check removed, the
+three guards no longer stop (`expect_abort` fails for each).
+
+**C7.** Designed, prototyped in scratch and deferred (the section above): designs A (checked procedures) and B
+(validators), callback and message rules, the prototype's results, the recommended follow-up with its rows and
+acceptance. Host printing and logical helpers deferred, with reasons; `mlx_item` stays the documented path.
+
+**Gates** (from scratch with the recipe, `build_chain.log`): Debug and Release 0 warnings, fast gate 13 of 13,
+installed; `check_install.sh` passed on Debug and on Release with `--require-gpu`; every unit area passed in both
+builds; `check_tree.sh` passed (rules `entry`, `docex`, `parity` included); both formatters on every touched Fortran
+file. The toy identity set is byte for byte the base's (`identity.log`).
+
+**Costs** (decision 13): none recorded. This phase adds new specifics and changes no existing path; the real-scalar
+operators and every operation the toys use compile to the same calls as before (the identity set shows their results
+unchanged).
+
+**Decisions taken under delegation.** (1) The integer scalar is built through `mlx_from` and `mlx_astype`'s
+binding, not `mlx_array_new_int`, which the parity ledger classes internal (the ledger is outside this phase's
+files). (2) A boolean array with an integer scalar promotes to int32 (the scalar is not converted to boolean, which
+would turn 2 into true). (3) Only the default integer kind is admitted, as decision 8 says; `int64` scalars are not.
+(4) A negative integer exponent follows MLX and is documented, not judged. (5) C7's follow-up recommendation is B's
+validators before A's checked forms.
+
+**Files changed:** `src/core/array/mlxf_array.f90`, `src/core/array/mlxf_array_elementwise.f90`,
+`src/core/array/mlxf_calls.f90`, `src/core/array/mlxf_calls_elementwise.f90`, `src/core/array/mlxf_array_tester.f90`,
+`src/core/ops/mlxf_ops_logic_tester.f90`, `src/test/framework/mlxf_test_registry.f90`,
+`test/consumer/mlxf_example_differences.f90`, `doc/policies/binding_contract_policy.md`, `doc/quickstart.md`, this
+note. No new file.
+
+**Exit.** The admitted integer expressions compile and pass; existing expressions keep their behaviour (every unit
+area, the identity set); C7 has a concrete, reviewable design and disposition; the deferral is not called
+recoverable-error support, and construction errors still stop.
+
+**What it means, in short.** `a + 1` and `2*k > 0` now work as a Fortran programmer expects, exactly in the array's
+integer kind and refusing to wrap; recoverable graph construction has a concrete, prototyped design waiting for the
+maintainer's decision.
+
+**Ruling R2 (2026-11-26, after the fence stop of Phase 4).** The driver's file fence refused
+`test/consumer/mlxf_example_differences.f90`, which must hold the block of the quickstart's new row D21 (rule
+`docex`) and which the file table had not foreseen. Hans ruled that a row assigns it to Phases 0 to 5 (added to the
+file table by the controller); Phase 4's work stands. Applied: the tree was left as it was, the row is in the table,
+and the gates were re-run on the unchanged sources: both builds up to date with no recompilation, fast gate 13 of 13
+in Debug and Release, `check_install.sh --require-gpu` passed on Release (`phase4/r2_*.log`). The fence's report named
+no other file.
+
+### 2026-11-26 — Phase 5: the generated reference, the installed-use guide and the cost model (Claude, run `mlxf_user_hardening`)
+
+Machine, toolchain and base as Phase 0, with Phases 0 to 4 in the tree. Evidence under
+`/Users/hael/agent_runs/mlxf_user_hardening/scratch/keep/phase5/` (below `phase5/`). Rulings R0 to R2 apply; none
+changes this phase. Three rows gained Phase 5 before their edit: the test registry (to register the benchmark),
+`src/test/bench/bench.inf`, and `mlxf_ops_index.f90` for one comment (below).
+
+**C12, the reference.** `scripts/generate_api_reference.py` writes `doc/api_reference.md` from the source: rank
+2d's inventory (`list_public_api.py`) gives the 316 public names in order; each is followed through `mlxf.f90`'s use
+line to its module and resolved there as a generic (every specific), a procedure, a type (public bindings with their
+signatures, every operator's operand pairs, public components), a spec type or a constant (its codes). Each specific
+shows its dummies as declared (kind, rank, intent, `[optional]`), its result and the comment above it, and each name
+links to the binding policy's section for its module. An unresolvable name, a module without a section or an
+undeclared dummy fails it (exit 2). `check_tree.sh` runs `--self-test` (a changed dummy and a removed public name
+change the output; an unknown public name fails it) and `--check` (stale output fails). A plant on a copy of the tree
+(`mlx_save`'s dummy renamed) fails `--check` (`plant_reference.log`). Every public name has its entry (316 of 316,
+*exact*). The generator found one defect of this run: Phase 2 had inserted the validator between `section` and its
+comment, so `mlx_check_indices` read "the bounds record of a section"; the comment is back above `section`.
+
+**C8, C10, C11, C13, the guide.** `doc/how2s/how2use_installed.md` (new) is the neutral entry: the compatibility
+table (exact compiler version, exact shared mlx-c, macOS on Apple silicon or a CPU-only MLX, one submitting thread
+and the OpenMP consequence), install and link (CMake with `mlxf_check_lifetime`, pkg-config), one precision/device
+matrix (storage, result kind, accuracy and device for every kind, float64 and complex128 included), an errors table
+(what stops, what returns a status, callbacks), ownership in short (the checker, views, `mlx_alloc`), and the cost
+model below with the bounded-loop advice (evaluate at the batch boundary, watch `mlx_active_memory()` and
+`mlx_peak_memory()`; no universal cadence, quickstart row S5). `how2use_from_simple.md` keeps its links and points to
+it; the README now leads with use (the first program, building, the links to the guide and the reference, the limits)
+and its status paragraph moved to a section of its own below the API table; the quickstart links both.
+
+**C11, the costs.** `src/test/bench/mlxf_bench_user_costs.f90` (new, `mlxf_test_exec test=bench_user_costs
+suite=costs`, named-only: no new executable, no CTest entry) measures the four cases rank 2f's benches lack: per-step
+against batched evaluation, element reads against one copy, `mlx_from`/`mlx_to` against `mlx_alloc`/`mlx_view` for
+64 MiB, and a callback called directly, through `mlx_function` and compiled (warm, and its first application labelled
+cold), each route's correctness checked once outside the timing, five repeats after a warm-up, median and range.
+Two runs on the Release build (`bench_user_costs.log`; GPU and CPU device; load 3.7 to 4.0 before each, *measured*):
+on the GPU an evaluated small step costs 152–216 µs against 6.5–7.3 µs batched; an element read by `mlx_item` 19 µs
+against 0.15 µs for all 4096 by `mlx_to`; 64 MiB in and out 3.1–3.2 ms (42 GB/s) by copies and 4.5–4.8 ms through a
+fresh `mlx_alloc` buffer (its allocation and fill dominate); `exp(x)*2+1` 157 µs direct or through `mlx_function` and
+142 µs compiled; the compiled first application 140 ms in a fresh process, 1.3 ms with MLX's kernel cache warm. The
+table is in the guide; Claude's review measured 181 µs, 21 µs and 14 GB/s on the M2 Ultra, of the same order. These
+are measurements of this machine, not floors.
+
+**Gates** (from scratch with the recipe, `build_chain.log`): Debug and Release 0 warnings, fast gate 13 of 13,
+installed; `check_install.sh` passed on Debug and on Release with `--require-gpu`; every unit area passed in both
+builds; `check_tree.sh` passed with the reference's checks (`check_tree_final.log`, after the last document edit);
+both formatters on every touched Fortran file. The toy identity set is byte for byte the base's (`identity.log`).
+
+**Decisions taken under delegation.** (1) The reference is plain generated Markdown with one fenced block per name,
+linked to the policy's sections rather than duplicating them (decision 10: no second hand-written contract). (2) A
+type's private components are left out (a bare `private` before `contains`). (3) The cost benchmark reports medians
+of two runs in the guide and keeps both runs' lines in the log. (4) The guide's name is `how2use_installed.md`, as
+the file table names it; the SIMPLE guide keeps its name and links.
+
+**Files changed:** `scripts/check_tree.sh`, `src/test/framework/mlxf_test_registry.f90`, `src/test/bench/bench.inf`,
+`src/core/ops/mlxf_ops_index.f90` (a comment), `README.md`, `doc/quickstart.md`, `doc/how2s/how2use_from_simple.md`,
+`doc/code_base_map.md`, this note; new: `scripts/generate_api_reference.py`, `doc/api_reference.md`,
+`doc/how2s/how2use_installed.md`, `src/test/bench/mlxf_bench_user_costs.f90`.
+
+**Exit.** C8 and C10 to C13 are documented in the guide and the reference, current by construction (the reference by
+its checks, the examples by `docex` and the installed check); full reference coverage and the staleness check pass;
+the performance numbers name the machine, the build, the boundary and the protocol; no performance is promised.
+
+**What it means, in short.** A user can now find every name with its arguments and kinds, learn from one page what
+the library needs and where its precision, error and ownership limits are, and see what a step, a read, a copy and
+a compiled call cost on real hardware.
+
+### 2026-11-26 — Phase 6: validation and hand-over (Claude, run `mlxf_user_hardening`)
+
+Machine, toolchain and base as Phase 0, with Phases 0 to 5 in the tree. Evidence under
+`/Users/hael/agent_runs/mlxf_user_hardening/scratch/keep/phase6/` (below `phase6/`). Rulings R0 to R2 apply.
+
+**Gates on the final sources** (`chain.sh`, `chain.out`): Debug and Release from scratch with `MLXF_WERROR=ON`, 0
+warnings, fast gate 13 of 13 (Release 10.6 s of 60, *measured*), every unit area in both builds (`units_*`), the
+installed consumer on Debug and on Release with `--require-gpu`, `check_tree.sh`; `release_gate.sh --allow-dirty`
+passed (`release_gate_final.log`: the snapshot's Debug and Release, their fast gates and installed consumers on the
+GPU, `check_embed.sh`, `check_toy_offstate.sh`, no side effect); `ci_cpu_job.sh` passed in Release and in Debug
+against a CPU-only MLX 0.32.4 / mlx-c 0.8.0 (`ci_cpu_final_*.log`), built in scratch from the exported sources the
+maintainer's `build_mlx_deps.sh --cpu-only` had left in `~/src/mlx-fortran/.deps/work-cpu` (copied, read only),
+with that script's flags (`build_cpu_deps.sh`, `build_cpu_deps.log`). The toy identity set is byte for byte the
+base's (`identity.log`); the release gate's off-state table equals the executable's (135 lines). RoPE's cases pass
+in `unit_fast` on this GPU (`applegpu_g17d`).
+
+**Found and fixed in this phase.** (1) The first release gate failed: the builds wrote `scripts/__pycache__` into the
+snapshot, because Phase 2's `check_rules.py` and `check_consumer.py` and Phase 5's `generate_api_reference.py`
+import sibling modules (`release_gate_try1.log`). Each now sets `sys.dont_write_bytecode` first; the second gate
+passed with no side effect. (2) An independent review of the new tests against section 6 (a read-only subagent, its
+findings listed in this entry's evidence) found checks weaker than the frozen bounds; the testers were tightened,
+no bound loosened: the empty integer extrema compared exactly in int64 (they had passed through float32), size and
+rank checks against vacuous passes, constant fixtures shrunk so that every partial sum is exact in float32 (int16 and
+uint16 to 4096 elements, int32 2e9 to 8: the frozen one-epsilon bound assumes exact sums), `ddof=1` on varying data
+(8e18 and its root), a GGUF save's status and a chmod's result asserted, the framework's seed in `test_norm2_range`,
+and two comments put back above the procedures they describe. A first Release build of the tightened testers failed on
+`-Werror=function-elimination` (`try_final1/`), fixed by separate statements. Gaps the review named and left open:
+one operand order only for the narrow-kind and real integer-scalar cases, a few slab-form edge cases of the validator,
+no load-back of a replaced checkpoint, no evaluation failure on the CPU device.
+
+**Upstream status** (`doc/collaboration/apple_questions.md`): checked against MLX's main branch `5c8989446`
+(2026-11-23): question 31's request (a) is met there by commit `1c141875c` (saves through a temporary file, symlinks
+followed); 33 (integer mean), 34 (Euclidean norm) and 35 (unchecked indices) are unchanged. Nothing was sent.
+
+**The second Metal GPU architecture is open.** This run has the M5 Ultra only. Decision 12 requires the fixed-fixture
+evidence, RoPE's cases included, on two distinct architectures before release readiness is claimed; it is not
+claimed. What it needs: `scripts/release_gate.sh` and every unit area on another generation (the M2 Ultra of the user
+review), with its `applegpu_*` identifier, compiler and dependency facts and numerical logs. The two-architecture rule
+is not written into the test-environment policy, since it is not adopted until a second machine runs it.
+
+**P1 local actions**: C1 (Phase 1), C2 (Phase 1), C3 (Phase 2) and C4 (Phase 2) are closed locally, each with its
+plant. **Documented limits remaining**: construction errors stop (C7 deferred), float64 on the GPU, complex128,
+compiler/platform/thread restrictions, unchecked indexing without the explicit call, the lifetime checker's blind spots.
+
+**Decisions taken under delegation.** (1) The CPU-only MLX built in scratch from the maintainer's exported sources
+rather than from a fresh export of the read-only clones. (2) The testers tightened in this phase, rather than the gaps
+only reported. (3) The two-architecture rule left out of the policy until adopted. (4) The plan stays in `planned/`,
+its status updated, since release readiness is open.
+
+**Files changed:** `scripts/check_rules.py`, `scripts/check_consumer.py`, `scripts/generate_api_reference.py`,
+`src/core/ops/mlxf_ops_reduce_tester.f90`, `src/core/io/mlxf_io_tester.f90`,
+`src/core/linalg/mlxf_linalg_matrix_tester.f90`, `src/core/transforms/mlxf_transforms_tester.f90`,
+`src/core/ops/mlxf_ops_logic_tester.f90`, `doc/collaboration/apple_questions.md`,
+`doc/implementation_notes/planned/mlxf_roadmap.md`, `doc/implementation_notes/README.md`, `doc/history/2026-11.md`,
+this note; new: `doc/implementation_notes/completed/mlxf_user_hardening_report.md`.
+
+**Exit.** Section 6's release evidence exists for this machine (both builds, installed, CPU-only, the gate, the test
+budget unchanged at 13 entries), every P1 local action is closed, and the report distinguishes protection, documented
+limits, the C7 deferral and the open upstream drafts. Release readiness is not claimed: the second architecture is
+missing, as decision 12 foresees.
+
+**What it means, in short.** The hardening is complete and validated on this machine; one check, a second GPU
+generation, separates it from a release.

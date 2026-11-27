@@ -31,8 +31,8 @@ use mlxf, only: mlxf_version_string, mlxf_build_description, mlx_runtime_version
                 mlx_blackman, mlx_hamming, mlx_hanning, mlx_gather, mlx_scatter, mlx_scatter_add, mlx_scatter_max, &
                 mlx_scatter_min, mlx_scatter_prod, mlx_put_along_dim, mlx_masked_scatter, mlx_searchsorted, mlx_unique, &
                 mlx_slice_update, mlx_slice_update_add, mlx_slice_update_max, mlx_slice_update_min, &
-                mlx_slice_update_prod, matmul, mlx_gather_mm, mlx_block_masked_mm, mlx_segmented_mm, mlx_addmm, &
-                mlx_inner, mlx_outer, mlx_kron, mlx_vecdot, mlx_cross, mlx_tensordot, mlx_einsum, &
+                mlx_slice_update_prod, mlx_check_indices, matmul, mlx_gather_mm, mlx_block_masked_mm, mlx_segmented_mm, &
+                mlx_addmm, mlx_inner, mlx_outer, mlx_kron, mlx_vecdot, mlx_cross, mlx_tensordot, mlx_einsum, &
                 mlx_hadamard_transform, mlx_inv, mlx_pinv, mlx_tri_inv, mlx_det, mlx_slogdet, mlx_cholesky, &
                 mlx_cholesky_inv, mlx_qr, mlx_lu, mlx_lu_factor, mlx_svd, mlx_eigh, mlx_eigvalsh, mlx_eig, mlx_eigvals, &
                 mlx_solve, mlx_solve_triangular, mlx_norm, mlx_norm_matrix, norm2, mlx_conv1d, mlx_conv2d, mlx_conv3d, &
@@ -49,5 +49,5 @@ use mlxf, only: mlxf_version_string, mlxf_build_description, mlx_runtime_version
                 mlx_random_truncated_normal, mlx_random_randint, mlx_random_bernoulli, mlx_random_multivariate_normal, &
                 mlx_random_categorical, mlx_random_permutation
 implicit none
-print '(A,I0)', 'mlxf public names: ', 315
+print '(A,I0)', 'mlxf public names: ', 316
 end program mlxf_api_names

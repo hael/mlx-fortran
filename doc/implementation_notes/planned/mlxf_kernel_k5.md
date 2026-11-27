@@ -1,27 +1,38 @@
 # K5: the pose objective of continuous refinement (B2) as a toy `cartft_calc` with its driver `cartft_pose_opt` (run `mlxf_kernel_k5`, on the M5 Ultra)
 
-Status, 2026-11-26: planned, not ruled.
+Status, 2026-11-26: planned; ruled as recommended by Hans, 2026-11-26 ("Rule as recommended"), every decision of section 3 and the run order K4, K3, K5, K6, K7; revised after ranks 2d to 2f (runs `mlxf_refactor`, `mlxf_toy_layout`,
+`mlxf_kernel_forms`).
 
-Base: the commit that holds this plan (the run pins its hash in Phase 0). Checked against `6f1af0d` with the
-working tree of 2026-11-26; SIMPLE at `d354efee2`, read through `git show` only.
+Base: the commit that holds this plan, after rank 2g's result and K3's (the run pins its hash in Phase 0). The
+revision was checked against `ae7d623` (ranks 2d to 2f committed) with the three uncommitted document edits of
+2026-11-26; the draft was written at `b2c43a4`. SIMPLE is pinned at `28c753993`, the mirror ledger's pin since
+rank 2e, read through `git show` and `git grep` only; of the SIMPLE files this plan reads, only
+`simple_linalg.f90` (a new `cdotc_sub`, beside `spd_solve_rel`) and `simple_strategy3D_matcher.f90` (the block
+kernel's memory terms) changed between the draft's pin `d354efee2` and this one, neither in what K5 reads.
 
 Depends on:
 
 - `mlx_metal_kernel` (`src/core/fast/mlxf_fast.f90`; binding contract policy, section 12). Validated: yes for
   complex64 inputs, float32 and complex64 outputs of rank 2, two-dimensional grids, template integers
-  (`unit_fast`; the toy projector's fused gather). Validated: no for a thread that loops over many pixels with
-  27 reads each (Phase 0, probe A), and no in the repository for `threadgroup` memory, `threadgroup_barrier`
-  and `simd_sum` (one scratch probe of the first two is recorded in the policy; no file under `src/` uses them).
+  (`unit_fast`; the toy projector's fused gather), and through run `mlxf_kernel_forms`
+  (`completed/mlxf_kernel_forms_report.md`): `threadgroup` arrays up to 32,768 B with `threadgroup_barrier`,
+  `simd_sum` and the other SIMD-group functions exact and bit-repeatable, and at K5's own shape (500
+  evaluations, 23 sums, 6,144 terms) a threadgroup tree with `simd_sum` 8.1 times faster than one thread per
+  evaluation (suites `probe` and `reduce`, Apple question 26). Validated: no for the tree's threads looping
+  over pixels with 27 gathered reads each (Phase 0, probe A).
 - `mlx_rfftn`, `mlx_take`, `mlx_round`, `cos`, `sin`, `cmplx`, `real`, `aimag`, `sum`, `reshape`, `mlx_to`,
   `mlx_synchronize`, `mlx_peak_memory`: public in `src/core/mlxf.f90` (read). Validated: yes (their areas).
-- `mlxf_oracle_pose` (`src/test/mlxf_oracle_pose.f90`). Validated: standalone only (32 checks, largest error
+- `mlxf_oracle_pose` (`src/test/oracles/mlxf_oracle_pose.f90`). Validated: standalone only (32 checks, largest error
   7.8e-15 on identities, *measured*, `completed/mlxf_oracles2_report.md`); no tester asserts
   `oracle_pose_selfcheck` yet (*exact*: `rg oracle_pose src test scripts` finds the oracle alone).
 - `scripts/run_parts.sh` with `RUN_PARTS_BENCH`, `RUN_PARTS_SUITE`, `RUN_PARTS_UNIT`. Validated: yes (K2).
 - The seam's pieces: `mlxf_toy_device_work`, rules `seam`, `mirror`, `arity`, `scripts/check_toy_offstate.sh`,
   `test/offstate/`. Validated: yes (`completed/mlxf_toy_seam_report.md`).
+- Rank 2g's result (read in Phase 0: it changes `src/core/` and may add assertions to unit areas; nothing
+  K5 calls changes its result: `sum` keeps its semantics).
 - Roadmap decisions 7 (order), 8 (oracle and repeatability), 9 and 15 (the performance contract and the 30 %
-  rule's denominator), 11 (toys mirror SIMPLE), 12 (the conditions that reopen one GPU-owning process).
+  rule's denominator), 11 (toys mirror SIMPLE), 12 (the conditions that reopen one GPU-owning process), 16 and
+  17 (ranks 2d to 2g before the K plans).
 
 ## 1. Why
 
@@ -60,8 +71,8 @@ off-state program asks the new class for the MLX backend; cycles and refusals in
 
 ### What the check found
 
-Read on 2026-11-26. A premise of the families note or the mlx3D note that the code contradicts is
-marked **differs**.
+Read on 2026-11-26 (SIMPLE at `28c753993`, the tree at `ae7d623`). A premise of the families note or the
+mlx3D note that the code contradicts is marked **differs**.
 
 1. **differs.** `gather_packed_bspline3_window_grad` is in `src/main/interp/simple_cartesian_fourier.f90`, not in
    `cftc/simple_cartft_calc.f90` (families note, section 4). The calculator's private `gather` calls it.
@@ -94,10 +105,12 @@ marked **differs**.
    `kto` below `box/2`; there is no shell residual. The public interface (`new`, `set_particle`, `model`,
    `objective`, `derivatives`, `shift_derivatives`, `scale`, `power`, `solve`, `oracle_pose_reference`,
    `oracle_pose_gather`, `oracle_pose_euler`, `oracle_pose_rotate`) is enough to build fixtures (decision 13).
-9. `threadgroup` memory and `threadgroup_barrier` have one scratch probe behind them and no use in the tree.
-   The binding contract policy (section 12, "Measured by the toys") and Apple question 26 record that a
-   `threadgroup` array with a barrier built and gave a correct 64-element group sum in a probe. No file under
-   `src/` holds that probe, and `simd_sum` appears nowhere in the repository.
+9. (Revised 2026-11-26.) `threadgroup` memory, `threadgroup_barrier` and the SIMD-group functions are
+   measured through the wrapper by run `mlxf_kernel_forms` (suite `probe`, in the named-only bench
+   `src/test/bench/mlxf_bench_kernel_forms.f90`): exact group sums for 32 to 1,024 threads with the barriers
+   and wrong ones from 256 threads up without them, `simd_sum` exact, a fixed tree bit-repeatable over
+   processes, arrays up to 32,768 B (65,536 B refused). Apple question 26 carries the numbers and still asks
+   whether MLX supports the feature. No toy uses it yet.
 10. SIMPLE's batch is `nthr` times `BATCHTHRSZ` = 50 particles (`simple_strategy3D_matcher.f90`,
     `simple_defs.f90`): 1,500 at 30 threads, 500 at 10, 250 at 5 (*derived*). Defaults in
     `simple_parameters.f90`: `athres_cont` 10 degrees, `trs` 0 (with `trs = 0` only the rotation is active),
@@ -120,16 +133,26 @@ callers ever give two slots of a batch different `kfromto`; what rule `mirror` r
 
 ### The queue
 
-K5 is third (roadmap decision 7: K3, K4, K5, K6, K7) and starts from the commit that holds K4's verified
-result. K3 and K4 edit the polar toy; K5 brings new classes and touches none of the polar toy's files. The
-files K5 shares with every earlier run are `src/test/mlxf_test_defs.f90`, `src/test/mlxf_test_registry.f90`,
-`src/test/test.inf`, `src/test/mlxf_toy_seam_tester.f90`, `scripts/toy_mirror.txt`, `scripts/toy_seam.txt`,
-`test/offstate/mlxf_offstate_exec.f90` and the families note. Phase 0 re-checks exactly these premises:
+Ranks 2d, 2e and 2f are delivered and committed (`ae7d623`); rank 2g, the user-facing hardening, runs next and
+before this batch (roadmap decision 17). K5 is third of the batch (roadmap decision 7: K3, K4, K5, K6, K7) and
+starts from the commit that holds K4's verified result. K3 and K4 edit the polar toy; K5 brings new classes in
+a new folder `src/test/toys/cartft/` and touches none of the polar toy's files. The files K5 shares with every
+earlier run are `src/test/framework/mlxf_test_defs.f90`, `src/test/framework/mlxf_test_registry.f90`,
+`src/test/toys/toys.inf`, `src/test/oracles/oracles.inf`, `src/test/bench/bench.inf`, `doc/code_base_map.md`,
+`src/test/toys/mlxf_toy_seam_tester.f90`, `scripts/toy_mirror.txt`, `scripts/toy_seam.txt`,
+`test/offstate/mlxf_offstate_exec.f90` and the families note. Rank 2g changes `src/core/` and no test file: it
+may raise the counts of `unit_ops`, `unit_io`, `unit_linalg`, `unit_array` and `unit_core`, and changes no
+operation K5 calls (integer statistics, norms, floating means, empty extrema, integer-scalar operators, saves,
+an index validator). Phase 0 re-checks exactly these premises:
 
-- the extents of `AREAS` (12), `BENCHES` (4) and `NAMED_ONLY` (4) in the registry, and the `run_bench` cases;
+- rank 2g's report: the operations and the counts it changed;
+- the extents of `AREAS` (12), `BENCHES` (6) and `NAMED_ONLY` (4) in the registry at `ae7d623`, and the
+  `run_bench` cases;
 - the members of `parameters` (`box`, `box_crop`, `nthr`, `trs`, `nstates`, `l_mlx` are used here);
-- the count of `unit_kernels` (1,955 today) and of its sub-suite `seam` (88), the fast gate's entries (13)
-  and its time (10.7 s today against the bound 38.74 s);
+- the count of `unit_kernels` (1,953 at `ae7d623`, before K3 and K4) and of its sub-suite `seam` (88), the
+  fast gate's entries (13) and its time (10.44 to 10.51 s in Release at the end of run `mlxf_kernel_forms`,
+  against the bound 38.74 s);
+- the last number in `doc/collaboration/apple_questions.md` (36 at `ae7d623`);
 - `SEAM_PENDING = 0` and the ledgers' line forms; the off-state program's checks;
 - the launcher's column layout and settings.
 
@@ -146,9 +169,11 @@ Numbered, never renumbered. A decision the maintainer has not ruled carries the 
 a resumable form. Both objectives (cc and Euclidean) are carried: the oracle has both, the per-pixel products
 are shared, and the difference is the list of sums and a host finaliser.
 
-**2. Modules.**
+**2. Modules.** Folders of rank 2d's test tree: the toy's modules, its fixture and its testers in a new folder
+`src/test/toys/cartft/` (with its `cartft.inf`, and `toys.inf` naming it); `mlxf_oracle_pose_tester` in
+`src/test/oracles/`; `mlxf_bench_cartft` in `src/test/bench/`.
 
-| Module (file `src/test/<module>.f90`) | Class | Holds |
+| Module (file `<module>.f90` in its folder) | Class | Holds |
 | --- | --- | --- |
 | `mlxf_toy_lm_solver` | host | `lm_problem`, `lm_options`, `lm_outcome`, `lm_scale_system`, `spd_solve_rel`, the resumable solve |
 | `mlxf_toy_cartft_calc` | host | the type, the host staging of references and slots, the finalisers in double |
@@ -237,18 +262,31 @@ SIMPLE's separable phase tables, computed on the host in double and uploaded (18
 shell 62).
 
 **8. Accumulation: partials in float32, added in double on the host** (the maintainer's choice a, first
-half). The device reduces each sum of an entry to P partials in a fixed order; the host adds them in real64
-and runs SIMPLE's finalisers in real64, as K8 answered its inner products (within 6.4e-9, *measured*, K8).
-P is frozen in Phase 1 from a measured table: the error of the objective, the gradient and the matrix against
-the oracle at the middle fixture for P in {1, 8, 32, 128}; the smallest P within 1.5 times the best is taken
-(`CARTFT_PARTIALS`; *guessed* outcome 32). P = 1 is the float32 tree: if it is within 1.5 times the best, the
-report says that double partials buy nothing measurable and the maintainer may rule for P = 1.
-Why not float32 alone by default: SIMPLE's stops are relative reductions of 1e-6; a sequential float32 sum of
-6,136 terms errs by about 5e-6 of the sum, a pairwise tree by about 2e-7, partials added in double by about
-1e-8 (*derived*, statistical estimates: eps32 sqrt(n/3) / 2, eps32 sqrt(log2 n), and a block's error over
-sqrt(P)). Compensated sums are used inside a block of the fused form (the wrapper's safe math mode honours
-them: *measured*, binding contract policy). Cost: 23 x 32 x 4 B = 2,944 B an entry and round for the
-Euclidean objective, 1,472,000 B for 500 entries; 27 sums and 1,728,000 B for the correlation (*derived*).
+half; revised 2026-11-26 by run `mlxf_kernel_forms`). The device reduces each sum of an entry to P partials in
+a fixed order; the host adds them in real64 and runs SIMPLE's finalisers in real64, as K8 answered its inner
+products (within 6.4e-9, *measured*, K8). In the graph form the P partials are MLX's `sum` over P blocks of the
+pixel dimension; in the fused form they are the sums of the threadgroup's SIMD groups (P = 8 at 256 threads)
+or the tree's float32 total (P = 1, decision 10). P is frozen per form from a measured table: the error of the
+objective, the gradient and the matrix against the oracle at the middle fixture, for P in {1, 8, 32, 128} in
+the graph form (Phase 1) and P in {1, 8} in the fused form (Phase 4); the smallest P within 1.5 times the best
+is taken (`CARTFT_PARTIALS`, `CARTFT_PARTIALS_FUSED`). If P = 1 is within 1.5 times the best, the report says
+that double partials buy nothing measurable and the maintainer may rule for P = 1.
+- *Expected, now measured on K5's shape* (suite `reduce`: 500 evaluations, 23 sums, 6,144 terms; errors
+  relative to the sum of |terms| on seed 1, *measured*): the threadgroup tree's float32 total 8.6e-9, MLX's
+  graph `sum` 8.5e-9, a serial float32 sum 2.4e-7, a compensated serial sum 3.2e-9. The draft's *guessed*
+  outcome P = 32 is withdrawn: P = 1 is now the expected outcome in both forms. SIMPLE's stops are relative
+  reductions of 1e-6, a hundred times above the tree's error.
+- *Compensation, a choice of this plan's tolerances* (recommended: compensated per-thread partials in the
+  fused form). Each thread's partial over its strided pixels (24 at 6,144 pixels and 256 threads) is a
+  compensated sum: compensation cost 2.8 % where the kernel is bound by other work (K1's tail, suite `tail`,
+  equivalent) and 14 % where the sums are the kernel (suite `reduce`, R1, for 50 to 90 times the accuracy);
+  K5's pass is bound by its 27 gathered reads and about 520 flop a pixel (section 1), not by its 23
+  additions. A plain partial replaces it only if Phase 4's sweep measures it more than 5 % faster on the
+  canonical driver with decision 14's frozen numbers still met. The wrapper's safe math mode honours
+  compensated sums (*measured*, binding contract policy).
+- *Cost of the copy:* 23 x P x 4 B an entry and round for the Euclidean objective: 736 B at P = 8, 368,000 B
+  for 500 entries; 27 sums and 432,000 B for the correlation (*derived*); 2,944 B and 1,472,000 B at the
+  graph form's largest P of 32.
 
 **9. What the toy returns and what the oracle judges** (choice d). `pose_normal_terms` returns what SIMPLE
 returns: the normalised objective, the gradient, and the Gauss-Newton matrix times the clamped regression
@@ -261,27 +299,35 @@ the two slope sums): c = 0.02, 1, 2.5 and 40. For the correlation the slope's ar
 at the planted pose (*derived*); its fixtures use c = 2.5 at three poses, and the report says which branches
 they reached. The clamp is one private function, as in SIMPLE.
 
-**10. Two forms; the fused launch is one thread per block of pixels** (choice b).
+**10. Two forms; the fused launch is one threadgroup per entry, a fixed tree with `simd_sum`** (choice b;
+revised 2026-11-26 by run `mlxf_kernel_forms`, which measured this choice at K5's shape).
 
 - *Graph form* (the reference, the CPU path, always kept): per tile of entries, the coordinates, weights and
   27 positions as arrays, one `mlx_take` on the bank, the per-pixel products, and `sum` over blocks of the
   pixel dimension, giving `(sums, P, entries)`. About 4.6 MB live per entry at 6,144 pixels (*derived*: 27
   gathered complex values, four float32 weight arrays of 27, the int32 positions), so a tile of 64 entries is
   about 0.3 GB and a tile of 500 about 2.3 GB.
-- *Fused form* (GPU only): `grid = [PK, entries, 1]`. One thread owns one block of `npix / PK` consecutive
-  pixels of one entry, loops over them in order with a compensated sum per quantity, and writes its sums once.
-  When PK is above P a device `sum` folds PK / P adjacent blocks before the copy. No two threads write one
-  element, nothing is atomic, and the order is fixed: the form is repeatable by construction. PK in
-  {32, 128, 512} and the threads per threadgroup in {32, 64, 256} are swept in Phase 4.
-- *Not built: one threadgroup per entry reducing in `threadgroup` memory with `simd_sum`* (the mlx3D note,
-  section 4). It returns float32 totals, which decision 8 does not take by default, and it rests on features
-  with one scratch probe behind them. Phase 0's probe B records whether it builds, is correct and repeats,
-  for Apple question 26 and the next plans. It gets a phase only if the fused form's measured copy and host
-  sum of partials are 30 % or more of a round (the only time it could save).
-- *Fallback named in advance.* If probe A shows that a thread looping over a block fails or is slower than
-  one thread per pixel, the fused form is one thread per pixel writing its products `(sums, npix, entries)`
-  and a device `sum` over blocks. It writes 23 x 6,144 x 4 B = 565,248 B an
-  entry, 282.6 MB a round of 500 entries (*derived*), which is why it is the fallback and not the choice.
+- *Fused form* (GPU only), the tree of suite `reduce` (R2): one threadgroup of 256 threads per entry,
+  `grid = [256 x entries, 1, 1]`, threadgroup `[256, 1, 1]`. Thread t of an entry loops over the pixels t,
+  t + 256, ... in that order with a compensated partial per quantity (decision 8); `simd_sum` reduces the
+  partials within each SIMD group; the 8 SIMD groups' sums go to a `threadgroup` array (8 x 27 x 4 = 864 B,
+  under the 32,768 B the wrapper admits) between barriers, and are written out as P = 8 partials or summed by
+  one thread in a fixed order to P = 1 (decision 8). No two threads write one element, nothing is atomic, and
+  the order is fixed: the form is repeatable by construction (R2 bit-repeatable over processes, *measured*).
+  The threadgroup in {128, 256, 512} and the entry quantum are swept in Phase 4.
+- *Why the tree* (*measured*, suite `reduce`, 500 evaluations of 23 sums over 6,144 terms, median of five
+  interleaved pairs, two invocations): 8.13 / 8.08 times faster than one thread per evaluation (R0, 2.07 ms
+  against 0.255 ms), and about 2.8 times faster than MLX's graph `sum` (R3; its direct verdict inconclusive by
+  R3's own A-A floor of 10 to 19 %, every direct pair at 2.03 or above). The draft's choice, one thread per
+  block of `npix / PK` pixels writing PK partials, launches between R0 and R2 in width and was not measured;
+  it becomes the first fallback. The mlx3D note's section 4 proposed the tree; the draft did not build it
+  because it rested on one scratch probe, which suite `probe` has replaced.
+- *Fallback named in advance.* If probe A shows that the tree fails to build, is not exact or is not
+  repeatable with K5's 27 gathered reads a pixel, the fused form is the draft's: `grid = [PK, entries, 1]`, one
+  thread per block of `npix / PK` consecutive pixels with a compensated sum per quantity, a device `sum`
+  folding PK / P adjacent blocks, PK in {32, 128, 512}. If that fails too, one thread per pixel writing its
+  products `(sums, npix, entries)` and a device `sum` over blocks: 23 x 6,144 x 4 B = 565,248 B an entry,
+  282.6 MB a round of 500 entries (*derived*), which is why it is last.
 
 **11. The lockstep and the converged particles** (choice a, second half). SIMPLE's rules are kept one by
 one: the scaled system, the observability test before the stationary test, the damping
@@ -297,7 +343,9 @@ host wait at the copy of the partials, every answer fed. At most 41 rounds a bat
 *Converged particles leave the launch.* A round evaluates the active entries only; the device takes their
 slot indices as an input. In the fused form the grid's entry extent is the active count rounded up to a
 multiple of 32 (*guessed*), the count is an int32 input and threads beyond it return at once, so a batch of
-500 needs at most 16 kernel objects, each built once at 0.2 ms (*measured*, binding contract policy). The
+500 needs at most 16 kernel objects, each costing 2.6 to 3.1 ms at its first evaluation and none recompiled
+(MLX keys its kernel library by the source, never by the launch configuration; *measured*, run
+`mlxf_kernel_forms`, suite `sizes`), at most about 50 ms a process. The
 work a fixed launch would waste, 1 - (evaluations / (particles x rounds)), is reported from the counters; a
 fixed-shape variant is not built. Invalid slots (power at or below `NUMERIC_FLOOR`) get
 `CARTFT_INVALID_PREPARATION` without an evaluation.
@@ -450,13 +498,15 @@ reads it, so the result is the same and 61 sums a pass are saved. Judged against
 in double from the oracle's `model` (the oracle has none), within `CARTFT_OBJ_ERR` per shell over f0.
 
 **22. The mlx3D note's proposed kernel decisions, as applied here.** Sizes that change per launch (the active
-count) go in an int32 input; sizes fixed for a batch (the pixels, the block length, E, the strides) are
-template integers (its proposed decision 4). Its proposed decision 5 waits for a measured rebuild cost: this
-run reports the kernel objects built per batch and their seconds.
+count) go in an int32 input; sizes fixed for a run (the pixels, the block length, E, the strides) are template
+integers (its proposed decision 4, *measured* by run `mlxf_kernel_forms`: equal per launch, a new value 3 ms
+in an input against 42 ms as a template; the bench's sizes do not change within a run). Its proposed decision
+5 waits for a measured rebuild cost: a new object of an existing source costs about 3 ms (*measured*, same
+suite); this run reports the kernel objects built per batch and their seconds.
 
-**23. A file the table does not name.** The run may add a row for a new `src/test/mlxf_toy_cartft_*.f90`,
-`mlxf_cartft_*.f90` or a tester of them before its first edit, with its ledger lines. Any other unnamed file
-is a stop.
+**23. A file the table does not name.** The run may add a row for a new
+`src/test/toys/cartft/mlxf_toy_cartft_*.f90`, `src/test/toys/cartft/mlxf_cartft_*.f90` or a tester of them
+before its first edit, with its ledger lines and the map regenerated. Any other unnamed file is a stop.
 
 **24. Counts and the fast gate's cost.** Existing sub-suites keep the counts Phase 0 finds. `unit_kernels`
 gains `oracle_pose`, `cartft_calc`, `cartft_pose_opt`, and `seam` grows by the new class's cycles and
@@ -484,10 +534,13 @@ batch record's). The toy clips a band at box/2 as SIMPLE does.
 ### The choices that are the maintainer's
 
 - **4**: `cartft_calc` refuses the host backend (recommended) or carries a host route in SIMPLE's arithmetic.
-- **8**: partials added in double with P from a measured table (recommended), float32 trees, or compensated
-  float32 totals on the device.
+- **8** (revised): partials added in double with P from a measured table per form (recommended; P = 1, the
+  tree's float32 total, now expected from the measured 8.6e-9), and compensated per-thread partials inside the
+  tree (recommended), or plain partials.
 - **9**: the toy returns SIMPLE's scaled matrix and the scale beside it (recommended), or the plain matrix.
-- **10**: the fused launch is one thread per block (recommended); the threadgroup reduction is probed, not built.
+- **10** (revised): the fused launch is one threadgroup per entry reducing by a fixed tree with `simd_sum`
+  (recommended, *measured* 8.1 times faster than one thread per evaluation at K5's shape), with the draft's
+  one thread per block of pixels as the first fallback.
 - **11**: converged particles leave the launch through an active list (recommended), or a fixed launch.
 - **12**: what is resident and where the host waits, as the table says.
 - **13, 15, 18**: the fixtures, the recovery bounds' ceilings, the bench's size, data and units.
@@ -497,21 +550,22 @@ batch record's). The toy clips a band at box/2 as SIMPLE does.
 
 ## 4. Not in this plan
 
-- Any change of `src/core`, `src/defs`, the generator or the parity ledger (315 public names, none pending).
+- Any change of `src/core`, `src/defs`, the generator or the parity ledger (315 public names at `ae7d623`,
+  none pending; rank 2g's additions are its own).
 - A measurement of SIMPLE, a change of SIMPLE, or SIMPLE's plan for this family (families note, section 9).
 - A CTF model, an `ori` class, image preparation (`prepimg4align_cart`), the sigma update, symmetry, states
   above what `nstates` already allows, priors.
 - B1 (the discrete search of the Cartesian objective) and the choice of seeds for the solve.
 - `mlx_custom_function`: the gradient is analytic in the kernel (mlx3D note, section 4).
 - A change of the polar toy, the projector, the reconstructor, or of any oracle.
-- A threadgroup-reduction kernel, unless decision 10's condition is met and the maintainer rules.
+- A second fused form beside the one decision 10 keeps (the fallbacks are built only in its place).
 
 ## 5. Change types and gates
 
 | Phase | Change | Gates at the phase's end |
 | --- | --- | --- |
 | 0 | none in the repository | the base builds in Debug and Release from scratch with zero warnings; the fast gate passes in both; counts and times recorded |
-| 1 | new test-only modules, ledgers, defs, registry, `test.inf` | the gates of every phase (below); `oracle_pose` and `cartft_calc` on both devices; controls 1, 2, 3, 4, 6, 11; repeatability of the graph form; tolerances frozen |
+| 1 | new test-only modules in `src/test/toys/cartft/`, ledgers, defs, registry, the folders' `.inf` files, the code-base map | the gates of every phase (below); `oracle_pose` and `cartft_calc` on both devices; controls 1, 2, 3, 4, 6, 11; repeatability of the graph form; tolerances frozen |
 | 2 | the solver, the driver, the off-state program, sub-suite `seam` | every phase's gates; `cartft_pose_opt` on both devices; controls 5, 7, 8, 9, 10; `scripts/check_toy_offstate.sh --exec` |
 | 3 | the bench with the graph form | every phase's gates; the bench's keys refuse what they do not read; the splits recorded |
 | 4 | the fused form | every phase's gates; decisions 14, 15 and 17 on the fused form; controls 1, 5 and 9 repeated on it |
@@ -520,9 +574,11 @@ batch record's). The toy clips a band at box/2 as SIMPLE does.
 
 The gates of every phase: Debug and Release from scratch in hand-configured trees
 (`-DMLXF_WERROR=ON -DFORTLS=OFF -DBUILD_TESTS=ON`), zero warnings; the fast gate in both; `scripts/check_tree.sh`;
-`scripts/restyle_fortran.py` and `scripts/format_use_blocks.py` on every touched Fortran file; the existing
-unit areas keep their counts (core 215 or 216, array 193, ops 2,462, fft 194, linalg 632, compile 63, fast 152,
-random 486, transforms 274, io 846, distributed 55; kernels as Phase 0 finds it plus this plan's sub-suites).
+`scripts/restyle_fortran.py` and `scripts/format_use_blocks.py` on every touched Fortran file (the static gate
+includes rank 2d's rules `publist` and `size`, the `.inf` descriptions and the code-base map); the existing
+unit areas keep the counts Phase 0 finds on the base (at `ae7d623`, *measured*: core 214 to 216, array 193,
+ops 2,462, fft 194, linalg 632, compile 63, fast 152, random 486, transforms 274, io 846, distributed 55,
+kernels 1,953; rank 2g, K3 and K4 may have changed them), kernels plus this plan's sub-suites.
 
 ## 6. Acceptance
 
@@ -545,8 +601,9 @@ random 486, transforms 274, io 846, distributed 55; kernels as Phase 0 finds it 
 12. The fast gate within its bound (38.74 s) and the new cost within decision 24's 3.0 s, or the reason.
 
 Reported, not gated: the middle and bench accuracy; statuses and step counts; passes per solve; the share of
-work the active list saves; the kernel objects built per batch; probe B's result; cc's timings; `set_ref`'s
-seconds; the stage seconds; the first evaluation of a new kernel source (60 ms was *measured* for another).
+work the active list saves; the kernel objects built per batch and their first evaluations (about 3 ms each,
+*measured* by run `mlxf_kernel_forms`); cc's timings; `set_ref`'s seconds; the stage seconds; the first
+evaluation of a new kernel source (about 42 ms, *measured*, same run).
 
 Reserved for the maintainer: the rulings of section 3; whether a kept fused form becomes the default; whether
 SIMPLE's plan for B2 is opened (families note, section 9); what is committed.
@@ -555,9 +612,9 @@ SIMPLE's plan for B2 is opened (families note, section 9); what is committed.
 
 The run works on the M5 Ultra only (30 cores, 103.1 GB, the only GPU), in the session, in a copy of the
 checkout, one run at a time; nothing else is built or run while a step is timed. Git is read-only: nothing
-is committed or pushed. SIMPLE is read through `git -C ~/src/SIMPLE show d354efee2:<path>` only and is not
+is committed or pushed. SIMPLE is read through `git -C ~/src/SIMPLE show 28c753993:<path>` only and is not
 measured. No production data. A finding about MLX or mlx-c becomes a numbered entry of
-`doc/collaboration/apple_questions.md` (the last is 31), written, never sent.
+`doc/collaboration/apple_questions.md` after the last one Phase 0 finds (36 at `ae7d623`), written, never sent.
 
 Stops (the run records the state, leaves the tree at the last passing phase, and reports):
 
@@ -578,30 +635,33 @@ on the canonical driver's elapsed time with submission, waits and collection inc
 
 ## 8. Phases
 
-### Phase 0: the base, the premises and the probes (box: 100 min)
+### Phase 0: the base, the premises and the probes (box: 90 min)
 
 1. Pin the base's hash. Build Debug and Release from scratch; run the fast gate in both; record the counts of
    every unit area, of `unit_kernels`' sub-suites, the fast gate's time and entries.
 2. Re-check the queue's premises (section 2) and the items listed as not verified there.
-3. Probe A: a kernel with `grid = [PK, 500, 1]` whose thread loops over 6,144 / PK pixels, reads 27 voxels of
-   a 323**3 complex64 cube at seeded coordinates and keeps 23 compensated sums: it builds, its sums equal a
-   host double sum within 1e-6 of the terms' moduli, two runs give equal bits; seconds at PK = 32, 128, 512.
-4. Probe B: a `threadgroup` array, `threadgroup_barrier` and `simd_sum` reducing one entry's pixels: builds
-   or not, correct or not, equal bits in two runs or not. Recorded only.
+3. Probe A: decision 10's tree at K5's gather: `grid = [256 x 500, 1, 1]`, threadgroup 256, each thread
+   looping over 24 pixels at stride 256, reading 27 voxels of a 323**3 complex64 cube at seeded coordinates,
+   keeping 23 compensated partials, `simd_sum` and the fixed sum over the 8 SIMD groups: it builds, its sums
+   equal a host double sum within 1e-6 of the terms' moduli, two runs give equal bits; seconds at
+   threadgroups of 128, 256 and 512, and the draft's block form at PK = 32 and 128 beside it.
+4. Probe B of the draft (the `threadgroup` array, the barrier and `simd_sum` alone) is not run: suite `probe`
+   of run `mlxf_kernel_forms` measured them (Apple question 26), and probe A re-checks them at K5's shape.
 5. Probe C: `mlx_take` of 27 x 6,144 x T positions from a bank of two 323**3 cubes: seconds and MLX peak at
    T = 16, 64, 250, 500.
 6. Probe D: `oracle_dft_3d` on a 320**3 cube: seconds and resident size.
 7. Probe E: `mlx_rfftn` of a 320**3 real cube and the expansion to 323**3: seconds and MLX peak.
 
 **Exit:** the base passes as found; every premise is confirmed or its new value recorded; probes A, C, D, E
-have numbers, B has its three answers; the fused design (block or the fallback) and the bench accuracy's
-size are fixed in Progress.
+have numbers; the fused design (the tree or a fallback of decision 10) and the bench accuracy's size are fixed
+in Progress.
 
 ### Phase 1: the calculator in the graph form on the small and middle fixtures (box: 240 min)
 
 1. `mlxf_cartft_fixture`, `mlxf_oracle_pose_tester` with its registry row (acceptance 1, control 11).
 2. `mlxf_toy_cartft_calc`, its glue and workspace: `new`, `kill`, `set_ref`, `ref_exists`, `new_ptcls`,
-   `set_sigma2`, `set_ptcl`, the getters, `predict`; the ledgers' lines; `test.inf`.
+   `set_sigma2`, `set_ptcl`, the getters, `predict`; the ledgers' lines; `cartft.inf`, `toys.inf`,
+   `oracles.inf` and the regenerated `doc/code_base_map.md`.
 3. `predict` against the oracle's reference and gather on the full disk, the rim included (control 4).
 4. The batched evaluation in the graph form, `pose_normal_terms`, `shift_normal_terms`, the finalisers.
 5. The accumulation table (decision 8) at the middle fixture; P frozen.
@@ -638,7 +698,9 @@ the bench refuses keys it does not read; the gates of every phase pass.
 2. `mlxf_toy_cartft_workspace_fused` in the design Phase 0 fixed; `set_eval_form`, `set_eval_tile`; refusal on
    the CPU device with a message.
 3. Decisions 14, 15 and 17 on the fused form with the numbers frozen in Phases 1 and 2; controls 1, 5, 9.
-4. The `sweep` suite over blocks, threadgroup and the entry quantum; the canonical configuration frozen.
+4. The accumulation table of decision 8 for the fused form (P in {1, 8}); P frozen.
+5. The `sweep` suite over the threadgroup, the entry quantum and decision 8's plain-partial variant; the
+   canonical configuration frozen.
 
 **Exit:** the fused form passes acceptance 2, 5 and 6, or it is removed here with the reason; its canonical
 configuration is in Progress before any verdict run; the gates of every phase pass.
@@ -647,7 +709,7 @@ configuration is in Progress before any verdict run; the gates of every phase pa
 
 1. Interleaved pairs graph, fused at one process, five pairs, two invocations; the same at three processes
    through the launcher (go to last exit); six processes reported.
-2. The rule of decision 20 applied; decision 10's condition for the threadgroup reduction evaluated.
+2. The rule of decision 20 applied.
 3. Kept: the default stays `graph`. Deleted: the fused module, its tests and its ledger lines removed, the
    build and gates repeated.
 
@@ -659,8 +721,9 @@ gates of every phase pass.
 1. `completed/mlxf_kernel_k5_report.md`: the numbers of section 6, the findings of section 2 as they ended,
    what a SIMPLE plan for B2 would have to do (the resumable solve, the serial batch call, the upload point).
 2. The families note (B2's row, the open decisions closed, the flop count), the roadmap, the toy and test
-   policies, the binding contract policy's "Measured by the toys" if a wrapper fact was measured, Apple
-   question 26's record of probe B (or a new entry 32), the history, the notes' README.
+   policies, the binding contract policy's "Measured by the toys" if a wrapper fact was measured, a new Apple
+   entry after the last if the run met an MLX or mlx-c question, the history, the notes' README; the
+   folders' `.inf` files and `doc/code_base_map.md` for what was kept.
 3. The last gates of section 5. The report ends with a commit message, without an attribution or co-author
    line, that names every new file.
 
@@ -670,21 +733,25 @@ gates of every phase pass.
 
 | File | What | Phases |
 | --- | --- | --- |
-| `src/test/mlxf_cartft_fixture.f90` | new: seeded fixtures through the oracle's public interface | 1, 2, 3 |
-| `src/test/mlxf_oracle_pose_tester.f90` | new: asserts the pose oracle's self-check | 1 |
-| `src/test/mlxf_toy_cartft_calc.f90` | new: host | 1, 2, 4 |
-| `src/test/mlxf_toy_cartft_calc_mlx.f90` | new: glue | 1, 2, 4 |
-| `src/test/mlxf_toy_cartft_workspace.f90` | new: device, the graph form | 1, 2, 4 |
-| `src/test/mlxf_toy_cartft_workspace_fused.f90` | new: device, the fused form (removed on "delete") | 4, 5 |
-| `src/test/mlxf_toy_cartft_calc_tester.f90` | new: sub-suites `cartft_calc`, `cartft_calc_n64` | 1, 4 |
-| `src/test/mlxf_toy_lm_solver.f90` | new: host | 2 |
-| `src/test/mlxf_toy_cartft_pose_opt.f90` | new: host | 2 |
-| `src/test/mlxf_toy_cartft_pose_opt_tester.f90` | new: sub-suite `cartft_pose_opt` | 2, 4 |
-| `src/test/mlxf_bench_cartft.f90` | new: `bench_cartft` | 3, 4, 5 |
-| `src/test/mlxf_test_defs.f90` | the records, `CARTFT_FORMS`, the frozen numbers and defaults | 1, 2, 3, 4, 5 |
-| `src/test/mlxf_test_registry.f90` | rows of the sub-suites, `NAMED_ONLY`, `BENCHES`, `run_bench` | 1, 2, 3 |
-| `src/test/mlxf_toy_seam_tester.f90` | the new class's cycles and refusals | 2, 4 |
-| `src/test/test.inf` | the directory's description | 1, 2, 3, 4 |
+| `src/test/toys/cartft/mlxf_cartft_fixture.f90` | new: seeded fixtures through the oracle's public interface | 1, 2, 3 |
+| `src/test/oracles/mlxf_oracle_pose_tester.f90` | new: asserts the pose oracle's self-check | 1 |
+| `src/test/toys/cartft/mlxf_toy_cartft_calc.f90` | new: host | 1, 2, 4 |
+| `src/test/toys/cartft/mlxf_toy_cartft_calc_mlx.f90` | new: glue | 1, 2, 4 |
+| `src/test/toys/cartft/mlxf_toy_cartft_workspace.f90` | new: device, the graph form | 1, 2, 4 |
+| `src/test/toys/cartft/mlxf_toy_cartft_workspace_fused.f90` | new: device, the fused form (removed on "delete") | 4, 5 |
+| `src/test/toys/cartft/mlxf_toy_cartft_calc_tester.f90` | new: sub-suites `cartft_calc`, `cartft_calc_n64` | 1, 4 |
+| `src/test/toys/cartft/mlxf_toy_lm_solver.f90` | new: host | 2 |
+| `src/test/toys/cartft/mlxf_toy_cartft_pose_opt.f90` | new: host | 2 |
+| `src/test/toys/cartft/mlxf_toy_cartft_pose_opt_tester.f90` | new: sub-suite `cartft_pose_opt` | 2, 4 |
+| `src/test/bench/mlxf_bench_cartft.f90` | new: `bench_cartft` | 3, 4, 5 |
+| `src/test/framework/mlxf_test_defs.f90` | the records, `CARTFT_FORMS`, the frozen numbers and defaults | 1, 2, 3, 4, 5 |
+| `src/test/framework/mlxf_test_registry.f90` | rows of the sub-suites, `NAMED_ONLY`, `BENCHES`, `run_bench` | 1, 2, 3 |
+| `src/test/toys/mlxf_toy_seam_tester.f90` | the new class's cycles and refusals | 2, 4 |
+| `src/test/toys/cartft/cartft.inf` | new: the folder's description (rule of every source folder) | 1, 2, 4, 5 |
+| `src/test/toys/toys.inf` | names the new toy folder `cartft/` | 1 |
+| `src/test/oracles/oracles.inf` | names the pose oracle's tester | 1 |
+| `src/test/bench/bench.inf` | names the new bench | 3 |
+| `doc/code_base_map.md` | regenerated by `scripts/generate_codeoverview.py` in each phase that adds or removes a Fortran file or edits an `.inf` (the static gate checks it) | 1, 2, 3, 4, 5, 6 |
 | `scripts/toy_mirror.txt` | the new modules' lines; the header's list of SIMPLE files read | 1, 2, 4, 5 |
 | `scripts/toy_seam.txt` | the new stems with their classes | 1, 2, 4, 5 |
 | `test/offstate/mlxf_offstate_exec.f90` | the calculator's refusals; the solve on a quadratic | 2 |
@@ -697,7 +764,7 @@ gates of every phase pass.
 | `doc/policies/toy_example_policy.md` | the new classes and their backend answers | 6 |
 | `doc/policies/test_environment_policy.md` | the new sub-suites, the named-only one, the bench | 6 |
 | `doc/policies/binding_contract_policy.md` | "Measured by the toys", only if a wrapper fact was measured | 6 |
-| `doc/collaboration/apple_questions.md` | probe B's record | 6 |
+| `doc/collaboration/apple_questions.md` | a finding about MLX or mlx-c, if any | 6 |
 | `doc/history/2026-11.md`, or `doc/history/2026-12.md` if the run ends in December | the batch as delivered | 6 |
 
 Not in the table and not to be touched: every file under `src/core`, `src/defs`, `build/gen`; the oracles;

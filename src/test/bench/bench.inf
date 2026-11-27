@@ -1,1 +1,1 @@
-!@descr: the benchmarks run by hand (mlxf_test_exec test=bench_<x>): the polar table, the projector, the reconstruction, the insertion probe, the BLAS products and the kernel forms
+!@descr: the benchmarks run by hand (mlxf_test_exec test=bench_<x>): the polar table, the projector, the reconstruction, the insertion probe, the BLAS products, the kernel forms and the user-facing costs

@@ -34,7 +34,7 @@ use mlxf_ops_shape,       only: reshape, mlx_permute, transpose, mlx_concatenate
 use mlxf_ops_index,       only: mlx_gather, mlx_scatter, mlx_scatter_add, mlx_scatter_max, mlx_scatter_min, &
                                 mlx_scatter_prod, mlx_put_along_dim, mlx_masked_scatter, mlx_searchsorted, mlx_unique, &
                                 mlx_slice_update, mlx_slice_update_add, mlx_slice_update_max, mlx_slice_update_min, &
-                                mlx_slice_update_prod
+                                mlx_slice_update_prod, mlx_check_indices
 use mlxf_ops_reduce,      only: sum, minval, mlx_logsumexp, mlx_cumsum, minloc, product, maxval, all, any, count, &
                                 maxloc, mlx_mean, mlx_median, mlx_var, mlx_std, mlx_cumprod, mlx_cummax, mlx_cummin, &
                                 mlx_logcumsumexp, mlx_softmax
@@ -101,7 +101,7 @@ public :: real, aimag, conjg, sqrt, mlx_astype, mlx_bitcast, max, merge, cmplx, 
     &mlx_number_of_elements, mlx_identity, mlx_eye, mlx_tri, mlx_linspace, mlx_meshgrid, mlx_bartlett, mlx_blackman, &
     &mlx_hamming, mlx_hanning, mlx_gather, mlx_scatter, mlx_scatter_add, mlx_scatter_max, mlx_scatter_min, &
     &mlx_scatter_prod, mlx_put_along_dim, mlx_masked_scatter, mlx_searchsorted, mlx_unique, mlx_slice_update, &
-    &mlx_slice_update_add, mlx_slice_update_max, mlx_slice_update_min, mlx_slice_update_prod
+    &mlx_slice_update_add, mlx_slice_update_max, mlx_slice_update_min, mlx_slice_update_prod, mlx_check_indices
 public :: matmul, mlx_gather_mm, mlx_block_masked_mm, mlx_segmented_mm, mlx_addmm, mlx_inner, mlx_outer, mlx_kron, &
     &mlx_vecdot, mlx_cross, mlx_tensordot, mlx_einsum, mlx_hadamard_transform
 public :: mlx_inv, mlx_pinv, mlx_tri_inv, mlx_det, mlx_slogdet, mlx_cholesky, mlx_cholesky_inv, mlx_qr, mlx_lu, &

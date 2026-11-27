@@ -120,6 +120,30 @@ written, the skill `mlxf-modern-fortran`.
   `check_rules.py` keep use 3 out: `ctorcall` (a library function, `mlx_*` or `mlxf_*`, referenced inside a
   constructor) and `ctorexpr` (an element that refers to a handle and is not a bare designator: `[a*2.0, b]`,
   `[-a, b]`, `[(a), b]`, `[exp(a), b]`).
+- **The consumer lifetime checker.** The package installs `<prefix>/share/mlxf/check_consumer.py` (Python 3.7,
+  standard library) with `mlxf_consumer_checks.py`, the analysis the repository's two rules share (one
+  implementation). `check_consumer.py FILE...` reports each unsafe form with its file, line and safe spelling
+  and exits 1; `--rules` prints what it checks and what it cannot see; `--self-test` runs its planted fixtures.
+  `mlxf_check_lifetime(<target>)`, defined by the package config, runs it on a target's Fortran sources before
+  the target builds, and a finding fails the build (without a Python 3.7 it warns and checks nothing). Coverage:
+
+  | unsupported form | rule | detected |
+  | --- | --- | --- |
+  | 3: a function result in a constructor, `[a, mlx_from(x)]`, a renamed import `[a, f(x)]` | `ctorcall` | yes, for names imported from `mlxf` |
+  | 3: an expression of handles in a constructor, `[a*2.0, b]`, `[exp(a), b]`, `[e(a), b]` | `ctorexpr` | yes, for handles the file declares |
+  | 4: a function result assigned to a whole array or a section of handles, `v = exp(a)` | `wholefunc` | yes, for arrays declared in scope |
+  | 1: an allocatable handle component in a type without a defined assignment | `alloccomp` | yes, at the type's definition |
+  | 2: `allocate(source=)` and `mold=` of a handle; array intrinsics on arrays of handles | `allocsrc`, `arrayintr` | yes, for names declared in scope |
+  | 5: intrinsic self-assignment `w = w` of a type holding handles | `selfassign` | yes, for types the file defines |
+  | 6: an overlapping section assignment `v(2:3) = v(1:2)` | `overlap` | yes, same array on both sides |
+  | a borrowed view of an expression, `call mlx_view(exp(a), p)` | `viewexpr` | yes |
+  | handles, types or functions of another file; aliasing (pointers, associate, dummies); macros and inactive preprocessor branches (read as written); fixed form; OpenMP private copies | | not detected |
+
+  A clean result covers only these forms in the files given; it is no proof that a program leaks nothing, and
+  `mlx_live_count()` at run time remains the check of record. Its fixtures cover each rule's unsafe and safe
+  form, renamed imports, a whole `use mlxf`, scopes and the preprocessor's limit; `check_tree.sh` runs them and
+  the consumer programs, and `check_install.sh` runs the installed copy outside the repository on a planted leak,
+  directly and through `mlxf_check_lifetime`.
 - **The assignment pattern** for a derived type with allocatable handle components: a type-bound defined
   assignment that copies them element by element.
 
@@ -216,7 +240,17 @@ written, the skill `mlxf-modern-fortran`.
   stays half precision); a real scalar with a complex64 array becomes complex64; an integer or boolean array with a real scalar gives
   float32. A real64 literal never makes a float64 graph. Arithmetic (`**` included), comparisons, `max`, `min`,
   `atan2`, `modulo`, `mlx_logaddexp`, `mlx_floor_divide` and `mlx_clip`'s bounds accept real32 and real64
-  scalars on either side, in the intrinsic's argument order. The bitwise functions (`iand`, `ior`, `ieor` on
+  scalars on either side, in the intrinsic's argument order. **The operators `+ - * / **` and the six
+  comparisons also accept a default-integer scalar on either side**: with an integer array (int8 to int64, uint8
+  to uint64) the scalar is made in the array's kind exactly, never through real32, so `k + 1` keeps int32 and
+  `k == 16777217` compares an int64 exactly; `/` is true division to float32, as for two integer arrays; a value
+  the kind cannot hold (int8 with 300, an unsigned kind with a negative value, uint8 with 256) stops with
+  `error stop 86` instead of wrapping (guards `guard_scalar_int8`, `guard_scalar_unsigned`, `guard_scalar_uint8`);
+  a negative integer exponent follows MLX. With a real or complex array the integer scalar is weak, as a real one
+  (`h + 1` stays float16); with a boolean array it is int32 and MLX promotes the booleans to int32. Other integer
+  kinds of scalar are not accepted (convert them, or use an array). The tests (`unit_array`,
+  `test_integer_scalars`; `unit_ops`, `test_integer_comparisons`) hold the frozen matrix of the user-hardening
+  plan's C9. The bitwise functions (`iand`, `ior`, `ieor` on
   either side; `shiftl`, `mlx_right_shift` as the shift) accept a default integer scalar, which takes the
   array's integer kind.
   A real32 scalar widened for a float64 array retains its original real32 rounding; a real64 scalar is
@@ -285,6 +319,11 @@ written, the skill `mlxf-modern-fortran`.
 
 ## 8. Evaluation and memory
 
+- **A graph keeps everything it has not evaluated.** Every intermediate and every scalar operand (a buffer of
+  its own) stays alive until the graph is evaluated: `a = a*0.999 + 0.001` repeated 300000 times without an
+  evaluation stops while it is built (`[metal::malloc] Resource limit (499000) exceeded`, measured on an M5
+  Ultra; 100000 steps evaluate). The limit depends on the machine, MLX and the graph, so no count is safe: a loop
+  evaluates at its own batch boundary (`call mlx_eval(a)` every n steps). Operators never evaluate on their own.
 - `mlx_eval(a | arrays)` evaluates; `mlx_async_eval(a | arrays)` queues and returns; `mlx_synchronize()`
   waits for the work queued on every device; `mlx_to`, `mlx_to_alloc` and `mlx_view` evaluate. The overlap
   pattern, from one thread: queue block n+1 with `mlx_async_eval`, copy out block n, let the CPU consume it.
@@ -321,10 +360,50 @@ written, the skill `mlxf-modern-fortran`.
   joins the arrays' elements, each in array element order, into a rank-1 array.
 - `mlx_slice(a,lower,upper[,stride])` takes one bound per dimension, inclusive and in range 1 through
   extent; stride defaults to one and may be negative but never zero. Oppositely ordered bounds give
-  an empty slice. `mlx_take_along_dim(a,indices,dim)` takes integer one-based indices of compatible
+  an empty slice. Along an extent of zero no bound is valid, so such a dimension is used whole (it is already empty);
+  no bound outside 1 through extent is admitted to make an empty slice, which the bounds check would lose. `mlx_take_along_dim(a,indices,dim)` takes integer one-based indices of compatible
   rank and shape and shifts them inside the graph. It does not check index values for the Fortran
   range: index 0 becomes MLX index -1 and wraps to the last element of the selected dimension.
-  Callers needing strict bounds must validate indices before constructing the graph.
+  Callers needing strict bounds must validate indices before constructing the graph. **An index outside
+  the array reads outside its buffer** (MLX 0.32.4, measured with `mlx_take` on five values): on the GPU it
+  returns 0 with status 0 (6 to 100000000, -5); on the CPU 6 to 10000 return 0, while 1000000 returned
+  another value (8.9e11) or ended the process (SIGSEGV), and -5 and 100000000 ended it (SIGBUS, SIGSEGV), from
+  run to run. No status reports it. Indices from outside the program are checked before they reach any
+  index-taking operation (`doc/collaboration/apple_questions.md`, question 35), with the explicit check below.
+- **`call mlx_check_indices(indices, extent, status)`** and **`call mlx_check_indices(indices, extent, size,
+  status)`** check an integer array of one-based values (any integer kind, signed or unsigned, any shape)
+  against a caller-supplied extent: every value `1 <= i <= extent` (elements), or every slab start
+  `1 <= i <= extent - size + 1` for slabs of `size` elements (after `1 <= size <= extent` is checked).
+  `call mlx_check_indices(indices(:), extents(:), status)` and `(indices(:), extents(:), sizes(:), status)`
+  check a list of index arrays, each against its own extent (and slab size), and name the first that fails.
+  `status` is required: 0 when every value passes, an empty array of indices included; 1 otherwise, with the
+  reason and the offending smallest or largest value in `mlx_last_error()` (index 0, which the operations wrap,
+  is refused here; a nonempty array into an extent of 0, a negative extent, a slab larger than the extent and a
+  non-integer array are refused). It reduces the indices to their smallest and largest value in their own kind
+  and evaluates both once, a wait for the device: run it on untrusted input before the indices reach a graph,
+  never inside a compiled or traced callback (`mlx_function`, a transform), and reuse the indices it accepted
+  unchanged. Extents are default integers. Nothing else changes: the operations below stay unchecked and lazy,
+  with no added evaluation, and there is no global switch. The recipes (`s = a%shape()`):
+
+  | operation | check |
+  | --- | --- |
+  | `mlx_take(a,idx,dim)`, `mlx_take_along_dim`, `mlx_put_along_dim`, `mlx_scatter_add(a,idx,u,dim)` element form | `mlx_check_indices(idx, s(dim), status)` |
+  | `mlx_take(a,idx)` (positions in array element order) | `mlx_check_indices(idx, int(a%size()), status)`, for an `a` of at most `huge(1)` elements |
+  | `mlx_gather(a,idx,dim,slice_sizes)`, `mlx_scatter*(a,idx,u,dim)` | `mlx_check_indices(idx, s(dim), slice_sizes(dim), status)` (for a scatter, the slab's extent along `dim`, 1 for `mlx_scatter`'s `updates`) |
+  | `mlx_gather(a,list,dims,slice_sizes)`, `mlx_scatter*(a,list,u,dims)` | `mlx_check_indices(list, s(dims), slice_sizes(dims), status)` |
+  | `mlx_slice(a,start,dims,slice_sizes)`, `mlx_slice_update(a,u,start,dims)` (dynamic) | the starts per listed dimension: check the host values before `mlx_from`, or each start against `s(dims(k))` and `slice_sizes(dims(k))` |
+  | `mlx_gather_mm(a,b,lhs_indices,rhs_indices)` | each list against its operand's number of matrices, `product(s(3:))` |
+  | `mlx_segmented_mm(a,b,segments)` | both bounds of every segment against the inner extent `k` (a last bound below the first is an empty segment, allowed) |
+  | `mlx_cross_entropy(logits,targets)` | `targets` against the number of classes, `size(logits, 1)` |
+
+  `mlx_as_strided` keeps its separate unsafe contract (an offset and strides over the buffer, below): no index
+  check covers it. The tests (`unit_ops`, `test_index_check`, per device): the exact accept/reject matrix of
+  the user-hardening plan's C3 (first and last valid value, 0, negative, extent + 1, the largest int32, int64
+  2^40 and its smallest value, uint8 255, uint32 4e9, uint64 2^63, int8 and int16 kinds, duplicates, a (2, 2)
+  array, empty lists and an extent of 0, a negative extent, float32 and boolean arrays, slabs ending at the
+  boundary and one past it, a slab of the whole extent, the largest default-integer extent without overflow,
+  lists of dimensions with the failing one named), a refused index (100000000, which crashes the CPU's
+  `mlx_take`) kept from the operation, accepted indices reused, and `mlx_take` still unchecked and lazy.
 - `mlx_take(a,indices,dim)` gathers whole slices: the indices' Fortran shape takes the place of dimension
   `dim`, `r(.., i1, .., ik, ..) = a(.., indices(i1, .., ik), ..)`. Its indices are one-based, shifted in
   the graph and unchecked, as `mlx_take_along_dim`'s (0 wraps to the last slice). Gathering a slab per index
@@ -370,7 +449,28 @@ written, the skill `mlxf-modern-fortran`.
   `mlx_var` and `mlx_std` add `ddof` (the divisor is the count less `ddof`, 0 by default). Without `dim` or
   `dims` every dimension is reduced and the result is rank 0. The reduced dimensions are removed, or kept with
   extent 1 under `keepdims=.true.`. `all`, `any` and `count` treat a nonzero element as true; `count` is
-  int32, `all` and `any` boolean; `mlx_mean` of an integer array is float32. Optional arguments are passed by
+  int32, `all` and `any` boolean. **`mlx_mean`, `mlx_var` and `mlx_std` of an integer or boolean array convert it
+  to float32 before the arithmetic** and return float32: MLX 0.32.4 sums such input in its own kind, so a large
+  total wrapped with status 0 (a 1024×1024 int32 array of 4096 had mean 0; `doc/collaboration/apple_questions.md`,
+  question 33). The conversion is float32's: an int32, int64 or uint64 value beyond 2^24 is rounded once, so the
+  statistics have float32's precision, not integer exactness; `sum` and `product` keep the integer kind and its
+  wrapping. The tests (`unit_ops`, `test_integer_statistics`): exact fixtures (the image of 4096, two values 2e9,
+  signed cancellation, a constant of each of the nine integer and boolean kinds) within one float32 epsilon of
+  max(1, |answer|) in every form, and int32 and int64 fixtures in [-2e9, 2e9] against the float32 family's oracle
+  and frozen tolerances on the data scaled by 1e-9. `maxval` and `minval` of a zero extent stop (MLX refuses the
+  reduction) in MLX; the library returns Fortran's identities instead, in the operand's kind and the reduction's
+  shape (dimensions removed, or kept with extent 1): `-huge` and `huge` for reals, `-huge-1` and `huge` for
+  integers, 0 and the largest value for the unsigned kinds, minus and plus the largest finite value of float16 and
+  bfloat16, false and true for booleans (a complex array, which has no order, is refused as before); a reduction
+  over nonzero extents of an empty array keeps MLX's empty result. **`mlx_mean` of a floating or complex array
+  is scaled**: `s*mean(x/s)`, `s` the largest magnitude of the reduced elements (of their real and imaginary
+  parts), with its gradient stopped, so no partial sum overflows where the mean is representable (two float32
+  values 2e38 have the mean 2e38; MLX alone gave infinity); where `s` is zero or not finite the plain mean stands
+  (0, infinity, NaN as IEEE arithmetic gives them), and the mean of an empty extent is NaN. The tests
+  (`unit_ops`, `test_mean_range`, `test_empty_extrema`): two equal values within 8 epsilons (float32 2e38,
+  float64 1e308), 1024 values of mixed magnitudes and signs within (n+2) epsilons of the mean of the magnitudes,
+  signed cancellation, complex parts at 2e38, zeros, NaN and infinities, every form; the identities of the
+  thirteen ordered kinds in every form, exactly. Optional arguments are passed by
   keyword (`sum(a, keepdims=.true.)`). `mlx_logsumexp` uses MLX's stable reduction; the first test
   of its `(a,dim)` form keeps the bound `1e-5 * max(1, abs(logsumexp(x)))`, in log units, including CPU
   float64 (the exponential uses float32 precision).
@@ -557,7 +657,18 @@ written, the skill `mlxf-modern-fortran`.
   nonzeros for 0), over two the matrix norm of the matrices whose rows run along `dims(1)` and columns along
   `dims(2)` (the largest column sum for 1, the smallest for -1, the row sums for plus and minus infinity, the
   largest and smallest singular value for 2 and -2). Without `dim` a rank-1 array is a vector and a rank-2
-  array a matrix over dimensions (1, 2); a higher rank stops. `mlx_norm_matrix(a,ord[,dims][,keepdims])` takes
+  array a matrix over dimensions (1, 2); a higher rank stops. **`norm2` of a floating or complex array is
+  scaled**: `s*sqrt(sum((a/s)**2))`, `s` the largest magnitude of the reduced elements (of the real and imaginary
+  parts for a complex array, so that the scale itself cannot overflow), its gradient stopped, each squared term
+  at most 1 (2): two float32 values 1e20 or 1e-30 now have a finite, nonzero norm, where MLX's norm, which squares
+  before it sums, gave infinity and 0 (float64 likewise at 1e200 and 1e-200; question 34). Where `s` is zero or
+  not finite MLX's norm stands: 0 for zeros and empty reductions, +infinity for an infinity, NaN for a NaN. The
+  derivative is `a/norm2(a)` away from zero; at zero it is not finite, as for MLX's norm. Integer arrays and
+  `mlx_norm` of every order keep MLX's computation. The tests (`unit_linalg`, `test_norm2_range`; `unit_transforms`,
+  `test_scaled_gradients`): two equal values within 8 epsilons in every form, 1024 values of mixed magnitudes
+  (1e-30 to 1e37) and signs within (n+2) epsilons of a real64 reference, relative, complex parts at 1e30,
+  float16 values whose squares float16 cannot hold, zeros, empty reductions, NaN and infinity; the gradients of
+  `norm2` (also at 1e20 and 1e200) and of `mlx_mean` within `mlx_value_and_grad`'s frozen tolerance. `mlx_norm_matrix(a,ord[,dims][,keepdims])` takes
   `'fro'` or `'nuc'` (the sum of the singular values) over `dims`, dimensions 1 and 2 by default. The norms of
   singular values (2, -2, `'nuc'`) run on the CPU's default stream, the others on the default device.
 - **Convolutions.** MLX's channels-last layouts read in Fortran order: the input is (C, W[, H[, D]], N), the
@@ -1025,7 +1136,7 @@ dimension 1 and, where there is a sequence, positions along dimension 2**; the f
 - **On disk the bytes are MLX's.** A Fortran (m, n) array is, to a NumPy reader, the C-order (n, m) array over
   the same bytes: element (i, j) of the Fortran array is element [j-1, i-1] there, as in ordinary C
   interoperability. Read back through this library it is (m, n) again.
-- `call mlx_save(file, a[, status])` writes `a`, evaluated, in NumPy's `.npy` format 1.0; MLX adds `.npy` to a
+- `call mlx_save(file, a[, status])` writes `a`, evaluated, in NumPy's `.npy` format 1.0; `.npy` is added to a
   name that does not end with it. `a = mlx_load(file[, status])` reads one, the name given whole. The header
   holds the shape reversed and `'fortran_order': False`; a view that is column-contiguous (a transpose) is
   written without a copy with `'fortran_order': True` under its own reversed shape, which NumPy and `mlx_load`
@@ -1040,11 +1151,26 @@ dimension 1 and, where there is a sequence, positions along dimension 2**; the f
   arrays without a word). `call mlx_load_safetensors(file, names, arrays[, metadata, status])` returns the arrays
   and their names **sorted by name** (MLX keeps them in a hash table) and the metadata sorted by the first string.
   `call mlx_save_gguf(file, names, arrays[, status])` and `call mlx_load_gguf(file, names, arrays[, status])` do
-  the same for GGUF, without metadata (typed maps with no Fortran counterpart).
+  the same for GGUF, without metadata (typed maps with no Fortran counterpart). A save adds `.safetensors` or
+  `.gguf` to a name that does not end with it, as MLX does.
+- **A save replaces its file only by a complete write.** The three saves first check what they can (live arrays,
+  names, metadata, the kinds of the format, below), then evaluate the arrays, then settle the destination's name
+  (the suffix added) and refuse a destination a rename could not replace as it is: a symbolic link ("save to the
+  file it names"), anything but a regular file, a file with other hard links, another user's file; and a save
+  into a directory the program cannot write fails, even over a writable file, since the sibling lives there. They then
+  create a hidden sibling, `.<name>.mlxf<pid>-<k>.tmp<suffix>` in the destination's directory (the first free k of
+  100), have MLX write it, give it the old file's permission bits (a new file has those of any file the program
+  creates) and rename it over the destination. Any failure removes the sibling and leaves the destination byte for
+  byte as it was, or absent if it was; the destination itself is never removed. The promise covers a save that
+  returns: nothing is flushed with fsync, so a crash or a power loss is not covered, and may leave the sibling.
+  Ownership, extended attributes and ACLs of the old file are not carried over (another user's file is refused for
+  that reason; the group is the directory's, as for any new file). `mlx_function_exporter` and
+  `mlx_export_function` write in place and keep their own warning (section 14).
 - **Kinds** (MLX 0.32.4). `.npy` takes every dtype, float64 on the CPU device. safetensors takes every dtype but
-  float64 ("received invalid dtype", a status). GGUF takes int8, int16, int32, float16 and float32; another is a
-  status. **A save MLX refuses for its kind has already opened the file:** a file of that name is lost (empty
-  for safetensors, a bare header for GGUF), so check the kinds before saving over a file worth keeping.
+  float64; GGUF takes int8, int16, int32, float16 and float32. The library refuses another kind with a status
+  before anything is written ("nothing was written"): MLX 0.32.4 itself refuses it only after opening the file,
+  which emptied a file of that name (question 31; a 99-byte safetensors file was left with 0 bytes, an 80-byte GGUF
+  file with 24).
 - **Devices.** MLX reads files on the CPU only (a load built on the GPU's stream fails its evaluation), so what
   is read is built on the CPU's default stream whatever the default device, and is used from there by
   operations on either device (unified memory, no copy).
@@ -1054,6 +1180,13 @@ dimension 1 and, where there is a sequence, positions along dimension 2**; the f
 - `call mlx_print_graph(arrays[, file, status])` writes the graph that computes the arrays as text, one line an
   operation, to a file or to the standard output; `call mlx_export_to_dot(file, arrays[, status])` writes it in
   Graphviz's dot language. Both show MLX's shapes, the Fortran shapes reversed.
+- The tests of replacement (`unit_io`, `test_replacement`, per device): the checkpoint's bytes unchanged after a
+  refused kind, names and metadata, a failed evaluation (one buffer beyond the GPU's maximum), a failed write and
+  a failed rename (the transaction's steps, `mlxf_save_begin` and `mlxf_save_end` of `mlxf_io`, driven one by one
+  by the tester: not part of `mlxf`), and with every temporary name taken; no destination after a failed save to a
+  new name; no temporary file left; a replacement writes the bytes of a save to a fresh name and keeps the mode
+  640; a new file's mode is that of a file the program creates; `.npy` added once to a name with spaces; a symbolic
+  link, a second hard link and a directory refused. Not tested: another user's file (it needs a second account).
 - The tests (`unit_io`): each of the eight transfer kinds at ranks 0 to 4 saved, the file read as bytes with its
   header parsed in Fortran (kind, reversed shape, data equal to the host array's bytes in array element order),
   loaded with its kind and Fortran shape, and written again to the same bytes; a host matrix's own bytes under

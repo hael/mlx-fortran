@@ -400,7 +400,16 @@ layout does 2.9 million pairs per second on 24 cores; the target machine is an M
       so. Could the convention be documented?
     - Where: MLX `mlx/io/safetensors.cpp`, `mlx/io/gguf.cpp`, `mlx/io/load.cpp`,
       `mlx/backend/metal/distributed.cpp`; mlx-c `mlx/c/io.h`, `mlx/c/distributed.h`, `mlx/c/map.cpp`.
-    - Meanwhile: the binding policy tells the user to check the kinds before saving over a file worth keeping;
+    - Reproduced again 2026-11-26 on the M5 Ultra (`applegpu_g17d`) through mlx-fortran: a 99-byte safetensors
+      checkpoint left with 0 bytes after a float64 save to its name, an 80-byte GGUF file left with 24 after an
+      int64 save (the user-hardening plan's C2).
+    - MLX's main branch has since answered (a): commit `1c141875c` ("Keep the existing file when save,
+      save_safetensors or save_gguf fails", 2026-10-29, after 0.32.4) writes every save to `<file>.tmp<random>` and
+      replaces the file only after a complete write, keeping its permissions; it follows a symbolic link and replaces
+      the file the link names. Before (a) is sent, it is narrowed to asking which release carries it.
+    - Meanwhile: since 2026-11-26 the library itself checks the kinds before anything is written and writes every
+      array save to a hidden temporary sibling renamed over the destination only when complete (refusing symbolic
+      links, hard-linked files and other users' files as destinations), so a failed save leaves the old file;
       the library builds loads and distributed nodes on the CPU's default stream whatever the default device;
       the iterators' end code is the constant `MLXF_MAP_END`.
 
@@ -422,13 +431,20 @@ layout does 2.9 million pairs per second on 24 cores; the target machine is an M
       returns about `4.61168602e18` instead of zero. A constant 1024×1024 int32 image of 4096 gives mean 0
       and variance 16777216 through the binding. Could integer inputs be promoted before accumulation in
       mean, and before variance/std compute their mean? Converting the inputs to float32 first makes these
-      fixtures correct; it does not promise exact conversion of every int64/uint64 value.
-    - Where: MLX `mlx/ops.cpp`, mean/variance reductions; mlx-c `mlx_mean` and `mlx_var`. The direct C
-      reproducer and logs are `/tmp/mlxf_codex_user_review_2026-11-26/backend_stats.c` and
-      `backend-stats.log`; the exact fixtures and follow-up are retained in
+      fixtures correct; it does not promise exact conversion of every int64/uint64 value. The direct C
+      reproducer (no mlx-fortran) on an M5 Ultra (`applegpu_g17d`), both streams, 2026-11-26: int32, uint32,
+      int64 and uint64 inputs are wrong in `mean`, `mean_axis`, `var` and `std` (uint32 `[4e9, 4e9]` mean
+      1.85251635e9; int64 `[2^62, 2^62]` mean -4.61168602e18; uint64 `[2^63, 2^63]` mean 0); int8, int16,
+      uint8, uint16 and bool constants (up to 65536 elements) are right, and so is every case converted to
+      float32 first (the control).
+    - Where: MLX `mlx/ops.cpp`, mean/variance reductions; mlx-c `mlx_mean` and `mlx_var`. Direct C
+      reproducer and control: `scripts/probes/user_statistics_probe.c` (its output is the finding); the exact
+      fixtures and follow-up are retained in
       [the consolidated plan](../implementation_notes/planned/mlxf_user_hardening.md), C1.
-    - Meanwhile: recommend explicit floating conversion before integer statistics. A local correction of
-      mean/variance/std is planned, not implemented. Current upstream issue/release status has not been
+    - Meanwhile: since 2026-11-26 the library converts integer and boolean input to float32 before
+      `mlx_mean`, `mlx_var` and `mlx_std` (binding policy, section 10); the probe still shows MLX's own result.
+    - Checked 2026-11-26 against MLX's main branch (`5c8989446`, 2026-11-23): `mean` still sums in the input's kind
+      (`multiply(sum(a, axes), normalizer)` with only the normalizer made floating); the item stands as written. Current upstream issue/release status has not been
       checked by this review; deduplicate and rerun before submission.
 
 34. **Euclidean norms and floating means overflow or underflow internally when the answer is representable.**
@@ -440,10 +456,19 @@ layout does 2.9 million pairs per second on 24 cores; the target machine is an M
       should the supported input range and intermediate arithmetic be explicit in the operation docs?
     - Where: MLX `mlx/linalg.cpp`'s Euclidean norm and `mlx/ops.cpp`'s mean, reached through
       `mlxf_linalg_matrix` and `mlxf_ops_reduce`. Fixtures and closed-form references:
-      [consolidated plan](../implementation_notes/planned/mlxf_user_hardening.md), C5. A direct C control
-      for this item remains to be admitted; do not confuse it with question 33's direct C verification.
-    - Meanwhile: describe the limitation and use an explicitly scaled calculation where the range requires
-      it. A local robust reduction is planned, not implemented. Check current upstream status before filing.
+      [consolidated plan](../implementation_notes/planned/mlxf_user_hardening.md), C5. Direct C reproducer
+      and control: `scripts/probes/user_range_probe.c`; on 2026-11-26 on an M5 Ultra (`applegpu_g17d`) it
+      shows the same through mlx-c alone, for `linalg_norm_l2` and `linalg_norm` of order 2 on both streams
+      (also float32 2e38 and CPU float64 1e308), the mean overflowing at float32 2e38 and CPU float64 1e308 (not
+      at 1e20 or 1e200), while the controls (the norm scaled by the largest magnitude, the mean as a sum of
+      halves) are within 8 epsilons in every case. It also shows `max` and `min` over an axis of extent 0
+      refused ("Cannot max reduce over axis 1 with size 0"), which is MLX's documented behaviour and the
+      library's to map to Fortran's identities, not a request.
+    - Meanwhile: since 2026-11-26 the library scales `norm2` and the floating `mlx_mean` by the largest magnitude
+      itself (binding policy, section 10); the probe still shows MLX's own result. Check current upstream status
+      before filing.
+    - Checked 2026-11-26 against MLX's main branch (`5c8989446`): the Euclidean norm is still
+      `sqrt(sum(square(a)))` in `mlx/linalg.cpp`; the item stands as written.
 
 35. **Unchecked indices can crash on CPU or return plausible zeros on GPU without an error.** Status: open,
     not sent; reproduced 2026-11-26 with MLX 0.32.4 / mlx-c 0.8.0 through mlx-fortran.
@@ -454,9 +479,16 @@ layout does 2.9 million pairs per second on 24 cores; the target machine is an M
       bounds validation. Negative-index wrapping is a separate convention.
     - Where: `mlx_take`, reached from the `p11_take_each.f90` probe in
       `~/for_claude/mlxf_user_review_2026-11-26/`; repeated against a fresh install by Codex. The consolidated
-      plan's C3 preserves the exact fixtures and proposes explicit boundary validation.
-    - Meanwhile: callers must validate input indices and slab extents before indexing. The existing lazy
-      path stays unchecked; a local explicit validator is planned. Check current upstream reports first.
+      plan's C3 preserves the exact fixtures and proposes explicit boundary validation. Repeated 2026-11-26 on an
+      M5 Ultra, four processes per index: the GPU returns 0 with status 0 for every out-of-range index (MLX
+      indices 5 to 99999999, and -6); the CPU returns 0 for MLX indices 5 to 9999, while 999999 returned
+      8.9e11 in three runs and ended the process (SIGSEGV) in one, -6 ended it (SIGBUS) in three of four, and
+      99999999 ended it in all four. The out-of-range read is not deterministic on the CPU.
+    - Meanwhile: since 2026-11-26 the library offers an explicit check, `mlx_check_indices` (element indices and
+      slab starts against caller-supplied extents, a status, one evaluation), that callers run on untrusted
+      indices; the lazy operations stay unchecked. Check current upstream reports first.
+    - Checked 2026-11-26 against MLX's main branch (`5c8989446`): the CPU and Metal indexing backends gained no bounds
+      check since 0.32.4 (their changes concern empty outputs and 64-bit offsets); the item stands as written.
 
 36. **Is `argpartition` (and `argsort`) stable on the GPU, and may we rely on it?** Status: open, not sent;
     measured 2026-11-26 with MLX 0.32.4 / mlx-c 0.8.0 on an M5 Ultra.

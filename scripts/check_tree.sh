@@ -18,6 +18,10 @@
 #   format_use_blocks.py        the one form of every use block, tree-wide
 #   restyle_fortran.py --check  the house layout of every Fortran file under src/ and test/, tree-wide
 #   ctest_budget.py --self-test the fast gate's transcript check on complete, failed and truncated runs
+#   check_consumer.py           --self-test: the consumer lifetime checker's planted fixtures, each rule's unsafe
+#                               form found and its safe form clean; then the consumer programs, which must be clean
+#   generate_api_reference.py   --self-test (a changed dummy and a removed public name change the reference, an
+#                               unknown name fails it), then --check: doc/api_reference.md is current
 # then warns, never fails, about Fortran sources under src/ and test/ that git does not track: the targets
 # glob their sources, so such a file builds here and is missing from a commit. Run restyle_fortran.py on the
 # files you touched to fix what its check reports. scripts/run_fast_gate.sh runs this first.
@@ -46,6 +50,10 @@ run scripts/check_submodule_linkage.py "$ROOT"
 run scripts/format_use_blocks.py --check
 run scripts/restyle_fortran.py --check --tree
 run scripts/ctest_budget.py --self-test
+run scripts/check_consumer.py --self-test
+run scripts/check_consumer.py test/consumer/*.f90
+run scripts/generate_api_reference.py --self-test
+run scripts/generate_api_reference.py --check
 if git -C "$ROOT" --no-optional-locks rev-parse --is-inside-work-tree > /dev/null 2>&1; then
     untracked=$(git -C "$ROOT" --no-optional-locks ls-files --others --exclude-standard -- src test |
         grep -E '\.([Ff](90|08)|inc|c|h)$')

@@ -1,24 +1,32 @@
 # K4: the shift lattice and the map reductions (A3) of the toy polar calculator (run `mlxf_kernel_k4`, on the M5 Ultra)
 
-Status, 2026-11-26: planned, not ruled. Base: the commit that holds this plan (the maintainer commits it with the
-pending work; the run pins the hash in Phase 0 and records it). The code this note was checked against is
-`6f1af0d` with the working tree of 2026-11-26 (the toys in the shape of SIMPLE's integration, parity Phases 5 to
-9). SIMPLE is read at `d354efee2`. Machine: the M5 Ultra only (30 cores, 103.1 GB, the only GPU and the only
-machine that builds the library), in the session, in a copy of the checkout, one run at a time. Supersedes: none.
-Depends on:
+Status, 2026-11-26: planned; ruled as recommended by Hans, 2026-11-26 ("Rule as recommended"), every decision of section 3 and the run order K4, K3, K5, K6, K7; revised after ranks 2d to 2f (runs `mlxf_refactor`, `mlxf_toy_layout`,
+`mlxf_kernel_forms`). Base: the commit that holds this plan, after rank 2g's result (K4 runs before K3 by the ruling; the maintainer
+commits this plan with the pending work; the run pins the hash in Phase 0 and records it). The revision was
+checked against `ae7d623` (ranks 2d to 2f committed) with the three uncommitted document edits of 2026-11-26;
+the draft was written at `b2c43a4`. SIMPLE is pinned at `28c753993`, the mirror ledger's pin since rank 2e, and
+every SIMPLE fact below was re-read there. Machine: the M5 Ultra only (30 cores, 103.1 GB, the only GPU and the
+only machine that builds the library), in the session, in a copy of the checkout, one run at a time.
+Supersedes: none. Depends on:
 
-- the polar toy with its Fourier-Bessel shift maps and its driver (validated: yes, run `mlxf_toy_seam`:
-  `polar_shiftmap` 794 checks, `eul_prob_tab` 105, `polarft_tail` 55, `seam` 88 in `unit_kernels` 1,955;
-  `polar_shiftmap_accuracy` 48, named-only, last run at that run's Phase 1);
+- the polar toy on SIMPLE's memo layout (`ft_ref_terms (2nk, pftsz+1, nrefs, 2)`, the particle terms, tiles
+  made by `memoize_refs`) with its Fourier-Bessel shift maps and its driver (validated: yes, runs
+  `mlxf_toy_seam` and `mlxf_toy_layout`: `polar_shiftmap` 794 checks, `eul_prob_tab` 105, `polarft_tail` 55,
+  `seam` 88 in `unit_kernels` 1,953 at `ae7d623`; `polar_shiftmap_accuracy` 48, named-only, last run at run
+  `mlxf_toy_seam`'s Phase 1);
 - the dense score's resident reference tiles and K1's fused tail (validated: yes, run `mlxf_kernel_k1`, kept
   under R1 and R2); K2's device route `set_ref_route` (validated: yes, run `mlxf_kernel_k2`);
 - `mlx_fft`, `mlx_irfft`, `matmul`, `mlx_take`, `mlx_take_along_dim`, `mlx_compile` (validated: yes, `unit_fft`
-  194, `unit_linalg` 632, `unit_ops` 2,462, `unit_compile` 63; **not** validated: the time of `mlx_fft` over
-  arrays of 364 by 30 by 351 by 4 complex64 elements);
+  194, `unit_linalg` 632, `unit_ops` 2,462, `unit_compile` 63 at `ae7d623`, counts rank 2g may raise; **not**
+  validated: the time of `mlx_fft` over arrays of 364 by 30 by 351 by 4 complex64 elements);
 - `type(mlx_metal_kernel)` (validated: yes, `unit_fast` 152, K1's tail, K2's gather; a two-dimensional grid and
-  two outputs are in `unit_fast`; **not** validated: a grid of 364 by 256 threads with rank-2 float32 outputs
-  read back by a second kernel; `threadgroup` memory, `threadgroup_barrier` and `simd_sum`, which this plan
-  does not use);
+  two outputs are in `unit_fast`; the SIMD-group functions (`simd_sum`, `simd_min`, `simd_shuffle`, the lane
+  attributes) and `threadgroup` arrays up to 32,768 B with barriers exact and repeatable through the wrapper,
+  and a SIMD group per pair 3.3 times faster than one thread per pair on K1's tail (*measured*, run
+  `mlxf_kernel_forms`, suites `probe` and `tail`, Apple question 26); **not** validated: a grid of 364 by 256
+  threads with rank-2 float32 outputs read back by a second kernel);
+- the measured kernel forms of run `mlxf_kernel_forms` (`completed/mlxf_kernel_forms_report.md`, "What the K
+  plans take"): decision 9's launch shape and decision 4's sizes follow them;
 - the oracles `mlxf_oracle_polar_objfun` (25 self-checks) and `mlxf_oracle_polar_shiftmap` (21) (validated:
   standalone, run `mlxf_oracles2`; **not** asserted by any registry row, and never compared with the toy);
 - `scripts/run_parts.sh` (validated: for benchmarks that write its row layout; **not** for the shift maps,
@@ -26,8 +34,9 @@ Depends on:
 - the recorded inputs of milestone 1, `~/agent_runs/mlxf_m1_m5/scratch/keep/shiftmap_grid.txt` (SHA-256
   `aa05ca2773e6eb5d688dcd75ef1756a24940bea8d079c7daf59cdf77bc902eca`) and `polar_case.txt` (SHA-256
   `90a974fa0842a35d5eee6fe3a07a37405bbbd5849ed3eb7818c129d7dacff1d9`);
-- the roadmap's decisions 7, 9, 12 and 15 (ruled or standing), and **decision 13, which awaits the maintainer's
-  ruling and is decision 1 of this plan**.
+- rank 2g's result (read in Phase 0: it changes `src/core/` and may add assertions to unit areas);
+- the roadmap's decisions 7, 9, 12, 15, 16 and 17 (ruled or standing), and **decision 13, which awaits the
+  maintainer's ruling and is decision 1 of this plan**.
 
 K3 and K7 edit the same toy: K4 launches from the commit that holds K3's verified result (section 2, "The
 queue").
@@ -60,11 +69,14 @@ the report says which stage held it back.
 
 ## 2. Contract
 
-- **Where the code lives:** `src/test/` only, in the polar toy's files and two new device submodules, against
-  the public module `mlxf`. No file under `src/core/` or `src/defs/` changes. A missing wrapper is a stop with a
+- **Where the code lives:** `src/test/` only (rank 2d's tree): the polar toy's files and two new device
+  submodules in `src/test/toys/polar/`, the oracles' tester in `src/test/oracles/`, against the public module
+  `mlxf`. Every new Fortran file opens with its `!@descr:` line and `doc/code_base_map.md` is regenerated in
+  the phase that adds or deletes one (the static gate checks it). No file under `src/core/` or `src/defs/` changes. A missing wrapper is a stop with a
   report. K4 brings no new class: the maps stay procedures of `polarft_calc` under SIMPLE's names.
-- **What it mirrors,** read with `git -C ~/src/SIMPLE show d354efee2:<path>` (never the working tree; nothing
-  is copied in): `src/main/pftc/simple_polarft_shiftmap.f90` (`new_shiftmap`, `setup_shiftmaps` with its
+- **What it mirrors,** read with `git -C ~/src/SIMPLE show 28c753993:<path>` (never the working tree; nothing
+  is copied in; `simple_polarft_shiftmap.f90` changed between the draft's pin `d354efee2` and this one by
+  `23eb95cc2`, check 5): `src/main/pftc/simple_polarft_shiftmap.f90` (`new_shiftmap`, `setup_shiftmaps` with its
   internal `build_map`, `kill_shiftmap`, `gen_shiftmap`, `shiftmap_mode`, `shiftmap_shift`, `shiftmap_draw`,
   `wsqsum_ptcl_band`); `src/main/pftc/simple_polar_shiftmap.f90` (type `polar_shiftmap`: the grid, the areas);
   reading references only: `fill_tab_range` with `finish_particle_map` in
@@ -88,8 +100,9 @@ the report says which stage held it back.
 
 ### What the check found (2026-11-26)
 
-Read in the working tree and in SIMPLE at `d354efee2`. A premise of the families note or of the mlx3D note that
-the code contradicts is marked **differs**.
+Read in the working tree at `ae7d623` and in SIMPLE at `28c753993` (first read at `b2c43a4` and `d354efee2`;
+checks 5, 11, 14 and 15 are revised for ranks 2e and 2f). A premise of the families note or of the mlx3D note
+that the code contradicts is marked **differs**.
 
 1. **The cells are in the reference's frame.** SIMPLE's `shiftmap_shift` returns "the shift of a grid point in
    the optimizer's frame: the reference's own"; the oracle's header (`mlxf_oracle_polar_objfun.f90`) states the
@@ -116,7 +129,11 @@ the code contradicts is marked **differs**.
    30, and 351 x 183 x 30 against 229 x 364 x 30 (the Fourier-Bessel form's useful radius-order terms, 43 and
    229, *measured* in the milestone 1 report). They count the shell sums only. SIMPLE's sums multiply a complex
    by a real matrix (`shell_sums` in `gen_shiftmap_kernel`), the lattice's a complex by a complex one, and the
-   count leaves out SIMPLE's products per order and every transform. It is not a ratio of costs.
+   count leaves out SIMPLE's products per order and every transform. It is not a ratio of costs. Since
+   `23eb95cc2` SIMPLE's `gen_shiftmap_kernel` takes the reference spectra from `ft_ref_terms` (rows nk+1..2nk)
+   and the reference power from the terms, one dot product per bin (`term_sums`) under the Euclidean objective;
+   the toy's maps read the same rows of its memo (rank 2e) and keep their own order of the power's sum, a
+   difference the families note records (rank 2e's report).
 6. **Differs: the mlx3D note's section 4 on the particle-side variant** ("a thread holds one shifted particle
    and the reference rings stream past; the U shifted copies are never written"). A shifted particle on the
    band is 183 bins of 30 shells, 5,490 complex numbers: it does not fit a thread's registers. Every rotation
@@ -152,11 +169,13 @@ the code contradicts is marked **differs**.
     width is the tester's own double-precision sum.
 11. **The maps read the host memos, and that is the whole reason for the device route's refusal.**
     `new_shiftmap` (`mlxf_toy_polarft_shiftmap.f90`) refuses under `POLARFT_REF_ROUTES%device` ("the maps read
-    the host memos, which the device route does not make"); `new_shiftmap_mlx` hands `self%ft_ref` and
-    `self%ft_ref2` to `prepare_maps`. The device memos are released by `new_from_memos`
-    (`mlxf_toy_polarft_workspace_lifecycle.f90`). But both routes end in `finish_tiles` with the same resident
-    array `self%refs`, which holds `ft_ref2` and `conjg(ft_ref)` of every shell and every bin: the band the maps
-    need is a section of it.
+    the host memos, which the device route does not make"); `new_shiftmap_mlx` hands one parity's memo
+    `self%ft_ref_terms(:, :, :, ieo)` to `prepare_maps`, which builds the full-ring spectra from its rows
+    nk+1..2nk and the power's terms from the conjugate of its rows 1..nk. The device memos are released by
+    `new_from_memos` (`mlxf_toy_polarft_workspace_lifecycle.f90`). But both routes end in `finish_tiles` with
+    the same resident array `self%refs`, which holds the conjugated memo of every shell and every bin, packed
+    (rank 2e: on the host route packed from `ft_ref_terms` on the host): the band the maps need is a section
+    of it.
 12. **The benchmark cannot time the maps in parts today.** `suite=shiftmap` reads `cases case grid maps ptiles
     device evidence widths revision nthr` (`SUITE_KEYS` in `mlxf_bench_polar_table.f90`), refuses `nthr=` in
     `bench_shiftmap`, and writes `bench_polar_table_shiftmap.tsv` with the rate in column 23 (`write_map_row`).
@@ -171,15 +190,25 @@ the code contradicts is marked **differs**.
     nalpha, then three compiled reductions (`map_select`, `map_reduce`, `map_evidence`) and one wait per tile
     when cutoffs are given (`polarft_workspace_score_maps`, `tile_maps`). The reductions take the map as an
     array of losses; nothing in them is Fourier-Bessel.
-15. **Apple question 26** records that a `threadgroup` array declared in a kernel body built and summed 64
-    elements correctly in one probe; no file of the tree uses the feature. This plan's kernels need none
-    (decision 9).
+15. **Apple question 26** now records run `mlxf_kernel_forms`'s probe through the wrapper: exact group sums
+    for 32 to 1,024 threads with barriers, the SIMD-group functions exact, a fixed tree bit-repeatable, arrays
+    up to 32,768 B. Only the named-only bench `bench_kernel_forms` uses the features; no toy does. This plan's
+    kernels use SIMD-group functions and no `threadgroup` memory (decision 9), and plan no probe of either.
 
 ### The queue
 
-The runs go one at a time in the order K3, K4, K5, K6, K7, each from the commit that holds the previous run's
-verified result. Only K3 precedes K4 in this batch. Phase 0 re-checks exactly these premises, and writes what
-changed:
+Ranks 2d, 2e and 2f are delivered and committed (`ae7d623`); rank 2g, the user-facing hardening, runs next and
+before this batch (roadmap decision 17). Then the runs go one at a time in the order K3, K4, K5, K6, K7, each
+from the commit that holds the previous run's verified result. Only K3 precedes K4 in this batch. Phase 0
+re-checks exactly these premises, and writes what changed:
+
+- **Rank 2g may change the counts and some reductions.** It changes `src/core/` and no toy file: integer
+  `mean`, `var` and `std` promoted first, the Euclidean norms and floating means in a scaled form, empty
+  `maxval` and `minval` given Fortran's identities, integer-scalar operators, failed saves that keep the
+  file, an index validator; it may add assertions to unit areas. Phase 0 reads its report, takes every area's
+  count from the base (section 5), and records decision 20's identity invocations twice on the base; a digest
+  that differs from `ae7d623`'s (the 364-line identity set of runs `mlxf_toy_layout` and `mlxf_kernel_forms`,
+  SHA-256 `e2d65e88...4d33dba5`) is recorded with the operation 2g's report names, else it is a stop.
 
 - **K3 may leave a scored list of pairs.** K3 delivers per-particle lists of references on the resident tiles.
   The lattice's sums are the dense kernel's sums for (shifted copy, listed candidate) pairs. If K3's report
@@ -190,12 +219,14 @@ changed:
 - **K3 may assert `oracle_polar_selfcheck`** in a tester of its own. Then decision 11's tester asserts the
   shift map's self-check only.
 - **K3 edits** `mlxf_toy_eul_prob_tab.f90` (a second driver beside it is possible), `mlxf_bench_polar_table.f90`
-  (`SUITE_KEYS`, new suites), `mlxf_test_defs.f90`, `mlxf_test_registry.f90`, both ledgers, `src/test/test.inf`,
-  `test/offstate/` and the families note. The counts of section 5 and the identity invocations of decision 20
+  (`SUITE_KEYS`, new suites), `mlxf_test_defs.f90`, `mlxf_test_registry.f90`, both ledgers,
+  `src/test/toys/polar/polar.inf`, `src/test/oracles/oracles.inf`, `doc/code_base_map.md`, `test/offstate/`
+  and the families note. The counts of section 5 and the identity invocations of decision 20
   are taken from the base as K3 left it, not from this note.
 - **K7 follows and reads this plan's result:** the reductions' kernels of decision 9 are per pair across a map,
-  K7's are per particle across references. They share K1's file `mlxf_toy_polarft_workspace_tail.f90` only if
-  K7 chooses to; K4 does not edit that file.
+  K7's are per particle across references; both are written a SIMD group per item, as run `mlxf_kernel_forms`
+  found faster. They share K1's file `mlxf_toy_polarft_workspace_tail.f90` only if K7 chooses to; K4 does not
+  edit that file. Whether K1's own tail moves to a SIMD group per pair is K7's decision 27.
 - K5 and K6 bring classes of their own and touch the polar toy only through the shared files of the table.
 - **If K4 runs before K3** (K3's plan gives a reason in its own queue section; the order is the maintainer's):
   nothing of the list above exists yet. Decision 5 stands as written, the counts and the identity invocations
@@ -303,15 +334,19 @@ at the end of the section.
      the Fourier-Bessel form computes it today;
    - the losses are `1 + (refpow - 2 cross) / ptclpow`, in rows (rotation, distinct shift, pair).
    The particle tile stays the map's (`set_shiftmap_options`, default 16). Sizes that change per map reach a
-   kernel in an int32 input, not a template (the mlx3D note's proposal 4, taken).
+   kernel in an int32 input, not a template (the mlx3D note's proposal 4, taken): equal per launch, and a new
+   value costs about 3 ms in an input against 42 ms as a template (*measured*, run `mlxf_kernel_forms`, suite
+   `sizes`).
 
-5. (2026-11-26, recommended) **The references come from the dense score's resident tiles,** `self%refs`, by a
-   gather of each particle's candidates on the map's 30 shells (check 11), subject to the queue's first item.
+5. (2026-11-26, recommended) **The references come from the dense score's resident tiles,** `self%refs` (the
+   packed conjugated memo, rank 2e), by a gather of each particle's candidates on the map's 30 shells (check
+   11), subject to the queue's K3 item.
    The lattice then keeps no reference data of its own, on either route. Fallback, if the gather from the
-   packed tiles costs more than 20 % of the construction at the bench (*guessed*): a resident band of
-   `conjg(ft_ref)` and `ft_ref2` made in `prepare_maps` from the host memos (1.76e9 B for both parities of
-   10,000 references, *derived*: two arrays of 43,920 B per reference and parity), and decision 18 falls to
-   "no".
+   packed tiles costs more than 20 % of the construction at the bench (*guessed*): a resident band of the
+   memo's rows nk+1..2nk and of the conjugate of its rows 1..nk on the map's 30 shells (what `prepare_maps`
+   reads of `ft_ref_terms` today, rank 2e), made in `prepare_maps` from the host memo (1.76e9 B for both
+   parities of 10,000 references, *derived*: two arrays of 43,920 B per reference and parity), and decision 18
+   falls to "no".
 
 6. (2026-11-26, recommended) **The reductions kept are SIMPLE's four, in SIMPLE's order.** The mode (the first
    strict maximum of the tempered log posterior with the prior and the cell's log area, rings outermost, then
@@ -336,23 +371,39 @@ at the end of the section.
    the `form` dummy go with the losers. No other key, option or member enters the toy; alternatives live in
    the benchmark.
 
-9. (2026-11-26, recommended) **The fused form of the reductions is four small kernels in two launch shapes,
-   without `threadgroup` memory,** in a new device submodule `mlxf_toy_polarft_workspace_maptail`, written
-   only if decision 10 admits it. One thread per pair scanning a whole screen map would run 64 threads of
-   140,140 cells each per tile; the work is therefore split by rotation.
+9. (2026-11-26, recommended; revised 2026-11-26 by run `mlxf_kernel_forms`) **The fused form of the reductions
+   is four small kernels in two launch shapes, the per-pair ones a SIMD group per pair, without `threadgroup`
+   memory,** in a new device submodule `mlxf_toy_polarft_workspace_maptail`, written only if decision 10
+   admits it. One thread per pair scanning a whole screen map would run 64 threads of 140,140 cells each per
+   tile; the work is therefore split by rotation.
    - Kernel 1, grid (rotation, pair): a thread scans its rotation's U cells in SIMPLE's order and writes the
      rotation's largest tempered log posterior with its first cell, and the largest physical one.
-   - Kernel 2, one thread per pair, on K1's pattern: over the 364 partials, the mode in SIMPLE's order (ties to
-     the lower ring, then rotation, then direction), the loss at the mode, the pair's physical maximum.
+   - Kernel 2, a SIMD group per pair (T1's shape): its 32 lanes stride over the 364 partials, each keeping its
+     first maximum, then `simd_max` and the least index among the maximal lanes give the mode in SIMPLE's
+     order (ties to the lower ring, then rotation, then direction), the loss at the mode and the pair's
+     physical maximum.
    - Kernel 3, grid (rotation, pair): its rotation's share of the width's moments and, when asked, of the
      evidence's sum, above the cut, with compensated sums and `metal::precise::exp`.
-   - Kernel 4, one thread per pair: the 364 shares summed in a fixed order, the width and the evidence.
+   - Kernel 4, a SIMD group per pair: the 364 shares, each lane's strided part in index order and the lanes in
+     a fixed tree (`simd_sum` or `simd_shuffle` in a fixed order), the width and the evidence.
+   - *Why a SIMD group per pair* (*measured*, run `mlxf_kernel_forms`, suite `tail`): on K1's tail, the same
+     reduction of 364 rotations per pair, a SIMD group per pair was 3.28 / 3.28 times faster than one thread
+     per pair (5 of 5 pairs), first minima exact, and 1.8 times faster from go to the last exit at six
+     processes. Kernels 1 and 3 keep a thread per (rotation, pair), which fills the GPU already (23,296
+     threads per tile of 64 pairs); a SIMD group per (rotation, pair) for the screen grid's 385 cells is a
+     configuration of Phase 4's sweep, not a fifth kernel.
+   - *Compensated sums* stay in kernel 3 and kernel 4: they are free where the kernel is not bound by its
+     sums (2.8 % on K1's tail, suite `tail`) and cost 14 % in a reduction-bound kernel for 50 to 90 times the
+     accuracy (suite `reduce`); the width and the evidence are differences of moments, and decision 12's last
+     row is the tolerance they buy. A plain sum replaces them only if Phase 4 measures it more than 5 %
+     faster on the canonical driver and decision 12's row still holds.
    The kernels read losses through an int32 table from cell to row, so they serve the lattice's rows and the
    Fourier-Bessel form's cells alike. Partials cross between kernels as rank-2 float32 outputs, which K2
    proved; nothing is atomic, so the form is repeatable by construction. **Fallback, named in advance:** if
-   the four launches cost more than the graph reductions they replace, one thread per pair scanning the whole
-   map (K1's tail unchanged in shape); if that is slower too, the graph reductions stay. `threadgroup` memory
-   is not probed and not used.
+   the four launches cost more than the graph reductions they replace, one SIMD group per pair scanning the
+   whole map (T1's shape over all cells); if that is slower too, the graph reductions stay. `threadgroup`
+   memory is not used (none of the four needs it) and is not probed: the wrapper's support is measured
+   (Apple question 26).
 
 10. (2026-11-26, recommended) **Ceilings before kernels,** in scratch copies of the tree with a null stage
     (the diff kept with the run's evidence; no repository key), at one process on both grids:
@@ -489,7 +540,8 @@ at the end of the section.
 
 22. (2026-11-26, recommended) **Memory is measured and reported:** per form and grid the prepared device
     memory, the MLX peak and cache, one process's footprint; the families note's seam facts are rewritten with
-    them (today: a map adds 2.63e9 B for both parities, 9.77e9 B active with the tiles). Expected for a
+    them (before rank 2e: a map adds 2.63e9 B for both parities, 9.77e9 B active with the tiles; Phase 0's
+    baseline measures them on the base). Expected for a
     lattice on the tiles (*derived*): no reference data of its own, and the phase tables of decision 4.
 
 23. (2026-11-26, recommended) **Files beyond the table.** A toy file that passes 700 lines is split into a
@@ -498,8 +550,8 @@ at the end of the section.
 
 24. (2026-11-26, recommended) **MLX and mlx-c findings** (a transform's time or working memory at these
     shapes, a kernel that returns wrong rows under the default math mode as in MLX issue #4603, the cost of
-    several launches) become numbered entries of `doc/collaboration/apple_questions.md`, from 32 on, written by
-    the run and never sent.
+    several launches) become numbered entries of `doc/collaboration/apple_questions.md`, after the last one
+    Phase 0 finds (37 and following at `ae7d623`), written by the run and never sent.
 
 **Defaults taken without a question:**
 - the grid, the candidates per particle (16) and the case are the recorded files'; no new measurement of SIMPLE;
@@ -511,7 +563,8 @@ at the end of the section.
 - the driver is unchanged in what it does: `finish_particle_map` calls `gen_shiftmap` and `shiftmap_mode`, and
   `batch_map_results` hands over the results with the new component;
 - the mlx3D note's proposal 5 (`apply` with a launch of its own) is not needed: a kernel object per map and
-  tile shape costs 0.2 ms once.
+  tile shape costs about 3 ms once (a new object of an existing source, 2.6 to 3.1 ms at its first evaluation;
+  MLX never recompiles for a new launch configuration; *measured*, run `mlxf_kernel_forms`, suite `sizes`).
 
 **The choices that are the maintainer's,** each with what the other way costs:
 - **Decision 1** (the roadmap's 13): A or B. A keeps SIMPLE's cells on the GPU and, by the derived costs, most
@@ -536,7 +589,8 @@ at the end of the section.
 - A host route for the maps (decision 19); a lattice of the toy's own (decision 3).
 - K3's lists, beyond using what K3 kept (the queue); K7's per-particle reductions.
 - More graph-level work on the Fourier-Bessel construction (the roadmap, section 5).
-- `threadgroup` memory, `threadgroup_barrier`, `simd_sum`, atomic outputs.
+- `threadgroup` memory and atomic outputs (no kernel of decision 9 needs them); SIMD-group functions are used
+  by kernels 2 and 4 only.
 
 ## 5. Change types and gates
 
@@ -552,11 +606,14 @@ at the end of the section.
 
 Every phase ends with Debug and Release built from scratch in the run's own hand-configured trees
 (`-DMLXF_WERROR=ON -DFORTLS=OFF -DBUILD_TESTS=ON`) with no warning, the fast gate passing in both (13 entries),
-`scripts/check_tree.sh` passing, `scripts/restyle_fortran.py` and `scripts/format_use_blocks.py` run on every
-Fortran file touched, and the areas' counts, Debug and Release alike: `unit_core` 215 or 216, `unit_array` 193,
-`unit_ops` 2,462, `unit_fft` 194, `unit_linalg` 632, `unit_compile` 63, `unit_fast` 152, `unit_random` 486,
-`unit_transforms` 274, `unit_io` 846, `unit_distributed` 55 unchanged (or as K3 left them, recorded in Phase
-0), and `unit_kernels` at 1,955 (or K3's count) plus this run's checks, the new count frozen at each exit.
+`scripts/check_tree.sh` passing (with rank 2d's rules `publist` and `size`, the `.inf` descriptions and the
+code-base map), `scripts/restyle_fortran.py` and `scripts/format_use_blocks.py` run on every Fortran file
+touched, and the areas' counts, Debug and Release alike, as Phase 0 finds them on the base (rank 2g and K3
+may have changed them). At `ae7d623` (*measured*): `unit_core` 214 to 216, `unit_array` 193, `unit_ops`
+2,462, `unit_fft` 194, `unit_linalg` 632, `unit_compile` 63, `unit_fast` 152, `unit_random` 486,
+`unit_transforms` 274, `unit_io` 846, `unit_distributed` 55, and `unit_kernels` 1,953 (`polarft_calc` 333,
+`projector_chain` 91 since rank 2e). `unit_kernels` is the base's count plus this run's checks, the new count
+frozen at each exit.
 Phase 6 adds `scripts/check_embed.sh`, `scripts/check_toy_offstate.sh --exec`, `scripts/check_install.sh`,
 `scripts/release_gate.sh --allow-dirty` and the Release fast gate 10 times of 10. Nothing is built while a step
 is timed.
@@ -611,7 +668,7 @@ is timed.
   runs with `MLX_ENABLE_TF32=0`. Timed runs are Release, on a machine with a one-minute load of at most 4.
 - A large host array is not staged and released where a footprint is measured.
 - The run writes its notes with the editor tools. Git is read-only: nothing is committed or pushed. SIMPLE is
-  read at `d354efee2` through `git show` and `git grep` only.
+  read at `28c753993` through `git show` and `git grep` only.
 
 **Stops:**
 - a wrapper is missing or refuses a call of decision 4, 5 or 9 (reported; never a private binding);
@@ -623,7 +680,9 @@ is timed.
 - the graph form of a kept construction is not repeatable (decision 14), with the operation named;
 - decision 16's mixed outcome (1.30 at one process, a judged split below 1.00);
 - decision 1 is not ruled when Phase 0 reads the rulings;
-- K3's result or SIMPLE at `d354efee2` contradicts a decision in a way no declared difference resolves;
+- K3's result, rank 2g's or SIMPLE at `28c753993` contradicts a decision in a way no declared difference
+  resolves; an identity digest of the base differs from `ae7d623`'s with no operation of 2g's report to
+  explain it;
 - a change to `src/core/`, `src/defs/` or `scripts/run_parts.sh` would be needed;
 - the static gate fails on something the run did not touch.
 
@@ -641,8 +700,8 @@ rules T and C.
 
 1. Record the machine, the base commit, SIMPLE's commit, the rulings (decision 1 above all) and the two
    recorded files' hashes. Build Debug and Release from scratch; run the gate; record section 5's counts.
-2. Re-check the queue's five premises against K3's report and code, and the premises of "What the check
-   found" with `rg` and `git show`; write what changed. If decision 1 is not ruled, stop here.
+2. Re-check the queue's premises against rank 2g's report, K3's report and code, and the premises of "What
+   the check found" with `rg` and `git show`; write what changed. If decision 1 is not ruled, stop here.
 3. Decision 20's identity invocations, twice each.
 4. The baseline of decision 15, twice, with the stage profile; whether `read_map` admits case `2500_1` for
    decision 16's last split.
@@ -650,8 +709,11 @@ rules T and C.
 6. Probes, in the benchmark's scratch or a scratch program, none kept in the repository: `mlx_fft` over
    (364, 30, 351, 4) and (364, 30, 43, 16) complex64 on both devices (it evaluates; its time; the MLX peak);
    the real-packed product at (2 x 351 x 30) by (2 x 30 x 16) per bin and particle; a kernel on a grid of 364
-   by 256 threads with two rank-2 float32 outputs and an int32 input of fewer than 8 and of more than 8
-   elements, read back by a one-thread-per-pair kernel; the gather of 16 candidates' band from `self%refs`.
+   by 256 threads with two rank-2 float32 outputs and an int32 input of more than 8 elements (one of fewer
+   than 8 is measured, run `mlxf_kernel_forms`), read back by a SIMD-group-per-pair kernel; the gather of 16
+   candidates' band from `self%refs` (the packed conjugated memo since rank 2e: the map's 30 shells in both
+   row halves, conjugated back where the maps read the memo itself). No probe of `threadgroup` memory or of the SIMD-group functions: they
+   are measured (Apple question 26), and kernels 2 and 4 re-check them in their own gates.
 7. Freeze in Progress: the baseline, the fixtures' definitions of decisions 2 and 13, the probes' answers.
 
 **Exit:** the counts, digests and baseline are in Progress; every premise is confirmed or its change written;
@@ -702,8 +764,9 @@ one lattice; decision 20 holds.
 ### Phase 4, the fused reductions, only if decision 10 admits them (box: 210 min)
 
 `mlxf_toy_polarft_workspace_maptail` (decision 9) behind `set_shiftmap_form`'s `tail`; its gates in
-`polar_lattice` on the GPU, the graph form on the CPU device; the threadgroup and the row layout swept at the
-bench and frozen; the fallback taken by decision 9's rule if the four launches lose.
+`polar_lattice` on the GPU, the graph form on the CPU device; the threadgroup, the row layout, kernels 1 and 3
+as a thread or a SIMD group per (rotation, pair) on the screen grid, and decision 9's plain-sum variant swept
+at the bench and frozen; the fallback taken by decision 9's rule if the four launches lose.
 
 **Exit:** the fused form passes decision 12's last row and every reduction gate on the GPU for each
 construction present, is refused on the CPU device with the graph form taking over, is repeatable (decision
@@ -730,7 +793,8 @@ stopped on decision 16's mixed outcome with the rows.
 4. `planned/mlxf_kernel_families.md` (section 3's variants and numbers in hand, the seam facts with measured
    bytes, the differences from SIMPLE, section 8's row K4); the roadmap (decision 13's ruling and outcome,
    section 5); `doc/policies/test_environment_policy.md` (the suites, `suite=maps`, check 13's sentence); the
-   plans' index; the history; `src/test/test.inf`; the root `README.md` where it names the maps.
+   plans' index; the history; `src/test/toys/polar/polar.inf` and `doc/code_base_map.md` for the files kept
+   and deleted; the root `README.md` where it names the maps.
 5. The last-phase gates of section 5.
 6. The report `completed/mlxf_kernel_k4_report.md`, in the order of the how-to's section 8: what was learned,
    the changes per phase, decisions under delegation, deviations, evidence against the baseline, what is left
@@ -744,24 +808,26 @@ report exists; `scripts/check_tree.sh` and the last-phase gates pass; `git statu
 
 | File | What | Phases |
 | --- | --- | --- |
-| `src/test/mlxf_oracle_polar_tester.f90` (new) | sub-suite `oracle_polar`: the two self-checks asserted | 0 |
-| `src/test/mlxf_toy_polarft_workspace_lattice.f90` (new) | device submodule: the lattice's preparation and construction | 1, 3, 4, 6 |
-| `src/test/mlxf_toy_polarft_workspace_maptail.f90` (new) | device submodule: the fused reductions' kernels | 4, 6 |
-| `src/test/mlxf_toy_polarft_lattice_tester.f90` (new) | sub-suites `polar_lattice` and `polar_lattice_decision` | 1, 2, 4, 6 |
-| `src/test/mlxf_toy_polarft_workspace.f90` | the map record's members, the interfaces of the new module procedures | 1, 4, 6 |
-| `src/test/mlxf_toy_polarft_workspace_shiftmap.f90` | the form's branch; the reductions fed by either construction; decision 17's deletion | 1, 4, 6 |
-| `src/test/mlxf_toy_polarft_calc.f90` | the additions' interfaces, the form's members | 1, 6 |
-| `src/test/mlxf_toy_polarft_shiftmap.f90` | `set_shiftmap_form`, `shiftmap_shifts`; decision 18's refusal | 1, 6 |
-| `src/test/mlxf_toy_polarft_shiftmap_mlx.f90` | the glue's bodies and stubs of the same | 1, 4, 6 |
-| `src/test/mlxf_toy_eul_prob_tab.f90` | `batch_map_results` with the shifts | 1 |
-| `src/test/mlxf_toy_polarft_shiftmap_tester.f90` | the tests per form, the private oracle's frame; `test_folding` with decision 17 | 1, 3, 6 |
-| `src/test/mlxf_toy_eul_prob_tab_tester.f90` | the driver's map results per form | 1, 6 |
-| `src/test/mlxf_toy_seam_tester.f90` | the cycles and refusals of decision 19 | 1, 6 |
-| `src/test/mlxf_toy_*.f90` (new, decision 23) | submodules of a toy file that passes 700 lines | 1, 4, 6 |
-| `src/test/mlxf_test_defs.f90` | `POLARFT_MAP_FORMS`, the record's component, decision 12's tolerances, decision 2's constants | 0, 1, 2, 4, 6 |
-| `src/test/mlxf_test_registry.f90` | rows `oracle_polar`, `polar_lattice`, `polar_lattice_decision`; one `NAMED_ONLY` name | 0, 1, 2 |
-| `src/test/mlxf_bench_polar_table.f90` | `suite=maps`; `form=` and `tail=`; the rows; decision 17's columns | 3, 4, 5, 6 |
-| `src/test/test.inf` | the directory's description | 6 |
+| `src/test/oracles/mlxf_oracle_polar_tester.f90` (new) | sub-suite `oracle_polar`: the two self-checks asserted | 0 |
+| `src/test/toys/polar/mlxf_toy_polarft_workspace_lattice.f90` (new) | device submodule: the lattice's preparation and construction | 1, 3, 4, 6 |
+| `src/test/toys/polar/mlxf_toy_polarft_workspace_maptail.f90` (new) | device submodule: the fused reductions' kernels | 4, 6 |
+| `src/test/toys/polar/mlxf_toy_polarft_lattice_tester.f90` (new) | sub-suites `polar_lattice` and `polar_lattice_decision` | 1, 2, 4, 6 |
+| `src/test/toys/polar/mlxf_toy_polarft_workspace.f90` | the map record's members, the interfaces of the new module procedures | 1, 4, 6 |
+| `src/test/toys/polar/mlxf_toy_polarft_workspace_shiftmap.f90` | the form's branch; the reductions fed by either construction; decision 17's deletion | 1, 4, 6 |
+| `src/test/toys/polar/mlxf_toy_polarft_calc.f90` | the additions' interfaces, the form's members | 1, 6 |
+| `src/test/toys/polar/mlxf_toy_polarft_shiftmap.f90` | `set_shiftmap_form`, `shiftmap_shifts`; decision 18's refusal | 1, 6 |
+| `src/test/toys/polar/mlxf_toy_polarft_shiftmap_mlx.f90` | the glue's bodies and stubs of the same | 1, 4, 6 |
+| `src/test/toys/polar/mlxf_toy_eul_prob_tab.f90` | `batch_map_results` with the shifts | 1 |
+| `src/test/toys/polar/mlxf_toy_polarft_shiftmap_tester.f90` | the tests per form, the private oracle's frame; `test_folding` with decision 17 | 1, 3, 6 |
+| `src/test/toys/polar/mlxf_toy_eul_prob_tab_tester.f90` | the driver's map results per form | 1, 6 |
+| `src/test/toys/mlxf_toy_seam_tester.f90` | the cycles and refusals of decision 19 | 1, 6 |
+| `src/test/toys/polar/mlxf_toy_*.f90` (new, decision 23) | submodules of a toy file that passes 700 lines | 1, 4, 6 |
+| `src/test/framework/mlxf_test_defs.f90` | `POLARFT_MAP_FORMS`, the record's component, decision 12's tolerances, decision 2's constants | 0, 1, 2, 4, 6 |
+| `src/test/framework/mlxf_test_registry.f90` | rows `oracle_polar`, `polar_lattice`, `polar_lattice_decision`; one `NAMED_ONLY` name | 0, 1, 2 |
+| `src/test/bench/mlxf_bench_polar_table.f90` | `suite=maps`; `form=` and `tail=`; the rows; decision 17's columns | 3, 4, 5, 6 |
+| `src/test/toys/polar/polar.inf` | the folder's description: the lattice and the fused reductions | 1, 4, 6 |
+| `src/test/oracles/oracles.inf` | the folder's description: the oracles' tester | 0 |
+| `doc/code_base_map.md` | regenerated by `scripts/generate_codeoverview.py` in each phase that adds or deletes a Fortran file or edits an `.inf` (the static gate checks it) | 0, 1, 2, 3, 4, 6 |
 | `test/offstate/mlxf_offstate_exec.f90` | one check: the maps refuse the host backend | 1 |
 | `scripts/toy_mirror.txt` | the additions' lines; the declared difference of `ialpha`; decision 17's lines | 1, 6 |
 | `scripts/toy_seam.txt` | the two device submodules | 1, 4, 6 |
@@ -775,9 +841,10 @@ report exists; `scripts/check_tree.sh` and the last-phase gates pass; `git statu
 | `doc/implementation_notes/planned/mlxf_kernel_k4.md` | this note: Progress, decision 23's rows | 0, 1, 2, 3, 4, 5, 6 |
 | `doc/implementation_notes/completed/mlxf_kernel_k4_report.md` (new) | the report | 6 |
 
-`mlxf_test_defs.f90`, `mlxf_test_registry.f90`, `src/test/test.inf`, both ledgers, `test/offstate/`, the
-families note, the polar toy's files and `mlxf_bench_polar_table.f90` are shared with the other kernel runs of
-this batch: this run starts from a commit that holds every earlier run's result.
+`mlxf_test_defs.f90`, `mlxf_test_registry.f90`, the folders' `.inf` files, `doc/code_base_map.md`, both
+ledgers, `test/offstate/`, the families note, the polar toy's files and `mlxf_bench_polar_table.f90` are shared
+with the other kernel runs of this batch: this run starts from a commit that holds every earlier run's result
+and rank 2g's.
 
 ## Progress
 

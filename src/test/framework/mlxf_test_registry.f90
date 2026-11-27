@@ -6,13 +6,13 @@
 module mlxf_test_registry
 use, intrinsic :: iso_fortran_env,     only: int32, real32, real64
 use mlxf,                              only: mlx_array, mlx_from, mlx_eval, mlx_live_count, mlx_last_error, &
-                                             mlx_set_default_device, MLX_DEVICES, exp, mlx_fft, mlx_fft2, mlx_astype, &
-                                             mlx_zeros, mlx_arange, mlx_metal_kernel, mlx_metal_kernel_spec, &
-                                             mlx_segmented_mm, mlx_qr, mlx_eigvalsh, mlx_conv2d, mlx_conv_spec, &
-                                             mlx_as_strided, matmul, mlx_random_categorical, mlx_random_normal, &
-                                             mlx_function, mlx_grad_function, mlx_value_and_grad, mlx_set_compile_mode, &
-                                             mlx_scaled_dot_product_attention, mlx_attention_spec, mlx_rope, &
-                                             mlx_layer_norm, mlx_send
+                                             mlx_set_default_device, MLX_DEVICES, MLX_DTYPES, exp, mlx_fft, mlx_fft2, &
+                                             mlx_astype, mlx_zeros, mlx_arange, mlx_metal_kernel, &
+                                             mlx_metal_kernel_spec, mlx_segmented_mm, mlx_qr, mlx_eigvalsh, mlx_conv2d, &
+                                             mlx_conv_spec, mlx_as_strided, matmul, mlx_random_categorical, &
+                                             mlx_random_normal, mlx_function, mlx_grad_function, mlx_value_and_grad, &
+                                             mlx_set_compile_mode, mlx_scaled_dot_product_attention, &
+                                             mlx_attention_spec, mlx_rope, mlx_layer_norm, mlx_send
 use mlxf_array_tester,                 only: run_all_array_tests
 use mlxf_device_tester,                only: run_all_device_tests
 use mlxf_error_tester,                 only: run_all_error_tests, run_all_recovery_half_tests
@@ -60,6 +60,7 @@ use mlxf_bench_projector,              only: run_bench_projector
 use mlxf_bench_insert_probe,           only: run_bench_insert_probe
 use mlxf_bench_blas,                   only: run_bench_blas
 use mlxf_bench_kernel_forms,           only: run_bench_kernel_forms
+use mlxf_bench_user_costs,             only: run_bench_user_costs
 use mlxf_test_utils,                   only: begin_test_suite, end_test_suite
 implicit none
 private
@@ -74,8 +75,8 @@ end interface
 character(len=*), parameter :: AREAS(12) = [character(len=16) :: 'core', 'array', 'ops', 'linalg', 'fft', 'compile', &
     &'transforms', 'fast', 'random', 'io', 'distributed', 'kernels']
 ! the measure-only benchmarks, run by hand (never by CTest): mlxf_test_exec test=bench_<x> suite=<mode>
-character(len=*), parameter :: BENCHES(6) = [character(len=32) :: 'polar_table', 'recon_pcg', 'projector', &
-    &'insert_probe', 'blas', 'kernel_forms']
+character(len=*), parameter :: BENCHES(7) = [character(len=32) :: 'polar_table', 'recon_pcg', 'projector', &
+    &'insert_probe', 'blas', 'kernel_forms', 'user_costs']
 ! sub-suites an area runs only when suite= names them (too costly for the fast gate)
 character(len=*), parameter :: NAMED_ONLY(4) = [character(len=32) :: 'recovery_half', 'polar_shiftmap_accuracy', &
     &'reconstructor_pcg_n32', 'distributed_ring']
@@ -88,7 +89,7 @@ type :: guard_member
     character(len=3)  :: device = 'cpu'
 end type guard_member
 
-type(guard_member), parameter :: GUARDS(30) = [&
+type(guard_member), parameter :: GUARDS(33) = [&
     &guard_member('guard_empty_operation',   'object_contracts', 'cpu'), &
     &guard_member('guard_stale_handle',      'object_contracts', 'cpu'), &
     &guard_member('guard_openmp_region',     'object_contracts', 'cpu'), &
@@ -118,7 +119,10 @@ type(guard_member), parameter :: GUARDS(30) = [&
     &guard_member('guard_rope_offset',       'object_contracts', 'cpu'), &
     &guard_member('guard_optional_empty',    'object_contracts', 'cpu'), &
     &guard_member('guard_fused_on_cpu',      'object_contracts', 'cpu'), &
-    &guard_member('guard_send_rank',         'object_contracts', 'cpu')]
+    &guard_member('guard_send_rank',         'object_contracts', 'cpu'), &
+    &guard_member('guard_scalar_int8',       'object_contracts', 'cpu'), &
+    &guard_member('guard_scalar_unsigned',   'object_contracts', 'cpu'), &
+    &guard_member('guard_scalar_uint8',      'object_contracts', 'cpu')]
 
 contains
 
@@ -237,6 +241,8 @@ contains
                 call run_bench_blas(mode, found)
             case('kernel_forms')
                 call run_bench_kernel_forms(mode, found)
+            case('user_costs')
+                call run_bench_user_costs(mode, found)
         end select
     end subroutine run_bench
 
@@ -289,6 +295,12 @@ contains
                 call guard_fft2_norm
             case('guard_dtype_astype')
                 call guard_dtype_astype
+            case('guard_scalar_int8')
+                call guard_scalar_int8
+            case('guard_scalar_unsigned')
+                call guard_scalar_unsigned
+            case('guard_scalar_uint8')
+                call guard_scalar_uint8
             case('guard_dtype_zeros')
                 call guard_dtype_zeros
             case('guard_dtype_arange')
@@ -372,6 +384,27 @@ contains
         a = mlx_from([1._real32, 2._real32])
         r = mlx_astype(a, 99)
     end subroutine guard_dtype_astype
+
+    ! a default-integer scalar the int8 kind cannot hold: the operator stops rather than wrap 300
+    subroutine guard_scalar_int8
+        type(mlx_array) :: r
+        write(*,'(a)') 'guard_scalar_int8: an int8 array plus 300'
+        r = mlx_astype(mlx_from([1]), MLX_DTYPES%int8)+300
+    end subroutine guard_scalar_int8
+
+    ! a negative default-integer scalar with an unsigned array: a stop, not a wrapped 2**32-1
+    subroutine guard_scalar_unsigned
+        type(mlx_array) :: r
+        write(*,'(a)') 'guard_scalar_unsigned: -1 plus a uint32 array'
+        r = -1+mlx_astype(mlx_from([1]), MLX_DTYPES%uint32)
+    end subroutine guard_scalar_unsigned
+
+    ! 256 compared with a uint8 array: a stop, not a comparison with 0
+    subroutine guard_scalar_uint8
+        type(mlx_array) :: r
+        write(*,'(a)') 'guard_scalar_uint8: a uint8 array compared with 256'
+        r = mlx_astype(mlx_from([1]), MLX_DTYPES%uint8) == 256
+    end subroutine guard_scalar_uint8
 
     ! as guard_dtype_astype, through mlx_zeros
     subroutine guard_dtype_zeros

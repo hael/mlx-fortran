@@ -80,7 +80,7 @@ descriptions come from `<dir>/<dir>.inf`. Regenerate with
       - `mlxf_device_tester.f90` — tests of mlxf_device: the backend, device counts, the default device, device information
       - `mlxf_error.f90` — errors: the mlx-c error handler, the hard-error stop, checked statuses, the last error and the one-thread guard
       - `mlxf_error_tester.f90` — tests of mlxf_error: recorded messages, checked statuses, and recovery from a failed evaluation
-      - `mlxf_libc.f90` — the C library entry points the library calls (strlen, memcpy, posix_memalign, free, fopen, fclose, dup, fdopen) and C-string copies
+      - `mlxf_libc.f90` — the C library entry points the library calls (strlen, memcpy, posix_memalign, free, fopen, fclose, dup, fdopen, rename, unlink, chmod, lstat, getpid, geteuid; symlink, link, mkdir, rmdir for the tests), C-string copies and a file's facts
       - `mlxf_memory.f90` — MLX's memory controls: active, peak and cache memory, the cache and memory limits
       - `mlxf_memory_tester.f90` — tests of mlxf_memory: active, peak and cache memory follow an array's life; the limits are set and restored
       - `mlxf_registry.f90` — the handle registry: each live MLX object (its ctx address) with a serial and a Fortran-side reference count
@@ -96,7 +96,7 @@ descriptions come from `<dir>/<dir>.inf`. Regenerate with
   - **defs/** — the constants and vocabularies shared by more than one module of mlx-fortran (exported = defs, local = stay)
     - `mlxf_defs.f90` — the constants and vocabularies more than one module uses: the hard-error status, the devices, the dtypes
   - **test/** — test-only code compiled into mlxf_test_exec: framework/ (assertions, the suite registry, the ABI probe), toys/ (the toys that mirror SIMPLE, one folder per toy), oracles/ (their independent references), bench/ (the benchmarks)
-    - **bench/** — the benchmarks run by hand (mlxf_test_exec test=bench_<x>): the polar table, the projector, the reconstruction, the insertion probe, the BLAS products and the kernel forms
+    - **bench/** — the benchmarks run by hand (mlxf_test_exec test=bench_<x>): the polar table, the projector, the reconstruction, the insertion probe, the BLAS products, the kernel forms and the user-facing costs
       - `mlxf_bench_blas.f90` — the crossover of BLAS and MLX matrix products: sgemm and cgemm on the host against matmul on MLX's devices
       - `mlxf_bench_insert_probe.f90` — the protected-update probe: SIMPLE's gridding insertion as one Metal kernel with atomic float32 deposits, against the oracle
       - `mlxf_bench_kernel_forms.f90` — the kernel-forms benchmark: ways of writing a Metal kernel, set beside the toys' current kernels on the GPU
@@ -104,6 +104,7 @@ descriptions come from `<dir>/<dir>.inf`. Regenerate with
       - `mlxf_bench_polar_table.f90` — benchmark of the polar table workspace at SIMPLE's sizes: accuracy block, timing sweep, profile, overlap, shift maps
       - `mlxf_bench_projector.f90` — benchmark of the toy projector at SIMPLE's sizes: the reprojection of one state timed, chained to family A, and judged
       - `mlxf_bench_recon_pcg.f90` — benchmark of the toy reconstructor_pcg at SIMPLE's boxes: transforms, timing, profile, probe, accuracy
+      - `mlxf_bench_user_costs.f90` — the costs a porter meets: evaluation per step against batched, element reads, copies against the shared buffer, warm compiled callbacks
     - **framework/** — the test library: assertions and the summary, the suite registry, the test definitions, the NaN-safe reductions, and the ABI probe of the generated layer (a C header, its echo functions compiled by Apple's clang, and the tester)
       - `mlxf_abi_tester.f90` — the ABI probe: every argument and result class of the generated bind(c) layer echoed by C, and the C layouts
       - `mlxf_test_defs.f90` — what test modules share: the polar pipeline's constants, tunables, tolerances and behaviourless records
@@ -170,6 +171,7 @@ descriptions come from `<dir>/<dir>.inf`. Regenerate with
     - `mlxf_example_differences.f90` — the dtype-and-result table of doc/quickstart.md: one block per row, each asserting its row and printing D<n>: ok
     - `mlxf_example_errors.f90` — failures and ownership a caller handles: a status with mlx_last_error(), the named owner of mlx_view, the session's devices
     - `mlxf_example_first.f90` — the README's first program: two arrays, exp(-matmul(a, b)) on MLX's default device, copied back with a status
+    - `mlxf_example_user_safety.f90` — the safe spellings of today's limits, and what the library now protects: integer statistics, checkpoints, untrusted indices, handle lists, long loops, host tests, wide-range norms
   - **offstate/** — the off-state build of the toys: a project of its own that compiles their host files and glue stubs without USE_MLX and without the library, and its program
     - `mlxf_offstate_exec.f90` — the off-state program of the toys: what a build without MLX runs, built without USE_MLX and without the library
   - `mlxf_test_exec.f90` — the one test executable: mlxf_test_exec test=<unit_area|list> [suite=] [device=], expect_abort(s), guard=

@@ -6,7 +6,8 @@
 # Installs the configured build BUILD (default build/) into a scratch prefix whose path holds spaces, builds the
 # consumer project CONSUMER (default test/consumer/) against it with only -Dmlxf_DIR= and runs its programs (the
 # consumer and the examples of README.md and doc/quickstart.md), compiles CONSUMER/mlxf_api_names.f90, which
-# imports every public name of mlxf (scripts/list_public_api.py --check holds it to src/core/mlxf.f90), then
+# imports every public name of mlxf (scripts/list_public_api.py --check holds it to src/core/mlxf.f90), runs the
+# installed lifetime checker (self-test, the consumer programs, a planted leak), then
 # checks that only mlxf.mod was installed and no producer path or flag leaked, that the private modules cannot be
 # imported, that a copy of the package config naming another compiler version or another mlx-c version refuses
 # the consumer with its message, and that pkg-config links the consumer. Without --require-gpu the programs run
@@ -19,7 +20,7 @@ GPU_ARGS=()
 for arg in "$@"; do
     case "$arg" in
         --require-gpu) GPU_ARGS=(require-gpu) ;;
-        -h|--help) sed -n '2,14p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
         -*) echo "check_install: unknown option: $arg (see --help)" >&2; exit 2 ;;
         *) positional+=("$arg") ;;
     esac
@@ -69,9 +70,32 @@ if ! grep -q '^SKIP' "$WORK/consumer.log"; then
         echo "check_install: mlxf_example_first did not run on the GPU" >&2; exit 1
     fi
 fi
-for example in mlxf_example_differences mlxf_example_errors; do
-    "${run_env[@]}" "$WORK/consumer build/$example" "${GPU_ARGS[@]+"${GPU_ARGS[@]}"}"
+# from the scratch directory: mlxf_example_user_safety writes (and removes) its files in the current directory
+for example in mlxf_example_differences mlxf_example_errors mlxf_example_user_safety; do
+    (cd "$WORK" && "${run_env[@]}" "$WORK/consumer build/$example" "${GPU_ARGS[@]+"${GPU_ARGS[@]}"}")
 done
+# the installed lifetime checker, run outside the repository on the installed files alone (-I: no script
+# directory, no PYTHONPATH): its self-test, the consumer programs (clean; the consumer build ran it through
+# mlxf_check_lifetime too) and a planted leak, which it must report with its file, line and rule
+DATADIR=$(sed -n 's/^CMAKE_INSTALL_DATADIR:PATH=//p' "$CACHE")
+CHECKER="$PREFIX/${DATADIR:-share}/mlxf/check_consumer.py"
+[[ -x "$CHECKER" && -f "$(dirname "$CHECKER")/mlxf_consumer_checks.py" ]] || { echo "check_install: the lifetime checker was not installed" >&2; exit 1; }
+(cd "$WORK" && "$PY" -I "$CHECKER" --self-test)
+(cd "$WORK" && "$PY" -I "$CHECKER" consumer/*.f90)
+printf 'program leak\nuse mlxf, only: mlx_array, mlx_concatenate, exp\ntype(mlx_array) :: a, b, c\nc = mlx_concatenate([a, exp(b)])\nend program leak\n' > "$WORK/leak.f90"
+if (cd "$WORK" && "$PY" -I "$CHECKER" leak.f90) > "$WORK/leak.log" 2>&1; then
+    echo "check_install: the planted leak passed the installed lifetime checker" >&2; exit 1
+fi
+grep -q '^leak.f90:4: ctorexpr: ' "$WORK/leak.log" || { cat "$WORK/leak.log"; echo "check_install: the lifetime checker did not report the planted leak" >&2; exit 1; }
+# and through mlxf_check_lifetime: a project holding the leak must fail to build
+mkdir "$WORK/leak project"
+cp "$WORK/leak.f90" "$WORK/leak project/"
+printf 'cmake_minimum_required(VERSION 3.25)\nproject(leak LANGUAGES Fortran)\nfind_package(mlxf CONFIG REQUIRED)\nadd_executable(leak leak.f90)\ntarget_link_libraries(leak PRIVATE mlxf::mlxf)\nmlxf_check_lifetime(leak)\n' > "$WORK/leak project/CMakeLists.txt"
+cmake -S "$WORK/leak project" -B "$WORK/leak build" "-DCMAKE_Fortran_COMPILER=$FC" "-Dmlxf_DIR=$PACKAGE" > "$WORK/leak build.log" 2>&1
+if cmake --build "$WORK/leak build" >> "$WORK/leak build.log" 2>&1; then
+    echo "check_install: a project holding the planted leak built through mlxf_check_lifetime" >&2; exit 1
+fi
+grep -q 'leak.f90:4: ctorexpr: ' "$WORK/leak build.log" || { cat "$WORK/leak build.log"; echo "check_install: mlxf_check_lifetime did not report the planted leak" >&2; exit 1; }
 "$PY" - "$PREFIX" "$BUILD" "$ROOT" "$WORK/consumer build/compile_commands.json" <<'PY'
 from pathlib import Path
 import sys
@@ -154,4 +178,4 @@ subprocess.run([compiler, str(Path(work) / 'consumer/mlxf_consumer.f90')] + flag
 subprocess.run([str(Path(work) / 'pkg consumer')] + sys.argv[6:], check=True, cwd=work,
                env=dict(os.environ, MLX_ENABLE_TF32='0', OMP_NUM_THREADS='1', OMP_THREAD_LIMIT='4', OMP_WAIT_POLICY='PASSIVE'))
 PY
-echo "check_install: passed (consumer and examples${GPU_ARGS[*]:+ (require-gpu)}, isolation, compiler and mlx-c refusals, private modules, pkg-config)"
+echo "check_install: passed (consumer and examples${GPU_ARGS[*]:+ (require-gpu)}, lifetime checker, isolation, compiler and mlx-c refusals, private modules, pkg-config)"

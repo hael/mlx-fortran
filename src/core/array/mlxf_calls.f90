@@ -11,7 +11,7 @@ use mlxf_defs,         only: mlxf_reduce_spec, mlxf_slice_spec
 use mlxf_array,        only: mlx_array
 implicit none
 
-public :: mlxf_unary, mlxf_binary, mlxf_weak_scalar, mlxf_dtype_op, mlxf_int_op, mlxf_vector_op, mlxf_ternary_op, &
+public :: mlxf_unary, mlxf_binary, mlxf_weak_scalar, mlxf_integer_scalar, mlxf_dtype_op, mlxf_int_op, mlxf_vector_op, mlxf_ternary_op, &
     &mlxf_zeros_op, mlxf_reduce_all_op, mlxf_reduce_dims_op, mlxf_int2_op, mlxf_list_op, mlxf_check_dtype, &
     &mlxf_axes_of, mlxf_zero_based, mlxf_one_based, mlxf_check_dim, mlxf_slice_bounds, mlxf_cpu_stream, &
     &mlxf_optional_handle
@@ -41,6 +41,14 @@ interface
         real(real64),     intent(in)    :: x
         character(len=*), intent(in)    :: proc
     end subroutine mlxf_weak_scalar
+
+    ! a default-integer scalar for an operator with a: exact in an integer array's kind, int32 with booleans, weak
+    module subroutine mlxf_integer_scalar( r, a, i, proc )
+        type(mlx_array),  intent(inout) :: r
+        type(mlx_array),  intent(in)    :: a
+        integer,          intent(in)    :: i
+        character(len=*), intent(in)    :: proc
+    end subroutine mlxf_integer_scalar
 
     ! int f(mlx_array* res, const mlx_array a, mlx_dtype dtype, const mlx_stream s)
     module subroutine mlxf_dtype_op( r, f, a, dtype, proc )

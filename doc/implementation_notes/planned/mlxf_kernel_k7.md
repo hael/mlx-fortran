@@ -1,23 +1,31 @@
 # K7, family A4: the cc objective and the classic strategies' reductions in the polar toy (run `mlxf_kernel_k7`, on the M5 Ultra)
 
-Status, 2026-11-26: planned, not ruled. Run `mlxf_kernel_k7` on the M5 Ultra (30 cores, 103.1 GB, the only GPU
-and the only machine that builds the library), in the session, in a copy of the checkout, one run at a time.
-Base: the commit that holds this plan (the run pins its hash in Phase 0 and records it). The note was checked
-against `6f1af0d` with the working tree of 2026-11-26 (runs `mlxf_toy_seam` and `mlxf_parity_rest` included,
-uncommitted), SIMPLE at `d354efee2`, read with `git -C ~/src/SIMPLE show d354efee2:<path>` only and never
-edited. Supersedes: none. Fifth and last of the queue K3, K4, K5, K6, K7 (roadmap decision 7); section 9 says
-which premises the earlier runs may change. Depends on:
-- the polar toy in the integration shape (validated: yes, run `mlxf_toy_seam`, `unit_kernels` 1,955 checks,
-  seam ledger without a `pending` line);
-- K1's fused tail, kept (validated: yes, `completed/mlxf_kernel_k1_report.md`; one thread per pair);
+Status, 2026-11-26: planned; ruled as recommended by Hans, 2026-11-26 ("Rule as recommended"), every decision of section 3 and the run order K4, K3, K5, K6, K7; revised after ranks 2d to 2f (runs `mlxf_refactor`, `mlxf_toy_layout`,
+`mlxf_kernel_forms`). Run `mlxf_kernel_k7` on the M5 Ultra (30 cores, 103.1 GB, the only GPU and the only
+machine that builds the library), in the session, in a copy of the checkout, one run at a time. Base: the
+commit that holds this plan, after rank 2g's result and K6's (the run pins its hash in Phase 0 and records
+it). The revision was checked against `ae7d623` (ranks 2d to 2f committed) with the three uncommitted document
+edits of 2026-11-26; the draft was written at `b2c43a4`. SIMPLE is pinned at `28c753993`, the mirror ledger's
+pin since rank 2e, read with `git -C ~/src/SIMPLE show 28c753993:<path>` only and never edited; between the
+draft's pin `d354efee2` and this one `23eb95cc2` changed `simple_polarft_corr.f90` and `simple_polarft_memo.f90`
+(findings 2, 6 and 8 are re-read there). Supersedes: none. Fifth and last of the queue K3, K4, K5, K6, K7
+(roadmap decision 7), after rank 2g; section 9 says which premises the earlier runs may change. Depends on:
+- the polar toy in the integration shape on SIMPLE's memo layout (validated: yes, runs `mlxf_toy_seam` and
+  `mlxf_toy_layout`, `unit_kernels` 1,953 checks at `ae7d623`, seam ledger without a `pending` line);
+- K1's fused tail, kept (validated: yes, `completed/mlxf_kernel_k1_report.md`; one thread per pair; the same
+  reduction a SIMD group per pair measured 3.28 times faster by run `mlxf_kernel_forms`, decision 27);
+- the measured kernel forms of run `mlxf_kernel_forms` (`completed/mlxf_kernel_forms_report.md`, "What the K
+  plans take"): suites `tail` (decisions 16 and 27), `select` (decisions 14 and 15) and `probe` (decision 25);
+- rank 2g's result (read in Phase 0: it changes `src/core/`, among it the empty `maxval` and `minval`, and may
+  add assertions to unit areas);
 - `mlxf_oracle_polar_objfun` (validated: standalone, 25 self-checks at `TOL_ROUTE` 1e-12,
   `completed/mlxf_oracles2_report.md`; no tester compares a kernel with it yet, which that report leaves to
   K4, K5 and K7);
 - `maxloc`, `minloc`, `merge`, `max`, `min`, `mlx_take_along_dim`, `mlx_put_along_dim`, `mlx_argpartition`,
   `mlx_partition`, `mlx_topk`, `mlx_argsort`, `mlx_irfft`, `mlx_async_eval`, `type(mlx_metal_kernel)`
-  (validated: public in `src/core/mlxf.f90`; `unit_ops` 2,462, `unit_fast` 152);
-- roadmap decisions 7, 8, 9, 11, 12 and 15, the toy-example policy (section 8 above all), the families note
-  (sections 3 and 8) and the mlx3D note (pattern P4, proposed decision 3).
+  (validated: public in `src/core/mlxf.f90`; `unit_ops` 2,462, `unit_fast` 152 at `ae7d623`);
+- roadmap decisions 7, 8, 9, 11, 12, 15, 16 and 17, the toy-example policy (section 8 above all), the families
+  note (sections 3 and 8) and the mlx3D note (pattern P4, proposed decision 3, now marked measured in part).
 
 ## 1. Why
 
@@ -37,14 +45,20 @@ record in hand; the dense posterior score is 1.76e7 pairs/s on the GPU against 3
 
 ## 2. Contract
 
-- **Where the code lives:** `src/test/` only, in `mlxf_toy_<stem>` modules under SIMPLE's type and procedure
-  names, against the public module `mlxf` as a user writes. No file under `src/core/` or `src/defs/` changes;
+- **Where the code lives:** `src/test/` only (rank 2d's tree): `mlxf_toy_<stem>` modules in
+  `src/test/toys/polar/` under SIMPLE's type and procedure names, against the public module `mlxf` as a user
+  writes. Every new Fortran file opens with its `!@descr:` line and `doc/code_base_map.md` is regenerated in
+  the phase that adds or removes one (the static gate checks it). No file under `src/core/` or `src/defs/` changes;
   no SIMPLE name enters them. A missing or refusing wrapper is a stop with a report.
-- **What it mirrors** (read at `d354efee2`; no SIMPLE source is copied):
+- **What it mirrors** (read at `28c753993`; no SIMPLE source is copied):
   - `src/main/pftc/simple_polarft_corr.f90`: `gen_objfun_vals` (the objective switch on
-    `params%cc_objfun`), `gen_corrs`, `gen_euclids`;
-  - `src/main/pftc/simple_polarft_memo.f90`: `memoize_sqsum_ptcl` (the particle powers), `memoize_ptcls`,
-    `memoize_one_ref`, `memoize_ref_bins`;
+    `params%cc_objfun`), `gen_corrs`, `gen_euclids`; since `23eb95cc2` the unshifted per-pair sums are
+    `term_sums` (one dot product per bin of the reference terms and the particle terms), and `cc_sums`, which
+    lost its `l_conj` argument, sums only the cross term against a reference shifted on the fly;
+  - `src/main/pftc/simple_polarft_memo.f90`: `memoize_sqsum_ptcl` (the particle powers), `memoize_ptcls`
+    (which makes the particle terms `ft_ptcl_terms` for cc and `ft_ptcl_wterms` for the Euclidean objective),
+    `memoize_one_ref`, `memoize_refs` (`memoize_ref_bins` was removed by `23eb95cc2`; the toy retired its own
+    in rank 2e);
   - `src/main/strategies/search/simple_strategy3D_srch.f90`, type `strategy3D_srch`: `new`, `prep4srch`,
     `store_solution`, `kill`;
   - `simple_strategy3D_greedy.f90`, type `strategy3D_greedy`, and `simple_strategy3D_shc.f90`, type
@@ -62,30 +76,40 @@ record in hand; the dense posterior score is 1.76e7 pairs/s on the GPU against 3
 - **Off-state invariant:** with `cc_objfun = OBJFUN_EUCLID` and no reduction requested, every existing polar
   path is byte for byte what it was: the identity invocations of the base that touch the polar toy (the
   digests on both devices and both tails, the shift maps; Phase 0 lists them and their bytes) are equal at
-  every phase exit. With tests excluded (`--exclude-tests`) none of this code is compiled and the library
+  every phase exit, but for decision 27's outcome if it is kept: then the dense digests move once, within
+  K1's frozen bounds, and the new lines are recorded in Phase 5 and reproduced from then on. With tests excluded (`--exclude-tests`) none of this code is compiled and the library
   and its installed module are unchanged. In a build without MLX the new host files compile without the
   library and the new classes run their host route (`scripts/check_toy_offstate.sh --exec`).
 - **Not part of it:** shifts (K4), reference subsets (K3), the shift search after a reduction, the 2D
   strategies, any change to SIMPLE.
 
-### What the check found (2026-11-26)
+### What the check found (2026-11-26, re-read at `ae7d623` and `28c753993`)
 
-Each line names the file and procedure read. **differs** marks a premise of the families note or the mlx3D
+Each line names the file and procedure read; findings 2, 3, 6, 8, 13 and 14 are revised for ranks 2e and 2f. **differs** marks a premise of the families note or the mlx3D
 note that the code contradicts.
 
 1. **The toy calculator has one objective.** `mlxf_toy_polarft_calc.f90`, type `polarft_calc`: no objective
    member; the `parameters` record of `mlxf_test_defs.f90` has no `cc_objfun`, `npeaks` or `npeaks_inpl`.
-2. **Cross and reference power are never separate on the device today.** `polarft_workspace_new` and
-   `finish_tiles` (`mlxf_toy_polarft_workspace_lifecycle.f90`) pack one complex tile of `2nk` rows (rows
-   1..nk `ft_ref2`, rows nk+1..2nk `conjg(ft_ref)`) into a real tile (4nk, 2rt). `polarft_workspace_submit`
-   (`mlxf_toy_polarft_workspace_score.f90`) builds the particle terms as `c2 * w` and `xc * (-2 w)`,
-   concatenated, so one product gives `refpow - 2 cross` and one `mlx_irfft` gives the row. The correlation
-   needs the two rows apart, hence two products and two inverse transforms per pair, as `gen_corrs` has.
+2. **Cross and reference power are never separate on the device today.** `polarft_workspace_new`
+   (`mlxf_toy_polarft_workspace_lifecycle.f90`), called by `memoize_refs` since rank 2e, packs on the host,
+   per reference tile, the conjugated memo `conjg(ft_ref_terms)` of `2nk` rows (the memo holds conj(FT(REF2))
+   on rows 1..nk and FT(REF) on rows nk+1..2nk, so the tile's rows are FT(REF2) and conj(FT(REF)), what the
+   draft read as `ft_ref2` and `conjg(ft_ref)`) into a real tile (4nk, 2rt);
+   `finish_tiles` makes it resident. `polarft_workspace_submit` (`mlxf_toy_polarft_workspace_score.f90`)
+   uploads the calculator's particle terms `ft_ptcl_wterms` (rows 1..nk `w_k FT(CTF2)`, rows nk+1..2nk
+   `-2 w_k FT(X.CTF)`, made on the host by `memoize_ptcls`), so one product gives `refpow - 2 cross` and one
+   `mlx_irfft` gives the row. The correlation needs the two rows apart, hence two products and two inverse
+   transforms per pair, as `gen_corrs` has: at `28c753993` its unshifted path is two `term_sums`, over rows
+   1..nk and rows nk+1..2nk of `ft_ref_terms` against the same rows of the unweighted `ft_ptcl_terms`.
 3. **The tail is one thread per pair.** `tail_spec` (`mlxf_toy_polarft_workspace_tail.f90`): grid
    `[rt*bt, 1, 1]`, threadgroup `[min(POLARFT_TAIL_TG, rt*bt), 1, 1]` with `POLARFT_TAIL_TG` 64, inputs `raw,
    iw, temps, u, par`, outputs `dists` (float32) and `irots` (int32) of shape (rt, bt); pair `e` reads
    `raw[e*nrots + i]` and its particle is `e / rt`. It holds no `threadgroup` memory, no barrier, no atomic.
    It reduces over rotations only (the minimum and the posterior draw); nothing reduces across references.
+   Run `mlxf_kernel_forms` built the same reduction a SIMD group per pair (T1: lanes stride over the
+   rotations, `simd_min` and the least rotation among the minimal lanes) and measured it 3.28 / 3.28 times
+   faster, first minima exact, draws within K1's bound (suite `tail`, *measured*); `tail_spec` is public since
+   that run, with its interface in `mlxf_toy_polarft_workspace.f90`.
 4. **The fused tail takes transformed rows.** The products and `mlx_irfft` stay library operations in
    `polarft_workspace_submit`; the kernel is the finish and the in-plane reduction. A fused cc finish is the
    same shape with two row inputs.
@@ -94,16 +118,19 @@ note that the code contradicts.
    copies (rpad, bpad) entries, 8 B per padded pair, and slices to (nr, nb).
 6. **SIMPLE's classic strategies reduce the memoised correlation.** `gen_objfun_vals` calls `gen_corrs` for
    `OBJFUN_CC`: no shell weight, normalised by `sqsums_ptcls(i)` (the raw particle power of
-   `memoize_sqsum_ptcl`), single precision, no guard on a non-positive power. The k-weighted double-precision
+   `memoize_sqsum_ptcl`), single precision, no guard on a non-positive power (re-read at `28c753993`: the
+   sums are now `term_sums` over `ft_ref_terms` and `ft_ptcl_terms`, the normalisation unchanged). The k-weighted double-precision
    form (`gen_corr_cc_for_rot_8_noshift`, `_shifted`, normalised by `ksqsums_ptcls`) is called per rotation by
    the shift optimisers after the reduction, not by a strategy's loop over references.
 7. **`gen_euclids` returns a score, not a distance:** `exp(-loss)`, a negative loss recomputed directly in
    double and clamped at 0. The classic strategies therefore take the first maximum of a score for both
    objectives; the existing tail takes the minimum of a distance and draws.
-8. **The toy's particle memo differs from SIMPLE's in what it stores, and suffices.** `set_ptcl_pft`
+8. **The toy's particle memo differs from SIMPLE's in what it stores, and its powers suffice.** `set_ptcl_pft`
    (`mlxf_toy_polarft_memo.f90`) stores `kshell_sqsums_ptcls(k, i)` unweighted per shell; SIMPLE's
    `memoize_sqsum_ptcl` stores k times it. Both particle powers (the sum, and the sum weighted by k) follow
-   from the toy's member on the host in double; no new memo is needed.
+   from the toy's member on the host in double; no new power memo is needed. The particle terms are another
+   matter: the toy has `ft_ptcl_wterms` (rank 2e) and not SIMPLE's cc terms `ft_ptcl_terms` (`FT(CTF2)`,
+   `FT(X.CTF)`, unweighted), which rank 2e left to this plan (decision 28).
 9. **Tie rules in SIMPLE.** In-plane: `maxloc(inpl_corrs)`, the first maximum (`srch_greedy`, `srch_shc`).
    Across references: `store_solution` keeps the larger score (an equal one does not replace);
    `extract_peak_ori` takes `maxloc` of `s3D%proj_space_corrs(:, ithr)`, the lowest reference index among
@@ -130,14 +157,21 @@ note that the code contradicts.
     order inside the two parts undefined, and with it the choice among equals at the boundary; the policy
     (section 10) says MLX documents no stability for `mlx_argsort`. `maxloc(a, dim)` is promised to choose the
     first equal extremum on both devices. **differs:** the mlx3D note's proposed decision 3 names
-    `mlx_argpartition` as the graph form; alone it does not reproduce "ties to the lower index".
+    `mlx_argpartition` as the graph form; alone it does not reproduce "ties to the lower index". Run
+    `mlxf_kernel_forms` measured it at this plan's shape (K best of 10,000 by 1,024, suite `select`,
+    *measured*): with the repair it is exact and 2.6 to 6.4 times slower than K rounds of `maxloc` (E1 3.15
+    ms against E0 0.49 ms at K = 3 and 1.21 ms at K = 10); without the repair it also passed, because MLX
+    0.32.4 kept the lower index at every planted boundary tie, an order MLX does not document (Apple question
+    36), so the repair stays the correct form.
 14. **A per-particle reduction inside the pair kernel needs `threadgroup` memory.** With one thread per pair
     and the pair order `e = particle * rt + reference`, a threadgroup of `rt` consecutive threads is one
     particle's references of the tile (rt 250 at the canonical plan, under the limit of 1,024, *measured*,
     policy section 12). Reducing inside the launch then needs a `threadgroup` array and a
-    `threadgroup_barrier`. The policy's section 12 and Apple question 26 record one probe (a 64-element group
-    sum) as correct; no source of that probe was found in `src/test/mlxf_bench_insert_probe.f90`, and no toy
-    kernel uses the feature. The plan treats it as unproven.
+    `threadgroup_barrier`. Run `mlxf_kernel_forms` measured the feature through the wrapper (suite `probe`,
+    Apple question 26): exact group sums for 32 to 1,024 threads with the barriers, wrong from 256 threads up
+    without them, a fixed tree bit-repeatable over processes, arrays up to 32,768 B (a group's 250 scores and
+    rotations need 2,000 B). The draft treated it as unproven; it is proven on this machine, and no toy kernel
+    uses it yet.
 15. **The oracle's reach.** `oracle_polar_pair` takes one reference and one particle as rank-2
     `complex(real64)` arrays (`pair_new`) and gives `dist`, `cc` (unweighted) and `cc_weighted` (w_k = k) per
     rotation by direct sums; its ring route exists for the Euclidean loss only (`dists_by_rings`). Its
@@ -149,7 +183,10 @@ note that the code contradicts.
     the pass 1.133 s with the compiled tail and 0.628 s with the fused one; copy-out and the host part 0.026
     to 0.028 s of a pass; in the barriered profile the products 0.55 s and the transform 0.42 s of 1.94 to
     2.00 s. A reduction on the device can save at most the copy-out and host part: 0.028 / 0.628 = 4.5 % of
-    the fused pass (*derived*).
+    the fused pass (*derived*). Rank 2e made the dense passes 4 to 10 % shorter (*measured*, its report), so
+    Phase 0 measures the pass again. The selection itself is small beside it: K rounds of `maxloc` over 10,000
+    by 1,024 take 0.49 ms (K = 3) and 1.21 ms (K = 10), a SIMD group per particle 0.24 and 0.30 ms (*measured*,
+    suite `select`).
 
 ## 3. Decisions and rulings
 
@@ -184,10 +221,13 @@ the others are defaults taken without a question, open to the review.
    distance in double as `gen_euclids` does; it clamps at 0, as `oracle_polar_score` does. Where SIMPLE's
    recomputed loss is positive the two scores differ by that loss, which is a rounding residue of the
    single-precision row; the difference is declared, not modelled.
-6. **The cc tiles are their own resident layout.** Under `OBJFUN_CC`, `memoize_ref_bins` makes, per parity,
-   two real tiles of (2nk, 2rt) per reference tile in place of the Euclidean (4nk, 2rt): the packed
-   `ft_ref2` rows and the packed `conjg(ft_ref)` rows. Bytes are the Euclidean layout's (*derived*: the same
-   elements in two arrays; 7.14e9 B for both parities at `2500_4`, *measured*, families note). The Euclidean
+6. **The cc tiles are their own resident layout** (revised 2026-11-26 for rank 2e's memo). Under `OBJFUN_CC`,
+   `memoize_refs` makes, per parity, two real tiles of (2nk, 2rt) per reference tile in place of the
+   Euclidean (4nk, 2rt), packed on the host straight from `ft_ref_terms` as rank 2e packs the Euclidean ones
+   (its decision 6's measured fallback): the packed rows 1..nk of the conjugated memo (FT(REF2)) and the
+   packed rows nk+1..2nk (conj(FT(REF))). Bytes are the Euclidean layout's (*derived*: the same elements in
+   two arrays; 7.14e9 B for both parities at `2500_4`, *measured*, families note, before rank 2e's 10 % cut of
+   the resident size; Phase 0 measures it). The Euclidean
    layout and its arithmetic are not touched: a reordering of its rows would change the order of a sum and
    with it the base's digests. Rejected in advance: one stacked product with the particle terms doubled and
    zero-filled (no new layout, twice the product's multiply-adds, where the products were 0.55 s of a
@@ -284,30 +324,42 @@ the others are defaults taken without a question, open to the review.
       value. The tie rule is then `maxloc`'s promise (policy, section 10), exact on both devices.
     - *Hill climb:* `merge` of the ranks with a large integer where the score is not above `prev_corr`,
       `minloc` and `minval` over references, and the best pair's result where no rank survives.
-    `mlx_argpartition` is not the reference form (finding 13). It is measured in Phase 3 as an alternative
-    for K = 10 (the partition, the K-th value, a repair of the boundary ties by a cumulative count of the
-    equals in index order, `mlx_argsort` of the K kept) and is built into the toy only if the K rounds cost
-    more than 10 % of the pass at the canonical plan (*guessed* threshold) and the alternative passes gate L.
-15. **(ruling asked) The mlx3D note's proposal 3, as built against the tail.** Recommended: yes to its
-    substance (the reductions run on the device, K best in registers by insertion with strict comparison,
-    ties to the lower global reference index), no to its place (inside the pair kernel) as the first form.
-    - *First fused form of the reduction (F2):* a second kernel object applied in the same graph to the
-      block's concatenated table (rpad, bpad): one thread per particle scans its column in ascending global
-      index and keeps K entries in registers. It sees global indices in order, so no merge across tiles is
-      needed and ties go to the lower index by construction. Launch: grid `[bpad, 1, 1]`, K a template
-      integer, the hill climb's variant reading the ranks. It uses nothing unproven. At `2500_4` it is 1,024
-      threads of 10,000 entries per half (*derived*).
+    `mlx_argpartition` is not the reference form (finding 13). The draft's measurement of it in Phase 3, as
+    an alternative for K = 10 built into the toy only if the K rounds cost more than 10 % of the pass, is
+    withdrawn, 2026-11-26: run `mlxf_kernel_forms` measured it with its repair at this plan's shape, exact and
+    2.6 to 6.4 times slower than the K rounds (suite `select`, *measured*), and the K rounds cost 1.21 ms at K
+    = 10 against a pass of about 0.6 s (finding 16). The K rounds of `maxloc` are the graph form, as that run
+    found them the better graph form; `mlx_argpartition` enters neither the toy nor the bench.
+15. **(ruling asked; revised 2026-11-26 by run `mlxf_kernel_forms`) The mlx3D note's proposal 3, as built
+    against the tail.** Recommended: yes to its substance (the reductions run on the device, K best in
+    registers by insertion with strict comparison, ties to the lower global reference index), no to its place
+    (inside the pair kernel) as the first form, and a SIMD group per particle as the first fused form.
+    - *First fused form of the reduction (F2), a SIMD group per particle (E3):* a second kernel object applied
+      in the same graph to the block's concatenated table (rpad, bpad): each particle's column is read by one
+      SIMD group, each of its 32 lanes keeping K entries in registers over a strided part of the column in
+      ascending global index, then a merge over the lanes with ties to the lower global index. Launch: grid
+      `[32 bpad, 1, 1]`, threadgroup 256 (8 particles), K a template integer (a constant of the run), the
+      hill climb's variant reading the ranks. At `2500_4` it is 1,024 SIMD groups of 10,000 entries per half
+      (*derived*). *Measured* at this shape (suite `select`, exact on seeds 1 to 3, two invocations): 2.10 /
+      2.02 times faster than K rounds of `maxloc` at K = 3 and 4.06 / 4.12 at K = 10, and 3.5 to 4.0 times
+      faster than one thread per particle (E2, the draft's F2, which is not built).
     - *Inside the pair launch (F3):* threadgroup `[rt, 1, 1]`, a `threadgroup` array of the group's scores
       and rotations, a barrier, one thread of the group reducing to K, and a merge of the tiles' K lists in
-      tile order. It needs finding 14's feature, `rt` at most 1,024, and a grid that is a multiple of `rt`.
-      It is probed in Phase 3 (decision 25) and built only if the probe is exact and bit-repeatable on this
-      machine and F2 has passed decision 17; otherwise it is recorded as not built, with the probe's numbers.
+      tile order. It needs finding 14's feature (measured, Apple question 26), `rt` at most 1,024, and a grid
+      that is a multiple of `rt`. It is built only if F2 has passed decision 17 and its own ceiling admits it;
+      its group reduction is then checked in its gates (exact against a host loop, bit-repeatable over 20
+      evaluations), not by a probe of its own; otherwise it is recorded as not built, with the ceilings.
     - *Fallback, named in advance:* the graph forms of decision 14, which are kept in every case.
-16. **The fused pair stage (F1)** is K1's kernel with other source pieces: per pair thread, the loop over
-    rotations forms the score (`metal::precise` functions; for cc from two row inputs and the particle's
-    power) and keeps the first maximum; outputs the score and the rotation, shape (rt, bt); grid and
-    threadgroup as `tail_spec` has them. No `threadgroup` memory. It is a different computation from K1's
-    draw, so it is judged on its own.
+16. **The fused pair stage (F1) is written a SIMD group per pair** (revised 2026-11-26 by run
+    `mlxf_kernel_forms`). K1's kernel shape with other source pieces, in the shape that run measured fastest
+    (T1): each pair is one SIMD group whose 32 lanes stride over the rotations, each lane forming the score
+    (`metal::precise` functions; for cc from two row inputs and the particle's power) and keeping its first
+    maximum, then `simd_max` and the least rotation among the maximal lanes give the pair's first maximum;
+    outputs the score and the rotation, shape (rt, bt); grid `[32 rt bt, 1, 1]`, threadgroup 64 (T1's, K1's
+    measured indifference). No `threadgroup` memory. *Why* (*measured*, suite `tail`, on K1's own reduction
+    over 364 rotations per pair): 3.28 / 3.28 times faster than one thread per pair, 5 of 5 pairs, first minima
+    exact, and 1.84 / 1.80 from go to the last exit at six processes. It is a different computation from
+    K1's draw, so it is judged on its own; one thread per pair (`tail_spec`'s shape) is not built for F1.
 17. **The keep rule, per fused form** (roadmap decision 15; K1's decision 18 is the model). The driver is
     `strategy3D_batch` on the MLX backend at the canonical tile plan (bt 64, rt 250), elapsed time of a pass
     with submission, synchronisation and collection, at equal work and with gates L, S and D passing.
@@ -323,7 +375,9 @@ the others are defaults taken without a question, open to the review.
       parts' exit spread at most the median of their median passes).
     - F1 is judged for cc with the best pair (the canonical configuration) and reported for the Euclidean
       objective; F2 is judged for best k at K = 10 against the graph reduction, F1's verdict applied to both
-      sides. Expected from finding 16: F2's ceiling is below 1.30 and it is not built.
+      sides. Expected from finding 16 and suite `select`: F2's ceiling is below 1.30 (*derived*: the K rounds
+      it replaces cost 1.21 ms a half at K = 10, about 0.4 % of a fused pass), so it is not built, and the
+      report records E3 as the form a later consumer would build first.
 18. **The bench** is a new suite of `mlxf_bench_polar_table.f90`: `suite=classic` with the keys `cases case
     cases_list bt rt device nthr nparts part go passes tail objfun reduce npeaks form` (`objfun=cc|euclid`,
     `reduce=greedy|peaks|shc`, `form=graph|metal|null` for the reduction, `tail=graph|metal|null` for the pair
@@ -371,23 +425,53 @@ the others are defaults taken without a question, open to the review.
     without MLX".
 23. **The fast gate.** The new sub-suites `polarft_objfun` (gate S and the table) and `strategy3D` (gates L
     and D, the drivers, both backends) join `unit_kernels` on both devices; no CTest entry is added (13
-    stay). They add at most 2.0 s to the area in Release (*guessed*; the fast gate is 10.7 s of a bound of
-    38.74 s, *measured*, run `mlxf_parity_rest`); an entry above 0.5 s says why in the policy's table.
+    stay). They add at most 2.0 s to the area in Release (*guessed*; the fast gate is 10.44 to 10.51 s of a
+    bound of 38.74 s, *measured*, run `mlxf_kernel_forms`); an entry above 0.5 s says why in the policy's
+    table.
 24. **File rows may be added** for a submodule when a toy module or tester passes 700 lines, named
-    `mlxf_toy_<module>_<part>.f90`, each recorded in the file table by the phase that adds it. No other file
+    `src/test/toys/polar/mlxf_toy_<module>_<part>.f90`, each recorded in the file table by the phase that adds
+    it, with the map regenerated. No other file
     outside the table.
 25. **The probes** run in the run's scratch directory against the installed `mlxf`, not in the tree, their
-    numbers in Progress: (a) a `threadgroup` float array of 250 elements with `threadgroup_barrier`, one
-    thread per group reducing to the 10 best, on 1,024 groups, exact against a host loop and bit-repeatable
-    over 20 evaluations; (b) the same with `simd_sum`, reported only; (c) whether two identical references in
-    one tile and in two tiles give equal score bits. A probe that fails or is not repeatable closes F3 and
-    becomes an entry of `doc/collaboration/apple_questions.md` under question 26 or as the next number.
-26. **A finding about MLX or mlx-c** (a `maxloc` that does not take the first maximum on a device, the cost
-    of `mlx_argpartition` on the GPU, `threadgroup` memory) is written as a numbered entry of
-    `doc/collaboration/apple_questions.md` after the last (31 today), never sent.
+    numbers in Progress. Probes (a) and (b), `threadgroup` memory with a barrier and `simd_sum`: withdrawn,
+    2026-11-26, as probes of their own: run `mlxf_kernel_forms` measured both through the wrapper (suite
+    `probe`, Apple question 26), and F3, if admitted, checks its own group reduction in its gates (decision
+    15). Probe (c) stays: whether two identical references in one tile and in two tiles give equal score
+    bits. A finding that contradicts suite `probe` becomes an amendment of question 26.
+26. **A finding about MLX or mlx-c** (a `maxloc` that does not take the first maximum on a device; the cost
+    of `mlx_argpartition` and `threadgroup` memory are measured, questions 36 and 26) is written as a numbered
+    entry of `doc/collaboration/apple_questions.md` after the last one Phase 0 finds (37 and following at
+    `ae7d623`), never sent.
+27. **(ruling asked; added 2026-11-26 from run `mlxf_kernel_forms`) Whether K1's draw tail moves to a SIMD group
+    per pair.** That run measured K1's fused tail as kept (T0, one thread per pair) against the same draw a
+    SIMD group per pair (T1): 3.28 / 3.28 times faster, 5 of 5 pairs, first minima exact, draws within K1's
+    frozen `POLARFT_TAIL_ROT_BLK` (5 differing rotations per 64,000 pairs), 1.84 / 1.80 times from go to the
+    last exit at six processes (*measured*, suite `tail`); and K1's tail ceiling on rank 2e's base reaches 1.32
+    by K1's method and 1.45 by the profile's share (*derived*), so a driver change could pass the 30 % rule.
+    It changed no toy default and left the choice to the K plans; the maintainer has not ruled.
+    - **Recommended: yes, in this run, as a verdict of its own.** F1 is written in T1's shape (decision 16), so
+      T1 for the draw is the same pattern with K1's finish, and this run already edits
+      `mlxf_toy_polarft_workspace_tail.f90`. T1 replaces T0 as `tail=metal` (one fused form, no second path)
+      only if the dense canonical driver (`suite=time case=2500_4 bt=64 rt=250`, K1's protocol) is at least
+      1.30 times faster with it, by decision 17's rules at one process, three of `2500_4` and six of
+      `2500_1`, with the gates of `polarft_tail` and `eul_prob_tab` at K1's frozen tolerances and the
+      first-minimum gate run on rows with ties across lanes (run `mlxf_kernel_forms` found that a gate without
+      them let an inverted first-index rule pass). If kept, T0 is deleted, the dense digests move once (draws
+      within K1's bound), and Phase 5 records the new lines as the identity from then on; K3's list route, if
+      kept, inherits the form.
+    - **Alternatives:** (a) leave K1's tail as it is and record the measured gain for a later plan: costs
+      nothing now and leaves the gain on the tail of every dense fill; (b) a small plan of its own before K3,
+      so the dense digests move before the batch rather than at its end: one more run on the M5.
+28. **The particle terms of cc are SIMPLE's `ft_ptcl_terms`** (added 2026-11-26 for rank 2e's layout). Under
+    `OBJFUN_CC`, `memoize_ptcls` makes `ft_ptcl_terms (2nk, pftsz+1, nptcls)` under SIMPLE's name and layout
+    (rows 1..nk `FT(CTF2)`, rows nk+1..2nk `FT(X.CTF)`, unweighted), and the device's cc pair stage uploads
+    them as the Euclidean one uploads `ft_ptcl_wterms`. Under `OBJFUN_EUCLID` the toy does not make them, a
+    declared difference: SIMPLE makes both so that the objective may change on a live calculator, while a toy
+    calculator has one objective from `new` to `kill` (decision 1); the Euclidean path's memory and bytes stay
+    the base's. Size: the same as `ft_ptcl_wterms`, 0.36e9 B at `2500_4` (*derived* in rank 2e's report).
 
-**Defaults taken without a question:** decisions 1, 2, 4 to 7, 13, 16, 18 to 26. **Rulings asked:** 3, 8, 9,
-10, 11, 12, 14 with 15, and 17's canonical configuration.
+**Defaults taken without a question:** decisions 1, 2, 4 to 7, 13, 16, 18 to 26 and 28. **Rulings asked:** 3,
+8, 9, 10, 11, 12, 14 with 15, 17's canonical configuration, and 27.
 
 ## 4. Not in this plan
 
@@ -400,8 +484,8 @@ the others are defaults taken without a question, open to the review.
 - A cc form of the posterior draw or of the shift maps (SIMPLE refuses both under cc).
 - Any measurement of SIMPLE, any SIMPLE source change, any wrapper, any file under `src/core/` or
   `src/defs/`, a CTest entry, the accelerated mode (TF32), production data (`~/data`, `~/data2`).
-- A change of `scripts/run_parts.sh`, of the Euclidean tiles, of K1's kept tail or of the projector and
-  reconstructor toys.
+- A change of `scripts/run_parts.sh`, of the Euclidean tiles, of the projector and reconstructor toys, or of
+  K1's kept tail beyond decision 27's verdict.
 
 ## 5. Change types and gates
 
@@ -409,19 +493,21 @@ the others are defaults taken without a question, open to the review.
 | --- | --- | --- |
 | 0 | measurement; no tree change but Progress | the base's counts and identity bytes; section 9's re-checks; the oracle's reach; the bench's baseline rows |
 | 1 | new test-only code: the host route and the strategies | gates L, S, D on the host route, seeds 2 and 3 at tolerances frozen on seed 1; a team against one thread; ten planted violations fail; rules `mirror`, `seam`; the off-state program |
-| 2 | new test-only code: the cc tiles, the graph pair stage, the graph reductions, the MLX branch | gates L, S, D and decision 21 on both devices; the two backends' decisions equal under gate D's rule; nine planted violations fail; sub-suite `seam` |
-| 3 | measurement; the bench's suite | decision 25's probes; decision 17's ceilings; the rounds against `mlx_argpartition`; configurations frozen |
-| 4 | new test-only code under the 30 % rule, per form, or not entered | every gate of Phase 2 on the GPU with the fused form; four planted violations fail |
-| 5 | measurement | decision 17's verdicts; decision 18's table complete; decision 21 at bench size |
+| 2 | new test-only code: the cc tiles and particle terms, the graph pair stage, the graph reductions, the MLX branch | gates L, S, D and decision 21 on both devices; the two backends' decisions equal under gate D's rule; ten planted violations fail; sub-suite `seam` |
+| 3 | measurement; the bench's suite | decision 25's probe (c); decision 17's ceilings; decision 27's ceiling on the dense driver; configurations frozen |
+| 4 | new test-only code under the 30 % rule, per form, or not entered | every gate of Phase 2 on the GPU with the fused form; decision 27's form under `polarft_tail` and `eul_prob_tab`; six planted violations fail, each where its form is built |
+| 5 | measurement; possibly result-changing for the dense tail (decision 27) | decision 17's verdicts; decision 27's verdict and, if kept, the dense digests recorded anew; decision 18's table complete; decision 21 at bench size |
 | 6 | documents; the last gates | the report; the release gates below; `git status` shows file-table paths only |
 
 Every phase ends with Debug and Release built from scratch in the run's own hand-configured trees
 (`-DMLXF_WERROR=ON -DFORTLS=OFF -DBUILD_TESTS=ON`) with no warning, the fast gate 13 of 13 in both,
 `scripts/check_tree.sh` passing, and `scripts/restyle_fortran.py` and `scripts/format_use_blocks.py` run on
-every Fortran file touched, by explicit file name. The existing areas keep their counts, Debug and Release
-alike: core 215 or 216, array 193, ops 2,462, fft 194, linalg 632, compile 63, fast 152, random 486,
-transforms 274, io 846, distributed 55; `unit_kernels` is the base's count (1,955 today, re-read in Phase 0)
-plus the new sub-suites' counts, each existing sub-suite keeping its own. Phase 6 adds
+every Fortran file touched, by explicit file name (the static gate includes rank 2d's rules `publist` and
+`size`, the folders' `.inf` descriptions and the code-base map). The existing areas keep the counts Phase 0
+finds, Debug and Release alike (at `ae7d623`, *measured*: core 214 to 216, array 193, ops 2,462, fft 194,
+linalg 632, compile 63, fast 152, random 486, transforms 274, io 846, distributed 55; rank 2g and K3 to K6 may
+have changed them); `unit_kernels` is the base's count (1,953 at `ae7d623`, re-read in Phase 0) plus the new
+sub-suites' counts, each existing sub-suite keeping its own (`polarft_tail` may grow by decision 27). Phase 6 adds
 `scripts/check_embed.sh`, `scripts/check_toy_offstate.sh --exec`, `scripts/check_install.sh`,
 `scripts/release_gate.sh --allow-dirty`, and the Release fast gate 10 times of 10. Nothing else is built
 while a step is timed.
@@ -449,27 +535,34 @@ check named in Progress (after an edit the run waits 1.2 s before `make`, K1's w
   fallback in visiting order (L); `put_last` left out (L); best k with the higher index first among equals
   (L); the invalid entry selectable (L, the zero-power particle); a variate keyed by the place in the block
   (the team gate); a ledger line removed (rule `mirror`); `use mlxf` in a host file (rule `seam`).
-- Phase 2: the cross and reference-power tiles exchanged (S); the conjugate dropped from the cross tile (S);
+- Phase 2: the cross and reference-power tiles exchanged (S); the conjugate dropped from the cross tile (the
+  memo's rows nk+1..2nk packed as they are, S); the particle's cc terms taken from `ft_ptcl_wterms` (S);
   a padded reference scored 0 (L: chosen where every cc is negative); the tile's local index returned for a
   reference (L); the ranks of a padded particle read (L); a chosen entry masked by value (L, duplicate
   scores); `prev_corr` without the clamp at 0 (L, a negative previous score); a term that depends on a call
   counter (decision 21); a refusal's branch removed (`seam`).
 - Phase 4: the kernel's insertion with `>=` (L); plain `exp` for `precise::exp` (S, if above the frozen
   tolerance; otherwise reported as not detectable and the piece kept `precise`); the kernel scanning from the
-  last reference (L); for F3, the barrier removed (L or decision 21).
+  last reference (L); F1's least rotation among the maximal lanes inverted, on handmade rows whose ties fall
+  in different lanes (L); for F3, the barrier removed (L or decision 21); for decision 27, T1 skipping the
+  last rotation (the first-minimum gate of `polarft_tail`).
 - Phase 5: an unread key (`error stop 2`); a part's digest altered (decision 21 at bench size).
 
 **Hypotheses, reported with their numbers:**
 - H1: the graph reductions cost under 5 % of a pass at the canonical plan (*guessed*).
-- H2: F1 gains at least 30 % for cc (K1's draw tail gained 1.65 to 1.80, *measured*).
-- H3: F2's ceiling is below 1.30 (*derived* from finding 16) and F2 is not built.
+- H2: F1 gains at least 30 % for cc (K1's draw tail gained 1.65 to 1.80, *measured*, and its reduction a SIMD
+  group per pair was 3.3 times faster still, suite `tail`).
+- H3: F2's ceiling is below 1.30 (*derived* from finding 16 and suite `select`'s 1.21 ms) and F2 is not built.
+- H6: decision 27's T1 reaches 1.30 on the dense canonical driver (*derived*: K1's tail ceiling 1.32 to 1.45
+  and T1 3.3 times faster than T0).
 - H4: a cc pass costs at most 1.6 times the Euclidean one in the graph form (*guessed*: one more transform,
   0.42 s of a barriered 1.94 s, *measured*, K1, and the same product work).
 - H5: identical references give identical score bits whatever their tile (*guessed*).
 
-**Reported, not gated:** every time, rate and byte count; one process's footprint and MLX peak; the cost of
-`mlx_argpartition` against the rounds; the probes; the share of near-ties; the differences from SIMPLE.
+**Reported, not gated:** every time, rate and byte count; one process's footprint and MLX peak; probe (c);
+the share of near-ties; the differences from SIMPLE; decision 27's rows whatever its verdict.
 **Reserved for the maintainer:** whether a keyed order is acceptable in SIMPLE's `srch_shc` (decision 11);
+decision 27's ruling before the go;
 Q42 (the non-positive power) and Q8, Q10 of the oracles' report; the order among equals inside `maxnloc`'s
 first n; whether the miniatures read like SIMPLE.
 
@@ -498,7 +591,9 @@ the stop go on):
 - section 9's re-check finds that an earlier run changed a premise in a way its decision here does not
   cover (the shape of the table, the tail's inputs, the block's reference set);
 - a change to `src/core/`, `src/defs/`, `scripts/run_parts.sh` or SIMPLE would be needed; SIMPLE at
-  `d354efee2` contradicts a decision; the static gate fails on something the run did not touch.
+  `28c753993` contradicts a decision; the static gate fails on something the run did not touch;
+- an identity digest of the base differs from `ae7d623`'s and neither rank 2g's report nor an earlier run's
+  report names the change (section 9).
 
 **Gates no ruling may waive:** no warning in Debug or Release; the static gate; the library untouched; the
 oracle shares no code with the toy; no SIMPLE source copied; tolerances and bounds frozen before the seeds
@@ -513,15 +608,17 @@ build.
    count of `unit_kernels`, the fast gate's time, and the bytes of the base's identity invocations that
    touch the polar toy (twice each).
 2. Section 9's re-checks, item by item, each answered in Progress with the file and procedure read.
-3. Read at `d354efee2` the dummy lists and the members of `strategy3D_srch`, `strategy3D_greedy`,
-   `strategy3D_shc`, their parent `strategy3D_pftc`, `strategy3D_spec`, and `hpsort` as `maxnloc` calls it;
-   record what the miniatures keep and what they declare as a difference. Read rule `mirror` in
-   `scripts/check_rules.py` for what it compares.
+3. Read at `28c753993` the dummy lists and the members of `strategy3D_srch` (it gained `view_solve` and
+   `refine_extra_pose_continuously`'s `seed_coord` with `c1f255d20`, which the miniatures do not model),
+   `strategy3D_greedy`, `strategy3D_shc`, their parent `strategy3D_pftc`, `strategy3D_spec`, `hpsort` as
+   `maxnloc` calls it, and `gen_corrs`, `term_sums`, `cc_sums` and `memoize_ptcls`; record what the
+   miniatures keep and what they declare as a difference. Read rule `mirror` in `scripts/check_rules.py` for
+   what it compares.
 4. The oracle's reach: build `oracle_polar_pair` objects from the host fixture's sections, compare its `dist`
    with the ring oracle's rows of sub-suite `polarft_host` (the comparison the oracles' report left to K4 and
    K7), and time 1,760 pairs. If the layouts differ, the bridge is a tester's helper, not an oracle change.
 5. The bench's baseline: `suite=time` at `2500_4` and `2500_1`, graph and fused tails, one process, twice,
-   for the pass K7's rows are read against.
+   for the pass K7's rows are read against and decision 27's verdict is judged on.
 
 **Exit:** the counts and bytes are in Progress; every item of section 9 is answered; the oracle agrees with
 the ring oracle within the ceiling; no stop condition holds; the tree is unchanged but for this note.
@@ -544,7 +641,8 @@ are the base's.
 
 ### Phase 2, the device in graph form: the cc tiles, the table, the reductions (box: 240 min)
 
-1. The cc layout at `memoize_ref_bins` (decision 6) and its refusals; the Euclidean path unchanged.
+1. The cc layout at `memoize_refs` (decision 6), `ft_ptcl_terms` at `memoize_ptcls` (decision 28), and their
+   refusals; the Euclidean path unchanged.
 2. The graph pair stage for both objectives (decision 14), queued per tile with `mlx_async_eval` as the
    dense score is; the table collected as a test option.
 3. `mlxf_toy_polarft_workspace_reduce.f90`: the three graph reductions; the block's spec gains the
@@ -553,32 +651,36 @@ are the base's.
 4. The tester's device checks on both devices: gate S with the device's tolerances measured on seed 1 over
    both devices and frozen; gate L on the fixture and on handmade tables; gate D; the two backends against
    each other; decision 21; the cycles and refusals in `seam`.
-5. The nine planted violations. H5 measured.
+5. The ten planted violations. H5 measured.
 
 **Exit:** the gates of the row pass on both devices in Debug and Release; every tolerance and bound is frozen
 in `mlxf_test_defs.f90` and Progress before seeds 2 and 3 ran; the new counts are recorded; the fast gate's
 time is within decision 23 or the excess is explained in the policy's table.
 
-### Phase 3, the probes, the bench's suite and the ceilings (box: 150 min)
+### Phase 3, the probe, the bench's suite and the ceilings (box: 130 min)
 
 1. `suite=classic` (decision 18) with the null forms; `RUN_PARTS_SUITE=classic` rows at one process.
-2. Decision 25's probes (a), (b), (c).
+2. Decision 25's probe (c).
 3. The profile of a pass at the canonical plan for cc and the Euclidean objective: products, transforms,
    pair stage, reduction, collection (barriered, labelled as such), and the unbarriered pass; H1 and H4.
-4. The ceilings of F1 and F2 (decision 17), two invocations each; the K rounds against the
-   `mlx_argpartition` alternative at K = 10 (decision 14).
+4. The ceilings of F1, F2 and F3 (decision 17), two invocations each; the dense driver's tail ceiling for
+   decision 27 (a null tail in a scratch copy, K1's method), two invocations.
 5. The verdict configurations frozen in Progress.
 
-**Exit:** each fused form has a ceiling and a line "built" or "not built, by its ceiling" in Progress; F3 has
-its probe's verdict; the configurations are frozen; no gate of Phase 2 changed.
+**Exit:** each fused form and decision 27's T1 have a ceiling and a line "built" or "not built, by its
+ceiling" in Progress; the configurations are frozen; no gate of Phase 2 changed.
 
 ### Phase 4, the fused forms, each only if Phase 3 admits it (box: 180 min)
 
-1. F1: the source pieces of the score and the first maximum in `mlxf_toy_polarft_workspace_tail.f90`, its
-   spec, its refusal off the GPU; selected by `set_tail_form`, as K1's.
-2. F2, if admitted: the per-particle kernel in `mlxf_toy_polarft_workspace_reduce.f90`, selected by an
-   addition `set_reduce_form`. F3, if admitted by decision 15.
-3. Every gate of Phase 2 on the GPU with each fused form; decision 21; the four planted violations.
+1. F1: the source pieces of the score and the first maximum in `mlxf_toy_polarft_workspace_tail.f90`, a SIMD
+   group per pair (decision 16), its spec, its refusal off the GPU; selected by `set_tail_form`, as K1's.
+2. F2, if admitted: the per-particle kernel a SIMD group per particle (E3, decision 15) in
+   `mlxf_toy_polarft_workspace_reduce.f90`, selected by an addition `set_reduce_form`. F3, if admitted by
+   decision 15.
+3. Decision 27, if ruled yes and its ceiling admits it: K1's draw a SIMD group per pair in the same file,
+   behind `tail=metal` for the verdict's runs only (T0 stays until Phase 5's verdict); the gates of
+   `polarft_tail` and `eul_prob_tab` with tied rows across lanes.
+4. Every gate of Phase 2 on the GPU with each fused form; decision 21; the six planted violations of the forms built.
 
 **Exit:** each built form passes gates L, S, D and decision 21 on the GPU on seeds 2 and 3 at the frozen
 tolerances (a fused form gets no tolerance of its own); the graph forms' results are unchanged; or the phase
@@ -587,7 +689,9 @@ is recorded as not entered, with the ceilings.
 ### Phase 5, the bench and the verdicts (box: 210 min)
 
 1. Decision 17's verdict runs for each built form: five interleaved pairs at one process, at 6 processes of
-   `2500_1` and at 3 of `2500_4`, both invocations, each row's validity checked.
+   `2500_1` and at 3 of `2500_4`, both invocations, each row's validity checked. Decision 27's verdict on the
+   dense driver by the same rules; if kept, T0 is deleted, the dense digests and the identity set are
+   recorded anew twice and become the base's lines, and the gates of Phase 2 run again.
 2. Decision 18's table for the kept configuration and for the graph forms: cc and Euclidean, the three
    reductions, K 3 and 10, alone and as 3 and 6 processes: total rate, rate per process, footprint, MLX peak.
 3. Decision 21 at bench size. The two planted violations.
@@ -603,7 +707,9 @@ complete or each missing row has its `run_parts` status; the tree holds only kep
    "Differences from SIMPLE"), section 2a's row A, section 8's row K7.
 2. `doc/policies/test_environment_policy.md` (the sub-suites, the suite `classic`, any fast entry above 0.5
    s), `doc/policies/toy_example_policy.md` where it lists the toys, the plans' index, the history,
-   `src/test/test.inf`, `test/offstate/offstate.inf`, the root `README.md` where it names the kernels.
+   `src/test/toys/polar/polar.inf` and `doc/code_base_map.md` for what was kept, `test/offstate/offstate.inf`,
+   the root `README.md` where it names the kernels; decision 27's outcome in the families note's row K1 and
+   the roadmap.
 3. The gates of section 5's last sentence, the Release fast gate 10 times of 10.
 4. The report `completed/mlxf_kernel_k7_report.md` in the how-to's order: what was learned, the changes per
    phase, decisions under delegation, deviations, evidence, what is left open, and a commit message without
@@ -615,34 +721,37 @@ complete or each missing row has its `run_parts` status; the tree holds only kep
 
 | File | What | Phases |
 | --- | --- | --- |
-| `src/test/mlxf_test_defs.f90` | `OBJFUN_*`, `cc_objfun`, `npeaks`, `npeaks_inpl`, the records, the block spec's members, tolerances and bounds, `POLAR_SCORE_INVALID` | 1, 2, 4 |
-| `src/test/mlxf_polarft_host_fixture.f90` | `make_strategy3D_fixture`, its table and lines | 1 |
-| `src/test/mlxf_toy_polarft_calc.f90` | the interfaces of `gen_objfun_vals` and of the additions | 1, 2, 4 |
-| `src/test/mlxf_toy_polarft_corr.f90` (new) | host submodule: `gen_objfun_vals` | 1 |
-| `src/test/mlxf_toy_polarft_memo.f90`, `mlxf_toy_polarft_memo_mlx.f90` | the cc layout's request at `memoize_ref_bins` | 2 |
-| `src/test/mlxf_toy_polarft_block.f90`, `mlxf_toy_polarft_block_mlx.f90` | the block's objective and reduction; refusals; stubs | 2, 4 |
-| `src/test/mlxf_toy_polarft_workspace.f90` | the cc tiles, the reduction's interfaces and state | 2, 4 |
-| `src/test/mlxf_toy_polarft_workspace_lifecycle.f90` | the cc tiles | 2 |
-| `src/test/mlxf_toy_polarft_workspace_score.f90` | the graph pair stage | 2 |
-| `src/test/mlxf_toy_polarft_workspace_tail.f90` | F1's source pieces and spec | 4 |
-| `src/test/mlxf_toy_polarft_workspace_reduce.f90` (new) | device submodule: the graph reductions; F2, F3 | 2, 4 |
-| `src/test/mlxf_toy_strategy3D_srch.f90` (new) | host: type `strategy3D_srch` | 1, 2 |
-| `src/test/mlxf_toy_strategy3D_utils.f90` (new) | host: `extract_peak_ori`, `extract_peak_oris` | 1 |
-| `src/test/mlxf_toy_strategy3D_greedy.f90` (new) | host: type `strategy3D_greedy` | 1, 2 |
-| `src/test/mlxf_toy_strategy3D_shc.f90` (new) | host: type `strategy3D_shc` | 1, 2 |
-| `src/test/mlxf_toy_strategy3D_matcher.f90` (new) | host: type `strategy3D_batch`, both branches | 1, 2 |
-| `src/test/mlxf_toy_polarft_objfun_tester.f90` (new) | sub-suite `polarft_objfun` | 1, 2, 4 |
-| `src/test/mlxf_toy_strategy3D_tester.f90` (new) | sub-suite `strategy3D` | 1, 2, 4 |
-| `src/test/mlxf_toy_seam_tester.f90` | the new cycles and refusals | 2, 4 |
-| `src/test/mlxf_toy_*.f90` (new, decision 24) | submodules past 700 lines | 1, 2, 4 |
-| `src/test/mlxf_bench_polar_table.f90` | `suite=classic`, its keys and rows | 3, 4, 5 |
-| `src/test/mlxf_test_registry.f90` | two `run_suite` rows | 1 |
-| `src/test/test.inf` | the directory's description | 6 |
+| `src/test/framework/mlxf_test_defs.f90` | `OBJFUN_*`, `cc_objfun`, `npeaks`, `npeaks_inpl`, the records, the block spec's members, tolerances and bounds, `POLAR_SCORE_INVALID` | 1, 2, 4 |
+| `src/test/toys/polar/mlxf_polarft_host_fixture.f90` | `make_strategy3D_fixture`, its table and lines | 1 |
+| `src/test/toys/polar/mlxf_toy_polarft_calc.f90` | the interfaces of `gen_objfun_vals` and of the additions | 1, 2, 4 |
+| `src/test/toys/polar/mlxf_toy_polarft_corr.f90` (new) | host submodule: `gen_objfun_vals` | 1 |
+| `src/test/toys/polar/mlxf_toy_polarft_memo.f90`, `mlxf_toy_polarft_memo_mlx.f90` | the cc layout's request at `memoize_refs`; `ft_ptcl_terms` at `memoize_ptcls` (decision 28) | 2 |
+| `src/test/toys/polar/mlxf_toy_polarft_block.f90`, `mlxf_toy_polarft_block_mlx.f90` | the block's objective and reduction; refusals; stubs | 2, 4 |
+| `src/test/toys/polar/mlxf_toy_polarft_workspace.f90` | the cc tiles, the reduction's interfaces and state | 2, 4 |
+| `src/test/toys/polar/mlxf_toy_polarft_workspace_lifecycle.f90` | the cc tiles | 2 |
+| `src/test/toys/polar/mlxf_toy_polarft_workspace_score.f90` | the graph pair stage | 2 |
+| `src/test/toys/polar/mlxf_toy_polarft_workspace_tail.f90` | F1's source pieces and spec; decision 27's T1 and, if kept, T0's deletion | 4, 5 |
+| `src/test/toys/polar/mlxf_toy_polarft_tail_tester.f90` | decision 27's gates with ties across lanes, if it is built | 4, 5 |
+| `src/test/toys/polar/mlxf_toy_polarft_workspace_reduce.f90` (new) | device submodule: the graph reductions; F2, F3 | 2, 4 |
+| `src/test/toys/polar/mlxf_toy_strategy3D_srch.f90` (new) | host: type `strategy3D_srch` | 1, 2 |
+| `src/test/toys/polar/mlxf_toy_strategy3D_utils.f90` (new) | host: `extract_peak_ori`, `extract_peak_oris` | 1 |
+| `src/test/toys/polar/mlxf_toy_strategy3D_greedy.f90` (new) | host: type `strategy3D_greedy` | 1, 2 |
+| `src/test/toys/polar/mlxf_toy_strategy3D_shc.f90` (new) | host: type `strategy3D_shc` | 1, 2 |
+| `src/test/toys/polar/mlxf_toy_strategy3D_matcher.f90` (new) | host: type `strategy3D_batch`, both branches | 1, 2 |
+| `src/test/toys/polar/mlxf_toy_polarft_objfun_tester.f90` (new) | sub-suite `polarft_objfun` | 1, 2, 4 |
+| `src/test/toys/polar/mlxf_toy_strategy3D_tester.f90` (new) | sub-suite `strategy3D` | 1, 2, 4 |
+| `src/test/toys/mlxf_toy_seam_tester.f90` | the new cycles and refusals | 2, 4 |
+| `src/test/toys/polar/mlxf_toy_*.f90` (new, decision 24) | submodules past 700 lines | 1, 2, 4 |
+| `src/test/bench/mlxf_bench_polar_table.f90` | `suite=classic`, its keys and rows | 3, 4, 5 |
+| `src/test/framework/mlxf_test_registry.f90` | two `run_suite` rows | 1 |
+| `src/test/toys/polar/polar.inf` | the folder's description: the cc objective, the strategies and their batch owner | 1, 2, 6 |
+| `doc/code_base_map.md` | regenerated by `scripts/generate_codeoverview.py` in each phase that adds or removes a Fortran file or edits an `.inf` (the static gate checks it) | 1, 2, 4, 5, 6 |
 | `test/offstate/CMakeLists.txt`, `mlxf_offstate_exec.f90`, `offstate.inf` | the new host files and checks | 1, 6 |
 | `scripts/check_toy_offstate.sh` | only if its comparison names the lines it reads; else untouched | 1 |
 | `scripts/toy_mirror.txt` | the new lines; SIMPLE's strategy files in its header | 1, 2, 4 |
 | `scripts/toy_seam.txt` | seven lines (six host, one device) | 1, 2 |
-| `doc/implementation_notes/planned/mlxf_kernel_families.md` | sections 2a, 3 and 8 | 6 |
+| `doc/implementation_notes/planned/mlxf_kernel_families.md` | sections 2a, 3 and 8 (rows K1 and K7) | 6 |
+| `doc/implementation_notes/planned/mlxf_roadmap.md` | K7's row; decision 27's outcome | 6 |
 | `doc/policies/test_environment_policy.md`, `doc/policies/toy_example_policy.md` | the suites, the bench, the toys' list | 6 |
 | `doc/implementation_notes/README.md` | the index | 6 |
 | `README.md` | the status | 6 |
@@ -653,22 +762,28 @@ complete or each missing row has its `run_parts` status; the tree holds only kep
 
 ## 9. The queue
 
-K7 runs last, from the commit that holds K6's verified result. K5 and K6 bring their own classes and touch
-only the shared files. K3 and K4 edit the polar toy this plan builds on. Phase 0, item 2, re-checks exactly
-the premises below and records each answer; a premise changed beyond what its line allows is section 7's
-stop.
+Ranks 2d, 2e and 2f are delivered and committed (`ae7d623`); rank 2g, the user-facing hardening, runs next and
+before the batch (roadmap decision 17). K7 runs last of the batch, from the commit that holds K6's verified
+result. K5 and K6 bring their own classes and touch only the shared files. K3 and K4 edit the polar toy this
+plan builds on. Rank 2g changes `src/core/` and no toy file: integer `mean`, `var` and `std` promoted first,
+the Euclidean norms and floating means in a scaled form, empty `maxval` and `minval` given Fortran's
+identities (the graph reductions of decision 14 reduce non-empty tables, but a padded or all-invalid column
+is gated, and its result is re-checked), integer-scalar operators, saves that keep a file on failure, an index
+validator; it may add assertions to unit areas. Phase 0, item 2, re-checks exactly the premises below and
+records each answer; a premise changed beyond what its line allows is section 7's stop.
 
 | Premise of this plan | Who may change it | What Phase 0 re-checks, and what follows |
 | --- | --- | --- |
 | A block is dense: every reference in order (finding 5) | K3 | `score_block_posterior_mlx`'s refusals and the block spec's members. If a block may list or mask references, an absent pair must carry `POLAR_SCORE_INVALID` in the table; decisions 4 and 12 to 15 then hold unchanged. If the table is no longer (rpad, bpad), stop |
 | The tiles' layout and residency (finding 2) | K3 (reordered or gathered tiles), K4 (shifted references) | `polarft_workspace_new`, `finish_tiles`. Decision 6 builds its layout beside whatever the Euclidean one is; the global index of a tile's reference must still be known to the reductions |
-| The tail: one thread per pair, inputs `raw, iw, temps, u, par`, outputs (rt, bt), pair order `e = particle * rt + reference` (finding 3) | K4 (a shift dimension, other source pieces, another grid) | `tail_source`, `tail_spec`, the `tail_inputs` and `tail_outputs` records. F1 is written from the tail as it is then; if K4 proved `threadgroup` memory in its own probe, decision 25 (a) cites it and is not repeated |
+| The tail: one thread per pair, inputs `raw, iw, temps, u, par`, outputs (rt, bt), pair order `e = particle * rt + reference` (finding 3) | K4 (a shift dimension, other source pieces, another grid) | `tail_source`, `tail_spec` (public since run `mlxf_kernel_forms`), the `tail_inputs` and `tail_outputs` records. F1 and decision 27 are written from the tail as it is then, a SIMD group per pair; K4's per-pair kernels 2 and 4 are written in the same shape, and F1 reuses their pattern if K4 kept them |
 | `gen_objfun_vals` refuses a shift (decision 2) | K4 | whether a shifted row exists on either route; if so the refusal stays and the difference is recorded, since no reduction here reads a shift |
 | The `parameters` record and `polarft_block_spec` members | K3, K4, K5, K6 | no name of decisions 1, 10 and 13 is taken; the record's constructor calls in the off-state program still compile |
 | `SUITE_KEYS`, the table's columns and `canonical_plan` of the bench; `run_parts.sh`'s columns | K3, K4 | the suite's key table and the columns of decision 18; the canonical plan (bt 64, rt 250) |
-| The fast gate: 13 entries, 10.7 s of 38.74 s; `unit_kernels` 1,955 | all four | the counts and the time; decision 23's 2.0 s is against the time found |
-| Both ledgers, the registry, `test/offstate/`, `test.inf`, the families note | all four | the lines present; the off-state program's shape; the last Apple question's number |
-| K1's numbers of finding 16 | K3, K4 (a changed pass) | Phase 0, item 5, measures the pass again; decision 17's ceilings are measured, never taken from this note |
+| The fast gate: 13 entries, 10.44 to 10.51 s of 38.74 s in Release; `unit_kernels` 1,953; the other areas' counts (at `ae7d623`) | rank 2g and all four | the counts and the time; decision 23's 2.0 s is against the time found |
+| The base's identity digests (the 364-line set of runs `mlxf_toy_layout` and `mlxf_kernel_forms`, SHA-256 `e2d65e88...4d33dba5` at `ae7d623`, and its successors in each run's report) | rank 2g, all four | recorded twice on the base; a change that neither rank 2g's report nor an earlier run's names is section 7's stop |
+| Both ledgers, the registry (`BENCHES` 6, `NAMED_ONLY` 4 at `ae7d623`), `test/offstate/`, the folders' `.inf` files and the code-base map, the families note | all four | the lines present; the off-state program's shape; the last Apple question's number (36 at `ae7d623`) |
+| K1's numbers of finding 16 | rank 2e (passes 4 to 10 % shorter), K3, K4 (a changed pass) | Phase 0, item 5, measures the pass again; decision 17's and decision 27's ceilings are measured, never taken from this note |
 
 ## Progress
 

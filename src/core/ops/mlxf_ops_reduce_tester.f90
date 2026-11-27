@@ -5,16 +5,16 @@
 ! tolerances of mlxf_test_defs (an error relative to max(1, |reference|)); extrema, logical reductions, counts
 ! and positions are exact.
 module mlxf_ops_reduce_tester
-use, intrinsic :: iso_fortran_env, only: int32, real32, real64
-use, intrinsic :: ieee_arithmetic, only: ieee_is_nan, ieee_value, ieee_quiet_nan
+use, intrinsic :: iso_fortran_env, only: int8, int16, int32, int64, real32, real64
+use, intrinsic :: ieee_arithmetic, only: ieee_is_nan, ieee_value, ieee_quiet_nan, ieee_is_finite, ieee_positive_inf
 use mlxf,             only: mlx_array, mlx_from, mlx_to, mlx_set_default_device, mlx_default_device, MLX_DEVICES, &
                             MLX_DTYPES, mlx_astype, mlx_zeros, reshape, sum, product, maxval, minval, all, any, count, &
                             mlx_mean, mlx_median, mlx_var, mlx_std, mlx_logsumexp, maxloc, minloc, mlx_cumsum, abs, &
-                            mlx_cumprod, mlx_cummax, mlx_cummin, mlx_logcumsumexp, mlx_softmax
+                            mlx_cumprod, mlx_cummax, mlx_cummin, mlx_logcumsumexp, mlx_softmax, cmplx
 use mlxf_test_utils,  only: assert_true, assert_int, test_devices, device_name, set_fixed_seed
 use mlxf_test_defs,   only: ELEM_SEED_CALIBRATION, ELEM_SEEDS_JUDGED, ELEM_CEILING, REDUCE_TOLERANCES, REDUCE_NBATCH, &
                             elem_tolerance
-use mlxf_test_reduce, only: nan_maxval
+use mlxf_test_reduce, only: nan_maxval, nan_max
 implicit none
 private
 public :: run_all_ops_reduce_tests
@@ -85,6 +85,9 @@ contains
             call test_softmax
             call test_positions
             call test_reduce_conventions
+            call test_integer_statistics
+            call test_mean_range
+            call test_empty_extrema
         end do
         call mlx_set_default_device(original)
     end subroutine run_all_ops_reduce_tests
@@ -390,6 +393,364 @@ contains
             end do
         end do
     end subroutine test_reduce_family
+
+    ! mean, variance and standard deviation of integer and boolean arrays: the input is converted to float32 before
+    ! the arithmetic, so a large total cannot wrap. Exact fixtures (values and partial sums exact in float32) within
+    ! one float32 epsilon of max(1, |answer|), every integer kind; general integer fixtures in [-2e9, 2e9] judged by the
+    ! frozen tolerances of the float32 family on the same data scaled by 1e-9 (the family's domain [-2, 2])
+    subroutine test_integer_statistics
+        integer,           parameter   :: KINDS(9) = [MLX_DTYPES%int8, MLX_DTYPES%int16, MLX_DTYPES%int32, &
+            &MLX_DTYPES%int64, MLX_DTYPES%uint8, MLX_DTYPES%uint16, MLX_DTYPES%uint32, MLX_DTYPES%uint64, MLX_DTYPES%bool]
+        real(real64),      parameter   :: SCALE = 1.e9_real64
+        type(mlx_array)                :: a, p, r
+        type(mlx_array),   allocatable :: ops(:)
+        type(reduce_case)              :: cases(3)
+        type(reduce_form), allocatable :: forms(:)
+        type(form_result)              :: res
+        type(elem_tolerance)           :: tol
+        integer(int32),    allocatable :: img(:,:)
+        integer,           allocatable :: seeds(:)
+        real(real64),      allocatable :: ref(:), y(:)
+        real(real64)                   :: x(N1, N2, N3, NB), value
+        integer                        :: k, c, j, b, w
+        write(*,'(a)') 'test_integer_statistics'
+        allocate(img(1024, 1024), source=4096_int32)
+        a = mlx_from(img)
+        call exact(mlx_mean(a), 4096._real64, 'the mean of a 1024 x 1024 int32 image of 4096')
+        call exact(mlx_mean(a, 1), 4096._real64, 'its mean along dimension 1')
+        call exact(mlx_mean(a, [1, 2], keepdims=.true.), 4096._real64, 'its mean over both dimensions, kept')
+        call exact(mlx_var(a), 0._real64, 'its variance')
+        call exact(mlx_var(a, 2, ddof=1), 0._real64, 'its variance along dimension 2 with ddof 1')
+        call exact(mlx_std(a), 0._real64, 'its standard deviation')
+        call exact(mlx_std(a, [2, 1]), 0._real64, 'its standard deviation over both dimensions')
+        p = mlx_from([2000000000_int32, 2000000000_int32])
+        call exact(mlx_mean(p), 2.e9_real64, 'the mean of two int32 values 2000000000')
+        call exact(mlx_mean(p, 1, keepdims=.true.), 2.e9_real64, 'along dimension 1, kept')
+        call exact(mlx_var(p), 0._real64, 'their variance')
+        call exact(mlx_var(p, ddof=1), 0._real64, 'their variance with ddof 1')
+        call exact(mlx_std(p, 1), 0._real64, 'their standard deviation')
+        p = mlx_from([2000000000_int32, -2000000000_int32, 2000000000_int32, -2000000000_int32])
+        call exact(mlx_mean(p), 0._real64, 'the mean of [2e9, -2e9, 2e9, -2e9]')
+        call exact(mlx_var(p), 4.e18_real64, 'their variance, 4e18')
+        call exact(mlx_std(p), 2.e9_real64, 'their standard deviation, 2e9')
+        p = mlx_from([2000000000_int32, -2000000000_int32])
+        call exact(mlx_var(p, ddof=1), 8.e18_real64, 'the variance of [2e9, -2e9] with ddof 1, 8e18')
+        call exact(mlx_std(p, 1, ddof=1), sqrt(8.e18_real64), 'its standard deviation with ddof 1')
+        ! a constant of every integer kind and of booleans, at a value exact in float32 and the kind
+        do k = 1, size(KINDS)
+            select case( k )
+                case( 1 )
+                    p = mlx_from(spread(100_int8, 1, 4096))
+                    value = 100._real64
+                case( 2 )
+                    p = mlx_from(spread(30000_int16, 1, 4096))
+                    value = 30000._real64
+                case( 3 )
+                    p = mlx_from(spread(2000000000_int32, 1, 8))
+                    value = 2.e9_real64
+                case( 4 )
+                    p = mlx_from(spread(4611686018427387904_int64, 1, 2))
+                    value = 4611686018427387904._real64
+                case( 5 )
+                    p = mlx_astype(mlx_from(spread(200_int32, 1, 4096)), KINDS(k))
+                    value = 200._real64
+                case( 6 )
+                    p = mlx_astype(mlx_from(spread(60000_int32, 1, 4096)), KINDS(k))
+                    value = 60000._real64
+                case( 7 )
+                    p = mlx_astype(mlx_from(spread(4000000000_int64, 1, 2)), KINDS(k))
+                    value = 4.e9_real64
+                case( 8 )
+                    ! -2**63 as int64 has the bits of 2**63 as uint64
+                    p = mlx_astype(mlx_from(spread(-huge(1_int64)-1_int64, 1, 2)), KINDS(k))
+                    value = 9223372036854775808._real64
+                case default
+                    p = mlx_from(spread(1_int32, 1, 4096)) > 0._real32
+                    value = 1._real64
+            end select
+            call assert_int(KINDS(k), p%kind(), 'the constant fixture has the kind under test')
+            r = mlx_mean(p)
+            call assert_int(MLX_DTYPES%float32, r%kind(), 'the mean of an integer or boolean array is float32')
+            call exact(r, value, 'the mean of a constant of that kind')
+            call exact(mlx_mean(p, 1), value, 'along dimension 1')
+            call exact(mlx_var(p), 0._real64, 'its variance')
+            call exact(mlx_std(p, 1), 0._real64, 'its standard deviation along dimension 1')
+        end do
+        ! general integer fixtures, int32 and int64, against the family's oracle and frozen tolerances
+        cases(1) = reduce_case('mlx_mean', r_mean, o_mean, -2._real64, 2._real64, .false., .false.)
+        cases(2) = reduce_case('mlx_var', r_var, o_var, -2._real64, 2._real64, .false., .false.)
+        cases(3) = reduce_case('mlx_std', r_std, o_std, -2._real64, 2._real64, .false., .false.)
+        call reduce_forms(forms)
+        seeds = family_seeds()
+        do k = 1, size(seeds)
+            do c = 1, size(cases)
+                call draw(x, -2.e9_real64, 2.e9_real64, 2000*seeds(k)+300+c, .true.)
+                tol = tolerance_of(cases(c)%name)
+                do w = 1, 2
+                    allocate(ops(NB+1))
+                    if( w == 1 )then
+                        ops(1) = mlx_from(int(x, int32))
+                    else
+                        ops(1) = mlx_from(int(x, int64))
+                    endif
+                    do b = 1, NB
+                        if( w == 1 )then
+                            ops(b+1) = mlx_from(int(x(:, :, :, b), int32))
+                        else
+                            ops(b+1) = mlx_from(int(x(:, :, :, b), int64))
+                        endif
+                    end do
+                    res = form_result()
+                    do j = 1, size(forms)
+                        if( forms(j)%mode /= FORM_ALL )then
+                            call batch_reference(x, forms(j), cases(c)%oracle, ref)
+                            r = cases(c)%f(ops(1), forms(j))
+                            call scaled_error(r, ref, merge(SCALE**2, SCALE, c == 2), res%err)
+                        else
+                            do b = 1, NB
+                                call reference(x(:, :, :, b), forms(j), cases(c)%oracle, ref)
+                                r = cases(c)%f(ops(b+1), forms(j))
+                                call scaled_error(r, ref, merge(SCALE**2, SCALE, c == 2), res%err)
+                            end do
+                        endif
+                    end do
+                    call judge(res%err, tol%f32, cases(c)%name, merge('int32', 'int64', w == 1), seeds(k))
+                    deallocate(ops)
+                end do
+            end do
+        end do
+    contains
+        ! a result of one element (any rank) within one float32 epsilon of max(1, |want|)
+        subroutine exact( res, want, label )
+            type(mlx_array),  intent(in) :: res
+            real(real64),     intent(in) :: want
+            character(len=*), intent(in) :: label
+            call values_of(res, y)
+            call assert_true(size(y) > 0 .and. all(abs(y-want) <= real(epsilon(1._real32), real64)*max(1._real64, &
+                &abs(want))), label//' is exact (within one float32 epsilon)')
+        end subroutine exact
+
+    end subroutine test_integer_statistics
+
+    ! the mean of floating values near the ends of the range, against the bounds frozen before the change: two equal
+    ! values within 8 epsilons of the kind (float32 2e38 on every device, float64 1e308 on the CPU), every form; a
+    ! fixture of mixed magnitudes and signs within (n+2) epsilons of the mean of the magnitudes; complex parts near
+    ! the top of the range; zeros, NaN and infinities as IEEE arithmetic gives them; an empty mean NaN, not refused
+    subroutine test_mean_range
+        integer,      parameter   :: NMIX = 1024
+        type(mlx_array)           :: a, r
+        real(real64), allocatable :: y(:)
+        real(real32)              :: x(NMIX), u(NMIX), big(4, 3)
+        complex(real32)           :: z(1)
+        real(real64)              :: want, eps
+        write(*,'(a)') 'test_mean_range'
+        eps = real(epsilon(1._real32), real64)
+        a = mlx_from([2.e38_real32, 2.e38_real32])
+        want = real(2.e38_real32, real64)
+        call near(mlx_mean(a), want, 8._real64*eps*want, 'the mean of two float32 values 2e38')
+        call near(mlx_mean(a, 1), want, 8._real64*eps*want, 'along dimension 1')
+        call near(mlx_mean(a, keepdims=.true.), want, 8._real64*eps*want, 'kept')
+        big = 2.e38_real32
+        a = mlx_from(big)
+        call near(mlx_mean(a, 1), want, 8._real64*eps*want, 'a (4, 3) array of 2e38 along dimension 1')
+        call near(mlx_mean(a, [1, 2]), want, 8._real64*eps*want, 'over both dimensions')
+        call near(mlx_mean(a, [2], keepdims=.true.), want, 8._real64*eps*want, 'over dimension 2, kept')
+        if( mlx_default_device() == MLX_DEVICES%cpu )then
+            call near(mlx_mean(mlx_from([1.e308_real64, 1.e308_real64])), 1.e308_real64, &
+                &8._real64*epsilon(1._real64)*1.e308_real64, 'the mean of two float64 values 1e308')
+        endif
+        ! mixed magnitudes from 1e-30 to 1e37, random signs: a partial sum may pass 3e38 in any order
+        call set_fixed_seed(ELEM_SEED_CALIBRATION)
+        call random_number(u)
+        x = real(10._real64**(-30._real64+67._real64*real(u, real64)), real32)
+        call random_number(u)
+        x = merge(x, -x, u > 0.5_real32)
+        x(1:8) = 3.e38_real32
+        want = sum(real(x, real64))/NMIX
+        call near(mlx_mean(mlx_from(x)), want, real(NMIX+2, real64)*eps*sum(abs(real(x, real64)))/NMIX, &
+            &'the mean of 1024 values of mixed magnitudes and signs, eight of them 3e38')
+        call near(mlx_mean(mlx_from([3.e38_real32, -3.e38_real32, 1._real32])), 1._real64/3._real64, &
+            &5._real64*eps*2.e38_real64, 'signed cancellation [3e38, -3e38, 1]')
+        call near(mlx_mean(mlx_from([0._real32, 0._real32])), 0._real64, 0._real64, 'the mean of zeros is 0')
+        z = cmplx(2.e38_real32, -2.e38_real32, real32)
+        r = mlx_mean(mlx_from([z(1), z(1)]))
+        call mlx_to(z, reshape(r, [1]))
+        call assert_true(abs(real(z(1), real64)-2.e38_real64) <= 8._real64*eps*2.e38_real64 .and. &
+            &abs(real(aimag(z(1)), real64)+2.e38_real64) <= 8._real64*eps*2.e38_real64, &
+            &'the mean of two complex values (2e38, -2e38) keeps both parts')
+        call values_of(mlx_mean(mlx_from([ieee_value(1._real32, ieee_quiet_nan), 1._real32])), y)
+        call assert_true(ieee_is_nan(y(1)), 'a NaN makes the mean NaN')
+        call values_of(mlx_mean(mlx_from([ieee_value(1._real32, ieee_positive_inf), 1._real32])), y)
+        call assert_true(.not. ieee_is_finite(y(1)) .and. y(1) > 0._real64, 'an infinity makes it +infinity')
+        call values_of(mlx_mean(mlx_from([ieee_value(1._real32, ieee_positive_inf), &
+            &-ieee_value(1._real32, ieee_positive_inf)])), y)
+        call assert_true(ieee_is_nan(y(1)), 'opposite infinities make it NaN')
+        r = mlx_mean(mlx_zeros([0, 3]), 1)
+        call values_of(r, y)
+        call assert_true(all(r%shape() == [3]) .and. all(ieee_is_nan(y)), &
+            &'the mean over an extent of zero is NaN, in the reduction''s shape, not a refusal')
+    contains
+        subroutine near( res, ref, tol, label )
+            type(mlx_array),  intent(in) :: res
+            real(real64),     intent(in) :: ref, tol
+            character(len=*), intent(in) :: label
+            real(real64), allocatable :: v(:)
+            call values_of(res, v)
+            call assert_true(size(v) > 0 .and. all(ieee_is_finite(v)) .and. all(abs(v-ref) <= tol), &
+                &label//' is within its bound')
+        end subroutine near
+
+    end subroutine test_mean_range
+
+    ! maxval and minval over an extent of zero give Fortran's identities in the operand's kind and the reduction's
+    ! shape (-huge and huge for reals, -huge-1 and huge for integers, 0 and the largest value for the unsigned
+    ! kinds, the largest finite half values, false and true), in every form; a reduction over nonzero extents of
+    ! an empty array keeps MLX's (empty) result
+    subroutine test_empty_extrema
+        integer, parameter :: KINDS(13) = [MLX_DTYPES%float32, MLX_DTYPES%float64, MLX_DTYPES%float16, &
+            &MLX_DTYPES%bfloat16, MLX_DTYPES%int8, MLX_DTYPES%int16, MLX_DTYPES%int32, MLX_DTYPES%int64, MLX_DTYPES%uint8, &
+            &MLX_DTYPES%uint16, MLX_DTYPES%uint32, MLX_DTYPES%uint64, MLX_DTYPES%bool]
+        type(mlx_array)           :: a, r
+        real(real64), allocatable :: y(:)
+        real(real64)              :: lo, hi
+        integer                   :: k
+        logical                   :: shaped, exact
+        write(*,'(a)') 'test_empty_extrema'
+        do k = 1, size(KINDS)
+            if( mlx_default_device() /= MLX_DEVICES%cpu .and. KINDS(k) == MLX_DTYPES%float64 ) cycle
+            select case( k )
+                case( 1 )
+                    lo = -huge(1._real32)
+                case( 2 )
+                    lo = -huge(1._real64)
+                case( 3 )
+                    lo = -65504._real64
+                case( 4 )
+                    lo = -3.38953139e38_real64
+                case( 5 )
+                    lo = -128._real64
+                case( 6 )
+                    lo = -32768._real64
+                case( 7 )
+                    lo = -2147483648._real64
+                case( 8 )
+                    lo = -9223372036854775808._real64
+                case default
+                    lo = 0._real64
+            end select
+            select case( k )
+                case( 5:8 )
+                    hi = -lo-1._real64
+                case( 9 )
+                    hi = 255._real64
+                case( 10 )
+                    hi = 65535._real64
+                case( 11 )
+                    hi = 4294967295._real64
+                case( 12 )
+                    hi = 18446744073709551615._real64
+                case( 13 )
+                    hi = 1._real64
+                case default
+                    hi = -lo
+            end select
+            a = mlx_zeros([0, 3], KINDS(k))
+            r = maxval(a, 1)
+            shaped = has_shape(r, [3])
+            exact = holds(r, lo, KINDS(k), .true.)
+            call assert_true(r%kind() == KINDS(k) .and. shaped .and. exact, &
+                &'maxval of an empty dimension: the most negative value of the kind, three of them')
+            r = minval(a, 1)
+            shaped = has_shape(r, [3])
+            exact = holds(r, hi, KINDS(k), .false.)
+            call assert_true(r%kind() == KINDS(k) .and. shaped .and. exact, &
+                &'minval of an empty dimension: the largest value of the kind')
+            r = maxval(a)
+            shaped = has_shape(r, [integer ::])
+            exact = holds(r, lo, KINDS(k), .true.)
+            call assert_true(shaped .and. exact, 'maxval of the whole empty array: rank 0, the same')
+            r = minval(a, keepdims=.true.)
+            shaped = has_shape(r, [1, 1])
+            exact = holds(r, hi, KINDS(k), .false.)
+            call assert_true(r%kind() == KINDS(k) .and. shaped .and. exact, &
+                &'minval of the whole, kept: (1, 1), the same')
+            r = maxval(a, [1, 2])
+            shaped = has_shape(r, [integer ::])
+            exact = holds(r, lo, KINDS(k), .true.)
+            call assert_true(r%kind() == KINDS(k) .and. shaped .and. exact, &
+                &'maxval over the list [1, 2]: rank 0, the same')
+            r = minval(a, [1], keepdims=.true.)
+            shaped = has_shape(r, [1, 3])
+            exact = holds(r, hi, KINDS(k), .false.)
+            call assert_true(r%kind() == KINDS(k) .and. shaped .and. exact, &
+                &'minval over the list [1], kept: (1, 3), the same')
+            r = maxval(a, 2)
+            shaped = has_shape(r, [0])
+            call assert_true(r%kind() == KINDS(k) .and. shaped, &
+                &'maxval over the nonzero dimension 2 of a (0, 3) array: an empty (0) result')
+        end do
+    contains
+        ! whether every element of res equals the identity, exactly: integer kinds in int64 (the unsigned maximum as
+        ! its bits, -1), the floating kinds and booleans through float32 (float64 itself), where they are exact
+        logical function holds( res, want, kind, low )
+            type(mlx_array), intent(in) :: res
+            real(real64),    intent(in) :: want
+            integer,         intent(in) :: kind
+            logical,         intent(in) :: low
+            integer(int64), allocatable :: iv(:)
+            integer(int64)              :: wi
+            integer                     :: n
+            n = int(res%size())
+            holds = n > 0
+            if( .not. holds ) return
+            if( any(kind == [MLX_DTYPES%int8, MLX_DTYPES%int16, MLX_DTYPES%int32, MLX_DTYPES%int64, MLX_DTYPES%uint8, &
+                &MLX_DTYPES%uint16, MLX_DTYPES%uint32, MLX_DTYPES%uint64]) )then
+                allocate(iv(n))
+                call mlx_to(iv, mlx_astype(reshape(res, [n]), MLX_DTYPES%int64))
+                select case( kind )
+                    case( MLX_DTYPES%int8 )
+                        wi = merge(-128_int64, 127_int64, low)
+                    case( MLX_DTYPES%int16 )
+                        wi = merge(-32768_int64, 32767_int64, low)
+                    case( MLX_DTYPES%int32 )
+                        wi = merge(-2147483648_int64, 2147483647_int64, low)
+                    case( MLX_DTYPES%int64 )
+                        wi = merge(-huge(1_int64)-1_int64, huge(1_int64), low)
+                    case( MLX_DTYPES%uint8 )
+                        wi = merge(0_int64, 255_int64, low)
+                    case( MLX_DTYPES%uint16 )
+                        wi = merge(0_int64, 65535_int64, low)
+                    case( MLX_DTYPES%uint32 )
+                        wi = merge(0_int64, 4294967295_int64, low)
+                    case default
+                        wi = merge(0_int64, -1_int64, low)
+                end select
+                holds = all(iv == wi)
+            else
+                call values_of(res, y)
+                if( kind == MLX_DTYPES%float64 )then
+                    holds = all(abs(y-want) <= 0._real64)
+                else
+                    holds = all(abs(y-real(real(want, real32), real64)) <= 0._real64)
+                endif
+            endif
+        end function holds
+
+    end subroutine test_empty_extrema
+
+    ! the error of r against ref, both divided by s, as the family measures it; err keeps the largest
+    subroutine scaled_error( r, ref, s, err )
+        type(mlx_array), intent(in)    :: r
+        real(real64),    intent(in)    :: ref(:), s
+        real(real64),    intent(inout) :: err
+        real(real64), allocatable :: y(:)
+        call values_of(r, y)
+        if( size(y) /= size(ref) )then
+            err = huge(1._real64)
+            return
+        endif
+        err = nan_max(err, nan_maxval(abs(y/s-ref/s)/max(1._real64, abs(ref/s))))
+    end subroutine scaled_error
 
     ! the forms every scan runs: each dimension and the whole array, forward and reversed, inclusive and exclusive
     subroutine scan_forms( forms )

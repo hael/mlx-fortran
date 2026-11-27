@@ -22,7 +22,9 @@ added to it as a comment, not filed again.
 
 Common fields: host and target aarch64-apple-darwin25 (macOS 26.7.3, Apple M2 Ultra; issue 5 on an M3 Pro);
 GNU Fortran 16.2.0 (Homebrew GCC 16.2.0), also 13.4.0 for issues 2 to 4; flags `-std=f2018`, at `-O0 -g -fcheck=bounds,do,mem`
-and at `-O3`, the same output.
+and at `-O3`, the same output. Issues 2 and 3 were observed again on 2026-11-26 on an Apple M5 Ultra (macOS
+27.2.1, GNU Fortran 16.2.0, both flag sets, the same counts); through the library they are the user-hardening plan's
+C4 (1000 rounds of `[a, exp(b)]`, `[a, b*2.0]` or `v = exp(a)` keep 1000 handles and 250 MiB alive).
 
 ### 1. Defined assignment skipped for allocatable components in intrinsic assignment
 
@@ -52,7 +54,7 @@ and at `-O3`, the same output.
   as an actual argument is not finalized when its type has a component with a type-bound defined
   assignment). File as new if none of them covers the constructor case, with "See also" to these.
 - **Where the library meets it:** unsupported use 3; rules `ctorcall` and `ctorexpr` keep it out of this
-  repository's code.
+  repository's code; the installed `check_consumer.py` (rules of the same names) reports it in a consumer's.
 
 ### 3. A scalar function result assigned to a whole array through an elemental defined assignment is not finalized
 
@@ -64,7 +66,8 @@ and at `-O3`, the same output.
 - **Related:** PR 121475 (2025, "Missed finalization": a function result assigned through a class defined
   assignment is finalized once instead of twice); PR 37336. File as new with "See also" if PR 121475 does not
   cover the elemental whole-array case.
-- **Where the library meets it:** unsupported use 4.
+- **Where the library meets it:** unsupported use 4; the installed `check_consumer.py` reports it (rule
+  `wholefunc`).
 
 ### 4. Intrinsic self-assignment finalizes the right side's components before the defined assignments read them
 
