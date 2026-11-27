@@ -29,6 +29,8 @@ integer, parameter :: CANDS(3, 3) = reshape([7, 2, 5, 5, 7, 2, 2, 2, 7], [3, 3])
 real(real32), parameter :: TEMP_T = 9._real32
 real(real32), parameter :: TEMP_PHYS = 30._real32
 real(real64), parameter :: PRIOR_SCREEN = 0.5_real64
+! the noise of the seeded fixtures relative to each particle ring's rms
+real(real64), parameter :: SEED_NOISE = 0.05_real64
 ! the map the tests build on their own grid over every shell: the calculator's full-band map
 integer, parameter :: IMAP = SHIFTMAP_FULL
 
@@ -89,6 +91,8 @@ contains
             call test_candidates_and_tiles(devs(i))
             call test_refusals_rebuild(devs(i))
             call test_lifecycle(devs(i))
+            call test_mode_ties(devs(i))
+            call test_seeded_widths(devs(i))
         end do
         call mlx_set_default_device(original)
     end subroutine run_all_polar_shiftmap_tests
@@ -1294,5 +1298,108 @@ contains
             &nbad = nbad + 1
         call pftc%kill
     end subroutine map_cycle
+
+    ! an exact tie: constant rings, the particle its reference times the CTF, unshifted, at a high temperature: every
+    ! cell of the first ring has the same loss bit for bit, at every rotation and direction, and the mode is the first
+    ! of them in SIMPLE's order, (rotation 1, ring 1, direction 1)
+    subroutine test_mode_ties( dev )
+        integer, intent(in) :: dev
+        type(map_fixture)       :: fx
+        type(polarft_calc)      :: pftc
+        type(map_request)       :: mb
+        type(polar_map_results) :: res
+        integer                 :: st, k, j, h, i
+        write(*,'(a)') 'test_mode_ties'
+        fx = make_map_fixture(.false., .false.)
+        do h = 1, 2
+            do j = 1, NREF
+                do k = 1, fx%nk
+                    fx%rref(:, k, j, h) = cmplx(1._real32 + 0.1_real32 * real(k + j, real32), 0._real32, real32)
+                end do
+            end do
+        end do
+        do i = 1, NPTCL
+            do k = 1, fx%nk
+                fx%x(:, k, i) = fx%ctf(:, k, i) * fx%rref(:, k, 1, 2 - mod(i, 2))
+            end do
+        end do
+        call prepare_half(fx, pftc)
+        mb = map_block([1], reshape([1], [1, 1]), [1.e4_real32, TEMP_PHYS])
+        call score_maps(pftc, mb, res, st)
+        call assert_int(0, st, 'the tie fixture is scored')
+        if( st /= 0 ) return
+        write(*,'(a,3(i0,a))') '    tie fixture: mode (', res%irot(1, 1), ', ', res%irho(1, 1), ', ', res%ialpha(1, 1), ')'
+        call assert_true(all(bits_equal(res%maps(:, :, 1, 1, 1), res%maps(1, 1, 1, 1, 1))), device_name(dev)//': the '//&
+            &'first ring''s cells tie bit for bit')
+        call assert_true(res%irot(1, 1) == 1 .and. res%irho(1, 1) == 1 .and. res%ialpha(1, 1) == 1, device_name(dev)//&
+            &': a tie goes to the first cell in SIMPLE''s order')
+        call pftc%kill
+    end subroutine test_mode_ties
+
+    ! a variate in [-1, 1) keyed by its indices and the seed, the same on every machine
+    pure real(real64) function keyed( seed, m, k, i, part )
+        integer, intent(in) :: seed, m, k, i, part
+        real(real64) :: x
+        x = sin(12.9898_real64 * real(m, real64) + 78.233_real64 * real(k, real64) + 37.719_real64 * real(i, real64) + &
+            &4.581_real64 * real(part, real64) + 91.17_real64 * real(seed, real64)) * 43758.5453_real64
+        keyed = 2._real64 * (x - real(floor(x), real64)) - 1._real64
+    end function keyed
+
+    ! the perturbed fixture with keyed noise of SEED_NOISE times each particle ring's rms, keyed by seed
+    function seeded_fixture( seed ) result(fx)
+        integer, intent(in) :: seed
+        type(map_fixture) :: fx
+        real(real64)      :: rms
+        integer           :: i, k, m
+        fx = make_map_fixture(.false., .true.)
+        do i = 1, NPTCL
+            do k = 1, fx%nk
+                rms = sqrt(sum(abs(real(fx%x(:, k, i), real64))**2 + abs(aimag(fx%x(:, k, i)))**2) / &
+                    &real(fx%pftsz, real64))
+                do m = 1, fx%pftsz
+                    fx%x(m, k, i) = fx%x(m, k, i) + cmplx(SEED_NOISE * rms * keyed(seed, m, k, i, 1), &
+                        &SEED_NOISE * rms * keyed(seed, m, k, i, 2), real32)
+                end do
+            end do
+        end do
+    end function seeded_fixture
+
+    ! on seeds 1 (calibration), 2 and 3 (judged) of the noisy fixture, each pair's width (its variance) and log
+    ! evidence against the host oracle's under the frozen caps
+    subroutine test_seeded_widths( dev )
+        integer, intent(in) :: dev
+        type(map_fixture)       :: fx
+        type(polarft_calc)      :: pftc
+        type(map_request)       :: mb
+        type(polar_map_results) :: res
+        type(map_summary)       :: sm
+        real(real64)            :: varerr, logerr
+        integer                 :: seed, st, b, c
+        write(*,'(a)') 'test_seeded_widths'
+        do seed = 1, 3
+            fx = seeded_fixture(seed)
+            call prepare_half(fx, pftc)
+            mb = map_block(half_pids(1), same_cands(CANDS(:, 1), size(half_pids(1))), [TEMP_T, TEMP_PHYS])
+            mb%prior_w = PRIOR_SCREEN
+            call score_maps(pftc, mb, res, st)
+            call assert_int(0, st, 'the seeded fixture is scored: '//pftc%message())
+            call pftc%kill
+            if( st /= 0 ) return
+            varerr = 0._real64
+            logerr = 0._real64
+            do b = 1, size(mb%ptcl_ids)
+                do c = 1, size(mb%cands, 1)
+                    sm = summarize(fx, oracle_map(fx, mb%ptcl_ids(b), mb%cands(c, b)), [TEMP_T, TEMP_PHYS], PRIOR_SCREEN)
+                    varerr = nan_max(varerr, abs(real(res%sdev(c, b), real64)**2 - sm%sdev**2))
+                    logerr = nan_max(logerr, abs(real(res%logz(c, b), real64) - sm%logz))
+                end do
+            end do
+            write(*,'(a,i0,a,es10.3,a,es10.3)') '    seed ', seed, ': variance error ', varerr, ', log evidence error ', &
+                &logerr
+            call assert_true(varerr <= POLAR_MAP_CAP_VAR * max(1._real64, maxval(fx%rho)**2), device_name(dev)//&
+                &': the seeded widths match the oracle''s within the variance cap')
+            call assert_true(logerr <= POLAR_MAP_CAP_LOG, device_name(dev)//': the seeded evidence matches the oracle''s')
+        end do
+    end subroutine test_seeded_widths
 
 end module mlxf_toy_polarft_shiftmap_tester

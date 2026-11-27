@@ -5,41 +5,11 @@
 ! Mode selection uses tempered temperature, physical moments may be cut off, and evidence is optional.
 submodule (mlxf_toy_polarft_workspace) mlxf_toy_polarft_workspace_shiftmap
 use, intrinsic :: iso_fortran_env, only: int32, int64
-use mlxf,           only: mlx_compile, mlx_from, mlx_to, mlx_eval, mlx_permute, reshape, matmul, mlx_irfft, mlx_fft, &
-                          mlx_concatenate, mlx_slice, mlx_take_along_dim, mlx_take, mlx_bitcast, MLX_DTYPES, merge, &
-                          minval, minloc, sum, sqrt, exp, real, aimag, mlx_logsumexp, max
+use mlxf,           only: mlx_compile, mlx_from, mlx_eval, mlx_permute, reshape, matmul, mlx_irfft, mlx_fft, &
+                          mlx_concatenate, mlx_slice, mlx_take_along_dim, mlx_take, mlx_bitcast, MLX_DTYPES, sum, real, &
+                          aimag
 use mlxf_test_defs, only: POLAR_BESSEL_JTOL, POLAR_MAP_LOG_CUT, polar_map_results
 implicit none
-
-! the device arrays every tile of a block shares: the particles' full-ring spectra, real parts then imaginary
-! parts along the shells (nrots, 2 nkb, nptcls), and
-! band CTF memos (pftsz+1, nkb, nptcls), the rotations' cosines and sines (nrots, 1), the particle's ring index
-! shifted by each order, (m' + n) modulo nrots (nrots, 1, 1, norder+1), the cells' prior with the log area of
-! one cell per radius (1, 1, nrho, 1); and the prior's log normaliser over every cell
-type :: map_shared
-    type(mlx_array) :: ydev
-    type(mlx_array) :: c2dev
-    type(mlx_array) :: cosr
-    type(mlx_array) :: sinr
-    type(mlx_array) :: shiftidx
-    type(mlx_array) :: cellprior
-    real(real64)    :: lse_prior = 0._real64
-end type map_shared
-
-! one tile of particles with every candidate of each: the particles' places in the block and their candidate
-! references (ncand, particles), and per pair (candidate fastest) its reference and
-! particle (inputs); the flat mode index, loss, width and log evidence per pair, and the maps when asked (outputs)
-type :: map_tile
-    integer,      allocatable :: ptcls(:)
-    integer,      allocatable :: cands(:,:)
-    integer,      allocatable :: pref(:)
-    integer,      allocatable :: pptcl(:)
-    integer,      allocatable :: idx(:)
-    real(real32), allocatable :: loss(:)
-    real(real32), allocatable :: sdev(:)
-    real(real32), allocatable :: logz(:)
-    real(real32), allocatable :: maps(:,:,:,:)
-end type map_tile
 
 contains
 
@@ -291,7 +261,7 @@ contains
         type(polar_map_results),  intent(out)   :: res
         complex(real32), allocatable :: yfull(:,:,:), c2(:,:,:)
         real(real32),    allocatable :: ypk(:,:,:), cellprior(:,:,:), cs(:), sn(:)
-        real(real64)                 :: lmax, s
+        real(real64)                 :: lmax, s, th
         type(map_shared)             :: sh
         type(map_tile)               :: tl
         integer                      :: im, nb, ncand, n1, nrots, pftsz, nkb, nrho, b, c, m, k, b0, b1, pt, p, i, ir, status
@@ -345,7 +315,7 @@ contains
         sh%shiftidx  = mlx_from(reshape(shift_table(nrots, self%maps(im)%norder), &
             &[nrots, 1, 1, self%maps(im)%norder + 1]))
         allocate(res%loss(ncand, nb), res%sdev(ncand, nb), res%irot(ncand, nb), res%irho(ncand, nb), &
-            &res%ialpha(ncand, nb))
+            &res%ialpha(ncand, nb), res%shifts(2, ncand, nb))
         if( mblk%evidence ) allocate(res%logz(ncand, nb))
         if( mblk%maps ) allocate(res%maps(self%maps(im)%nalpha, nrots, nrho, ncand, nb))
         ! the particles in graphs of at most ptcl_tile, each with all its candidates; pairs candidate fastest
@@ -373,10 +343,14 @@ contains
                 res%ialpha(c, b) = mod(tl%idx(i) - 1, self%maps(im)%nalpha) + 1
                 res%irot(c, b)   = mod((tl%idx(i) - 1) / self%maps(im)%nalpha, nrots) + 1
                 res%irho(c, b)   = (tl%idx(i) - 1) / (self%maps(im)%nalpha * nrots) + 1
+                ! the mode's shift in the reference's axes
+                th = 2._real64 * acos(-1._real64) * real(res%ialpha(c, b) - 1, real64) / real(self%maps(im)%nalpha, real64)
+                res%shifts(:, c, b) = self%maps(im)%rho(res%irho(c, b)) * [cos(th), sin(th)]
                 if( mblk%evidence ) res%logz(c, b) = tl%logz(i)
                 if( mblk%maps ) res%maps(:, :, :, c, b) = tl%maps(:, :, :, i)
             end do
             deallocate(tl%ptcls, tl%cands, tl%pref, tl%pptcl, tl%idx, tl%loss, tl%sdev, tl%logz)
+            call tl%lp%kill()
             if( allocated(tl%maps) ) deallocate(tl%maps)
         end do
     end subroutine polarft_workspace_score_maps
@@ -446,23 +420,19 @@ contains
     end subroutine check_map_block
 
     ! one tile's maps on the device: the particles' order-expanded weighted spectra, their contraction with every
-    ! candidate's, the transforms over the ring position and the orders, the loss L; then the mode (the first
-    ! largest log mass in Fortran order), the width at the physical temperature (the moments of the cells' shifts,
-    ! each rotation's turned into the particle's axes) and the log evidence; the results copied back
+    ! candidate's, the transforms over the ring position and the orders, the loss L; then the reductions, the
+    ! results copied back
     subroutine tile_maps( self, mblk, sh, tl, status )
         class(polarft_workspace), intent(inout) :: self
         type(polarft_map_block),  intent(in)    :: mblk
         type(map_shared),         intent(in)    :: sh
         type(map_tile),           intent(inout) :: tl
         integer,                  intent(out)   :: status
-        type(mlx_array)              :: iref, iptcl, itile, icand, y, ysh, z, bref, gpk, gp, f, h, d, gout, c2, r2, cr, rp
-        type(mlx_array)              :: pp, tt, tp, br, bi, top, bot, parts(2)
-        type(mlx_array)              :: lp, idx, loss, sdev, logz, lse, width_maps, active_idx
-        type(mlx_array), allocatable :: outs(:)
-        real(real32),    allocatable :: pw(:), t(:), tph(:), widths(:), cuts(:)
-        integer, allocatable         :: active(:)
-        real(real64)                 :: t0
-        integer                      :: im, np, pt, ncand, nrots, nalpha, nrho, nkb, nord, b, nactive
+        type(mlx_array)           :: iref, iptcl, itile, icand, y, ysh, z, bref, gpk, gp, f, h, d, gout, c2, r2, cr, rp
+        type(mlx_array)           :: pp, br, bi, top, bot, parts(2), lp
+        real(real32), allocatable :: pw(:)
+        real(real64)              :: t0
+        integer                   :: im, np, pt, ncand, nrots, nalpha, nrho, nkb, nord, b
         status = 0
         im     = mblk%imap
         np     = size(tl%pref)
@@ -473,14 +443,11 @@ contains
         nrho   = self%maps(im)%nrho
         nkb    = self%maps(im)%nkb
         nord   = self%maps(im)%norder + 1
-        allocate(pw(np), t(np), tph(np))
-        tph = 0._real32
+        allocate(pw(np))
         do b = 1, np
             pw(b) = real(mblk%ptclpow(tl%pptcl(b)), real32)
-            t(b)  = mblk%temps(mod(b - 1, ncand) + 1, tl%pptcl(b))
-            if( mblk%widths ) tph(b) = mblk%temps_phys(mod(b - 1, ncand) + 1, tl%pptcl(b))
         end do
-        t0    = clock_s()
+        t0    = map_clock()
         iref  = mlx_from(reshape(int(tl%pref, int32), [1, 1, np]))
         iptcl = mlx_from(reshape(int(tl%pptcl, int32), [1, 1, np]))
         itile = mlx_from(int(tl%ptcls, int32))
@@ -526,76 +493,8 @@ contains
         ! L = 1 + (refpow - 2 C) / ptclpow, C = gout / nrots, (direction, rotation, radius, pair)
         lp   = (rp - gout * (2._real32 / real(nrots, real32))) / pp + 1._real32
         if( mblk%profile ) call map_stage_done(self, 1, t0, [lp])
-        t0   = clock_s()
-        tt   = mlx_from(reshape(t, [1, 1, 1, np]))
-        call self%maps(im)%map_select%apply([lp, tt, sh%cellprior], outs, status)
-        if( status /= 0 )then
-            self%msg = 'polarft_workspace%score_maps: a tile''s selection could not be built'
-            return
-        endif
-        idx  = outs(1)
-        loss = outs(2)
-        if( mblk%profile ) call map_stage_done(self, 2, t0, [idx, loss])
-        t0   = clock_s()
-        allocate(tl%idx(np), tl%loss(np), tl%sdev(np), tl%logz(np))
-        active = [(b, b = 1, np)]
-        if( allocated(mblk%width_cutoff) )then
-            ! One synchronization per tile supplies every cutoff decision; no moment graph for rejected pairs.
-            call mlx_to(tl%idx, idx, status=status)
-            if( status == 0 ) call mlx_to(tl%loss, loss, status=status)
-            if( status /= 0 ) return
-            cuts = reshape(mblk%width_cutoff(:, tl%ptcls), [np])
-            active = pack(active, tl%loss <= cuts)
-        endif
-        if( .not. mblk%widths ) active = pack(active, .false.)
-        nactive = size(active)
-        if( nactive > 0 )then
-            width_maps = lp
-            if( nactive < np )then
-                active_idx = mlx_from(int(active, int32))
-                width_maps = mlx_take(lp, active_idx, 4)
-            endif
-            tp = mlx_from(reshape(tph(active), [1, 1, 1, nactive]))
-            call self%maps(im)%map_reduce%apply([width_maps, tp, sh%cellprior, self%maps(im)%cellx, &
-                &self%maps(im)%celly, self%maps(im)%cellr2, sh%cosr, sh%sinr], outs, status)
-            if( status /= 0 )then
-                self%msg = 'polarft_workspace%score_maps: a tile''s width reduction could not be built'
-                return
-            endif
-            sdev = outs(1)
-            if( mblk%profile ) call mlx_eval([sdev])
-        endif
-        ! Separate compiled graphs ensure unrequested evidence is never evaluated with the width.
-        if( mblk%evidence )then
-            lse = mlx_from(real(sh%lse_prior, real32))
-            call self%maps(im)%map_evidence%apply([lp, tt, sh%cellprior, lse], outs, status)
-            if( status /= 0 )then
-                self%msg = 'polarft_workspace%score_maps: a tile''s evidence reduction could not be built'
-                return
-            endif
-            logz = outs(1)
-            if( mblk%profile ) call mlx_eval([logz])
-        endif
-        if( mblk%profile ) self%mstage_s(3) = self%mstage_s(3) + clock_s() - t0
-        t0 = clock_s()
-        if( .not. allocated(mblk%width_cutoff) )then
-            call mlx_to(tl%idx, idx, status=status)
-            if( status == 0 ) call mlx_to(tl%loss, loss, status=status)
-        endif
-        tl%sdev = -1._real32
-        if( status == 0 .and. nactive > 0 )then
-            allocate(widths(nactive))
-            call mlx_to(widths, sdev, status=status)
-            tl%sdev(active) = widths
-        endif
-        if( status == 0 .and. mblk%evidence ) call mlx_to(tl%logz, logz, status=status)
-        if( status == 0 .and. mblk%maps )then
-            allocate(tl%maps(nalpha, nrots, nrho, np))
-            call mlx_to(tl%maps, lp, status=status)
-        endif
-        if( status /= 0 ) self%msg = 'polarft_workspace%score_maps: a tile could not be evaluated'
-        ! profiled, every result is evaluated before the copies: their seconds are the transfer's
-        if( mblk%profile ) self%mstage_s(4) = self%mstage_s(4) + (clock_s() - t0)
+        tl%lp = lp
+        call reduce_map_tile(self, mblk, sh, tl, status)
     end subroutine tile_maps
 
     function complex_directions( h, nalpha ) result(d)
@@ -611,89 +510,5 @@ contains
                 &[shp(1), min(q*nalpha, shp(2)), shp(3), shp(4), shp(5)]), 2, n=nalpha)
         end do
     end function complex_directions
-
-    ! the compiled selection: inputs (the maps L (nalpha, nrots, nrho, np), the tempered inverse temperatures
-    ! (1, 1, 1, np), the cells' prior with the log area (1, 1, nrho, 1)); outputs (the flat index of the mode, the
-    ! first largest log mass in Fortran order, and its loss), each (np)
-    subroutine map_select_callback( inputs, outputs, status )
-        type(mlx_array),              intent(in)  :: inputs(:)
-        type(mlx_array), allocatable, intent(out) :: outputs(:)
-        integer,                      intent(out) :: status
-        type(mlx_array) :: flat, idx
-        integer         :: shp(4), ncell, np
-        status = 1
-        if( size(inputs) /= 3 ) return
-        shp   = inputs(1)%shape()
-        ncell = shp(1) * shp(2) * shp(3)
-        np    = shp(4)
-        flat  = reshape(inputs(3) - inputs(1) * inputs(2), [ncell, np])
-        idx   = minloc(-flat, 1)
-        allocate(outputs(2))
-        outputs(1) = idx
-        outputs(2) = reshape(mlx_take_along_dim(reshape(inputs(1), [ncell, np]), reshape(idx, [1, np]), 1), [np])
-        status = 0
-    end subroutine map_select_callback
-
-    ! Width inputs: maps, physical inverse temperatures, prior, shift x/y/radius squared and rotation cos/sin.
-    ! The moments rotate each cell into the particle frame; negligible mass is cut before summing.
-    subroutine map_reduce_callback( inputs, outputs, status )
-        type(mlx_array),              intent(in)  :: inputs(:)
-        type(mlx_array), allocatable, intent(out) :: outputs(:)
-        integer,                      intent(out) :: status
-        type(mlx_array) :: lph, mp, a, w, w0, w1x, w1y, mx, my, w2, var, zero
-        integer         :: shp(4), ncell, np
-        status = 1
-        if( size(inputs) /= 8 ) return
-        shp   = inputs(1)%shape()
-        ncell = shp(1) * shp(2) * shp(3)
-        np    = shp(4)
-        lph   = inputs(3) - inputs(1) * inputs(2)
-        mp    = reshape(-minval(reshape(-lph, [ncell, np]), 1), [1, 1, 1, np])
-        a     = lph - mp
-        zero  = mlx_from(0._real32)
-        w     = merge(exp(a), zero, a > real(POLAR_MAP_LOG_CUT, real32))
-        w0    = sum(reshape(w, [ncell, np]), 1)
-        w1x   = sum(sum(w * inputs(4), 3), 1)
-        w1y   = sum(sum(w * inputs(5), 3), 1)
-        mx    = sum(w1x * inputs(7) - w1y * inputs(8), 1)
-        my    = sum(w1x * inputs(8) + w1y * inputs(7), 1)
-        w2    = sum(reshape(w * inputs(6), [ncell, np]), 1)
-        var   = (w2 - (mx * mx + my * my) / w0) / w0
-        allocate(outputs(1))
-        outputs(1) = sqrt(max(var, 0._real32))
-        status = 0
-    end subroutine map_reduce_callback
-
-    ! Evidence uses the tempered temperature and the prior normalizer, independently of the width graph.
-    subroutine map_evidence_callback( inputs, outputs, status )
-        type(mlx_array),              intent(in)  :: inputs(:)
-        type(mlx_array), allocatable, intent(out) :: outputs(:)
-        integer,                      intent(out) :: status
-        integer :: shp(4), ncell
-        status = 1
-        if( size(inputs) /= 4 ) return
-        shp = inputs(1)%shape()
-        ncell = product(shp(1:3))
-        allocate(outputs(1))
-        outputs(1) = mlx_logsumexp(reshape(inputs(3) - inputs(1) * inputs(2), [ncell, shp(4)]), 1) - inputs(4)
-        status = 0
-    end subroutine map_evidence_callback
-
-
-    real(real64) function clock_s()
-        integer(int64) :: count, rate
-        call system_clock(count, rate)
-        clock_s = real(count, real64) / real(rate, real64)
-    end function clock_s
-
-    ! a profiled map stage: its arrays evaluated (a barrier), its seconds added to mstage_s(i)
-    subroutine map_stage_done( self, i, t0, arrays )
-        class(polarft_workspace), intent(inout) :: self
-        integer,                  intent(in)    :: i
-        real(real64),             intent(in)    :: t0
-        type(mlx_array),          intent(in)    :: arrays(:)
-        call mlx_eval(arrays)
-        self%mstage_s(i) = self%mstage_s(i) + (clock_s() - t0)
-    end subroutine map_stage_done
 
 end submodule mlxf_toy_polarft_workspace_shiftmap

@@ -66,6 +66,7 @@ mlxf_toy_polarft_calc polarft_calc%stage_seconds addition inquiry: the profiled 
 mlxf_toy_polarft_calc polarft_calc%set_shiftmap_options addition the particles of one device graph, and the outputs SIMPLE's test hooks give: every map, the log evidence, the profiled stages
 mlxf_toy_polarft_calc polarft_calc%shiftmap_evidence addition hands over the log evidence of the last modes, which the testers hold to the oracle
 mlxf_toy_polarft_calc polarft_calc%shiftmap_maps addition hands over the maps of the last modes, which the testers hold to the oracle (SIMPLE: the private shiftmap_objfun_grid)
+mlxf_toy_polarft_calc polarft_calc%shiftmap_shifts addition hands over the modes' shifts in the reference's axes, what SIMPLE's callers compute with shiftmap_shift at the mode's cell
 mlxf_toy_polarft_calc polarft_calc%shiftmap_kstop addition inquiry: the last shell of a map's band, which the driver needs for a map the fixture handed in (SIMPLE's setup returns kscreen)
 mlxf_toy_polarft_calc polarft_calc%shiftmap_order addition inquiry: the Bessel orders a map keeps, which the folding test and the benchmark's rows read
 mlxf_toy_polarft_calc polarft_calc%shiftmap_term_counts addition inquiry: the radius-order terms kept and executed, a column of the benchmark's rows

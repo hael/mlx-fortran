@@ -95,7 +95,10 @@ double-precision residual at every cell, with caps confirmed on the CPU device a
 first GPU run: the maps, the mode where its margin is clear, the zero radius, the folding of orders beyond the
 directions, the Nyquist ring, the width and the log evidence against the host's moments, candidate order and
 tiles, refusals and rebuilds, and 100 prepare-score-invalidate cycles. The shift-map suite also checks
-requested-output profiling, changed weights/grid/band, strict width cutoffs and exact teardown.
+requested-output profiling, changed weights/grid/band, strict width cutoffs and exact teardown, an exact tie (the
+mode the first cell in SIMPLE's order), and each pair's width and log evidence against the host oracle on three
+keyed-noise seeds. Its sub-suite `oracle_polar` asserts the self-checks of the polar score's and the shift map's
+host oracles within their own limits (host only).
 Its sub-suite `polarft_tail` checks the fused tail of the dense score (a custom Metal kernel, the form `metal`):
 the refusal on the CPU device, identity and repeatability, small tile plans against the compiled tail within
 frozen bounds, and the kernel objects' lifecycle; `polarft_calc` and `eul_prob_tab` run their GPU checks with
@@ -167,9 +170,11 @@ starts any of them (`RUN_PARTS_BENCH`, `RUN_PARTS_SUITE`, `RUN_PARTS_UNIT`).
 rates. Timed runs
 follow the plan's rules: Release, an idle machine with the load recorded, best of 3 after a warm-up, two
 invocations, and the precision mode in every row. `suite=shiftmap` refuses `nthr=`: the maps run on the
-device with one submitting thread. A key a suite does not read is ignored, so the keys of the removed
-experiments (`form=`, `contraction=`, `hermitian=`, `ctile=`, `otile=`, `compact=`) no longer select
-anything. `widths=quarter|none` selects synthetic
+device with one submitting thread. A key a suite does not read stops the benchmark (exit status 2), as in the
+other benchmarks. `suite=maps` times one map's maps (`maps=window|screen`, one `ptiles=`) of one part
+(`nparts=`, `part=`, `go=`) with `passes=` timed passes and writes one row of `bench_polar_table.tsv` in the time
+suite's column order, so that `scripts/run_parts.sh` (`RUN_PARTS_SUITE=maps RUN_PARTS_UNIT=maps`) times the maps at
+one or more processes; `nthr=` sizes the host team only. `widths=quarter|none` selects synthetic
 cutoff survivors; `widths=all evidence=0` is the matched baseline. Cutoff/evidence rows do not claim an
 all-width CPU speedup. Grid files must carry fresh `simple_commit`, `fftw_plans` and full-team rates before
 ratios are used; `revision=` identifies the measured mlx-fortran tree. Performance runs are currently deferred

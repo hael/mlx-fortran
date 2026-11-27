@@ -142,6 +142,7 @@ contains
         if( allocated(res%irot) ) deallocate(res%irot)
         if( allocated(res%irho) ) deallocate(res%irho)
         if( allocated(res%ialpha) ) deallocate(res%ialpha)
+        if( allocated(res%shifts) ) deallocate(res%shifts)
         if( allocated(res%maps) ) deallocate(res%maps)
     end subroutine drop_maps
 
@@ -322,7 +323,7 @@ contains
             endif
             ncand = size(self%cands, 1)
             allocate(self%batch_maps%loss(ncand, n), self%batch_maps%sdev(ncand, n), self%batch_maps%irot(ncand, n), &
-                &self%batch_maps%irho(ncand, n), self%batch_maps%ialpha(ncand, n))
+                &self%batch_maps%irho(ncand, n), self%batch_maps%ialpha(ncand, n), self%batch_maps%shifts(2, ncand, n))
         endif
         call cut_blocks
         ! the backend is selected once
@@ -471,6 +472,7 @@ contains
             integer, intent(in) :: j0, j1
             real(real64), allocatable :: temp(:), temp_phys(:)
             real(real32), allocatable :: loss(:), sdev(:), logz(:), cut(:)
+            real(real64), allocatable :: xy(:,:)
             integer,      allocatable :: iref(:), iptcl(:), irot(:), irho(:), ialpha(:)
             real(real64)              :: t0, temp_s
             real(real32)              :: tphys
@@ -511,6 +513,8 @@ contains
             self%batch_maps%irot(:, j0:j1)   = reshape(irot, [ncand, nb])
             self%batch_maps%irho(:, j0:j1)   = reshape(irho, [ncand, nb])
             self%batch_maps%ialpha(:, j0:j1) = reshape(ialpha, [ncand, nb])
+            call self%pftc%shiftmap_shifts(xy)
+            if( allocated(xy) ) self%batch_maps%shifts(:, :, j0:j1) = reshape(xy, [2, ncand, nb])
             call self%pftc%shiftmap_evidence(logz)
             if( allocated(logz) )then
                 if( .not. allocated(self%batch_maps%logz) ) allocate(self%batch_maps%logz(ncand, n))
@@ -553,6 +557,7 @@ contains
         if( allocated(self%batch_maps%irot) ) call move_alloc(self%batch_maps%irot, res%irot)
         if( allocated(self%batch_maps%irho) ) call move_alloc(self%batch_maps%irho, res%irho)
         if( allocated(self%batch_maps%ialpha) ) call move_alloc(self%batch_maps%ialpha, res%ialpha)
+        if( allocated(self%batch_maps%shifts) ) call move_alloc(self%batch_maps%shifts, res%shifts)
     end subroutine batch_map_results
 
     ! the fills' accumulated host seconds: the variates, the submissions, the collections (with their waits),

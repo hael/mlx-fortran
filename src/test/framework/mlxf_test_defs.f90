@@ -91,7 +91,8 @@ type :: polar_table_entries
 end type polar_table_entries
 
 ! per (candidate, particle): the mode's loss, rotation, radius and direction (1-based), the physical width
-! (pixels), the log evidence when asked, and the full maps (nalpha, nrots, nrho, ncand, nptcls) when asked
+! (pixels), the mode's shift in the reference's axes (2, ncand, nptcls; pixels), the log evidence when asked, and
+! the full maps (nalpha, nrots, nrho, ncand, nptcls) when asked
 type :: polar_map_results
     real(real32), allocatable :: loss(:,:)
     real(real32), allocatable :: sdev(:,:)
@@ -99,6 +100,7 @@ type :: polar_map_results
     integer,      allocatable :: irot(:,:)
     integer,      allocatable :: irho(:,:)
     integer,      allocatable :: ialpha(:,:)
+    real(real64), allocatable :: shifts(:,:,:)
     real(real32), allocatable :: maps(:,:,:,:,:)
 end type polar_map_results
 
@@ -355,6 +357,8 @@ real(real64), parameter :: POLAR_MAP_LOG_CUT = -40._real64
 real(real64), parameter :: POLAR_MAP_CAP_L2  = 1.e-4_real64
 real(real64), parameter :: POLAR_MAP_CAP_LOG = 1.e-4_real64
 real(real64), parameter :: POLAR_MAP_CAP_VAR = 1.e-4_real64
+! the largest difference of a mode's shift (pixels) from its cell's: both are the same host arithmetic
+real(real64), parameter :: POLAR_MAP_SHIFT_TOL = 1.e-12_real64
 
 ! the polar fixture's calibration on the CPU device, fixture seed 1 (its seed banks the particles translated
 ! back), frozen: e_cpu, the largest error of a pair's distances relative to the largest |d| of its oracle row,

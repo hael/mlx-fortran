@@ -247,6 +247,7 @@ contains
         if( present(sdev) ) sdev = -1._real32
         if( allocated(self%sm_logz) ) deallocate(self%sm_logz)
         if( allocated(self%sm_maps) ) deallocate(self%sm_maps)
+        if( allocated(self%sm_shifts) ) deallocate(self%sm_shifts)
         if( .not. self%existence )then
             self%msg = 'polarft_calc%shiftmap_mode: refused: no calculator (new)'
         else if( imap < 1 .or. imap > NSHIFTMAPS )then
@@ -309,6 +310,7 @@ contains
         if( mblk%widths ) sdev = reshape(res%sdev, [np])
         if( allocated(res%logz) ) call move_alloc(res%logz, self%sm_logz)
         if( allocated(res%maps) ) call move_alloc(res%maps, self%sm_maps)
+        if( allocated(res%shifts) ) call move_alloc(res%shifts, self%sm_shifts)
     end subroutine shiftmap_mode
 
     module subroutine set_shiftmap_options( self, ptcl_tile, maps, evidence, profile )
@@ -321,6 +323,20 @@ contains
         self%sm_l_evidence = evidence
         self%sm_l_profile  = profile
     end subroutine set_shiftmap_options
+
+    module subroutine shiftmap_shifts( self, xy )
+        class(polarft_calc),       intent(inout) :: self
+        real(real64), allocatable, intent(out)   :: xy(:,:)
+        integer :: shp(3)
+        if( .not. self%l_mlx )then
+            self%msg = 'polarft_calc%shiftmap_shifts: refused: the toy''s shift maps run on the MLX backend only'
+            return
+        endif
+        self%msg = ''
+        if( .not. allocated(self%sm_shifts) ) return
+        shp = shape(self%sm_shifts)
+        xy  = reshape(self%sm_shifts, [2, shp(2) * shp(3)])
+    end subroutine shiftmap_shifts
 
     module subroutine shiftmap_evidence( self, logz )
         class(polarft_calc),       intent(inout) :: self

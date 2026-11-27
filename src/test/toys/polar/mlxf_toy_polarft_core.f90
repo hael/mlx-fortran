@@ -87,6 +87,7 @@ contains
         if( allocated(self%sm_cands) ) deallocate(self%sm_cands)
         if( allocated(self%sm_logz) ) deallocate(self%sm_logz)
         if( allocated(self%sm_maps) ) deallocate(self%sm_maps)
+        if( allocated(self%sm_shifts) ) deallocate(self%sm_shifts)
         if( allocated(self%pfts_refs) ) deallocate(self%pfts_refs)
         if( allocated(self%dft_e) ) deallocate(self%dft_e)
         if( allocated(self%ft_ref_terms) ) deallocate(self%ft_ref_terms)

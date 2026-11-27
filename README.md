@@ -140,7 +140,9 @@ score ([K1](doc/implementation_notes/completed/mlxf_kernel_k1_report.md)) and a 
 that reprojects the references on the GPU in a graph and a fused form and hands them to the calculator without
 leaving the device ([K2](doc/implementation_notes/completed/mlxf_kernel_k2_report.md)), and a miniature of SIMPLE's PCG
 reconstruction (`reconstructor_pcg` with its engine) that assembles and solves one half on the GPU
-([K8](doc/implementation_notes/completed/mlxf_kernel_k8_report.md)). The three models have the file layout an
+([K8](doc/implementation_notes/completed/mlxf_kernel_k8_report.md)). Its shift maps keep the Fourier-Bessel form
+with compiled reductions: a shift lattice and fused reductions were built, measured and not kept
+([K4](doc/implementation_notes/completed/mlxf_kernel_k4_report.md)). The three models have the file layout an
 integration in SIMPLE would have: host files that build without MLX, glue submodules beside them and device
 modules behind one opaque component
 ([report](doc/implementation_notes/completed/mlxf_toy_seam_report.md)). The API is still growing, so expect

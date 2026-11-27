@@ -48,6 +48,7 @@ use mlxf_toy_polarft_shiftmap_tester,  only: run_all_polar_shiftmap_tests, run_a
 use mlxf_toy_eul_prob_tab_tester,      only: run_all_eul_prob_tab_tests
 use mlxf_toy_polarft_tail_tester,      only: run_all_polarft_tail_tests
 use mlxf_oracle_projection_tester,     only: run_all_oracle_projection_tests
+use mlxf_oracle_polar_tester,          only: run_all_oracle_polar_tests
 use mlxf_toy_projector_tester,         only: run_all_projector_tests, run_all_projector_chain_tests
 use mlxf_toy_reconstructor_pcg_tester, only: run_all_reconstructor_pcg_tests, run_all_reconstructor_pcg_n32_tests
 use mlxf_toy_pcg_solver_tester,        only: run_all_pcg_solver_tests
@@ -186,6 +187,7 @@ contains
                 call run_suite('eul_prob_tab', run_all_eul_prob_tab_tests, suite, ran)
                 call run_suite('polarft_tail', run_all_polarft_tail_tests, suite, ran)
                 call run_suite('oracle_projection', run_all_oracle_projection_tests, suite, ran)
+                call run_suite('oracle_polar', run_all_oracle_polar_tests, suite, ran)
                 ! projector: above 0.5 s in Release: the oracle's explicit matrices and DFTs for every fixture, and
                 ! the GPU's first compilation of the fused gather
                 call run_suite('projector', run_all_projector_tests, suite, ran)

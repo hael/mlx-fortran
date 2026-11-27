@@ -1,6 +1,6 @@
 # K4: the shift lattice and the map reductions (A3) of the toy polar calculator (run `mlxf_kernel_k4`, on the M5 Ultra)
 
-Status, 2026-11-26: planned; ruled as recommended by Hans, 2026-11-26 ("Rule as recommended"), every decision of section 3 and the run order K4, K3, K5, K6, K7; revised after ranks 2d to 2f (runs `mlxf_refactor`, `mlxf_toy_layout`,
+Status, 2026-11-27: **delivered by run `mlxf_kernel_k4`, nothing of the lattices or the fused reductions kept** ([report](../completed/mlxf_kernel_k4_report.md)); 2026-11-26: planned; ruled as recommended by Hans, 2026-11-26 ("Rule as recommended"), every decision of section 3 and the run order K4, K3, K5, K6, K7; revised after ranks 2d to 2f (runs `mlxf_refactor`, `mlxf_toy_layout`,
 `mlxf_kernel_forms`). Base: the commit that holds this plan, after rank 2g's result (K4 runs before K3 by the ruling; the maintainer
 commits this plan with the pending work; the run pins the hash in Phase 0 and records it). The revision was
 checked against `ae7d623` (ranks 2d to 2f committed) with the three uncommitted document edits of 2026-11-26;
@@ -234,8 +234,16 @@ re-checks exactly these premises, and writes what changed:
 
 ## 3. Decisions and rulings
 
-None is ruled. Each is dated 2026-11-26 and carries its recommendation; the maintainer's choices are collected
-at the end of the section.
+Each is dated 2026-11-26 and carries its recommendation; the maintainer's choices are collected at the end of
+the section. **Ruled 2026-11-26** (Hans, "Rule as recommended", the roadmap's decision 18): every decision as
+recommended, so decision 1 is **B** (decision-level agreement by decision 2's test); read by the run in Phase 0
+(the run's `spec/rulings.md` was empty then). **Standing ruling, roadmap decision 19** (Hans, 2026-11-26, in the
+run's `spec/rulings.md` from Phase 1): an MLX-centric design that ports to NVIDIA with minimal changes: MLX
+operations and `fast` functions first; a custom kernel only where the keep rule keeps it, through
+`mlx_metal_kernel` with MLX arrays in and out and no host path around it, its source, launch spec and graph form
+kept together; no platform branch outside the kernel source and the tests' device checks; the report gains a
+section "For a CUDA twin" (per kept kernel the Metal-specific features it uses and their CUDA counterparts).
+It bears on decision 9 and Phase 4; Phases 1 to 3 build graphs only.
 
 1. (2026-11-26, **awaits the ruling: the roadmap's decision 13**) **Which operand carries the shifts.**
    - **Reference-side.** Copies of the reference, shifted in its own frame. The cells are SIMPLE's. Shared
@@ -442,6 +450,12 @@ at the end of the section.
 
     - The modes' indices are exact against the oracle where the oracle's margin to the runner-up is above
       `POLAR_MAP_CAP_LOG`; at a smaller margin either cell passes, and the count of such pairs is reported.
+    - **Amended by ruling R2** (Hans, 2026-11-27, "Judge each vs oracle", after Phase 4 stopped on this row's width):
+      the width of each form is judged against the oracle under the frozen `POLAR_MAP_CAP_VAR` (variance space, as
+      the existing tests apply it) on the calibration fixtures and on seeds 2 and 3, on both devices where the form
+      runs; the row "fused reductions against the graph's" keeps the losses (equal) and the evidence at its
+      calibrated tolerance, and its width part is reported (the largest relative difference per fixture class), not
+      gated. No new width measure or tolerance; nothing else of this decision changes.
 
 13. (2026-11-26, recommended) **Fixtures and sizes.**
     - Fast gate, both devices, inside `unit_kernels`: the tester's two analytic fixtures (24 ring positions, 4
@@ -811,26 +825,28 @@ report exists; `scripts/check_tree.sh` and the last-phase gates pass; `git statu
 | `src/test/oracles/mlxf_oracle_polar_tester.f90` (new) | sub-suite `oracle_polar`: the two self-checks asserted | 0 |
 | `src/test/toys/polar/mlxf_toy_polarft_workspace_lattice.f90` (new) | device submodule: the lattice's preparation and construction | 1, 3, 4, 6 |
 | `src/test/toys/polar/mlxf_toy_polarft_workspace_maptail.f90` (new) | device submodule: the fused reductions' kernels | 4, 6 |
-| `src/test/toys/polar/mlxf_toy_polarft_lattice_tester.f90` (new) | sub-suites `polar_lattice` and `polar_lattice_decision` | 1, 2, 4, 6 |
-| `src/test/toys/polar/mlxf_toy_polarft_workspace.f90` | the map record's members, the interfaces of the new module procedures | 1, 4, 6 |
-| `src/test/toys/polar/mlxf_toy_polarft_workspace_shiftmap.f90` | the form's branch; the reductions fed by either construction; decision 17's deletion | 1, 4, 6 |
-| `src/test/toys/polar/mlxf_toy_polarft_calc.f90` | the additions' interfaces, the form's members | 1, 6 |
-| `src/test/toys/polar/mlxf_toy_polarft_shiftmap.f90` | `set_shiftmap_form`, `shiftmap_shifts`; decision 18's refusal | 1, 6 |
+| `src/test/toys/polar/mlxf_toy_polarft_lattice_tester.f90` (new) | sub-suites `polar_lattice` and `polar_lattice_decision` | 1, 2, 3, 4, 6 |
+| `src/test/toys/polar/mlxf_toy_polarft_workspace.f90` | the map record's members, the interfaces of the new module procedures | 1, 3, 4, 6 |
+| `src/test/toys/polar/mlxf_toy_polarft_workspace_shiftmap.f90` | the form's branch; the reductions fed by either construction; decision 17's deletion | 1, 3, 4, 6 |
+| `src/test/toys/polar/mlxf_toy_polarft_calc.f90` | the additions' interfaces, the form's members | 1, 3, 4, 6 |
+| `src/test/toys/polar/mlxf_toy_polarft_shiftmap.f90` | `set_shiftmap_form`, `shiftmap_shifts`; decision 18's refusal | 1, 3, 4, 6 |
+| `src/test/toys/polar/mlxf_toy_polarft_core.f90` (added in Phase 1) | `kill` resets the maps' form members and drops the last modes' shifts, as it does every other map member | 1, 3, 6 |
 | `src/test/toys/polar/mlxf_toy_polarft_shiftmap_mlx.f90` | the glue's bodies and stubs of the same | 1, 4, 6 |
 | `src/test/toys/polar/mlxf_toy_eul_prob_tab.f90` | `batch_map_results` with the shifts | 1 |
-| `src/test/toys/polar/mlxf_toy_polarft_shiftmap_tester.f90` | the tests per form, the private oracle's frame; `test_folding` with decision 17 | 1, 3, 6 |
-| `src/test/toys/polar/mlxf_toy_eul_prob_tab_tester.f90` | the driver's map results per form | 1, 6 |
-| `src/test/toys/mlxf_toy_seam_tester.f90` | the cycles and refusals of decision 19 | 1, 6 |
+| `src/test/toys/polar/mlxf_toy_polarft_shiftmap_tester.f90` | the tests per form, the private oracle's frame; `test_folding` with decision 17 | 1, 3, 4, 6 |
+| `src/test/toys/polar/mlxf_toy_eul_prob_tab_tester.f90` | the driver's map results per form | 1, 3, 6 |
+| `src/test/toys/mlxf_toy_seam_tester.f90` | the cycles and refusals of decision 19 | 1, 3, 4, 6 |
 | `src/test/toys/polar/mlxf_toy_*.f90` (new, decision 23) | submodules of a toy file that passes 700 lines | 1, 4, 6 |
-| `src/test/framework/mlxf_test_defs.f90` | `POLARFT_MAP_FORMS`, the record's component, decision 12's tolerances, decision 2's constants | 0, 1, 2, 4, 6 |
-| `src/test/framework/mlxf_test_registry.f90` | rows `oracle_polar`, `polar_lattice`, `polar_lattice_decision`; one `NAMED_ONLY` name | 0, 1, 2 |
+| `src/test/toys/polar/mlxf_toy_polarft_workspace_mapreduce.f90` (new, decision 23, Phase 1) | device submodule: the maps' reductions of a tile (selection, width, evidence, copy-out) and their compiled callbacks, moved out of `_workspace_shiftmap.f90` (699 lines) so that both constructions feed them | 1, 3, 4, 6 |
+| `src/test/framework/mlxf_test_defs.f90` | `POLARFT_MAP_FORMS`, the record's component, decision 12's tolerances, decision 2's constants | 0, 1, 2, 3, 4, 6 |
+| `src/test/framework/mlxf_test_registry.f90` | rows `oracle_polar`, `polar_lattice`, `polar_lattice_decision`; one `NAMED_ONLY` name | 0, 1, 2, 3 |
 | `src/test/bench/mlxf_bench_polar_table.f90` | `suite=maps`; `form=` and `tail=`; the rows; decision 17's columns | 3, 4, 5, 6 |
-| `src/test/toys/polar/polar.inf` | the folder's description: the lattice and the fused reductions | 1, 4, 6 |
+| `src/test/toys/polar/polar.inf` | the folder's description: the lattice and the fused reductions | 1, 3, 4, 6 |
 | `src/test/oracles/oracles.inf` | the folder's description: the oracles' tester | 0 |
 | `doc/code_base_map.md` | regenerated by `scripts/generate_codeoverview.py` in each phase that adds or deletes a Fortran file or edits an `.inf` (the static gate checks it) | 0, 1, 2, 3, 4, 6 |
 | `test/offstate/mlxf_offstate_exec.f90` | one check: the maps refuse the host backend | 1 |
-| `scripts/toy_mirror.txt` | the additions' lines; the declared difference of `ialpha`; decision 17's lines | 1, 6 |
-| `scripts/toy_seam.txt` | the two device submodules | 1, 4, 6 |
+| `scripts/toy_mirror.txt` | the additions' lines; the declared difference of `ialpha`; decision 17's lines | 1, 3, 6 |
+| `scripts/toy_seam.txt` | the two device submodules | 1, 3, 4, 6 |
 | `doc/implementation_notes/planned/mlxf_kernel_families.md` | sections 3 and 8, the seam facts | 6 |
 | `doc/implementation_notes/planned/mlxf_roadmap.md` | decision 13's ruling and outcome; section 5 | 6 |
 | `doc/policies/test_environment_policy.md` | the suites, the benchmark, the unread-key sentence | 6 |
@@ -841,7 +857,9 @@ report exists; `scripts/check_tree.sh` and the last-phase gates pass; `git statu
 | `doc/implementation_notes/planned/mlxf_kernel_k4.md` | this note: Progress, decision 23's rows | 0, 1, 2, 3, 4, 5, 6 |
 | `doc/implementation_notes/completed/mlxf_kernel_k4_report.md` (new) | the report | 6 |
 
-`mlxf_test_defs.f90`, `mlxf_test_registry.f90`, the folders' `.inf` files, `doc/code_base_map.md`, both
+Phase 3 was added to the rows above whose files the removal of the lattices (decisions 10 and 17, Phase 3's item
+5) touches. Phase 4 was added to the calculator's parent, its shift-map submodule and the shift-map tester: with no
+lattice left, the fused reductions' selection and gates live with the Fourier-Bessel maps. `mlxf_test_defs.f90`, `mlxf_test_registry.f90`, the folders' `.inf` files, `doc/code_base_map.md`, both
 ledgers, `test/offstate/`, the families note, the polar toy's files and `mlxf_bench_polar_table.f90` are shared
 with the other kernel runs of this batch: this run starts from a commit that holds every earlier run's result
 and rank 2g's.
@@ -851,3 +869,736 @@ and rank 2g's.
 (one entry per phase, written by the run: date and times, machine, base, files changed, each exit item and how
 it was shown, the frozen numbers with their origin, the plants and the checks that failed on them, the load
 records, the decisions taken under delegation with their reasons, and every log's path)
+
+### Phase 0, 2026-11-26, 22:22 to 22:45 (the base, the baseline and the probes)
+
+**Machine and base.** The M5 Ultra (30 cores, 103,079,215,104 B, macOS, GPU `applegpu_g17d`, 1 GPU device in
+`unit_core`), GNU Fortran 16.2.0, CMake 4.5.1, MLX 0.32.4, mlx-c 0.8.0 from Homebrew (the maintainer's
+`build/` uses the same). Base `90f5932f10197247baf001a1087682fc34bd353d` (rank 2g committed), worktree clean
+at the start. SIMPLE `28c75399385fdf73909f350d00cf3019ec92d2a4`. Recorded inputs: `shiftmap_grid.txt`
+`aa05ca27...2eca` and `polar_case.txt` `90a974fa...f1d9`, both equal to the plan's (*exact*). Builds: run
+directory `scratch/build.sh` (the run's recipe: from scratch, `-DMLXF_WERROR=ON -DFORTLS=OFF
+-DBUILD_TESTS=ON`, `-j 12`, the fast gate, the install).
+
+**Rulings.** `spec/rulings.md` is empty. Decision 1 is ruled **B** by the roadmap's decision 18 ("every
+decision of section 3 of each plan stands as recommended"); recorded at the head of section 3. The plan goes
+on: no stop under "decision 1 is not ruled".
+
+**Files changed:** `src/test/oracles/mlxf_oracle_polar_tester.f90` (new), `src/test/framework/mlxf_test_registry.f90`
+(row `oracle_polar` after `oracle_projection`), `src/test/oracles/oracles.inf`, `doc/code_base_map.md`
+(regenerated), this note.
+
+**Exit items.**
+- *Both builds without a warning, the gate, the counts.* The base, from a pristine copy of the base sources
+  (`scratch/base_src`): Release 0 warnings, fast gate 13 of 13 (`/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase0/p0_build_base_release.log`); Debug 0
+  warnings, 13 of 13 (`/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase0/../p0_build_debug.log`). The base's counts (*measured*), Debug / Release:
+  `unit_core` 216 / 214, `unit_array` 232, `unit_ops` 2,988, `unit_fft` 194, `unit_linalg` 674, `unit_compile`
+  63, `unit_fast` 152, `unit_random` 486, `unit_transforms` 283, `unit_io` 905, `unit_distributed` 55,
+  `unit_kernels` 1,953 (`/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase0/counts_debug/`, `/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase0/counts_base_release/`). Against section 5's `ae7d623`
+  counts rank 2g raised `unit_array` (193 to 232), `unit_ops` (2,462 to 2,988), `unit_linalg` (632 to 674),
+  `unit_transforms` (274 to 283) and `unit_io` (846 to 905); every other count, `unit_kernels` included, is
+  unchanged. Phase 0's code, from scratch: Debug and Release 0 warnings, fast gate 13 of 13 (11.9 s of its
+  60 s budget in Release), `scripts/check_tree.sh` passed (one warning: the new file is
+  untracked, as nothing is committed) (`/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase0/p0_final_build_debug.log`, `/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase0/p0_final_build_release.log`);
+  counts as the base's with **`unit_kernels` 1,999** in both builds (1,953 + 46), `unit_core` 216 in both
+  (within its known 214 to 216) (`/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase0/counts_final_debug/`, `/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase0/counts_final_release/`). The counts the
+  later phases hold: the base's above, `unit_kernels` 1,999 plus each phase's checks.
+- *Decision 20's identity invocations, twice.* The 364-line identity set (the tool of runs `mlxf_toy_layout`,
+  `mlxf_kernel_forms` and `mlxf_user_hardening`, copied to `scratch/keep/tools/identity.sh` with only paths
+  changed; it holds the dense table's digests on both devices and both tails, the projector chain's device
+  and host routes, the Fourier-Bessel maps on both grids at `ptiles=16` and the off-state table) on the base
+  Release twice: equal, SHA-256 `e2d65e8861d23ef7d731960e17269c6ecaed23fc46d735a1dc37f0bb4d33dba5`, equal byte
+  for byte to rank 2g's last copy (`/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase0/identity_ab.log`, `/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase0/identity_a/`, `/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase0/identity_b/`). Rank 2g moved
+  no digest, so no operation of its report is needed. The same set on Phase 0's Release: equal to the
+  base's (`/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase0/identity_final.log`).
+- *The baseline, twice, with the stage profile* (decision 15; `/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase0/baseline/run_baseline.sh`, base Release,
+  `suite=shiftmap case=2500_4`, the recorded grid, `maps=window,screen ptiles=4,16 widths=all evidence=0
+  device=gpu`). Load before / after: run 1 3.35 / 4.01 (after a 75 s wait), run 2 3.27 / 3.08; nothing else of
+  the run ran. *Measured*, maps per second, run 1 / run 2:
+
+  | Map | ptile | rate | construct / select / reduce, us per map | MLX peak, B | digest |
+  | --- | --- | --- | --- | --- | --- |
+  | window | 16 | 7.8451e4 / 7.8162e4 | 9.40 / 1.03 / 1.91 | 1.074e10 | `CCF8071F11C612F9` |
+  | window | 4 | 5.2249e4 / 5.1779e4 | 10.83 / 3.42 / 4.60 | 1.011e10 | `CCF8071F11C612F9` |
+  | screen | 4 | 1.9863e4 / 1.9893e4 | 33.57 / 4.73 / 11.30 | 1.072e10 | `3218B5567D7482E9` |
+  | screen | 16 | 1.8888e4 / 1.8906e4 | 37.40 / 3.58 / 11.45 | 1.315e10 | `3218B5567D7482E9` |
+
+  **The baseline (frozen): window 7.83e4 maps per second at ptile 16, screen 1.99e4 at ptile 4** (the mean of
+  the two runs, *measured*). Prepared device memory 9.770e9 B with the tiles (9.77e9 in the families note:
+  unchanged), host 3.930e9 B (*measured*, column `prepared_device_bytes`, `host_bytes`). The canonical
+  driver's elapsed time at the baseline (decision 15): 32,000 / 7.83e4 + 32,000 / 1.99e4 = 0.409 + 1.608 =
+  2.017 s, the screen 80 % (*derived*). The window rate is 5.1 % and 4.8 % above milestone 1's 7.46e4 (7.45e4
+  in decision 15), run 1 beyond the 5 % mark; the screen rate is 0.2 % below. Cause sought once: no report
+  after milestone 1 records a map rate (searched in `completed/`), the digests are the base's, and the code
+  of the maps changed since milestone 1's `4706ecb` (runs `mlxf_toy_seam`, `mlxf_toy_layout`: the memo
+  layout, the preparation from `ft_ref_terms`); no single cause is identified. The Phase 0 rate is the
+  baseline, as the decision says. Bench logs and rows: `/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase0/baseline/run1/`, `/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase0/baseline/run2/`.
+- *Case `2500_1` for decision 16's last split.* `read_case` reads it from `polar_case.txt` (nrefs 2,500,
+  nptcls 2,000), but `check_map_case` stops with status 2 on the recorded grid file, whose maps carry nrefs
+  10,000. Decided under delegation (below).
+- *The queue's premises.* K3 has not run (no K3 report; the roadmap's decision 18 orders K4 first), so the
+  queue's "If K4 runs before K3" holds: decision 5 stands as written, the counts and identity invocations are
+  this base's, decision 11's tester asserts both self-checks (K3 asserted neither), and K3 reads this run's
+  report before its Phase 2. Rank 2g changed `src/core/`, scripts and documents and no file under `src/test/`
+  except the registry (its own benchmark row) and `bench.inf` (`git diff --stat ae7d623 90f5932 -- src/test
+  test`); its report states the identity set unchanged, which Phase 0 confirms.
+- *The premises of "What the check found",* re-read at the base and in SIMPLE at `28c753993` with `rg` and
+  `git show`: checks 1 to 15 confirmed (the toy files did not change since `ae7d623`). Details worth keeping:
+  `rho_max` is the last ring `(nrho - 1) step`, not the radius, in both codes; both use `nrho = 2, step =
+  radius` when the disc is smaller than one step; `shiftmap_draw` is also called by SIMPLE's own tester
+  submodule (not production); the last Apple question is 36, so this run's questions start at 37; question 26 says what
+  check 15 states.
+- *`oracle_polar` asserted* (decision 11): the new tester asserts `oracle_shiftmap_selfcheck` (21 checks) and
+  `oracle_polar_selfcheck` (25) within their own limits: 46 of 46, Release 0.24 s, Debug 0.41 s
+  (`/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase0/counts_final_release/unit_kernels.log`). Largest errors (*measured*): bessel vs direct cell 2.121e-9
+  (limit 1e-6), bessel cc vs direct 1.112e-9 (1e-6); every other check at most 1.3e-15 or exact. The plant: a
+  copy with `limits(12) = 0.5 errors(12)` (the bessel-vs-direct limit halved below its measured error) fails
+  exactly that check, 45 of 46 (`/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase0/plant_oracle_polar.diff`, `/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase0/plant_oracle_polar_run.log`).
+- *The probes* (item 6; a scratch program against the base install, `/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase0/probes/k4_probes.f90`, runs
+  `/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase0/probes/probes_run1.log`, `probes_run2.log`; load 2.4 to 2.5; times are medians of 7 evaluations each
+  with a wait, the first included, so a graph pays less; *measured*, from run 2):
+  - `mlx_fft` over the ring, complex64: (364, 30, 351, 4) evaluates on both devices, GPU 0.75 ms (best 0.70),
+    CPU 41.3 ms, MLX peak 245 MB; (364, 30, 43, 16) GPU 0.45 ms (best 0.40), CPU 20.1 ms, peak 120 MB. One
+    column against a direct double-precision DFT: relative error 5.8e-7 (GPU), 1.6e-7 (CPU).
+  - The real-packed product per bin and particle, (702 x 60) by (60 x 16) batched over 183 bins x 4
+    particles: GPU best 0.77 ms (1.28 TFLOP/s), CPU 2.3 ms; the window's (86 x 60) by (60 x 16) over 183 x 16:
+    GPU best 0.38 ms, CPU 1.3 ms; largest error against a double product 8.4e-6 on sums of 60 terms of [0, 1).
+  - A kernel on a grid of 364 by 256 threads with two rank-2 float32 outputs and an int32 table of 385 (and
+    56) cells, read back by a SIMD-group-per-pair kernel (`simd_max`, then `simd_min` of the least rotation
+    among the maximal lanes): every partial (93,184) and every pair's mode, value, rotation and cell equal
+    to the host's bit for bit; both launches 2.0 ms best (385 cells) and 0.26 ms (56 cells).
+  - The gather of 16 candidates' band (rows 1..30 and nk+1..nk+30 of the first row block, columns c and rt +
+    c, all 183 bins) from an array shaped like `self%refs` at the bench (244, 500, 183, 40), float32, by one
+    `mlx_take` of element positions: exact on a small array (288 of 288 elements); 0.58 ms for 256 pairs (16
+    particles), 0.29 ms for 64 pairs (4 particles). `mlx_take` without `dim` takes **1-based** positions, as
+    its reference says (the probe's first run used 0-based ones and failed its own check: `probes_run1.log`).
+  - What they say, *derived* and not a criterion: per screen map at ptile 4 the transform (0.70 ms / 64
+    maps) and the product (0.77 / 64) are 11 and 12 us, against the Fourier-Bessel construction's 33.6 us;
+    with the inverse transform, the phase product and the gather (0.29 / 64 = 4.6 us) the particle-side
+    construction is near the Fourier-Bessel one, and C1's 1.30 is not in sight from these probes alone. The
+    window's gather (0.58 ms) is larger than its transform and product together; decision 5's 20 % rule is
+    judged on the construction in Phase 3, not here. No probe meets a stop: every wrapper evaluated.
+
+**Frozen in Phase 0.**
+- The baseline above (window 7.83e4 at ptile 16, screen 1.99e4 at ptile 4, *measured*), and the counts.
+- Decision 2's fixtures as written in section 3, made concrete: pftsz 52 (104 rotations), 8 shells, the M5
+  grids' (nrho, nalpha) = (4, 14) and (11, 35) with their 43 and 351 distinct shifts; per grid and seed 32
+  representative and 32 near-tie pairs (12 midway, 12 two-copy at ratios 1, 1 + 1e-3, 1 + 1e-2, 1 + 1e-1, 8
+  twofold-symmetric at the last three ratios); retention 8 particles x 16 candidates, 8 of them one reference
+  perturbed by 1e-3 to 1e-1 of its norm, nbest 4; seed 1 reported, seeds 2 and 3 judged; the bounds and the
+  three plants of decision 2, unchanged.
+- Decision 13's fixtures as written: calibration the unperturbed analytic fixture, the oracle's size 1 and
+  seed 1; judged the perturbed fixture, the oracle's sizes 2 and 3, seeds 2 and 3; the time bound: at most
+  5 s added to `unit_kernels` in Release over Phase 0's 5.9 s alone (base 5.6 s; `oracle_polar` adds 0.3 s;
+  load 5.7 to 7.2, `/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase0/kernels_time.log`; the gate's per-entry times run in parallel and vary, 6.3 s and
+  9.7 s), and the fast gate under 38.74 s.
+- The probes' answers above.
+
+**Decisions taken under delegation.**
+1. The base was measured from a pristine copy of the base sources (`scratch/base_src`, the repository's
+   files with the run's edits taken back from HEAD) because an edit of the registry during the first Release
+   build broke that build (the run's own error); the Debug base build had finished before any edit.
+2. Decision 20's invocations are the 364-line identity set by the earlier runs' tool, paths changed only: it
+   holds every invocation the decision names, and its digest is comparable with rank 2g's.
+3. The baseline invocation runs `ptiles=4,16` on both maps (as milestone 1's traces did), so one invocation
+   gives the window's row at 16 and the screen's at 4; the frozen rate is the mean of the two runs (they
+   differ by 0.4 % and 0.2 %).
+4. Decision 16's split on `2500_1`, if Phase 5 needs it, uses a scratch copy of the recorded grid file with
+   `nrefs = 2500` in both map blocks and nothing else changed (the geometry is the case's; the file's SIMPLE
+   rates do not apply to it and are not reported beside that row). The recorded file itself is not edited.
+5. The plant of `oracle_polar` lowers the limit of the check with the largest measured error (bessel vs
+   direct cell), since halving a zero limit cannot fail an exact check.
+
+**What it means, in short.** The base is green, rank 2g moved counts but no toy output, the oracles are now
+asserted by the registry, and the Fourier-Bessel maps run at 7.83e4 (window) and 1.99e4 (screen) maps per
+second, 2.02 s for the canonical driver. Every operation the lattice needs evaluates and is exact where it
+can be checked; the probes suggest the particle-side construction will be close to the Fourier-Bessel one,
+which is what Phase 3's ceilings will decide.
+
+### Phase 1, 2026-11-26, 22:39 to 23:20 (the two lattices as graphs on the small fixtures)
+
+**Machine and base** as in Phase 0 (the M5 Ultra, base `90f5932`, Phase 0's working tree). The standing ruling of
+the roadmap's decision 19 (MLX-centric, a CUDA twin section in the report) appeared in the run's
+`spec/rulings.md` and is recorded at the head of section 3; Phase 1 builds graphs only.
+
+**Files changed:** new `src/test/toys/polar/mlxf_toy_polarft_workspace_lattice.f90` (device: the lattice's
+preparation and construction), `mlxf_toy_polarft_workspace_mapreduce.f90` (device, decision 23: the reductions
+of a tile and their compiled callbacks, moved out of `_workspace_shiftmap.f90`), `mlxf_toy_polarft_lattice_tester.f90`
+(sub-suite `polar_lattice`); edited `mlxf_toy_polarft_workspace.f90` (the map record's form, phase table and cell
+rows; the shared tile records; the interfaces), `mlxf_toy_polarft_workspace_shiftmap.f90` (the form's branches,
+the particle-side cosines, the modes' shifts), `mlxf_toy_polarft_calc.f90` (`set_shiftmap_form`,
+`shiftmap_shifts`, the form members), `mlxf_toy_polarft_shiftmap.f90` (their bodies; the form recorded per map),
+`mlxf_toy_polarft_core.f90` (row added to the table first: `kill` resets the new members),
+`mlxf_toy_eul_prob_tab.f90` (`batch_map_results` with the shifts), the testers
+`mlxf_toy_polarft_shiftmap_tester.f90`, `mlxf_toy_eul_prob_tab_tester.f90`, `mlxf_toy_seam_tester.f90`,
+`test/offstate/mlxf_offstate_exec.f90`, `mlxf_test_defs.f90` (`POLARFT_MAP_FORMS`, `polarft_map_spec%form`,
+`polar_map_results%shifts`, the lattice tolerances), `mlxf_test_registry.f90` (row `polar_lattice`), both
+ledgers, `polar.inf`, `doc/code_base_map.md`, this note.
+
+**What was built.** Both lattices follow the oracles' conventions, read in Phase 1: a shift multiplies a ring sample
+by exp(i z sin(theta - alpha)), z = 2 pi k rho / box, and `oracle_polar_frame` is [[c, s], [-s, c]] (the plan's
+default "the frame's sign is whatever makes the particle-side cell equal `oracle_polar_pair%dist`" is settled
+as: a particle-side cell at shift u in the particle's axes is the loss at `matmul(oracle_polar_frame(irot,
+nrots), u)`, and the particle copy carries the conjugate phase). Per tile the operand's ring is recovered from
+its memo bins (F[nrots - m] = (-1)^m conj F[m]), multiplied by the map's resident phase table (nrots, nkb, nud),
+transformed back to its 183 bins; the particle-side sums are one real-packed `matmul` per bin and particle
+against the weighted candidates gathered from `self%refs` (one `mlx_take` of 1-based element positions per row
+half), the reference-side sums an elementwise product per pair; `mlx_irfft` over the bins gives every rotation's
+cross term; L = 1 + (refpow - cross) / ptclpow with the reference power computed once per pair from the tiles'
+squared-modulus rows, as the Fourier-Bessel form computes it; the cells take their distinct shift's row
+(`cellrow`) and feed the existing compiled reductions, the particle-side lattice with cosines 1 and sines 0
+(its moments are in the particle's axes already). The Fourier-Bessel form's operations are unchanged
+(decision 20 below).
+
+**Exit items.**
+- *The reference-side lattice reproduces `%cell_bessel` and `%cell` within the frozen tolerances on both
+  devices; the particle-side lattice reproduces the direct losses at its cells and equals the reference-side one
+  at the coinciding rotations; the modes' shifts pass.* Sub-suite `polar_lattice` on the oracle's fixtures
+  (size 1 unseeded and seed 1 calibrate; sizes 2 and 3 and size 1 seeds 2 and 3 are judged), largest absolute
+  errors (*measured*, Release, `/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase1/rel_kernels_run1.log`; Debug `/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase1/counts_debug/unit_kernels.log`):
+
+  | Measure | calibration cpu / gpu | judged cpu / gpu | frozen tolerance | ceiling |
+  | --- | --- | --- | --- | --- |
+  | reference-side against `%cell_bessel` | 5.24e-7 / 6.39e-7 | 5.06e-7 / 6.28e-7 | 1.2772e-6 | 1e-4 |
+  | reference-side against `%cell` | 5.24e-7 / 6.39e-7 | 5.06e-7 / 6.28e-7 | 1.2772e-6 | 1e-4 |
+  | particle-side against the direct loss | 5.28e-7 / 5.55e-7 | 5.64e-7 / 6.32e-7 | 1.1106e-6 | 1e-4 |
+  | the two lattices at a coinciding rotation | 4.77e-7 / 4.77e-7 | 4.77e-7 / 4.77e-7 | 9.536e-7 | 2e-4 |
+  | the mode's shift against the oracle's (px) | at most 2.2e-16 (0 in Release) | 2.2e-16 / 2.2e-16 | 1e-12 | 1e-4 |
+
+  The calibration numbers are those of the first run, `/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase1/dbg_lattice_try1.log` (Debug); each tolerance is twice
+  the largest calibration error over both devices (*derived*), the shift's at least 1e-12 for host rounding
+  (*guessed*); the judged fixtures did not enter them. Modes judged where the oracle's margin exceeds
+  `POLAR_MAP_CAP_LOG`: 8 of 8 per lattice and device on the calibration fixtures, 16 of 16 on the judged ones,
+  none inside the margin.
+- *Every reduction of both passes the existing caps.* In `polar_lattice`: the maps' L2 against the oracle's
+  tables at most 1.27e-7 (cap 1e-4), the variance at most 1.93e-7 relative (cap 1e-4), the evidence at most
+  6.98e-7 (cap 1e-4). In `polar_shiftmap`, which now runs every test but `test_folding` per construction with its
+  private oracle reading a particle-side cell at its turned shift: every cap holds for the three forms on both
+  devices (2,346 checks; largest map error 7.59e-7 normalised L2 on the particle-side lattice).
+- *Decision 14 holds for both.* In one process the modes, losses, widths, evidence, maps and shifts of the
+  fixture block are bit for bit equal across two evaluations on each lattice and device; across two invocations
+  the printed digests agree (Release: `4529DEA7D7330CC0`, `1C56BF6DA9EA3CD6` cpu, `79F1D6C0A656F0E9`,
+  `377B9DF958A789E8` gpu, forms 2 and 3; `/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase1/time_kernels.log`, `/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase1/rel_lattice_inv_a.log`, `_b.log`).
+- *Decision 19.* `seam`: the host backend refuses `set_shiftmap_form` and `shiftmap_shifts` with the backend's
+  message, and 100 cycles of `new_shiftmap`, `gen_shiftmap`, `shiftmap_mode` and `kill_shiftmap` per construction
+  leave the live handles and the active memory where a warm cycle left them, on both devices (110 checks). The
+  off-state program checks that a host-backend calculator refuses `new_shiftmap` with today's message ("the toy's
+  shift maps run on the MLX backend only"): passed in its Debug and Release builds
+  (`/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase1/identity/offstate/Debug.run.log`, `Release.run.log`).
+- *The ten Phase 1 plants fail,* each in a patched copy built apart (`/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase1/plants/patch.py`, `run_plant.sh`,
+  `run_all.sh`; diffs and logs `/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase1/plants/<plant>.diff`, `.run.log`; a first pass on the code before the tester's
+  last refactor in `/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase1/plants/first_pass/`, the same outcome): the shift phase with the opposite sign
+  (`polar_lattice`: every cell measure, the modes, the shifts); the first ring counted once (the evidence, the
+  width, the maps); the mode's scan with directions outermost (the modes' indices and shifts in `polar_lattice`,
+  the modes in `polar_shiftmap`); the particle-side width with the reference-side rotation left in (the width,
+  on both devices, and nothing else); the frame transposed in `shiftmap_shifts` (the shifts in `polar_lattice` and
+  the driver's in `eul_prob_tab`); the band one shell short (the cells, the modes, the reductions); a candidate
+  gathered from the neighbouring tile column (`polar_shiftmap`'s cells and modes on the lattices); a public
+  addition missing from the mirror ledger (rule `mirror`); the new device submodule classed `host` (rule `seam`);
+  a term that depends on the call count added to a row (decision 14's bit-for-bit check, and the cells).
+- *Rules `mirror` and `seam` pass:* `scripts/check_tree.sh` passed in both builds' gates (the warning names the
+  four new files as untracked: nothing is committed).
+- *Decision 20 holds:* the 364-line identity set on Phase 1's Release equals the base's byte for byte, SHA-256
+  `e2d65e88...4d33dba5` (`/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase1/identity.log`).
+- *Decision 13's time bound is met:* `unit_kernels` alone in Release 9.79 and 9.72 s against Phase 0's 5.86 and
+  5.89 s, +3.9 s within the 5 s bound (*measured*, load 3.84 before and 3.30 after, nothing else of the run
+  running; `/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase1/time_kernels.log`); the fast gate 13.41 s (Release) under its 38.74 s. No fallback taken.
+- *Builds:* Debug and Release from scratch with `MLXF_WERROR`, 0 warnings, fast gate 13 of 13
+  (`/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase1/p1_build_debug.log`, `p1_build_release.log`). Counts, Debug and Release alike: every area as Phase 0's
+  base, **`unit_kernels` 3,799** (1,999 + 1,800: `polar_shiftmap` 794 to 2,346, `polar_lattice` 154 new,
+  `eul_prob_tab` 105 to 177, `seam` 88 to 110) (`/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase1/counts_debug/`, `/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase1/counts_release/`).
+
+**Frozen:** the five tolerances above in `mlxf_test_defs.f90`; `unit_kernels` 3,799.
+
+**Decisions taken under delegation.**
+1. The reductions and their callbacks moved to a new device submodule (`_workspace_mapreduce.f90`, decision 23,
+   row added before the edit) so that both constructions feed them; the tile's maps became a component of the
+   tile record so that the shared procedures keep five dummies (rule `arity`). The Fourier-Bessel form's graph is
+   unchanged (identity holds).
+2. `mlxf_toy_polarft_calc.f90` grows to 746 lines (724 at the base, already above decision 23's 700): it is the
+   parent that declares the interfaces, which no submodule can hold; not split. The shift-map tester (1,298 lines
+   at the base, 1,367 now) is a tester, which the size rules except.
+3. `set_shiftmap_form` and `shiftmap_shifts` keep host state only; their device effect passes through the
+   existing glue (`new_shiftmap_mlx` carries `spec%form`, `shiftmap_mode_mlx` returns the shifts), so no new glue
+   procedure or stub was written.
+4. `set_shiftmap_form` refuses `tail = metal` ("the compiled graph only") until Phase 4 builds the fused form; a map
+   remembers its form, and `shiftmap_mode` refuses a map made in another form until it is made again.
+5. A lattice map is refused without current reference tiles (it keeps no reference data, decision 5); the
+   gather's 32-bit element positions are guarded (refused above 2^31 - 1).
+6. Decision 12's measures are computed on the oracle's fixtures in `polar_lattice`; the analytic fixtures of
+   `polar_shiftmap` judge the existing caps per form. Tolerance = twice the largest calibration error over both
+   devices, the shift's floor 1e-12.
+7. The particle-side lattice's known-pose check in `polar_shiftmap` judges only the planted poses that are cells of
+   that lattice (at a coinciding rotation): 2 of the fixture's 3 (the pose at rotation 17 is not); the guard of at
+   least three stays for the other forms.
+8. Plant 3 ("the mode's scan with directions outermost") was built as the selection reading the maps in the
+   directions-outermost order, which moves the decoded modes on every fixture; no exact-tie fixture was built (a
+   float32 tie between cells of different rings and directions is not constructible on these grids). Recorded as a
+   deviation from "on a tie fixture".
+9. The modes' shifts are real64 (`polar_map_results%shifts`), computed on the host from the mode's indices.
+10. The fixtures' noise (size 1, seeds 1 to 3) is a keyed variate per sample, 0.1 of the particle's rms, on the
+    second particle; the calculator uses tiles of one reference (`set_tile_plan(2, 1)`), so the gather crosses tiles.
+11. A Release-only `-Wuninitialized` diagnostic (a tester record with an allocatable component) was removed by
+    keeping the record fixed-size; no flag was touched.
+
+**What it means, in short.** Both lattices exist as graphs and are as exact as float32 allows: about 6e-7 from the
+oracle's cells, the shifts exact, every mode the oracle's. The particle-side lattice equals the reference-side one
+where their grids share points. Nothing of the Fourier-Bessel form moved. Phase 2 judges whether the particle-side
+lattice's cells, which are not SIMPLE's, change any decision.
+
+### Phase 2, 2026-11-26 23:14 to 2026-11-27 00:20 (the decision-level test)
+
+**Machine and base** as before; the standing ruling of decision 19 changes nothing here (host-only test).
+
+**Files changed:** `src/test/toys/polar/mlxf_toy_polarft_lattice_tester.f90` (the named-only sub-suite
+`polar_lattice_decision`; the header names it), `src/test/framework/mlxf_test_defs.f90` (decision 2's constants,
+`POLAR_DECISION_*`, as section 3 states them), `src/test/framework/mlxf_test_registry.f90` (row and `NAMED_ONLY`
+name `polar_lattice_decision`), `doc/code_base_map.md` (the tester's description), this note.
+
+**What the test does** (host only, double precision, the oracle): the geometry is pftsz 52 (104 rotations), 8 shells
+(2 to 9), box 64, the window's and the screen's rings (nrho 4 and 11), which give the M5 grids' 14 and 35
+directions (*exact*, asserted). Per seed and grid: 32 representative pairs (point-source references, a planted
+rotation and an off-lattice shift anywhere in the disc, an astigmatic CTF, keyed noise at 0.1 and 0.5 of the
+signal's rms, alternating); 32 near-tie pairs (12 shifts midway between two rings or two directions, 12 sums of
+two shifted copies at amplitude ratios 1, 1 + 1e-3, 1 + 1e-2, 1 + 1e-1, three each, 8 twofold-symmetric
+references broken by 1e-3 to 1e-1); 8 retention particles with pools of 16 (8 the particle's reference perturbed
+by 1e-3 to 1e-1 of its norm, log-spaced, 8 others), nbest 4. The three lattices of a pair: R (SIMPLE's cells), P
+(the particle-side lattice) and R' (SIMPLE's directions turned by half a step); every table by the oracle's ring
+route (`dists_by_rings`), P with the particle carrying the conjugate phase of the cell's shift. The route is held
+to the oracle's direct cells on one screen pair: R against `oracle_shiftmap%table` 3.6e-15, P against `pair%dist`
+at the turned shift 2.4e-15 (*measured*). Modes by `oracle_shiftmap%mode` (tempered temperature, the screen with a
+prior of width half the disc's radius, the window without, as SIMPLE's screen and window), widths at the
+physical temperature (moments turned into the particle's axes on R and R'), the sequential width cutoff of
+`update_screen_best` over the pool with nper = nbest.
+
+**Exit items.**
+- *Item 1, the time of one screen table* (Release, load 2.0): 1.16, 1.14, 1.14 s for R, P, R' (*measured*);
+  predicted suite 33 min on the screen grids (*derived*), under 60: the ring was not shortened. The suite took
+  2,402 s (load about 4.1 at its end; `/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase2/decision_run1.log`).
+- *The statistics of P and of the control per seed, grid and class* (`/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase2/decision_run1.log`; T1 the pairs whose
+  modes' shifts differ from R's by more than one map step in a component, T2 the particles whose kept best differ,
+  T3 count the widths skipped in one table and not the other; each "P / control"; the widths' largest absolute
+  difference in pixels, reported):
+
+  | seed | grid | class | pairs | T1 | T2 | T3 count | width abs. diff. (px) | bound |
+  | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+  | 1 | window | representative | 32 | 3 / 1 | - | - | 1.08 / 0.774 | reported |
+  | 1 | window | near-tie | 32 | 4 / 7 | - | - | 1.03 / 2.84 | reported |
+  | 1 | window | retention | 128 | 8 / 15 | 4 / 8 | 5 / 10 | 4.15 / 4.12 | reported |
+  | 1 | screen | representative | 32 | 4 / 3 | - | - | 0.492 / 0.421 | reported |
+  | 1 | screen | near-tie | 32 | 12 / 14 | - | - | 10.2 / 6.39 | reported |
+  | 1 | screen | retention | 128 | 8 / 11 | 6 / 7 | 6 / 13 | 10.9 / 7.92 | reported |
+  | 2 | window | representative | 32 | 0 / 3 | - | - | 0.606 / 1.25 | passes |
+  | 2 | window | near-tie | 32 | 5 / 7 | - | - | 0.906 / 0.906 | passes |
+  | 2 | window | retention | 128 | 9 / 11 | 5 / 6 | 9 / 10 | 1.92 / 2.86 | passes |
+  | 2 | screen | representative | 32 | 4 / 2 | - | - | 0.74 / 0.858 | **fails T1** |
+  | 2 | screen | near-tie | 32 | 9 / 12 | - | - | 11 / 13.6 | passes |
+  | 2 | screen | retention | 128 | 17 / 16 | 5 / 7 | 11 / 14 | 10.4 / 12.8 | passes |
+  | 3 | window | representative | 32 | 1 / 1 | - | - | 1.1 / 0.862 | passes |
+  | 3 | window | near-tie | 32 | 5 / 7 | - | - | 2.62 / 0.947 | passes |
+  | 3 | window | retention | 128 | 6 / 9 | 7 / 7 | 10 / 10 | 3.86 / 4.19 | passes |
+  | 3 | screen | representative | 32 | 2 / 1 | - | - | 0.622 / 0.675 | passes |
+  | 3 | screen | near-tie | 32 | 11 / 16 | - | - | 6.84 / 5.63 | passes |
+  | 3 | screen | retention | 128 | 29 / 23 | 5 / 7 | 6 / 10 | 14.1 / 9.22 | **fails T1** |
+
+  T3's relative difference is 1.000 for P and for the control in every row: in each class some pair has a width of 0
+  in one table (all its mass in one cell) and not in the other. Summed over the judged rows T1 is 98 for P and 108
+  for the control (*measured*).
+- *The verdict of decision 2:* **the particle-side lattice fails** on the judged seeds: T1 exceeds the control's plus
+  one in two of the twelve judged rows (seed 2, screen, representative: 4 against 2; seed 3, screen, retention: 29
+  against 23); every T2, T3-count and T3-relative bound holds.
+- *The candidate, by decision 1's branch B:* P failed decision 2's test, so the plan continues as under A: **the
+  candidate lattice is the reference-side lattice** (SIMPLE's cells). Phase 3 removes the particle-side lattice after
+  its numbers are in Progress (decision 17), measures the reference-side ceiling C1 and the Fourier-Bessel form's
+  C2, and applies decision 10's rules.
+- *The three plants fail* (`/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase2/plants/patch.py`, `run_plant.sh`, each built apart in Release; `<plant>.diff`,
+  `.run.log`): the mode's shift converted with the transposed frame fails T1 in all 12 judged rows (12 failed
+  checks against 2 unplanted); the particle-side lattice on every second ring fails T1 in 10 rows, T3 count in 3, and
+  the route check; the candidates' losses compared after a permutation (the best and the worst swapped) fail T2
+  (T2 of P 8 in every retention row; the bound fails in one judged row, since the control's T2 is 6 or 7 there).
+- *No lattice has been timed:* only the oracle's tables were timed (item 1).
+- *Builds:* Debug and Release from scratch with `MLXF_WERROR`, 0 warnings, fast gate 13 of 13, `check_tree.sh`
+  passed (`/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase2/p2_build_debug.log`, `p2_build_release.log`); counts as Phase 1's, `unit_kernels` 3,799 in both (the
+  new sub-suite is named-only) (`/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase2/counts_debug/`, `counts_release/`). Decision 20: the identity set equals the
+  base's, `e2d65e88...4d33dba5` (`/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase2/final.log`).
+
+**Frozen in Phase 2:** decision 2's constants in `mlxf_test_defs.f90` (as section 3 states them; the noise levels
+0.1 and 0.5, the prior's width half the disc's radius on the screen and none on the window, *guessed*, frozen
+before the first run).
+
+**Decisions taken under delegation.**
+1. T3's relative difference is |a - b| / max(a, b), 0 when both widths are 0. The first run divided by R's width,
+   which is 0 for a pair whose mass sits in one cell, and printed 1e306 on seed 1; the run was stopped and the
+   statistic completed before any judged seed ran (the stopped run's log, `/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase2/decision_run0_t3undefined.log`). Under
+   this completion the statistic saturates at 1 on these fixtures; the absolute differences are reported beside it.
+2. T2 and T3's count are taken on the retention class (the only one with pools); T1 and T3's relative difference on
+   every class, the retention pairs included.
+3. Every table by the oracle's ring route (the self-check's "direct vs rings" identity, re-checked on a screen pair)
+   rather than per-cell sums, the same route for the three lattices so that near ties are not split by rounding.
+4. The noise levels (0.1 and 0.5 of the signal's rms), the screen's prior (width half the disc's radius) and the
+   fixtures' point sources, CTF and noise variances are this test's own (*guessed*); the toy has no `projs_ns`, so
+   nbest = 4 and nper = nbest as decision 2 says.
+5. The suite stays as a named-only sub-suite that fails on its judged rows: it records the verdict. It goes with the
+   particle-side lattice in Phase 3 (decision 17).
+
+**What it means, in short.** Judged by SIMPLE's own decisions, the particle-side lattice moves the start of the
+refinement about as often as SIMPLE's lattice turned by half a direction step does (98 against 108 pairs over the
+judged rows), but more often than that control plus one in two of twelve rows, so it does not pass the frozen test.
+The run goes on with the reference-side lattice, whose cells are SIMPLE's. The retention fixture is nearly tied by
+construction: even the control changes the kept best of most particles.
+
+### Phase 3, 2026-11-27, 00:20 to 00:55 (the bench size, the ceilings, the graph form's rate)
+
+**Machine and base** as before; no new ruling.
+
+**Files changed:** `src/test/bench/mlxf_bench_polar_table.f90` (`suite=maps`: one map's maps of one part at one
+particle tile, its row in `bench_polar_table.tsv` in the time suite's column order, a digest; `form=` and `tail=`
+in `suite=shiftmap` and `suite=maps`); and the removal of both lattices (item 5, below): deleted
+`src/test/toys/polar/mlxf_toy_polarft_workspace_lattice.f90` and `mlxf_toy_polarft_lattice_tester.f90` (copies kept
+in `/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase3/removed/`); edited `mlxf_toy_polarft_workspace.f90`, `_workspace_shiftmap.f90` (back to the base's
+operations, with the moved records and reductions and the modes' shifts), `_workspace_mapreduce.f90` (header),
+`mlxf_toy_polarft_calc.f90`, `_core.f90`, `_shiftmap.f90` (the form members and the form check go;
+`set_shiftmap_form` accepts the Fourier-Bessel form and the graph reductions), `mlxf_toy_polarft_shiftmap_tester.f90`
+(restored from HEAD), `mlxf_toy_eul_prob_tab_tester.f90` (the driver's shifts checked on the one form),
+`mlxf_toy_seam_tester.f90`, `mlxf_test_defs.f90` (`POLARFT_MAP_FORMS` keeps `bessel`; the lattice tolerances and
+decision 2's constants go; `POLAR_MAP_SHIFT_TOL`), `mlxf_test_registry.f90` (rows `polar_lattice` and
+`polar_lattice_decision` go), both ledgers, `polar.inf`, `doc/code_base_map.md`, this note (Phase 3 added to the file
+table's rows the removal touches, before the edits).
+
+**Exit items.**
+- *Item 1, the part mode.* `suite=maps` on the window at tile 16: 7.82e4 maps per second, as the baseline
+  (`/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase3/maps_try/`). Through `scripts/run_parts.sh` (`RUN_PARTS_SUITE=maps RUN_PARTS_UNIT=maps`): one process
+  7.84e4, two processes 4.82e4 and 4.82e4 (sum 9.64e4), every column the launcher reads in place
+  (`/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase3/parts_check/run_parts.tsv`, `split_1/`, `split_2/`).
+- *Item 2, `polar_shiftmap_accuracy` for every form present,* on both devices at the M5's geometries: passed, 144
+  checks, largest sampled error 1.9e-7 (lattice_ref, GPU) against the cap 1e-4 (`/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase3/accuracy.log`); after the
+  removal, the form that stays passes, 48 checks (`/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase3/accuracy_final.log`).
+- *Item 3, the particle-tile sweep of the candidate* (the reference-side lattice, graph form, best pass of 3,
+  *measured*, `/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase3/timed/sweep.log`): window 2.77e4, 2.97e4, 3.17e4, 3.19e4 maps per second at tiles 4, 8, 16, 32;
+  screen 4.24e3, 4.02e3, 3.71e3, 3.65e3 (MLX peak 1.24e10 B at 4 to 4.80e10 B at 32). Frozen: window 32, screen 4.
+- *Decision 10's ceilings, each twice* (null reductions: a scratch copy whose reductions return each pair's first
+  cell, still evaluated and copied, `/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase3/null/patch_null.py`, `null_reductions.diff`; interleaved with the graph
+  form; best pass of 3 per run, the mean of the two runs; `/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase3/timed/ceilings.log`; the first series ran without the
+  null binary and is kept as `ceilings_run0_nullpath.log`). The canonical driver is the window and the screen at
+  32,000 maps each (*derived* from the rates):
+
+  | construction | reductions | window (tile) | screen (tile) | canonical s |
+  | --- | --- | --- | --- | --- |
+  | Fourier-Bessel | graph | 7.84e4 (16) | 2.02e4 (4) | 1.991 |
+  | Fourier-Bessel | null | 1.021e5 (16) | 2.93e4 (4) | 1.404 |
+  | reference-side lattice | graph | 3.17e4 (32) | 4.21e3 (4) | 8.603 |
+  | reference-side lattice | null | 3.45e4 (32) | 4.53e3 (4) | 7.992 |
+  | particle-side lattice | graph | 1.345e5 (32) | 2.45e4 (16) | 1.544 |
+  | particle-side lattice | null | 2.021e5 (32) | 3.76e4 (16) | 1.008 |
+
+  (the particle-side lattice was also run at tiles 16 and 4: window 1.20e5 / 1.86e5, screen 2.32e4 / 3.63e4, graph /
+  null). The two runs of each row agree within 1 %. Load: 3.6 at the start of each series (after a wait), rising to
+  13 during them (*measured*, every row's load in the logs; the rates repeat within 1 % regardless).
+  - **C2 (Fourier-Bessel) = 1.991 / 1.404 = 1.42** (*derived*; predicted 1.43). C2 (reference-side) 1.08, C2
+    (particle-side) 1.53.
+  - **C1 (reference-side) against the Fourier-Bessel form's ceiling: 1.404 / 7.992 = 0.18;** C1 (particle-side)
+    1.404 / 1.008 = **1.39**. The particle-side lattice's graph form alone is 1.29 times the Fourier-Bessel graph on
+    the canonical driver (1.72 on the window, 1.21 on the screen).
+- *Item 4, the candidate's graph rate against the baseline,* three interleaved pairs per grid through
+  `suite=shiftmap` (`/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase3/timed/item4.log`, rows in `/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase3/timed/item4/<tag>/`): window 7.82e4, 7.81e4, 7.78e4 (Bessel,
+  tile 16) against 3.18e4, 3.17e4, 3.12e4 (reference-side, tile 32), ratio 0.41; screen 2.02e4, 2.01e4, 2.00e4
+  against 4.24e3, 4.20e3, 4.21e3, ratio 0.21 (*measured*). Stage profile, microseconds per map (construction,
+  selection, reduction): Bessel window 9.37, 1.01, 1.84; reference-side window 28.7, 0.64, 1.82; Bessel screen
+  33.1, 4.88, 10.95; reference-side screen 219.3, 4.79, 11.35. Decision 22's bytes: prepared device memory
+  9.770e9 B (Bessel) against 7.152e9 / 7.206e9 B (reference-side, window / screen): the lattice holds no reference
+  data of its own, 2.6e9 B less, as decision 5 predicted; MLX peak 1.07e10 against 1.25e10 / 1.24e10 B; host 3.93e9
+  B both.
+- **Decision 1's table, measured column** (the canonical case at the M5's grids): per map the construction takes
+  9.4 / 33.1 us (Fourier-Bessel, window / screen), 28.7 / 219 us (reference-side) at one process; the particle-side
+  lattice's whole graph map takes 7.4 / 40.8 us (the inverse of its rates).
+- *Item 5, decision 10's rules and decision 17.* The reference-side lattice's C1 (0.18) is below 1.30: **removed**.
+  The particle-side lattice is not the candidate (it failed decision 2's test in Phase 2): **removed** by decision
+  17, after its numbers above, although its C1 (1.39) is above 1.30. **No lattice remains**; Phase 4 works on the
+  Fourier-Bessel cells, and **Phase 4 is entered**: C2 of the Fourier-Bessel form is 1.42, at least 1.30.
+- *The benchmark and the toy hold the baseline and at most one lattice:* none; `form=` takes `bessel` only, a
+  lattice form is refused (`bench_polar_table: form=bessel`, exit 2, `/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase3/maps_try/final_refuse.log`).
+- *Decision 20:* every digest, map hash and table line of the identity set equals the base's; the set's one other
+  line, the assertion count of the `suite=shiftmap` invocation, is 24 against 22 (the benchmark's new check that the
+  maps' form is set, once per map) (`/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase3/identity_compare.txt`; SHA-256 of the Phase 3 set
+  `6c718cf1aaf0e33660abc7480232c6fb06bd590423a554c6dfbd871e36ca8147`, the reference from here on).
+- *Builds:* Debug and Release from scratch with `MLXF_WERROR`, 0 warnings, fast gate 13 of 13, `check_tree.sh`
+  passed (`/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase3/p3_build_debug.log`, `p3_build_release.log`). Counts, Debug and Release alike: as Phase 0's base,
+  `unit_kernels` **2,015** (1,999 + 16: `eul_prob_tab` 105 to 111, the driver's shifts; `seam` 88 to 98, the host
+  refusals and the 100 map cycles; `polar_shiftmap` 794 again) (`/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase3/counts_debug/`, `counts_release/`).
+
+**Ruling R1** (Hans, 2026-11-27, after the fence stopped Phase 3 at its end): the file table's row of
+`mlxf_toy_polarft_workspace_mapreduce.f90` omitted Phase 3, whose removal of both lattices reaches the reductions they
+fed (Phase 3 edited only that file's header comment). Ruled an omission of the table: the row lists Phases 1, 3, 4 and
+6 (edited by the controller); Phase 3's work stands. No source changed between the fence stop and the resumption, so
+the builds, gates, counts and identity above are those of the work as it stands (`check_tree.sh` passed again on
+resumption). To be recorded in the report.
+
+**Frozen:** the candidate's tiles (window 32, screen 4), now moot; the ceilings above; `unit_kernels` 2,015.
+
+**Decisions taken under delegation.**
+1. Both lattices are removed in Phase 3: the reference-side one by decision 10's rule, the particle-side one by
+   decision 17 as the non-candidate. The vocabulary `POLARFT_MAP_FORMS` (now `bessel` alone), the `form` dummy of
+   `set_shiftmap_form`, `shiftmap_shifts` and the shifts component stay: the `tail` selection serves Phase 4, the
+   vocabulary and the `form` dummy go in Phase 6 by decision 8, and the shifts are decision 7's (SIMPLE's
+   `shiftmap_shift` at the mode).
+2. The shift-map tester is restored from HEAD: everything Phase 1 added to it served the lattices. The driver's
+   shift check stays with its tolerance in the test defs (`POLAR_MAP_SHIFT_TOL`, 1e-12 px, host arithmetic on both
+   sides).
+3. The ceilings are measured through `suite=maps` at one process (its best pass of 3); the null reductions keep the
+   construction's evaluation and one copy-out per tile.
+4. The particle-side lattice was measured at tiles 16 and 32 (window) and 4 and 16 (screen) for decision 1's table,
+   its best tile taken.
+5. The identity set's reference becomes Phase 3's file, whose only difference from the base is the benchmark's
+   assertion count.
+
+**What it means, in short.** The reference-side lattice, SIMPLE's cells, is four to five times slower than the
+Fourier-Bessel form: each pair's copies cost 351 ring transforms on the screen and nothing is shared. The
+particle-side lattice is the fast one, 1.29 times the Fourier-Bessel graph and 1.39 times its ceiling, and it would
+pass decision 10, but it failed the decision-level test by two counts in two of twelve rows, so it goes. What remains
+is the Fourier-Bessel form, whose graph reductions take 29 % of the canonical time: the fused reductions of Phase 4
+can win at most 1.42 there.
+
+### Phase 4, 2026-11-27, 00:56 to 01:20 (the fused reductions): stopped for a ruling
+
+**State.** The fused form of decision 9 exists on the Fourier-Bessel cells (no lattice remains): the new device
+submodule `src/test/toys/polar/mlxf_toy_polarft_workspace_maptail.f90` (kernel 1 a thread per (rotation, pair), kernel
+2 a SIMD group per pair, kernel 3 a thread per (rotation, pair) with compensated sums and `metal::precise::exp`,
+kernel 4 a SIMD group per pair with a fixed shuffle tree; the pairs' width cutoffs decided on the device, so the graph
+form's host synchronisation per tile goes; the kernels made per map for the block's full tile, the actual count of
+pairs in an int32 input), selected by `set_shiftmap_form(form, tail)` with `tail = metal`, refused on the CPU device
+(glue `check_shiftmap_tail_mlx` and the workspace's block check). Tests in `polar_shiftmap` (file table rows extended
+to Phase 4 first): every test runs again with the fused reductions on the GPU, an exact-tie fixture, the fused form
+against the graph, the refusal on the CPU device. Debug (*measured*, `/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase4/dbg_try1.log`, `dbg_try2.log`): 1,236 of
+1,237 checks pass: every existing cap against the host oracle with the fused reductions, the tie's mode (1, 1, 1) on
+both forms, the fused modes equal to the graph's where the oracle's margin exceeds `POLAR_MAP_CAP_LOG` (46 of 46),
+the refusal, and the fused results' digest equal across two invocations (`2B4C6BBC43F11EE3`).
+
+**What fails:** decision 12's last row on the judged fixtures. Fused against graph, relative to max(1, |graph|):
+9.84e-7 on the calibration fixture (the noise-free analytic one), **2.63e-5** on the judged ones (the perturbed and
+the two broadband fixtures), above the ceiling 1e-5 and above any tolerance the calibration gives. Diagnosis
+(`/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase4/diag_fused_vs_graph_vs_oracle.log`, patch `/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase4/diag_patch.diff`): the losses are equal bit for bit and the log
+evidence differs by at most 4.8e-7; the whole excess is in `sdev` of small widths on the broadband folding grid (sdev
+0.036 px: the variances differ by 1.9e-6, which the square root of a cancelling difference of moments turns into
+2.6e-5). Against the oracle's double-precision width the fused form is the closer one in 24 of 41 pairs (17 the
+graph's); at the worst pair the fused error is 1.8e-5 against the graph's 4.4e-5, and the largest error against the
+oracle is 5.8e-5 for both, both within `POLAR_MAP_CAP_VAR` as a variance. No fault of the fused form was found.
+
+**Ruling needed.** Decision 12's row compares `sdev` directly; on small widths that measure is the graph's own float32
+error. Recommended: judge the width in this comparison as the existing cap does, the variance's difference relative
+to max(1, the largest radius squared) (here at most 3e-8), with the losses and the evidence at the calibrated
+tolerance; or judge each form against the oracle under the existing caps alone. Not done before the ruling: the
+freeze of `POLAR_MAPTAIL_TOL` (left at the ceiling 1e-5 as a placeholder), the four plants, the sweep of the
+threadgroups, of a SIMD group per (rotation, pair) and of the plain sums, the Release build and the identity set.
+Decision 13's calibration fixtures of the oracle (size 1, seed 1) lived in the lattice tester that Phase 3 removed;
+the calibration here used the analytic noise-free fixture alone.
+
+### Phase 4, resumed 2026-11-27, 01:37 to 02:00 under ruling R2 (the fused reductions)
+
+**Ruling R2** (Hans, "Judge each vs oracle"), recorded under decision 12: each form's width is judged against the
+oracle under `POLAR_MAP_CAP_VAR`; the "fused against graph" row keeps the losses (equal) and the evidence at its
+calibrated tolerance, its width part reported.
+
+**Files changed in Phase 4:** new `src/test/toys/polar/mlxf_toy_polarft_workspace_maptail.f90`; edited
+`mlxf_toy_polarft_workspace.f90` (the map record's four kernels and their tile size, the tile's full count of pairs,
+the interface), `_workspace_shiftmap.f90` (the fused form's refusal off the GPU, the tile's count, the kernels
+dropped with the map), `_workspace_mapreduce.f90` (the dispatch), `mlxf_toy_polarft_calc.f90` (the glue's interface),
+`_shiftmap.f90` (the block's tail; `set_shiftmap_form` accepts `tail = metal` on the GPU), `_shiftmap_mlx.f90` (glue
+`check_shiftmap_tail_mlx` and its stub), `mlxf_toy_polarft_shiftmap_tester.f90`, `mlxf_test_defs.f90`
+(`polarft_map_block%tail`, `POLARFT_MAPTAIL_TG`, `POLAR_MAPTAIL_TOL`; the tail vocabulary moved above its first use),
+`scripts/toy_seam.txt`, `polar.inf`, `doc/code_base_map.md`, this note (rows extended to Phase 4 before the edits).
+
+**Exit items.**
+- *The fused form passes decision 12's last row as amended by R2 and every reduction gate on the GPU.* Every test of
+  `polar_shiftmap` runs with the fused reductions on the GPU, against the host oracle under the frozen caps (maps,
+  modes, losses, widths, evidence, cutoffs, tiles with a partial last tile, re-preparation, lifecycle); new: an
+  exact-tie fixture (mode (1, 1, 1) on both forms), seeded fixtures (keyed noise, 0.05 of each ring's rms; seed 1
+  calibrates, seeds 2 and 3 are judged) with each form's width and evidence against the oracle (variance error at most
+  6.8e-7, evidence 1.7e-6, both caps 1e-4), and the fused form against the graph: the losses equal bit for bit on all
+  seven fixtures, the evidence within **`POLAR_MAPTAIL_TOL` = 3.886e-7** (frozen: twice the largest calibration
+  difference, 1.943e-7 on seed 1, the noise-free fixture 0, *derived*; ceiling 1e-5), judged 3.256e-7; the modes equal
+  in 73 of 73 pairs where the oracle's margin allows (14 inside it); the widths' largest relative difference, reported:
+  noise-free 9.8e-7, seed 1 1.3e-6, perturbed 3.0e-7, broadband 2.2e-6, broadband folding grid 2.6e-5, seeds 2 and 3
+  6.6e-7 and 6.3e-7 (*measured*; the diagnosis of the stop applies: the graph's own float32 error on small widths).
+  Release `/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase4/rel_shiftmap_a.log`, Debug `/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase4/dbg_r2_try1.log`; 1,301 checks.
+- *Refused on the CPU device, the graph form taking over:* `set_shiftmap_form(..., metal)` is refused there ("the
+  fused map reductions run on the GPU only") and the maps are scored by the graph; the workspace refuses a fused block
+  off the GPU as well.
+- *Repeatable (decision 14):* a repeated configuration is bit for bit equal in one process (the broadband test, each
+  form), and the fused results' digest equals across two invocations (`B6E41467C910D75A`, Release, `/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase4/rel_shiftmap_a.log`,
+  `_b.log`).
+- *The four plants* (`/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase4/sweep/patch.py`, `build_variant.sh`, each built apart; `<plant>.diff`, `.check.log`):
+  kernel 2's tie to the higher rotation fails "a tie goes to the first cell in SIMPLE's order"; kernel 3 without the
+  pairs' cutoff fails "rejected widths are exactly -1"; the fused form asked for on the CPU device fails the refusal and
+  the graph's take-over. **The compensation removed does not fail** (`/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase4/sweep/plain.check.log`): with plain sums
+  every check passes, the evidence against the graph unchanged (3.256e-7 judged) — also at the M5's own sizes, added in
+  a scratch copy (`/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase4/sweep/prod_case.py`, `prod_base.check.log`, `prod_plain.check.log`: evidence differences 0 and
+  8.5e-8 with or without compensation). The sums' errors are below what any gate here resolves: a deviation, recorded.
+- *The sweep* (patched copies, Release, `/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase4/timed/sweep.log`, two rounds interleaved with the graph reductions and the
+  current form; load before 1.5, every row's load in the log): threadgroups of kernels 1 and 3 at 32, 128 and 256 and of
+  kernels 2 and 4 at 32 and 128 all within 0.5 % of [64, 64]; plain sums 0 %; a SIMD group per (rotation, pair) for
+  kernels 1 and 3: screen +2.7 %, window -1.8 %, canonical +1.6 %. **Frozen:** `POLARFT_MAPTAIL_TG = [64, 64]`, a thread
+  per (rotation, pair), compensated sums. The rates (*measured*, mean of the two rounds' best passes): graph reductions
+  7.84e4 (window, tile 16) and 2.02e4 (screen, tile 4) maps per second, fused 9.30e4 and 2.51e4; on the canonical driver
+  1.992 s against 1.619 s, **1.23** (*derived*; rule T's verdict is Phase 5's). The four launches beat the graph
+  reductions, so decision 9's fallback is not taken.
+- *Builds:* Debug and Release from scratch with `MLXF_WERROR`, 0 warnings, fast gate 13 of 13 (10.9 s), `check_tree.sh`
+  passed (`/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase4/p4_build_debug.log`, `p4_build_release.log`). Counts: as Phase 3's, **`unit_kernels` 2,522** in both
+  (`polar_shiftmap` 794 to 1,301) (`/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase4/counts_debug/`, `counts_release/`). Decision 20: the identity set equals Phase
+  3's byte for byte (`6c718cf1...8147`, `/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase4/identity/identity.txt`).
+
+**Frozen:** `POLAR_MAPTAIL_TOL` 3.886e-7; `POLARFT_MAPTAIL_TG` [64, 64]; the form (a thread per (rotation, pair),
+compensated sums); `unit_kernels` 2,522.
+
+**Decisions taken under delegation.**
+1. With no lattice left the fused reductions serve the Fourier-Bessel cells alone, so the int32 table from cell to row
+   of decision 9 is not built; the gates live in `polar_shiftmap` (its row extended to Phase 4).
+2. The kernels are made per map for the block's full tile, the actual count of pairs reaches them in an int32 input
+   (decision 4's rule): a partial last tile needs no second kernel object.
+3. The pairs' width cutoffs are decided on the device from kernel 2's loss (the same float32 comparison as the graph
+   form's host comparison), which removes the graph form's synchronisation per tile.
+4. Decision 13's seeded calibration (seed 1) and judged seeds (2, 3) are keyed-noise versions of the perturbed analytic
+   fixture: the oracle fixtures of decision 13 lived in the lattice tester Phase 3 removed.
+5. The plant "kernel 3 without the cut" removes the pairs' width cutoff: dropping the -40 log-weight cut changes the sums
+   by about e^-40, which no gate can see.
+6. A variant replaces the frozen form only above the 5 % that decision 9 sets for the plain sums; none reached it.
+
+**What it means, in short.** The fused reductions are correct (every oracle gate, the graph's losses bit for bit, its
+modes, its evidence to 3.3e-7) and repeatable, and they take the canonical driver from 1.99 s to 1.62 s, 1.23 times,
+against a ceiling of 1.42: probably not the 1.30 rule T asks, which Phase 5 measures at one, three and six processes.
+Compensated sums buy nothing measurable at these sizes, and cost nothing either.
+
+### Phase 5, 2026-11-27, 01:58 to 03:47 (the verdict at one, three and six processes)
+
+**Machine and base** as before; no new ruling. **Files changed:** this note only (no source changed; the Release and
+Debug trees of Phase 4's end, built from scratch, hold the current sources: no file under `src/`, `test/` or
+`scripts/` is newer than that build).
+
+**Frozen before the first verdict row:** the Fourier-Bessel construction (the only one); the graph reductions and the
+fused reductions of Phase 4 (threadgroups [64, 64], a thread per (rotation, pair) for kernels 1 and 3, compensated
+sums); particle tiles 16 (window) and 4 (screen) for both forms; `suite=maps` through `scripts/run_parts.sh`
+(`RUN_PARTS_SUITE=maps RUN_PARTS_UNIT=maps RUN_PARTS_LOAD=4`), `passes=9`, Release, `MLX_ENABLE_TF32=0`; five pairs
+per split, graph then fused, each form on the window and then the screen (`/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase5/verdict.sh`); the analysis
+`/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase5/analyse.py`: at one process the canonical time from the best passes (32,000 maps per grid), at more the sum of the
+two grids' times from go to the last exit, a pair valid only when every run's parts exit within one median pass.
+
+**Splits.** `2500_4` at one and three processes; six processes on `2500_4` were not run by the launcher's guard
+(predicted summed footprint 1.355e11 B against 0.8 of the machine's memory, `/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase5/run_parts_2500_4.tsv`, `/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase5/s6.log`),
+so six processes ran on `2500_1` (the grid file with `nrefs = 2500`, `/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase5/shiftmap_grid_2500_1.txt`, Phase 0's
+decision) with its own one-process row. Every split ran or is recorded as not run. Load at the series' start 1.5, the
+launcher waiting for at most 4 before each launch (every row's load in the series tables).
+
+| Split | Canonical s, graph | Canonical s, fused | Ratio (median of pairs) | Valid pairs |
+| --- | --- | --- | --- | --- |
+| 1 process, 2500_4 (best passes) | 1.991 | 1.617 | **1.232** | 5 of 5 |
+| 3 processes, 2500_4 (go to last exit) | 16.86 | 13.69 | **1.232** | 5 of 5 |
+| 1 process, 2500_1 (best passes) | 1.993 | 1.645 | 1.212 | 5 of 5 |
+| 6 processes, 2500_1 (go to last exit) | 16.65 | 13.29 | **1.253** | 4 of 5 (pair 1's graph window exited 0.35 s apart, above its median pass 0.31 s) |
+
+(*measured*; `/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase5/analysis_2500_4.txt`, `analysis_2500_1.txt`; the runs in `/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase5/runs/`.) Per form and grid (median
+of the five runs; total rate, rate per process, largest process footprint, summed footprint, largest MLX peak):
+
+| Split | Form | Window maps/s | Screen maps/s | Footprint largest / summed B | MLX peak B |
+| --- | --- | --- | --- | --- | --- |
+| 1, 2500_4 | graph | 7.84e4 | 2.02e4 | 2.11e10 / 2.11e10 | 1.07e10 |
+| 1, 2500_4 | fused | 9.31e4 | 2.51e4 | 2.10e10 / 2.10e10 | 1.07e10 |
+| 3, 2500_4 | graph | 1.08e5 (3.59e4 each) | 2.49e4 (8.29e3 each) | 2.23e10 / 6.59e10 | 1.07e10 |
+| 3, 2500_4 | fused | 1.25e5 (4.17e4 each) | 3.15e4 (1.05e4 each) | 2.20e10 / 6.50e10 | 1.06e10 |
+| 1, 2500_1 | graph | 7.83e4 | 2.02e4 | 7.16e9 / 7.16e9 | 3.41e9 |
+| 1, 2500_1 | fused | 9.23e4 | 2.47e4 | 7.03e9 / 7.03e9 | 3.39e9 |
+| 6, 2500_1 | graph | 1.18e5 (1.97e4 each) | 2.49e4 (4.15e3 each) | 7.83e9 / 4.61e10 | 3.30e9 |
+| 6, 2500_1 | fused | 1.29e5 (2.16e4 each) | 3.22e4 (5.37e3 each) | 7.39e9 / 4.37e10 | 3.28e9 |
+
+SIMPLE's rates beside them, from the grid file (commit `0a8b0903e`, labelled context, not measured here): 1.09e5
+(window) and 2.05e4 (screen) maps per second on 30 threads.
+
+**Rule T** (the reductions, on the Fourier-Bessel construction): the median ratio at one process is 1.232, below 1.30;
+no judged split is below 1.00 (1.212 to 1.253). **The fused reductions are not kept**; decision 16's mixed outcome
+does not arise. **Rule C**: no lattice remains (Phase 3), so the Fourier-Bessel form stays; nothing to judge.
+
+**Reported with the verdict:** the roadmap's reopening conditions: the total rate at three or six processes below 0.8
+of one process's: not met (at three processes 1.38 and 1.23 times one process's on the window and the screen for the
+graph, 1.34 and 1.25 for the fused; at six on `2500_1` 1.51 and 1.23, 1.40 and 1.31); the summed footprint above 5.15e10
+B: **met at three processes on 2500_4** (6.59e10 B graph, 6.50e10 B fused), not at six on `2500_1` (4.61e10 B). The
+rate measures agree in direction (best pass at one process, go to last exit at more).
+
+**Exit items.** Both rules' outcomes are above with their rows and load records; every split was run or recorded as not
+run; the two invocations' digests agree per form (every form's digests equal across all five pairs of every split,
+`analyse.py`'s "digests equal"); the two Phase 5 plants fail: a key the suite does not read stops the benchmark
+(`bt=64`: "suite=maps does not read bt=64", exit 2, `/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase5/plants/plant_unread_key.log`), and a row whose parts exit apart
+is rejected by the validity test (a split-3 run with its exit spread set to 5 s: the pair "NOT VALID",
+`/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase5/plants/plant_spread.log`). Decision 20: the identity set equals Phase 3's byte for byte (`/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase5/identity/`);
+`check_tree.sh` passed.
+
+**Decisions taken under delegation.**
+1. "Two invocations each" is met by the five pairs: each form ran five times per split, and their digests are compared.
+2. Six processes on `2500_1` as decided in Phase 0 (a grid file with `nrefs = 2500`, nothing else changed).
+3. The launcher's load threshold is 4 (`RUN_PARTS_LOAD=4`), the run's protocol, not its default 2.
+4. No build in this phase: the sources are those of Phase 4's from-scratch builds.
+
+**What it means, in short.** The fused map reductions make the maps 1.23 times faster on the canonical driver, alone
+and with three or six processes sharing the GPU, which is short of the 1.30 a second path needs: Phase 6 removes them
+and the Fourier-Bessel form with its compiled graph reductions stays. Three processes on the large case already pass
+the roadmap's memory line (6.6e10 B summed).
+
+### Phase 6, 2026-11-27, 03:47 to 04:00 (the survivor and the record)
+
+**Machine and base** as before; no new ruling (standing 19, R1, R2).
+
+**Files changed:** deleted `src/test/toys/polar/mlxf_toy_polarft_workspace_maptail.f90` (copy in `/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase6/removed/`);
+edited `mlxf_toy_polarft_workspace.f90`, `_workspace_shiftmap.f90`, `_workspace_mapreduce.f90` (the fused reductions'
+members, dispatch and refusal removed), `mlxf_toy_polarft_calc.f90`, `_core.f90`, `_shiftmap.f90`,
+`_shiftmap_mlx.f90` (back to HEAD: the selector `set_shiftmap_form` and its glue removed),
+`mlxf_toy_polarft_shiftmap_tester.f90` (HEAD's tests and the exact-tie and seeded-width tests),
+`mlxf_toy_seam_tester.f90`, `mlxf_test_defs.f90` (`POLARFT_MAP_FORMS`, `polarft_map_block%tail`, the fused form's
+constants removed), `mlxf_bench_polar_table.f90` (`form=` and `tail=` removed), both ledgers, `polar.inf` (HEAD's),
+`doc/code_base_map.md`, `planned/mlxf_kernel_families.md`, `planned/mlxf_roadmap.md`,
+`doc/policies/test_environment_policy.md`, `doc/implementation_notes/README.md`, `doc/history/2026-11.md`,
+`README.md`, this note; new `completed/mlxf_kernel_k4_report.md`.
+
+**Exit items.**
+- *Decision 17: one construction of the maps, the default.* Rule C removed the lattices (Phase 3) and rule T the fused
+  reductions (Phase 5): the Fourier-Bessel form with its compiled graph reductions is the only construction and
+  reduction form; the selector, the vocabulary `POLARFT_MAP_FORMS`, the block's `tail`, the fused form's constants,
+  the benchmark's `form=` and `tail=` and their ledger lines are deleted, "dead" proved by the clean builds below. The
+  Fourier-Bessel form's own pieces (`shiftmap_order`, `shiftmap_term_counts`, `test_folding`) stay: decision 17
+  deletes them only when the lattice is kept.
+- *Decision 18:* its condition (a lattice kept that reads the tiles) does not hold: the device route's refusal of the
+  maps stays as it is; no gate or plant applies.
+- *The survivor passes every map gate as the default on both devices:* `polar_shiftmap` 834 checks (the base's 794,
+  the exact tie, the seeded widths and evidence against the oracle on seeds 1 to 3), `polar_shiftmap_accuracy` as
+  before, `eul_prob_tab` 111 (the driver's shifts), `seam` 96 (the 100 map cycles, the shifts' host refusal), the
+  off-state check (`/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase6/counts_release/unit_kernels.log`, `/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase6/dbg_kernels.log`).
+- *The counts, frozen:* every area as the base's (`unit_core` 215 in both builds this time, within its known 214 to
+  216); **`unit_kernels` 2,053** (`polarft_calc` 333, `polar_shiftmap` 834, `eul_prob_tab` 111, `polarft_tail` 55,
+  `oracle_projection` 44, `oracle_polar` 46, `projector` 100, `projector_chain` 91, `pcg_solver` 86,
+  `reconstructor_pcg` 192, `seam` 96, `polarft_host` 65) (`/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase6/counts_debug/`, `counts_release/`).
+- *Decision 20 on what remains:* the Fourier-Bessel form stays, so no line is retired; the 364-line identity set
+  equals the base's byte for byte, `e2d65e88...4d33dba5` (`/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase6/identity/identity.txt`).
+- *Documents:* the families note (A3's outcome, the seam facts with the measured bytes, the modes' shifts, row K4),
+  the roadmap (decision 13's ruling and outcome, section 5, rank 2's row), the test policy (the shift-map suite's new
+  tests, `oracle_polar`, `suite=maps`, check 13's sentence corrected: an unread key stops the benchmark), the plans'
+  index, the history (2026-11-27), the README (the maps' status).
+- *The last-phase gates:* Debug and Release from scratch with `MLXF_WERROR`, 0 warnings, fast gate 13 of 13
+  (`/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase6/p6_build_debug.log`, `p6_build_release.log`); `scripts/check_tree.sh` passed; `scripts/check_embed.sh` passed
+  (`/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase6/gate_embed.log`); `scripts/check_toy_offstate.sh --exec` passed, the host route's table equal to the
+  executable's (`/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase6/gate_offstate.log`); `scripts/check_install.sh` passed on Release with `--require-gpu` and on
+  Debug (`/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase6/gate_install_release.log`, `gate_install_debug.log`); `scripts/release_gate.sh --allow-dirty` passed
+  (`90f5932-dirty`, Debug and Release, 91 s, `/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase6/gate_release.log`); the Release fast gate 10 times of 10, 10.5 to
+  11.2 s each (`/Users/hael/agent_runs/mlxf_kernel_k4/scratch/keep/phase6/fast_gate_1.log` to `_10.log`).
+- *The report:* `completed/mlxf_kernel_k4_report.md`, with the commit message (no attribution line).
+- *`git status`* shows the file table's paths only (and the report).
+
+**Decisions taken under delegation.**
+1. `set_shiftmap_form` goes with the losers (decision 8): with one construction and one reduction form nothing is
+   left to select, and its `tail` was the fused form's.
+2. The exact-tie and seeded-width tests stay in `polar_shiftmap`: they judge the survivor against the oracle (R2's
+   seeds) and cost 40 checks.
+3. `suite=maps` stays without `form=` and `tail=`: it is decision 15's instrument for the maps at several processes.
+4. The reductions' submodule `_workspace_mapreduce` stays: the split keeps `_workspace_shiftmap.f90` under 700 lines
+   (decision 23); whether to merge it back is left open.
+5. The release gate's work directory `build_release_gate/` in the checkout (ignored by git) was deleted after the run.
+
+**What it means, in short.** The maps are as they were before the run, the Fourier-Bessel form with compiled
+reductions, identity bit for bit; what the run adds is the oracles' asserted self-checks, the modes' shifts SIMPLE's
+callers need, a part-mode benchmark of the maps and two more map tests, and the measured answer that neither shift
+lattice nor fused reductions earns its place at the M5's grids.

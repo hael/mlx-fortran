@@ -8,7 +8,7 @@
 module mlxf_toy_seam_tester
 use, intrinsic :: iso_fortran_env, only: int64, real32, real64
 use mlxf,                       only: mlx_array, mlx_from, mlx_to, mlx_eval, mlx_live_count, mlx_active_memory, &
-                                      mlx_synchronize, mlx_set_default_device, mlx_default_device, sum
+                                      mlx_synchronize, mlx_set_default_device, mlx_default_device, mlx_clear_cache, sum
 use mlxf_test_defs,             only: POLARFT_REF_ROUTES, parameters
 use mlxf_toy_device_work,       only: device_work
 use mlxf_toy_polarft_calc,      only: polarft_calc
@@ -22,6 +22,8 @@ public :: run_all_seam_tests
 ! the cycles of the lifecycle checks, and how often a cycle of a class also makes its device arrays
 integer, parameter :: NCYCLES    = 1000
 integer, parameter :: FULL_EVERY = 100
+! the cycles of a shift map's lifecycle
+integer, parameter :: NMAPCYCLES = 100
 ! the classes' smallest fixtures: a calculator of two references and two particles on a ring of eight samples
 integer, parameter :: C_PFTSZ = 4
 integer, parameter :: C_NK    = 2
@@ -73,6 +75,7 @@ contains
             call test_opaque_lifecycle(devs(i))
             call test_wrong_type(devs(i))
             call test_polarft_calc(devs(i))
+            call test_polarft_maps(devs(i))
             call test_projector(devs(i))
             call test_reconstructor_pcg(devs(i))
         end do
@@ -299,6 +302,7 @@ contains
         integer, intent(in) :: dev
         type(polarft_calc)        :: pftc
         real(real32)              :: dists(C_NREFS, 1), temps(1)
+        real(real64), allocatable :: xy(:,:)
         integer                   :: irots(C_NREFS, 1), live0, nbad, i
         integer(int64)            :: mem0, mem1
         write(*,'(a)') 'test_polarft_calc'
@@ -333,6 +337,9 @@ contains
         call pftc%new_shiftmap(1, [0._real64, 1._real64], 8, C_NK)
         call assert_true(index(pftc%message(), 'MLX backend') > 0, device_name(dev)//': a shift map is refused on '// &
             &'the host backend')
+        call pftc%shiftmap_shifts(xy)
+        call assert_true(index(pftc%message(), 'MLX backend') > 0 .and. .not. allocated(xy), device_name(dev)// &
+            &': the modes'' shifts are refused on the host backend')
         temps = 1._real32
         call pftc%submit_block(1, 1, [1], temps)
         call assert_true(index(pftc%message(), 'MLX backend') > 0, device_name(dev)//': a block in flight is '// &
@@ -344,6 +351,78 @@ contains
         call assert_int(live0, mlx_live_count(), device_name(dev)//': polarft_calc on the host backend left no '// &
             &'device object')
     end subroutine test_polarft_calc
+
+    ! the smallest calculator with its particles and weights memoized; nbad counts the refusals
+    subroutine small_map_calc( pftc, nbad )
+        type(polarft_calc), intent(inout) :: pftc
+        integer,            intent(inout) :: nbad
+        complex(real32) :: pft(C_PFTSZ, C_NK)
+        real(real32)    :: ctf(C_PFTSZ, C_NK)
+        real(real64)    :: w(C_NK, 2)
+        integer         :: i, j, k
+        call small_calc(pftc, .true., .true., nbad)
+        w = 1._real64
+        call pftc%set_sigma2_weights(w)
+        if( len(pftc%message()) > 0 ) nbad = nbad + 1
+        do i = 1, 2
+            do k = 1, C_NK
+                do j = 1, C_PFTSZ
+                    pft(j, k) = cmplx(real(j - i, real32), real(k, real32) / 2._real32, real32)
+                    ctf(j, k) = 0.5_real32 + 0.1_real32 * real(j, real32)
+                end do
+            end do
+            call pftc%set_eo(i, i == 1)
+            call pftc%set_ptcl_ctfmat(i, ctf)
+            call pftc%set_ptcl_pft(i, pft)
+            if( len(pftc%message()) > 0 ) nbad = nbad + 1
+        end do
+        call pftc%memoize_ptcls()
+        if( len(pftc%message()) > 0 ) nbad = nbad + 1
+    end subroutine small_map_calc
+
+    ! 100 cycles of new_shiftmap, gen_shiftmap, shiftmap_mode and kill_shiftmap on one calculator leave the live
+    ! handles and the active memory where a warm cycle left them
+    subroutine test_polarft_maps( dev )
+        integer, intent(in) :: dev
+        type(polarft_calc) :: pftc
+        integer(int64)     :: mem0
+        integer            :: live0, nbad, i
+        write(*,'(a)') 'test_polarft_maps'
+        nbad = 0
+        call small_map_calc(pftc, nbad)
+        call map_cycle(pftc, nbad)
+        call mlx_synchronize()
+        call mlx_clear_cache()
+        live0 = mlx_live_count()
+        mem0  = mlx_active_memory()
+        do i = 1, NMAPCYCLES
+            call map_cycle(pftc, nbad)
+        end do
+        call mlx_synchronize()
+        call mlx_clear_cache()
+        call assert_int(0, nbad, device_name(dev)//': polarft_calc: every map cycle was carried out')
+        call assert_int(live0, mlx_live_count(), device_name(dev)//': polarft_calc: 100 map cycles leave the live '//&
+            &'handles as they were')
+        call assert_true(mlx_active_memory() == mem0, device_name(dev)//': polarft_calc: 100 map cycles leave the '//&
+            &'active memory as it was')
+        call pftc%kill()
+    end subroutine test_polarft_maps
+
+    ! one map's cycle: made, the modes of particle 1 against both references read, every map released
+    subroutine map_cycle( pftc, nbad )
+        type(polarft_calc), intent(inout) :: pftc
+        integer,            intent(inout) :: nbad
+        real(real32) :: loss(C_NREFS)
+        integer      :: irot(C_NREFS), irho(C_NREFS), ialpha(C_NREFS)
+        call pftc%new_shiftmap(1, [0._real64, 1._real64], 8, C_NK)
+        if( len(pftc%message()) > 0 ) nbad = nbad + 1
+        call pftc%gen_shiftmap(1, [1, 2], [1, 1])
+        if( len(pftc%message()) > 0 ) nbad = nbad + 1
+        call pftc%shiftmap_mode(1, [1._real64, 1._real64], 0._real64, irot, irho, ialpha, loss)
+        if( len(pftc%message()) > 0 ) nbad = nbad + 1
+        call pftc%kill_shiftmap()
+        if( len(pftc%message()) > 0 ) nbad = nbad + 1
+    end subroutine map_cycle
 
     ! ---- the projector -------------------------------------------------------------------------------------------
 

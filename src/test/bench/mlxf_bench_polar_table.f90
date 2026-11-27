@@ -1,9 +1,10 @@
 !@descr: benchmark of the polar table workspace at SIMPLE's sizes: accuracy block, timing sweep, profile, overlap, shift maps
-! mlxf_test_exec test=bench_polar_table suite=<accuracy|time|profile|overlap|stream|shiftmap> [key=value ...]. The
+! mlxf_test_exec test=bench_polar_table suite=<accuracy|time|profile|overlap|stream|shiftmap|maps> [key=value ...]. The
 ! case geometry comes from a key = value file of SIMPLE's measured cases (cases=, case=), the shift maps' grid from
 ! another (grid=, maps=); the data are synthetic. Every suite hands the rings to the toy calculator and fills
 ! its tables through the toy driver; a key the suite does not read stops the program. The accuracy mode holds the 64,000-pair block to its oracle and the frozen bounds; the others append
-! measure-only rows to ./bench_polar_table*.tsv. suite=time scores one part (nparts=, part=) after a go file (go=).
+! measure-only rows to ./bench_polar_table*.tsv. suite=time scores one part (nparts=, part=) after a go file (go=),
+! and so does suite=maps, one map's maps of one part, in the same row layout.
 module mlxf_bench_polar_table
 use, intrinsic :: iso_fortran_env, only: int32, int64, real32, real64
 use, intrinsic :: iso_c_binding,   only: c_int, c_double
@@ -61,13 +62,14 @@ type :: bench_case
 end type bench_case
 
 ! the keys each suite reads, blank separated; test and suite belong to the executable
-character(len=*), parameter :: SUITE_KEYS(6) = [character(len=96) :: &
+character(len=*), parameter :: SUITE_KEYS(7) = [character(len=96) :: &
     &'accuracy cases case bt rt device tail', &
     &'time cases case cases_list bt rt device nthr nparts part go passes tail', &
     &'profile cases case bt rt device nthr tail', &
     &'overlap cases case bt rt device nthr outer load', &
     &'stream seconds nthr', &
-    &'shiftmap cases case grid maps ptiles device evidence widths revision nthr']
+    &'shiftmap cases case grid maps ptiles device evidence widths revision nthr', &
+    &'maps cases case grid maps ptiles device nthr nparts part go passes revision']
 
 ! one shift map of SIMPLE's measured grid (blocks [map name]) and SIMPLE's full-team rate on it (two invocations)
 type :: bench_map
@@ -204,6 +206,8 @@ contains
                 call bench_stream
             case( 'shiftmap' )
                 call bench_shiftmap
+            case( 'maps' )
+                call bench_maps
             case default
                 found = .false.
         end select
@@ -1633,6 +1637,143 @@ contains
         end do
         call pftc%kill
     end subroutine bench_shiftmap
+
+    ! one part of the maps of one map (maps=window or screen) at one particle tile (ptiles=, default 16): the
+    ! case's data, the reference tiles and the map made, the part's driver, then the go file; a warm pass, passes=
+    ! timed passes (default 3), one row of bench_polar_table.tsv in the time suite's layout (the rate in maps per
+    ! second of the part's particles times the candidates), the results' digest
+    subroutine bench_maps
+        type(bench_case)              :: cs
+        type(bench_data)              :: d
+        type(bench_map)               :: mp
+        type(polarft_calc)            :: pftc
+        type(eul_prob_tab)            :: tab
+        type(parameters)              :: params
+        type(polar_map_results)       :: res
+        integer,          allocatable :: cands(:,:), pids(:)
+        real(real64),     allocatable :: rho(:), walls(:)
+        real(real64)                  :: t0, prep, peak, cache
+        real                          :: load1
+        integer(int64)                :: dig
+        integer                       :: ptile, npasses, imap, np, i, rep
+        character(len=:), allocatable :: label
+        write(*,'(a)') '**** bench_polar_table suite=maps ****'
+        call mlx_set_default_device(device_of_arg())
+        cs      = read_case(arg_str('cases', 'polar_case.txt'), arg_str('case', '2500_4'))
+        mp      = read_map(arg_str('grid', 'shiftmap_grid.txt'), arg_str('maps', 'screen'))
+        ptile   = arg_int('ptiles', 16)
+        npasses = arg_int('passes', 3)
+        if( ptile < 1 .or. npasses < 1 )then
+            write(*,'(a)') 'bench_polar_table: suite=maps needs ptiles= and passes= of at least 1 (one map, one tile)'
+            error stop 2
+        endif
+        call check_map_case(cs, mp)
+        label  = map_label(mp)
+        cs%box = map_box(mp)
+        d%cs   = cs
+        call make_data(d, cs, POLAR_SEED_JUDGED, .false., pftc=pftc)
+        d%pfromto = part_range(cs%nptcls)
+        load1 = load_average()
+        t0    = clock_s()
+        call prepare(pftc, bench_config(bt=POLAR_CANON_BT, rt=POLAR_CANON_RT))
+        imap = map_index(mp)
+        rho  = [(real(i - 1, real64) * mp%rho_max / real(mp%nrho - 1, real64), i = 1, mp%nrho)]
+        call pftc%new_shiftmap(imap, rho, mp%nalpha, mp%kscreen)
+        call assert_int(0, refused(pftc), 'bench_polar_table: the map is made: '//pftc%message())
+        if( refused(pftc) /= 0 ) return
+        pids         = [(i, i = d%pfromto(1), d%pfromto(2))]
+        np           = size(pids)
+        cands        = map_candidates(d, mp)
+        params%pftsz = cs%pftsz
+        params%box   = cs%box
+        params%nthr  = arg_int('nthr', 1)
+        call tab%new_pipeline(params, pftc, pids)
+        call tab%set_candidates(cands(:, d%pfromto(1):d%pfromto(2)))
+        call tab%set_fill_stages(.false., .true.)
+        call tab%use_shiftmap(imap, mp%prior_w)
+        call tab%set_fill_options(np, 1, .false., .false.)
+        call assert_int(0, len(tab%message()), 'bench_polar_table: the driver is made: '//tab%message())
+        call pftc%set_shiftmap_options(ptile, .false., .false., .false.)
+        call mlx_synchronize()
+        prep = clock_s() - t0
+        call wait_for_go
+        call score_maps_pass(tab, np, res)
+        call mlx_synchronize()
+        call mlx_reset_peak_memory()
+        allocate(walls(npasses))
+        do rep = 1, npasses
+            t0 = clock_s()
+            call score_maps_pass(tab, np, res)
+            walls(rep) = clock_s() - t0
+        end do
+        peak  = real(mlx_peak_memory(), real64)
+        cache = real(mlx_cache_memory(), real64)
+        if( allocated(res%loss) )then
+            call assert_true(results_in_range(res, mp), 'bench_polar_table: every '//trim(mp%name)//&
+                &' result is finite and on the grid')
+            dig = DIGEST_START
+            call digest_maps(dig, res, 1, size(res%loss, 2))
+            call report_digest('maps', label//' part '//trim(int_str(arg_int('part', 1)))//' ptcl_tile='//&
+                &trim(int_str(ptile)), dig)
+        endif
+        call write_maps_row(d, mp, ptile, [walls(1:min(3, npasses)), [(-1._real64, i = npasses + 1, 3)], prep, &
+            &map_estimate_bytes(cs, mp, ptile, mp%norder), peak, cache, minval(walls), median_of(walls)], load1)
+        call tab%kill
+        call pftc%kill
+    end subroutine bench_maps
+
+    ! a maps row's form column: the map
+    function map_label( mp ) result(label)
+        type(bench_map), intent(in) :: mp
+        character(len=:), allocatable :: label
+        label = 'map:'//trim(mp%name)
+    end function map_label
+
+    ! an integer as text
+    function int_str( i ) result(str)
+        integer, intent(in) :: i
+        character(len=16) :: str
+        write(str, '(i0)') i
+    end function int_str
+
+    ! a row of bench_polar_table.tsv for suite=maps, in the time suite's column order (scripts/run_parts.sh reads
+    ! the rate in column 20, the work in 21, the MLX peak and cache in 26 and 27, the median pass in 30); vals =
+    ! wall_rep1..3, prep_s, est_bytes, mlx_peak_bytes, mlx_cache_bytes, the best pass, the median pass
+    subroutine write_maps_row( d, mp, ptile, vals, load1 )
+        type(bench_data), intent(in) :: d
+        type(bench_map),  intent(in) :: mp
+        integer,          intent(in) :: ptile
+        real(real64),     intent(in) :: vals(9)
+        real,             intent(in) :: load1
+        character(len=*), parameter   :: TSV = 'bench_polar_table.tsv'
+        character(len=1), parameter   :: T = achar(9)
+        character(len=:), allocatable :: label
+        real(real64)                  :: maps, cells
+        integer                       :: u, np
+        logical                       :: l_new
+        label = map_label(mp)
+        np    = d%pfromto(2) - d%pfromto(1) + 1
+        maps  = real(np, real64) * real(mp%ncand, real64)
+        cells = real(mp%nalpha, real64) * real(mp%nrots, real64) * real(mp%nrho, real64)
+        inquire(file=TSV, exist=l_new)
+        l_new = .not. l_new
+        open(newunit=u, file=TSV, position='append', action='write', status='unknown')
+        if( l_new ) write(u,'(a)') 'case'//T//'nspace'//T//'nstates'//T//'nrefs'//T//'nptcls'//T//'pftsz'//T//&
+            &'nrots'//T//'kfrom'//T//'kscreen'//T//'ptcl_tile'//T//'ncand'//T//'form'//T//'device'//T//'precision'//&
+            &T//'load1'//T//'wall_s'//T//'wall_rep1'//T//'wall_rep2'//T//'wall_rep3'//T//'maps_per_s'//T//&
+            &'useful_maps'//T//'cells_per_map'//T//'prep_s'//T//'nthr'//T//'est_bytes'//T//'mlx_peak_bytes'//T//&
+            &'mlx_cache_bytes'//T//'status'//T//'passes'//T//'wall_median_s'
+        write(u,'(a,10(a,i0),a,a,a,a,a,a,a,f6.2,4(a,f10.4),a,es12.5,2(a,es12.5),a,f10.4,a,i0,3(a,es12.5),a,a,a,i0,a,'//&
+            &'f10.4)') trim(d%cs%name), T, d%cs%nspace, T, d%cs%nstates, T, d%cs%nrefs, T, d%cs%nptcls, T, &
+            &d%cs%pftsz, T, mp%nrots, T, mp%kfrom, T, mp%kscreen, T, ptile, T, mp%ncand, T, label, T, &
+            &device_name(mlx_default_device()), T, precision_mode(), T, load1, T, vals(8), T, vals(1), T, vals(2), T, &
+            &vals(3), T, maps / vals(8), T, maps, T, cells, T, vals(4), T, arg_int('nthr', 1), T, vals(5), T, &
+            &vals(6), T, vals(7), T, 'timed', T, arg_int('passes', 3), T, vals(9)
+        close(u)
+        write(*,'(a,i0,a,f9.4,a,es11.4,a,f9.4,a,es11.4,2(a,es10.3),a)') '    maps '//label//' ptcl_tile=', ptile, &
+            &' best=', vals(8), ' s, ', maps / vals(8), ' maps/s; median=', vals(9), ' s, ', maps / vals(9), &
+            &' maps/s; peak ', vals(6), ' B, cache ', vals(7), ' B'
+    end subroutine write_maps_row
 
     ! the integers of a comma list (unreadable items skipped)
     function int_list( s ) result(v)

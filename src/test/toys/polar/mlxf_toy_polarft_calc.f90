@@ -130,6 +130,7 @@ type :: polarft_calc
     logical        :: sm_l_profile            = .false.
     real(real32),             allocatable :: sm_logz(:,:)
     real(real32),             allocatable :: sm_maps(:,:,:,:,:)
+    real(real64),             allocatable :: sm_shifts(:,:,:)
     character(len=:),         allocatable :: msg
     class(device_work),       allocatable :: ws(:)
   contains
@@ -179,6 +180,7 @@ type :: polarft_calc
     procedure :: set_shiftmap_options
     procedure :: shiftmap_evidence
     procedure :: shiftmap_maps
+    procedure :: shiftmap_shifts
     procedure :: wsqsum_ptcl_band
     procedure :: shiftmap_kstop
     procedure :: shiftmap_order
@@ -571,6 +573,13 @@ interface
         class(polarft_calc),       intent(inout) :: self
         real(real32), allocatable, intent(out)   :: maps(:,:,:,:)
     end subroutine shiftmap_maps
+
+    ! per pair of the last modes, the mode's shift in the reference's axes (2, pairs; pixels), the shift SIMPLE's
+    ! callers take from shiftmap_shift at the mode's cell; unallocated before any modes
+    module subroutine shiftmap_shifts( self, xy )
+        class(polarft_calc),       intent(inout) :: self
+        real(real64), allocatable, intent(out)   :: xy(:,:)
+    end subroutine shiftmap_shifts
 
     ! particle iptcl's weighted square sum over the shells kfromto(1)..kstop under its half's shell weights; 0
     ! when the calculator does not hold the particle

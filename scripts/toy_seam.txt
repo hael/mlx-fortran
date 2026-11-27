@@ -26,6 +26,7 @@ mlxf_toy_polarft_shiftmap host
 mlxf_toy_polarft_shiftmap_mlx glue
 mlxf_toy_polarft_workspace device
 mlxf_toy_polarft_workspace_lifecycle device
+mlxf_toy_polarft_workspace_mapreduce device
 mlxf_toy_polarft_workspace_score device
 mlxf_toy_polarft_workspace_shiftmap device
 mlxf_toy_polarft_workspace_tail device

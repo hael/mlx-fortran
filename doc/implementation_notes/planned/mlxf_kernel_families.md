@@ -126,8 +126,10 @@ tile plan 64 by 250, on the M5 Ultra):
   of 40 tiles of 244 by 500 by 183 single-precision values), made by `memoize_refs` (packed on the host from the
   memo, 3.57e9 B of staging per parity while one is uploaded, *derived*) and held until `kill_ref_tiles`, `kill`
   or the next `memoize_refs`: one iteration of a part process. A shift map adds 2.63e9 B for both
-  parities (*measured*: 9.77e9 B of active memory with the tiles) from `new_shiftmap` or `setup_shiftmaps`
-  until `kill_shiftmap`. A block in flight holds its graph: the MLX peak is 10.26e9 B while a half of 1,000
+  parities (*measured*: 9.77e9 B of active memory with the tiles, again in run `mlxf_kernel_k4`; a lattice on the
+  tiles would have held 7.15e9 B, no reference data of its own) from `new_shiftmap` or `setup_shiftmaps`
+  until `kill_shiftmap`. A process scoring the maps of case `2500_4` has a peak footprint of 2.1e10 B; three
+  share the GPU at 6.6e10 B summed (*measured*, K4). A block in flight holds its graph: the MLX peak is 10.26e9 B while a half of 1,000
   particles is scored, and MLX keeps 3.28e9 B in its cache afterwards (*measured*). With the fused tail the peak
   is 16.71e9 B: a cheap tail lets the host queue more tiles ahead of the device (*measured*, K1).
 - **What stays on the host.** The one memo of the references (`ft_ref_terms`, both parities: 3.57e9 B) and the
@@ -197,7 +199,9 @@ as mirrored or as an addition with its reason):
   iteration), the dense temperatures (`set_temps`), the maps' candidates (`set_candidates`; SIMPLE's pool
   selects them) and, when it has one, its own map (`use_shiftmap`).
 - **The maps:** they are built on the device when `shiftmap_mode` reads them, tile by tile; `gen_shiftmap`
-  records the pairs. There is no `shiftmap_shift`, no `shiftmap_draw` and no in-cell refinement. They read the
+  records the pairs. There is no `shiftmap_shift` (its rotation-free dummy list), no `shiftmap_draw` and no
+  in-cell refinement; `shiftmap_shifts` (an addition, K4) hands over the modes' shifts in the reference's axes,
+  what SIMPLE's callers compute with `shiftmap_shift` at the mode, and `batch_map_results` carries them. They read the
   memo's rows, and the reference power keeps the toy's order (`sum(c2 r2 w)`); SIMPLE's euclid power multiplies
   the weighted CTF term by the reference term, an order K4 revisits.
 - **The driver:** one thread walks the blocks, one or two in flight on the device (SIMPLE: an OpenMP loop
@@ -221,10 +225,20 @@ as mirrored or as an addition with its reason):
 - **A3, the shift lattice,** with the map reductions. Two variants:
   - **Particle-side shifts:** one ring transform per (particle, shift), shared by all that particle's
     references. It samples SIMPLE's polar grid rotated by each rotation's angle. It therefore agrees with
-    SIMPLE's map in distribution, not cell by cell.
-  - **Reference-side shifts:** SIMPLE's exact cells, at one ring transform per (reference, shift), about
-    1 Mflop at pftsz 182 and 61 shells (*derived*: 61 complex transforms of length 364). It pays only where
-    many particles share the reference.
+    SIMPLE's map in distribution, not cell by cell (exactly at the rotations whose angle is a whole number of
+    direction steps).
+  - **Reference-side shifts:** SIMPLE's exact cells, at one ring transform per (reference, shift) and map
+    shell: 30 transforms of length 364 on the maps' band (shells 2 to 31), not the 61 of the full band.
+  - **K4's outcome** (run `mlxf_kernel_k4`, [report](../completed/mlxf_kernel_k4_report.md)): both were built as
+    graphs on the dense score's resident tiles and reproduce the oracle's cells to float32 rounding (6.4e-7).
+    The reference-side lattice reaches 0.18 of the Fourier-Bessel form's ceiling (construction 219 us per screen
+    map against 33 us: nothing is shared at the benchmark's candidates) and was removed. The particle-side lattice
+    is the fast one, 1.29 times the Fourier-Bessel graph on the canonical driver and 1.39 times its ceiling, but it
+    failed the decision-level test (roadmap decision 13, ruled B): its start shifts differ from SIMPLE's by more
+    than a map step more often than a control lattice turned by half a direction step, by more than one pair, in two
+    of twelve judged rows (98 against 108 pairs summed), and was removed. The fused map reductions (four Metal
+    kernels) gave 1.23 times the graph reductions, below the 1.30 a second path needs, and were removed. The
+    Fourier-Bessel form with its compiled graph reductions stays.
 - **A4, the cc finish and the classic reductions:** the best pair, the best k, and the first improvement in
   a keyed random order (stochastic hill climbing evaluated in full, then decided in the CPU's order).
 
@@ -237,16 +251,19 @@ reference-side variant must also reproduce the Fourier-Bessel oracle's cells.
 **Numbers in hand.**
 - **Dense score:** 1.76e7 pairs/s on the GPU against 3.75e6 on 30 threads (*measured*).
 - **Fourier-Bessel maps on the GPU:** 7.46e4 (window) and 1.99e4 (screen) maps/s, against SIMPLE's 1.09e5
-  and 2.05e4 (*measured*).
+  and 2.05e4 (*measured*); 7.84e4 and 2.02e4 in run `mlxf_kernel_k4` (the canonical driver of 32,000 maps per grid
+  in 1.99 s, of which the graph reductions take 0.59 s: 29 %).
 - **Direct shifts on the half ring:** 0.50 (window) and 0.77 (screen) of the multiply-adds of SIMPLE's
-  Fourier-Bessel form at the M5 grids (*derived*).
+  Fourier-Bessel form at the M5 grids (*derived*), counting the shell sums only; the measured lattices (K4) are
+  bound by their ring transforms and their products.
 - **Break-even tile occupancy** against 30 threads: about 21 % (*derived*: 1/4.69, if a masked tile costs
   what a dense one does).
 - **Resident references** at pftsz 182, 61 shells, 2,500 directions, both halves: 0.9 GB per state
   (*derived*), before the scorer's reordered copy.
 
 **Open decisions.**
-- A3's variant: particle-side or reference-side shifts.
+- A3's variant: decided by K4 (roadmap decision 13, ruled B): neither lattice is kept; the Fourier-Bessel form
+  stays.
 - Whether a pair's arithmetic may depend on its tile. This fixes what repeatability can promise for
   arbitrary sets.
 - Which reductions enter first.
@@ -586,7 +603,7 @@ solution of the near-singular system either way. Reported for SIMPLE, not a K8 g
 | K1 | A1: the fused tail of the dense score | Metal kernel wrapper; the refactored polar toy and its baseline (roadmap rank 0b) | the polar-table checks pass on the GPU at their recorded counts; judged on the canonical driver's elapsed time against the compiled graph tail (roadmap decision 15), alone and at 3 and 6 processes. **Kept** (2026-11-25, the maintainer's ruling): 1.80 (`2500_4`) and 1.65 (`2500_1`) at one process, 1.74 at six of `2500_1`; `2500_4` at three not resolved by per-process rates (1.52 to 1.59 on the time to the last exit); +6e9 B peak per process; selectable, the default `graph` ([report](../completed/mlxf_kernel_k1_report.md)) |
 | K2 | B1: the polar projection | Metal kernel wrapper; `mlx_rfftn` for the bench | the host matrix oracle and controls pass; the chained test with A passes; timed at 2,500 directions, pftsz 182, 61 shells. **Delivered** (2026-11-25, [report](../completed/mlxf_kernel_k2_report.md)): the fused gather kept (24.6 and 24.4 at one process, 5.27 and 6.30 at three from go to the last exit), the device route kept (32.5 and 35.1); the probe's outcome C by the letter, B by the diagnosis, **ruled B**; the defaults kept (graph form, host route) |
 | K3 | A2: arbitrary reference sets | `mlx_gather_mm` or `mlx_block_masked_mm` | listed pairs equal the dense kernel's; occupancy and rate reported for cone-shaped sets, with and without orientation order |
-| K4 | A3: the shift lattice and the map reductions | K1's tail | the reference-side variant reproduces the Fourier-Bessel oracle's cells; a particle-side variant passes a decision-level test frozen before timing (roadmap decision 13); the chosen variant passes the map gates; timed against milestone 1's maps at the M5 grids |
+| K4 | A3: the shift lattice and the map reductions | K1's tail | the reference-side variant reproduces the Fourier-Bessel oracle's cells; a particle-side variant passes a decision-level test frozen before timing (roadmap decision 13); the chosen variant passes the map gates; timed against milestone 1's maps at the M5 grids. **Delivered 2026-11-27, nothing kept** ([report](../completed/mlxf_kernel_k4_report.md)): both lattices reproduce the oracle's cells; the particle-side one failed the decision-level test (2 of 12 rows) and the reference-side one its ceiling (0.18); the fused map reductions gave 1.23 (below 1.30, rulings R1 and R2); the Fourier-Bessel maps with the graph reductions stay; the oracles' self-checks and the modes' shifts (`shiftmap_shifts`) were added |
 | K5 | B2: the pose objective with gradient and Gauss-Newton matrix | Metal kernel wrapper | the objective, gradient and matrix match the host oracle; planted poses are recovered; evaluations per second timed |
 | K6 | C: the insertion, three forms | `mlx_scatter_add`, `mlx_argsort`, the scans, Metal kernel wrapper; K2 | the adjoint identity, numerator and density pass; the repeatability gate is applied to each form, and only a form that passes it is kept (roadmap decision 14); timed. A protected-update probe on a collision-heavy fixture follows K2 directly |
 | K7 | A4: the cc finish and the classic reductions | `mlx_argpartition` or `mlx_topk` | both objectives and each reduction match the oracle |

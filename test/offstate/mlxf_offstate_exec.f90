@@ -1,10 +1,11 @@
 !@descr: the off-state program of the toys: what a build without MLX runs, built without USE_MLX and without the library
 ! It imports the toys' host modules only. It fills the polar host route's table on the fixture of sub-suite
 ! polarft_host and writes its lines (scripts/check_toy_offstate.sh compares them with mlxf_test_exec's), checks that
-! a team of four fills the same bytes, and asks each toy class for the MLX backend: every one must refuse with
-! "built without MLX". Exit status 1 when a check fails.
+! a team of four fills the same bytes, asks each toy class for the MLX backend: every one must refuse with
+! "built without MLX", and asks the host backend's calculator for a shift map, which it refuses. Exit status 1
+! when a check fails.
 program mlxf_offstate_exec
-use, intrinsic :: iso_fortran_env, only: int32, real32
+use, intrinsic :: iso_fortran_env, only: int32, real32, real64
 use mlxf_test_defs,             only: PH_PFTSZ, parameters, polarft_host_fixture, polarft_host_table
 use mlxf_toy_polarft_calc,      only: polarft_calc
 use mlxf_toy_projector,         only: projector
@@ -42,6 +43,12 @@ end do
 ! the MLX backend is refused by every class, with the stub's message
 call pftc%new(parameters(pftsz=PH_PFTSZ, l_mlx=.true.), 2, [1, 2], [1, 2])
 call check(index(pftc%message(), 'built without MLX') > 0, 'polarft_calc refuses the MLX backend: '//pftc%message())
+call pftc%kill()
+! the host backend has no shift maps: a calculator on it refuses them
+call pftc%new(parameters(pftsz=PH_PFTSZ, l_mlx=.false.), 2, [1, 2], [1, 2])
+call pftc%new_shiftmap(1, [0._real64, 1._real64], 8, 2)
+call check(index(pftc%message(), 'shift maps run on the MLX backend only') > 0, &
+    &'polarft_calc on the host backend refuses a shift map: '//pftc%message())
 call pftc%kill()
 call vol%new([4, 4, 4], 1._real32)
 call check(index(vol%message(), 'built without MLX') > 0, 'projector refuses the MLX backend: '//vol%message())

@@ -1,1 +1,1 @@
-!@descr: independent double-precision references the toys and the benchmarks are judged against: DFTs, polar scores and shift maps, poses, projections, gridding, the reconstruction's fixture and PCG, with their self-checks
+!@descr: independent double-precision references the toys and the benchmarks are judged against: DFTs, polar scores and shift maps, poses, projections, gridding, the reconstruction's fixture and PCG, with their self-checks and the testers that assert them

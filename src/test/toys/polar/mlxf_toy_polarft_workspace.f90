@@ -63,6 +63,38 @@ type :: polarft_workspace_map
     type(mlx_function)        :: map_evidence
 end type polarft_workspace_map
 
+! the device arrays every tile of a block of maps shares: the particles' full-ring spectra, real parts then
+! imaginary parts along the shells (nrots, 2 nkb, nptcls), the band CTF memos (pftsz+1, nkb, nptcls), the
+! rotations' cosines and sines (nrots, 1), the particle's ring index shifted by each order, (m' + n) modulo nrots
+! (nrots, 1, 1, norder+1), the cells' prior with the log area of one cell per radius (1, 1, nrho, 1); and the
+! prior's log normaliser over every cell
+type :: map_shared
+    type(mlx_array) :: ydev
+    type(mlx_array) :: c2dev
+    type(mlx_array) :: cosr
+    type(mlx_array) :: sinr
+    type(mlx_array) :: shiftidx
+    type(mlx_array) :: cellprior
+    real(real64)    :: lse_prior = 0._real64
+end type map_shared
+
+! one tile of particles with every candidate of each: the particles' places in the block and their candidate
+! references (ncand, particles), and per pair (candidate fastest) its reference and particle (inputs); the
+! tile's maps lp (nalpha, nrots, nrho, pairs) on the device, which the construction makes and the reductions read;
+! the flat mode index, loss, width and log evidence per pair, and the maps when asked (outputs)
+type :: map_tile
+    integer,      allocatable :: ptcls(:)
+    integer,      allocatable :: cands(:,:)
+    integer,      allocatable :: pref(:)
+    integer,      allocatable :: pptcl(:)
+    integer,      allocatable :: idx(:)
+    real(real32), allocatable :: loss(:)
+    real(real32), allocatable :: sdev(:)
+    real(real32), allocatable :: logz(:)
+    real(real32), allocatable :: maps(:,:,:,:)
+    type(mlx_array)           :: lp
+end type map_tile
+
 ! the inputs of a tile's tail: the inverse transform's rows (nrots, rt, bt), 1/(2 wsq) and inverse
 ! temperatures (1, 1, bt), variates (rt, bt)
 type :: tail_inputs
@@ -326,6 +358,50 @@ interface
         class(polarft_workspace), intent(in) :: self
         real(real64) :: t(4)
     end function map_seconds
+
+    ! a tile's reductions of its maps tl%lp: the mode and its loss, the widths of the pairs under their cutoffs,
+    ! the evidence when asked, copied into tl; status /= 0 on a failure (message)
+    module subroutine reduce_map_tile( self, mblk, sh, tl, status )
+        class(polarft_workspace), intent(inout) :: self
+        type(polarft_map_block),  intent(in)    :: mblk
+        type(map_shared),         intent(in)    :: sh
+        type(map_tile),           intent(inout) :: tl
+        integer,                  intent(out)   :: status
+    end subroutine reduce_map_tile
+
+    ! the compiled reductions' callbacks: the selection (maps, tempered inverse temperatures, prior to the mode's
+    ! flat index and loss), the width and the evidence; separate module procedures, since the preparation compiles
+    ! what the reduction defines
+    module subroutine map_select_callback( inputs, outputs, status )
+        type(mlx_array),              intent(in)  :: inputs(:)
+        type(mlx_array), allocatable, intent(out) :: outputs(:)
+        integer,                      intent(out) :: status
+    end subroutine map_select_callback
+
+    module subroutine map_reduce_callback( inputs, outputs, status )
+        type(mlx_array),              intent(in)  :: inputs(:)
+        type(mlx_array), allocatable, intent(out) :: outputs(:)
+        integer,                      intent(out) :: status
+    end subroutine map_reduce_callback
+
+    module subroutine map_evidence_callback( inputs, outputs, status )
+        type(mlx_array),              intent(in)  :: inputs(:)
+        type(mlx_array), allocatable, intent(out) :: outputs(:)
+        integer,                      intent(out) :: status
+    end subroutine map_evidence_callback
+
+    ! the clock of the profiled map stages, in seconds
+    module function map_clock() result(t)
+        real(real64) :: t
+    end function map_clock
+
+    ! a profiled map stage: its arrays evaluated (a barrier), its seconds since t0 added to mstage_s(i)
+    module subroutine map_stage_done( self, i, t0, arrays )
+        class(polarft_workspace), intent(inout) :: self
+        integer,                  intent(in)    :: i
+        real(real64),             intent(in)    :: t0
+        type(mlx_array),          intent(in)    :: arrays(:)
+    end subroutine map_stage_done
 end interface
 
 end module mlxf_toy_polarft_workspace

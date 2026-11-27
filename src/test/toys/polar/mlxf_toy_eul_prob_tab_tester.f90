@@ -7,12 +7,13 @@
 module mlxf_toy_eul_prob_tab_tester
 use, intrinsic :: iso_fortran_env, only: real32, real64
 use mlxf,                  only: mlx_set_default_device, mlx_default_device, mlx_live_count, MLX_DEVICES
-use mlxf_test_defs,        only: POLAR_MAP_CAP_L2, SHIFTMAP_WINDOW, POLARFT_TAILS, parameters, polar_map_results
+use mlxf_test_defs,        only: POLAR_MAP_CAP_L2, POLAR_MAP_SHIFT_TOL, SHIFTMAP_WINDOW, POLARFT_TAILS, parameters, &
+                                 polar_map_results
 use mlxf_toy_polarft_calc, only: polarft_calc
 use mlxf_toy_eul_prob_tab, only: eul_prob_tab
 use mlxf_oracle_polar,     only: polar_full_ring, polar_keyed_u
 use mlxf_test_utils,       only: assert_true, assert_int, device_name, bits_equal, test_devices, tests_run
-use mlxf_test_reduce,      only: nan_max
+use mlxf_test_reduce,      only: nan_max, nan_maxval
 implicit none
 private
 public :: run_all_eul_prob_tab_tests
@@ -383,7 +384,7 @@ contains
         type(polar_map_results)   :: res
         real(real32), allocatable :: dists(:,:)
         integer,      allocatable :: irots(:,:), order(:)
-        real(real64)              :: worst, lo
+        real(real64)              :: worst, lo, sworst
         integer                   :: nbad, n, i, j, c, cands(NCAND, NPTCL)
         write(*,'(a)') 'test_coarse_maps'
         fx = make_fixture()
@@ -405,20 +406,26 @@ contains
             &'at SIMPLE''s shell max(kfrom + 1, kto / 2)')
         call tab%batch_entries(dists, irots, order)
         call tab%batch_map_results(res)
-        if( .not. allocated(res%loss) .or. .not. allocated(order) ) return
+        call assert_true(allocated(res%shifts), device_name(dev)//': the driver hands over the modes'' shifts')
+        if( .not. allocated(res%loss) .or. .not. allocated(order) .or. .not. allocated(res%shifts) ) return
         call assert_true(all(shape(res%loss) == [NCAND, NPTCL]), 'the maps'' results are (candidates, particles)')
         call assert_true(all(res%irot >= 1 .and. res%irot <= NROT) .and. all(res%irho >= 1 .and. res%irho <= NRHO) &
             &.and. all(res%ialpha >= 1 .and. res%ialpha <= NALPHA), device_name(dev)//': every mode lies on the '//&
             &'grid of SIMPLE''s rule')
         call assert_true(all(res%sdev >= 0._real32), 'every pair has a width')
-        worst = 0._real64
+        worst  = 0._real64
+        sworst = 0._real64
         do j = 1, NPTCL
             do c = 1, NCAND
-                lo    = oracle_cell(fx, order(j), cands(c, order(j)), [res%irot(c, j), res%irho(c, j), res%ialpha(c, j)])
-                worst = nan_max(worst, abs(real(res%loss(c, j), real64) - lo) / max(1._real64, abs(lo)))
+                lo     = oracle_cell(fx, order(j), cands(c, order(j)), [res%irot(c, j), res%irho(c, j), res%ialpha(c, j)])
+                worst  = nan_max(worst, abs(real(res%loss(c, j), real64) - lo) / max(1._real64, abs(lo)))
+                sworst = nan_max(sworst, nan_maxval(abs(res%shifts(:, c, j) - grid_shift(res%irho(c, j), &
+                    &res%ialpha(c, j)))))
             end do
         end do
         write(*,'(a,es10.3)') '    coarse maps: largest returned loss error at the returned cell ', worst
+        call assert_true(sworst <= POLAR_MAP_SHIFT_TOL, device_name(dev)//': every mode''s shift is its cell''s in the '//&
+            &'reference''s axes')
         call assert_true(worst <= POLAR_MAP_CAP_L2, device_name(dev)//': every returned loss is the direct residual '//&
             &'at the returned cell of the grid of SIMPLE''s rule')
         ! the maps alone: the same results without the dense stage

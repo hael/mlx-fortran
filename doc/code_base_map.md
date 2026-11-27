@@ -111,13 +111,14 @@ descriptions come from `<dir>/<dir>.inf`. Regenerate with
       - `mlxf_test_reduce.f90` — NaN-safe maximum for test code: a NaN anywhere makes the result +infinity, so no tolerance accepts it
       - `mlxf_test_registry.f90` — the area suites and guard groups of mlxf_test_exec: sub-suites per area, and the members of each guard group
       - `mlxf_test_utils.f90` — assertions, suite tracking and the summary of mlxf_test_exec
-    - **oracles/** — independent double-precision references the toys and the benchmarks are judged against: DFTs, polar scores and shift maps, poses, projections, gridding, the reconstruction's fixture and PCG, with their self-checks
+    - **oracles/** — independent double-precision references the toys and the benchmarks are judged against: DFTs, polar scores and shift maps, poses, projections, gridding, the reconstruction's fixture and PCG, with their self-checks and the testers that assert them
       - `mlxf_oracle_dft.f90` — host oracle: direct discrete Fourier transforms in complex double precision, 1D and 3D, and their self-check
       - `mlxf_oracle_gridding.f90` — host oracle of the gridding insertion on the native grid: accumulators, stored half, density correction, map
       - `mlxf_oracle_pcg.f90` — host oracle of the PCG problem: stencil matrix, transform operator, preconditioner, Cholesky and PCG solves
       - `mlxf_oracle_polar.f90` — the polar fixtures' shared tools: ring DFT, keyed variates, the memo-level oracle, checks of rows and draws
       - `mlxf_oracle_polar_objfun.f90` — host oracle of the polar objectives: Euclidean loss, two correlations, in-plane and reference reductions
       - `mlxf_oracle_polar_shiftmap.f90` — host oracle of the polar shift map: grid, cell, truncated Bessel form, areas, mode and width
+      - `mlxf_oracle_polar_tester.f90` — tests of the polar score's and the shift map's host oracles: the two self-checks asserted
       - `mlxf_oracle_pose.f90` — host oracle of the pose objective: prepared reference, quadratic B-spline gather, objectives, derivatives, solve
       - `mlxf_oracle_projection.f90` — host oracle of the Fourier projection and its adjoint: window, explicit matrix, gather, scatter, packed half
       - `mlxf_oracle_projection_tester.f90` — tests of the projection's host oracles: the self-checks of the direct transforms and of the projection asserted
@@ -143,6 +144,7 @@ descriptions come from `<dir>/<dir>.inf`. Regenerate with
         - `mlxf_toy_polarft_tail_tester.f90` — tests of the polar calculator's fused tail: the refusal on the CPU device, the two kernels' identity, repeatability, small tiles, objects
         - `mlxf_toy_polarft_workspace.f90` — the polar calculator's GPU workspace (test only): one parity's resident reference tiles, the entries' graph, the shift maps
         - `mlxf_toy_polarft_workspace_lifecycle.f90` — the polar workspace's lifecycle: reference memos validated and prepared as resident tiles with their tail, teardown
+        - `mlxf_toy_polarft_workspace_mapreduce.f90` — the polar workspace's shift-map reductions: a tile's mode, widths and evidence from its maps, and their compiled callbacks
         - `mlxf_toy_polarft_workspace_score.f90` — the polar workspace's scoring: block validation, the per-tile graph, the draw, copy-out
         - `mlxf_toy_polarft_workspace_shiftmap.f90` — the polar workspace's shift maps: the particle-reusing contraction, the direction transform and requested posterior outputs
         - `mlxf_toy_polarft_workspace_tail.f90` — the polar workspace's fused tail: a Metal kernel per tile for the distances and the posterior draw of every pair
