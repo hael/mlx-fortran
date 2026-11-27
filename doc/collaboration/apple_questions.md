@@ -507,6 +507,24 @@ layout does 2.9 million pairs per second on 24 cores; the target machine is an M
     - Meanwhile: the binding contract keeps "no stability" (section 10), and every selection that needs the
       first-maximum rule repairs the boundary's ties or uses a kernel with strict comparison.
 
+37. **The first GPU device-count query leaves the host overflow flag set.** Status: open, not sent;
+    reproduced 2026-11-26 through mlx-c alone on an M2 Ultra (`applegpu_g14d`), macOS 26.7.3,
+    MLX 0.32.4 / mlx-c 0.8.0, with `MLX_ENABLE_TF32=0`.
+    - Ask: after `feclearexcept(FE_ALL_EXCEPT)`, `mlx_metal_is_available` returns true/status 0 without
+      `FE_OVERFLOW`. After another clear, the first `mlx_device_count(&n, MLX_GPU)` returns 1/status 0
+      but sets `FE_OVERFLOW`; after clearing again, the second count returns the same result without
+      setting it. Can device initialization preserve the caller's floating-point environment, and is
+      this expected in MLX or a Metal initialization dependency? The exact lower-level cause is not yet
+      isolated; this is independent of mlx-fortran's numerical operations.
+    - Where: first GPU discovery through `mlx_device_count`. A C-only probe and its output are retained
+      in `~/m2_evidence/overflow_investigation/device_fenv.c` and `device_fenv.log`, with the compile
+      command in `README.txt`. A temporary instrumented copy of `bench_user_costs` samples and clears
+      the calling thread's overflow flag between stages: only `test_devices` sets it; the later CPU
+      and GPU benchmark stages do not set it again. These instrumented timings are diagnostic only.
+    - Meanwhile: distinguish this initialization flag from numerical overflow in a measured operation.
+      Do not suppress all floating-point diagnostics or clear a caller's pre-existing flags. No runtime
+      workaround was added. Reproduce on other configurations and check upstream reports before filing.
+
 ## For information (not Apple's to fix)
 
 - gfortran mis-finalizes derived types in four patterns (allocatable components with defined assignment,

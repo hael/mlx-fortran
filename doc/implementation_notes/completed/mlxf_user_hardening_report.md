@@ -1,4 +1,8 @@
-# User-facing hardening: the report of run `mlxf_user_hardening`
+# User-facing hardening: report and M2 validation closeout
+
+Updated 2026-11-27: **second-architecture validation closed** on the M2 Ultra; benchmark correctness follow-up
+validated. Release remains blocked by the empty-host-constructor contract violation and the final clean-tagged
+release gate, listed below. This update closes the missing-architecture item, not those separate conditions.
 
 Run `mlxf_user_hardening`, 2026-11-26, unattended on the M5 Ultra (macOS 27.2.1, GPU `applegpu_g17d`, GNU Fortran
 16.2.0, MLX 0.32.4, mlx-c 0.8.0), base `ae7d62367facaffc88a2262f8cb9b34ffcd88cfc`, everything in the working tree.
@@ -15,8 +19,9 @@ leaks have an installed checker that reports them at build time (C4). Norms and 
 range are right, empty extrema behave as Fortran's (C5, C6), and `a + 1` compiles (C9). Recoverable graph
 construction (C7) is designed and prototyped, deferred as R0 requires. A generated reference, a neutral installed-use
 guide and a measured cost model answer C8 and C10 to C13. The release gate, the installed consumer and the CPU-only
-CI pass; **release readiness stays open on the second Metal GPU architecture**, which this run does not have
-(decision 12).
+CI pass. The M2 follow-up now supplies the second Metal GPU architecture required by decision 12, including
+RoPE and installed consumers. The benchmark now records real correctness assertions and exits nonzero for
+incorrect/nonfinite results; timings remain non-gating. The remaining release conditions are RB1 and RB2 below.
 
 ## What changed, phase by phase
 
@@ -86,23 +91,67 @@ Each is recorded, with its reason, in the plan's Progress entry of its phase.
   the index check about one evaluated `take`; the scaled norm and mean about +45 % (one more reduction pass); the user
   cost table in the guide.
 
-## Open for the maintainer
+## M2 Ultra results and second-architecture closure
 
-1. **The second Metal GPU architecture** (decision 12): run `scripts/release_gate.sh` and the units (RoPE's cases in
-   `unit_fast` included) on a machine of another generation (the M2 Ultra of the user review), record its
-   `applegpu_*` identifier, compiler and dependency facts and the numerical logs; until then release readiness is not
-   claimed. Nothing else blocks it.
-2. **C7's follow-up**: whether to implement design B's validators (`mlx_check_broadcast`, `mlx_check_section`,
+**Closed on 2026-11-27.** The original M5 evidence is Claude's recorded Phase 6 run (`applegpu_g17d`, macOS
+27.2.1); Codex inspected the M2 logs and ran the follow-up checks locally (`applegpu_g14d`, macOS 26.7.3).
+Both use GNU Fortran 16.2.0, MLX 0.32.4 / mlx-c 0.8.0 and `MLX_ENABLE_TF32=0`.
+
+| M2 check | Observed result | Evidence under `~/m2_evidence/` |
+| --- | --- | --- |
+| Full snapshot release gate at `0f8252b` | Debug/Release 13/13 fast gates; installed consumers/examples on CPU/GPU, package isolation and refusals, pkg-config, embedding and MLX-free toy checks passed; no side effects; 173 s | `release_gate_0f8252b.log`, `machine.txt` |
+| Twelve directly run Release unit areas | 8,201 assertions passed, zero failures | `unit_summary.txt`, `unit_*.log` |
+| RoPE on the second GPU | `unit_fast` 152/152; GPU errors 20.730, 14.239 and 18.203 eps32 for seeds 1, 2 and 3, below the existing 41.5-eps32 bound; no tolerance change | `unit_fast.log` |
+| Benchmark correctness fix | Debug and two Release runs: 318/318 assertions each, CPU and GPU, exit 0; nine planted CPU fault cases exit 1 in each build; slow-timing controls exit 0 | `bench_correctness_2026-11-27/` |
+| Gates after the benchmark fix | Zero compiler warnings; Debug 13/13 in 24.94 s, Release 13/13 in 14.22 s | `bench_correctness_2026-11-27/fast-gate-*.log`, `build-*.log` |
+
+The full M2 snapshot is `0f8252b2d2bd7dc0e76cd29cf54e785b64b68b59`; its library sources (`src/core`,
+`src/defs`) are unchanged from the hardening commit `90f5932`. The later unstaged benchmark/test-bound changes
+have the separate validation above and source hashes in `bench_correctness_2026-11-27/machine.json`.
+M5 CPU-only Debug/Release evidence remains the original run's record; this closeout does not claim a new M5
+or CPU-only-MLX execution. The complete fixed-fixture and installed-consumer evidence on two distinct Metal
+architectures closes decision 12. The final tagged artifact still needs its own release gate.
+
+## Remaining release blockers
+
+1. **RB1 — Empty host-array constructors violate the public transfer contract.** The old report's broad
+   "zero-size host array" finding is narrowed by current probes: named zero-length real32, int32 and int64
+   arrays construct and evaluate successfully on both devices, while `mlx_from([integer(int32) ::])` and
+   `mlx_from([real(real32) ::])` each exit 86 and request `18446744073709551612` bytes. A standalone Fortran-only
+   assumed-rank probe reports size and shape `-1` for the empty constructor at `-O0` and `-O3` (GNU Fortran
+   16.2.0); the named-array control reports `0`. Origin: the corrupt-empty-descriptor compiler family recorded
+   in [compiler issue 6](../../compiler_issues/README.md); mitigation belongs at the library transfer boundary.
+   Binding-policy section 4 currently promises empty-array support without this exception. **Required:** a
+   safe boundary fix and regression tests for empty expressions and named arrays, or an explicit temporary
+   contract restriction with matching user documentation. The fix is preferred; neither disposition is
+   implemented here. Reproducers and ten per-device/form results: `~/m2_evidence/closeout_2026-11-27/`.
+2. **RB2 — The final clean tagged candidate has not passed its release gate.** HEAD `0f8252b` carries no release
+   tag; the benchmark fix and documentation remain unstaged. The successful full M2 snapshot predates that fix
+   and was not a `--require-tag` run. After RB1 is resolved, the maintainer must commit the intended candidate,
+   tag the project version, and obtain a passing `scripts/release_gate.sh --require-tag` from the clean tagged
+   tree. This is the existing [release-hardening criterion](../planned/mlxf_release_hardening.md), not a missing
+   second-machine test. Git remains read-only for this agent.
+
+No other original C1–C14 local acceptance failure is established by this closeout. The following remain
+explicit follow-ups or documented limitations; they do not reopen the completed architecture requirement.
+
+## Deferred follow-ups and documented limits
+
+1. **C7's follow-up**: whether to implement design B's validators (`mlx_check_broadcast`, `mlx_check_section`,
    `mlx_check_device`), then A's checked operations; rows and acceptance are in the plan.
-3. **Upstream drafts, unsent**: Apple questions 31 (narrowed: MLX's main branch already writes saves through a
+2. **Upstream drafts, unsent**: Apple questions 31 (narrowed: MLX's main branch already writes saves through a
    temporary file, following symlinks), 33, 34 and 35 (each checked against MLX `5c8989446`: unchanged); GCC issues 2
-   and 3 re-observed on the M5. Nothing was filed.
-4. **Found outside the plan**: `mlx_from` of a zero-size host array stops (it asks Metal for 2^64 - 4 bytes, on the
-   CPU device too); `mlxf_transfer` was in no phase's table.
-5. **Residual test gaps** the Phase 6 review named and this run did not close (listed in Phase 6's Progress): a few
+   and 3 re-observed on the M5. Apple question 32's architecture-dependent RoPE accuracy is covered by the
+   unchanged test bound. Question 37's first-device-query overflow flag was reproduced through mlx-c alone;
+   benchmark arithmetic did not raise it again after an instrumented clear. It remains a separate initialization
+   issue, not a failing finite-result check. Nothing was filed; no upstream fix is claimed for RB1.
+3. **Residual test gaps** the Phase 6 review named and this run did not close (listed in Phase 6's Progress): a few
    one-sided operand orders for narrow-kind scalars, slab-form edge cases of the validator, a load-back of a replaced
    checkpoint, and an evaluation failure on the CPU device.
-6. **Skill proposals** (not edited, per the run's rules): the Fortran skill could name `-Wfunction-elimination` among
+4. **Documented limits:** float64 on the GPU, complex128, compiler/platform/thread restrictions, unchecked indexing
+   without explicit validation, and the lifetime checker's blind spots. The first hosted-CI observations remain
+   explicitly non-gating under the release-hardening plan.
+5. **Skill proposals** (not edited, per the run's rules): the Fortran skill could name `-Wfunction-elimination` among
    the traps (an impure function as a later operand of `.and.`/`.or.` is an error in Release), and say that a
    comment belongs to the procedure under it when inserting a new procedure before another.
 
@@ -116,8 +165,9 @@ into place; mlx_check_indices; an installed lifetime checker sharing the
 repository rules' analysis, with mlxf_check_lifetime; scaled norm2 and floating
 mean; Fortran's empty maxval/minval; default-integer scalars on the operators;
 recoverable graph construction designed and deferred; a generated API
-reference, an installed-use guide and a cost benchmark. The second Metal GPU
-architecture remains open.
+reference, an installed-use guide and a cost benchmark. M5 and M2 validation
+is recorded; the cost benchmark now gates correctness without timing floors.
+Empty host constructors and the clean tagged gate remain release conditions.
 
 New files: doc/api_reference.md, doc/how2s/how2use_installed.md,
 doc/implementation_notes/completed/mlxf_user_hardening_report.md,

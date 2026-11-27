@@ -7,6 +7,9 @@ use, intrinsic :: iso_fortran_env, only: int64, real32, real64
 implicit none
 private :: int64, real32, real64
 
+! the small user-cost fixtures' float32 rounding allowance, relative to max(1, abs(host reference))
+real(real64), parameter :: USER_COST_TOL = real(1.e-5_real32, real64)
+
 ! a rotation's distance above this is invalid: -log of single-precision 1e-10, evaluated in double precision
 real(real64), parameter :: POLAR_DIST_MAX = -log(real(1.e-10_real32, real64))
 ! the distance of an invalid entry, and the bound below which a distance is valid

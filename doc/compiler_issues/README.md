@@ -117,7 +117,7 @@ C4 (1000 rounds of `[a, exp(b)]`, `[a, b*2.0]` or `v = exp(a)` keep 1000 handles
   `intent(out)` output array (owner ruling, 2026-11-22; binding policy, closure callbacks), never a function
   returning an array of handles.
 
-### 6. An empty `pack()` result passed to an assumed-rank dummy has a corrupt descriptor
+### 6. Empty expression results passed to an assumed-rank dummy can have a corrupt descriptor
 
 - **File:** `gfortran_empty_pack_assumed_rank.f90` (found 2026-11-25 with 16.2.0, M5 Ultra, macOS on
   Darwin 27.2.0, while verifying the NaN-safe test reduction; not checked on trunk).
@@ -126,9 +126,19 @@ C4 (1000 rounds of `[a, exp(b)]`, `[a, b*2.0]` or `v = exp(a)` keep 1000 handles
 - **Expected:** `empty: rank 1 size 0 arm 1`.
 - **Observed:** `empty: rank 1 size -1 arm default`; the nonempty control passes.
 - **Related:** not searched yet; check Bugzilla for assumed-rank and zero-size `pack` before filing.
-- **Where the repository meets it:** test code only. `nan_maxval` (`src/test/framework/mlxf_test_reduce.f90`) has one
+- **Where the repository meets it:** `nan_maxval` (`src/test/framework/mlxf_test_reduce.f90`) has one
   specific per rank instead of an assumed-rank dummy, since its callers pass masked `pack()` results that
   may be empty.
+- **Empty-constructor follow-up, 2026-11-27:** on the M2 Ultra with GNU Fortran 16.2.0, a Fortran-only
+  assumed-rank `contiguous` dummy reports `size=-1`, `shape=-1` for `[integer(int32) ::]` at both `-O0`
+  and `-O3`, while a named `integer(int32) :: x(0)` reports zero. The installed library's
+  `mlx_from([integer(int32) ::])` and real32 counterpart exit 86 on both CPU and GPU after requesting
+  `18446744073709551612` bytes; named empty real32/int32/int64 controls pass. This exposes the same class
+  of empty-descriptor failure at `mlxf_transfer_copy`'s assumed-rank boundary; no upstream issue identity
+  or fix is established. The constructors are not excluded by binding-policy section 4, so this is release
+  blocker RB1 in [the hardening report](../implementation_notes/completed/mlxf_user_hardening_report.md).
+  Consumer and Fortran-only reproducers/logs: `~/m2_evidence/closeout_2026-11-27/`. No workaround is added
+  by this documentation closeout.
 
 ## Trunk check and proposed reports, 2026-11-22
 
