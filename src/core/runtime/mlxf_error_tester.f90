@@ -4,7 +4,7 @@ use, intrinsic :: iso_fortran_env, only: int64, real32
 use mlxf,            only: mlx_array, mlx_from, mlx_to, mlx_eval, mlx_synchronize, mlx_clear_cache, mlx_active_memory, &
                            mlx_live_count, mlx_last_error, mlx_set_default_device, mlx_default_device, &
                            mlx_device_info_size, MLX_DEVICES
-use mlxf_test_utils, only: assert_true, assert_int, test_devices, device_name, gpu_check_runs
+use mlxf_test_utils, only: assert_true, assert_int, test_devices, device_name, metal_check_runs
 implicit none
 private
 
@@ -74,7 +74,7 @@ contains
         integer                       :: i, nfull, nok, live0, st, original
         call test_devices(devs)
         if( size(devs) == 0 ) return
-        if( .not. gpu_check_runs('the recovery gate (the maximum buffer of the Metal allocator)') ) return
+        if( .not. metal_check_runs('the recovery gate (the maximum buffer of the Metal allocator)') ) return
         maxbuf = mlx_device_info_size(MLX_DEVICES%gpu, 'max_buffer_length')
         if( maxbuf <= 0_int64 )then
             write(*,'(A)') '    SKIP: the device reports no maximum buffer length'

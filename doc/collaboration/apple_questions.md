@@ -560,6 +560,26 @@ layout does 2.9 million pairs per second on 24 cores; the target machine is an M
     - Meanwhile: the toy gathers the listed references with `mlx_gather` into tiles of the dense graph, and a
       custom kernel (a SIMD group per pair and bin) scores sparse lists.
 
+## Q. The CUDA backend (built and compiled on Linux, not yet run on a GPU)
+
+40. **A negative integer template argument gives the CUDA kernel's function a name that is not an identifier.**
+    Status: open, not sent; found 2026-11-27 with MLX 0.32.4 by reading the source and compiling the wrapped
+    kernel with NVRTC (CUDA 12.9, `sm_100a` and `sm_120a`) on a machine without a GPU; not yet seen on a GPU.
+    - Ask: `mlx/backend/cuda/custom_kernel.cpp` names the generated function `"custom_kernel_" + name +
+      template_arguments_hash(template_args)`, and `template_arguments_hash` appends `fmt::format("_{}", value)`
+      for an integer, so `SHIFT = -2` gives `custom_kernel_<name>_-2`: NVRTC refuses the declaration and the name
+      expression, and the evaluation fails. The Metal path does not meet it: `make_template_hash`
+      (`mlx/backend/common/metal_kernel.cpp`) turns `-` (and `<`, `>`) into `_`. Could the CUDA hash do the same
+      (`_n2`, or `_` as on Metal)?
+    - Where: `mlx/backend/cuda/custom_kernel.cpp:26-47` (the hash) and `:202-203` (the name). Reproducer, in
+      mlx-fortran: the test kernel `mlxf_test_template` with the template integer -2 (`unit_fast`,
+      `test_template_and_header`, "a negative integer parameter compiles"), wrapped by
+      `scripts/check_cuda_sources.sh` as MLX wraps it: it does not compile under MLX's name and compiles under the
+      same name with `-` replaced. With mlx-c: `mlx_fast_cuda_kernel_config_add_template_arg_int(cfg, "SHIFT", -2)`
+      on any kernel, then evaluate its output on a CUDA GPU.
+    - Meanwhile: on CUDA the test above is expected to fail as MLX's until this is answered, and a kernel passes a
+      negative constant as an input, or shifted to be non-negative. The Metal path is unaffected.
+
 ## For information (not Apple's to fix)
 
 - gfortran mis-finalizes derived types in four patterns (allocatable components with defined assignment,

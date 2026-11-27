@@ -61,7 +61,9 @@ gpuonly=0
 if [[ -f "$T" ]]; then
     nodevice=$(grep -c 'SKIP: no GPU device' "$T")
     gpuonly=$(grep -c 'SKIP: GPU-only check on a CPU-only MLX build' "$T")
-    grep -q 'Metal backend: F' "$T" || { echo "ci_cpu_job: the tests did not run on a CPU-only MLX"; failed=1; }
+    # a CPU-only MLX has neither GPU backend: a CUDA build without a GPU prints Metal backend: F too
+    grep -q 'Metal backend: F' "$T" && grep -q 'CUDA backend: F' "$T" \
+        || { echo "ci_cpu_job: the tests did not run on a CPU-only MLX"; failed=1; }
 fi
 echo "$TYPE: GPU-only checks skipped: ${gpuonly}; no-device skips: ${nodevice}"
 grep 'SKIP' "$T" 2>/dev/null | sort | uniq -c

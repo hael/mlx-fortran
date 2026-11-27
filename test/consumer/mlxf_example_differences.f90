@@ -1,15 +1,15 @@
 !@descr: the dtype-and-result table of doc/quickstart.md: one block per row, each asserting its row and printing D<n>: ok
 ! mlxf_example_differences [require-gpu]: on the GPU when one opens (the float64 rows on the CPU device), on the CPU
-! of a CPU-only MLX; on Metal without a GPU it prints SKIP and exits 0, unless require-gpu is given. A failed row
+! of a CPU-only MLX; on Metal or CUDA without a GPU it prints SKIP and exits 0, unless require-gpu is given. A failed row
 ! exits 1. The rows D3 and D15 are stops, the guards guard_matmul_integer and guard_float64_on_gpu.
 program mlxf_example_differences
 use, intrinsic :: iso_fortran_env, only: int32, real32, real64
 use, intrinsic :: iso_c_binding,   only: c_bool
 use, intrinsic :: ieee_arithmetic, only: ieee_is_nan, ieee_value, ieee_positive_inf
 use mlxf, only: mlx_array, mlx_from, mlx_to_alloc, mlx_astype, mlx_floor_divide, mlx_mean, mlx_round, mlx_take, &
-                mlx_set_default_device, mlx_default_device, mlx_device_count, mlx_metal_is_available, MLX_DEVICES, &
-                MLX_DTYPES, matmul, transpose, real, cmplx, sum, count, all, maxloc, modulo, exp, mlx_random_key, &
-                mlx_random_uniform, mlx_random_seed
+                mlx_set_default_device, mlx_default_device, mlx_device_count, mlx_metal_is_available, &
+                mlx_cuda_is_available, MLX_DEVICES, MLX_DTYPES, matmul, transpose, real, cmplx, sum, count, all, &
+                maxloc, modulo, exp, mlx_random_key, mlx_random_uniform, mlx_random_seed
 implicit none
 type(mlx_array)              :: a, b, c, f, z, key
 integer(int32),  allocatable :: i1(:)
@@ -20,16 +20,19 @@ logical(c_bool), allocatable :: l1(:)
 real(real32)                 :: x3(2, 2, 2), y3(2, 2, 2), want3(2, 2, 2)
 character(len=32)            :: arg
 integer                      :: k, device, nfailed
+logical                      :: gpu_backend
 nfailed = 0
 call get_command_argument(1, arg)
+gpu_backend = mlx_metal_is_available()
+if( mlx_cuda_is_available() ) gpu_backend = .true.
 if( mlx_device_count(MLX_DEVICES%gpu) > 0 )then
     device = MLX_DEVICES%gpu
 else if( trim(arg) == 'require-gpu' )then
     error stop 'mlxf_example_differences: require-gpu, and no GPU device in this session'
-else if( .not. mlx_metal_is_available() )then
+else if( .not. gpu_backend )then
     device = MLX_DEVICES%cpu
 else
-    write(*,'(a)') 'SKIP: mlxf_example_differences: no GPU device in this session; Metal MLX cannot allocate'
+    write(*,'(a)') 'SKIP: mlxf_example_differences: no GPU device in this session; Metal or CUDA MLX cannot allocate'
     stop
 endif
 call mlx_set_default_device(device)

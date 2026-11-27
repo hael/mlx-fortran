@@ -8,7 +8,8 @@ use mlxf,            only: mlx_array, mlx_stream, mlx_new_stream, mlx_default_st
                            mlx_synchronize, mlx_device_is_available, mlx_memory_limit, mlx_set_memory_limit, &
                            mlx_set_wired_limit, mlx_metal_start_capture, mlx_metal_stop_capture, mlx_from, mlx_to, &
                            mlx_live_count, mlx_last_error, mlx_set_default_device, mlx_default_device, MLX_DEVICES
-use mlxf_test_utils, only: assert_true, assert_int, test_devices, device_name, bits_equal, gpu_present, gpu_check_runs
+use mlxf_test_utils, only: assert_true, assert_int, test_devices, device_name, bits_equal, gpu_present, &
+                           metal_check_runs
 implicit none
 private
 public :: run_all_stream_tests
@@ -109,7 +110,7 @@ contains
         integer(int64) :: limit, previous, wired0, back
         integer        :: st
         write(*,'(a)') 'test_limits'
-        if( .not. gpu_check_runs('the memory and wired limits (Metal''s allocator)') ) return
+        if( .not. metal_check_runs('the memory and wired limits (Metal''s allocator)') ) return
         limit = mlx_memory_limit()
         call assert_true(limit > 0_int64, 'the memory limit is positive')
         call mlx_set_memory_limit(limit, previous=previous, status=st)
@@ -135,7 +136,7 @@ contains
         character(len=8) :: enabled
         integer          :: st
         write(*,'(a)') 'test_capture'
-        if( .not. gpu_check_runs('a Metal capture') ) return
+        if( .not. metal_check_runs('a Metal capture') ) return
         call get_environment_variable('MTL_CAPTURE_ENABLED', enabled)
         if( trim(enabled) == '1' )then
             write(*,'(a)') '    SKIP: MTL_CAPTURE_ENABLED=1: a capture would start and leave a trace behind'

@@ -1,15 +1,18 @@
-!@descr: custom Metal kernels against exact Fortran references: buffer layout, several buffers, templates, atomics, compiled use, refusals
+!@descr: custom kernels against exact Fortran references: buffer layout, several buffers, templates, atomics, compiled use, refusals, backend sources
 module mlxf_fast_tester
 use, intrinsic :: iso_fortran_env, only: real32, int32
-use mlxf,            only: mlx_array, mlx_metal_kernel, mlx_metal_kernel_spec, mlx_function, mlx_compile, mlx_from, &
+use mlxf,            only: mlx_array, mlx_custom_kernel, mlx_custom_kernel_spec, mlx_function, mlx_compile, mlx_from, &
                            mlx_to, mlx_item, mlx_eval, mlx_live_count, mlx_last_error, mlx_set_default_device, &
-                           mlx_default_device, MLX_DEVICES, MLX_DTYPES, transpose
-use mlxf_test_utils, only: test_devices, device_name, assert_true, assert_int, bits_equal, cpu_only_mlx
+                           mlx_default_device, mlx_cuda_is_available, MLX_DEVICES, MLX_DTYPES, transpose
+use mlxf_test_utils, only: test_devices, device_name, assert_true, assert_int, bits_equal, cpu_only_mlx, &
+                           metal_check_runs
 implicit none
 private
-public :: run_all_fast_tests
+public :: run_all_fast_tests, run_all_kernel_sources_tests
 
 character(len=*), parameter :: NL = new_line('a')
+! the histogram of test_atomic_outputs: weighted updates into bins
+integer, parameter :: NUPDATES = 4096, NBINS = 13
 
 contains
 
@@ -59,20 +62,20 @@ contains
 
     ! an empty kernel copied, killed and finalized on leaving the scope
     subroutine empty_kernel_scope
-        type(mlx_metal_kernel) :: k, copy
+        type(mlx_custom_kernel) :: k, copy
         copy = k
         call copy%kill()
     end subroutine empty_kernel_scope
 
     ! a kernel is one live object however many copies share it, building one needs no GPU, and kill is idempotent
     subroutine test_lifecycle
-        type(mlx_metal_kernel)      :: k, copy
-        type(mlx_metal_kernel_spec) :: spec
-        integer                     :: live0
+        type(mlx_custom_kernel)      :: k, copy
+        type(mlx_custom_kernel_spec) :: spec
+        integer                      :: live0
         write(*,'(a)') 'test_lifecycle'
         live0 = mlx_live_count()
         spec = column_spec([5, 3])
-        k = mlx_metal_kernel(spec)
+        k = mlx_custom_kernel(spec)
         call assert_int(live0+1, mlx_live_count(), 'a kernel and its launch configuration are one live object')
         copy = k
         call assert_int(live0+1, mlx_live_count(), 'a copy shares the kernel')
@@ -93,21 +96,40 @@ contains
     ! (its second Fortran subscript): in the source the columns are MLX's first axis, of stride inp_shape[1]
     function column_spec( shape ) result(spec)
         integer, intent(in) :: shape(2)
-        type(mlx_metal_kernel_spec) :: spec
+        type(mlx_custom_kernel_spec) :: spec
         spec%name = 'mlxf_test_add_column'
         spec%input_names = ['inp']
         spec%output_names = ['out']
         spec%source = 'uint elem = thread_position_in_grid.x;'//NL//&
+            &'out[elem] = inp[elem] + float(elem / inp_shape[1] + 1);'
+        spec%cuda_source = 'int elem = blockIdx.x * blockDim.x + threadIdx.x;'//NL//&
+            &'if (elem >= inp_shape[0] * inp_shape[1]) return;'//NL//&
             &'out[elem] = inp[elem] + float(elem / inp_shape[1] + 1);'
         spec%grid = [product(shape), 1, 1]
         spec%threadgroup = [64, 1, 1]
         spec%output_shapes = shape
     end function column_spec
 
+    ! the column kernel through the input's strides, without the copy: the source maps each element to its storage
+    function strided_spec( shape ) result(spec)
+        integer, intent(in) :: shape(2)
+        type(mlx_custom_kernel_spec) :: spec
+        spec = column_spec(shape)
+        spec%ensure_row_contiguous = .false.
+        spec%name = 'mlxf_test_add_column_strided'
+        spec%source = 'uint elem = thread_position_in_grid.x;'//NL//&
+            &'uint loc = elem_to_loc(elem, inp_shape, inp_strides, inp_ndim);'//NL//&
+            &'out[elem] = inp[loc] + float(elem / inp_shape[1] + 1);'
+        spec%cuda_source = 'int elem = blockIdx.x * blockDim.x + threadIdx.x;'//NL//&
+            &'if (elem >= inp_shape[0] * inp_shape[1]) return;'//NL//&
+            &'int64_t loc = elem_to_loc(int64_t(elem), inp_shape.data(), inp_strides.data(), inp_ndim);'//NL//&
+            &'out[elem] = inp[loc] + float(elem / inp_shape[1] + 1);'
+    end function strided_spec
+
     ! x(i, j) + j for a (5, 3) array: element (i, j) of a Fortran array is buffer position (j-1)*n1 + (i-1) in the
     ! source, and the shape the source sees is the Fortran shape reversed
     subroutine test_column_index
-        type(mlx_metal_kernel)       :: k
+        type(mlx_custom_kernel)      :: k
         type(mlx_array)              :: a
         type(mlx_array), allocatable :: outputs(:)
         real(real32)                 :: x(5, 3), y(5, 3), by_column(5, 3), by_row(5, 3)
@@ -120,7 +142,7 @@ contains
                 by_row(i, j) = x(i, j)+real(i, real32)
             end do
         end do
-        k = mlx_metal_kernel(column_spec(shape(x)))
+        k = mlx_custom_kernel(column_spec(shape(x)))
         a = mlx_from(x)
         call k%apply([a], outputs, status=st)
         if( st /= 0 ) write(*,'(a)') mlx_last_error()
@@ -140,8 +162,8 @@ contains
     ! a grid of (n1, n2, 1) threads: Metal's x runs along Fortran dimension 1 and y along dimension 2 when the
     ! source writes position y*n1 + x; the threadgroup is given per grid direction; verbose prints MLX's source
     subroutine test_grid_2d
-        type(mlx_metal_kernel)       :: k
-        type(mlx_metal_kernel_spec)  :: spec
+        type(mlx_custom_kernel)      :: k
+        type(mlx_custom_kernel_spec) :: spec
         type(mlx_array)              :: a
         type(mlx_array), allocatable :: outputs(:)
         real(real32)                 :: x(6, 4), y(6, 4), expected(6, 4)
@@ -153,19 +175,8 @@ contains
                 expected(i, j) = x(i, j)+real(10*i+j, real32)
             end do
         end do
-        spec%name = 'mlxf_test_grid_2d'
-        spec%input_names = ['inp']
-        spec%output_names = ['out']
-        spec%source = 'uint i = thread_position_in_grid.x;'//NL//&
-            &'uint j = thread_position_in_grid.y;'//NL//&
-            &'uint pos = j * threads_per_grid.x + i;'//NL//&
-            &'out[pos] = inp[pos] + float(10 * (i + 1) + (j + 1));'
-        spec%grid = [6, 4, 1]
-        spec%threadgroup = [4, 2, 1]
-        spec%output_shapes = shape(x)
-        spec%output_dtypes = [MLX_DTYPES%float32]
-        spec%verbose = .true.
-        k = mlx_metal_kernel(spec)
+        spec = grid_2d_spec()
+        k = mlx_custom_kernel(spec)
         a = mlx_from(x)
         call k%apply([a], outputs, status=st)
         call assert_int(0, st, 'a verbose kernel on a two-dimensional grid applies')
@@ -176,11 +187,33 @@ contains
         call assert_true(all(bits_equal(y, expected)), 'grid x is Fortran dimension 1 and grid y dimension 2 at position y*n1 + x')
     end subroutine test_grid_2d
 
+    ! the (6, 4) kernel of test_grid_2d; CUDA launches whole (4, 2) blocks, 8 threads along x, so its source guards
+    function grid_2d_spec() result(spec)
+        type(mlx_custom_kernel_spec) :: spec
+        spec%name = 'mlxf_test_grid_2d'
+        spec%input_names = ['inp']
+        spec%output_names = ['out']
+        spec%source = 'uint i = thread_position_in_grid.x;'//NL//&
+            &'uint j = thread_position_in_grid.y;'//NL//&
+            &'uint pos = j * threads_per_grid.x + i;'//NL//&
+            &'out[pos] = inp[pos] + float(10 * (i + 1) + (j + 1));'
+        spec%cuda_source = 'int i = blockIdx.x * blockDim.x + threadIdx.x;'//NL//&
+            &'int j = blockIdx.y * blockDim.y + threadIdx.y;'//NL//&
+            &'if (i >= inp_shape[1] || j >= inp_shape[0]) return;'//NL//&
+            &'int pos = j * inp_shape[1] + i;'//NL//&
+            &'out[pos] = inp[pos] + float(10 * (i + 1) + (j + 1));'
+        spec%grid = [6, 4, 1]
+        spec%threadgroup = [4, 2, 1]
+        spec%output_shapes = [6, 4]
+        spec%output_dtypes = [MLX_DTYPES%float32]
+        spec%verbose = .true.
+    end function grid_2d_spec
+
     ! two inputs (a matrix and one weight per column, the short one in Metal's constant address space) and two
     ! outputs of different rank and dtype, their shapes listed one after another with output_ranks
     subroutine test_two_inputs_two_outputs
-        type(mlx_metal_kernel)       :: k
-        type(mlx_metal_kernel_spec)  :: spec
+        type(mlx_custom_kernel)      :: k
+        type(mlx_custom_kernel_spec) :: spec
         type(mlx_array)              :: a, w
         type(mlx_array), allocatable :: outputs(:)
         real(real32)                 :: x(4, 3), weights(3), y(4, 3), expected(4, 3)
@@ -194,18 +227,8 @@ contains
                 expected(i, j) = x(i, j)+weights(j)
             end do
         end do
-        spec%name = 'mlxf_test_two_by_two'
-        spec%input_names = [character(len=8) :: 'values', 'weights']
-        spec%output_names = [character(len=9) :: 'sums', 'positions']
-        spec%source = 'uint elem = thread_position_in_grid.x;'//NL//&
-            &'sums[elem] = values[elem] + weights[elem / values_shape[1]];'//NL//&
-            &'positions[elem] = int(elem) + 1;'
-        spec%grid = [size(x), 1, 1]
-        spec%threadgroup = [12, 1, 1]
-        spec%output_ranks = [2, 1]
-        spec%output_shapes = [4, 3, 12]
-        spec%output_dtypes = [MLX_DTYPES%float32, MLX_DTYPES%int32]
-        k = mlx_metal_kernel(spec)
+        spec = two_by_two_spec()
+        k = mlx_custom_kernel(spec)
         a = mlx_from(x)
         w = mlx_from(weights)
         call k%apply([a, w], outputs, status=st)
@@ -226,36 +249,40 @@ contains
         call assert_true(all(positions == [(i, i=1, 12)]), 'the int32 output holds each element''s position in array element order')
     end subroutine test_two_inputs_two_outputs
 
+    ! the kernel of test_two_inputs_two_outputs: a (4, 3) matrix and three weights in, sums and positions out
+    function two_by_two_spec() result(spec)
+        type(mlx_custom_kernel_spec) :: spec
+        spec%name = 'mlxf_test_two_by_two'
+        spec%input_names = [character(len=8) :: 'values', 'weights']
+        spec%output_names = [character(len=9) :: 'sums', 'positions']
+        spec%source = 'uint elem = thread_position_in_grid.x;'//NL//&
+            &'sums[elem] = values[elem] + weights[elem / values_shape[1]];'//NL//&
+            &'positions[elem] = int(elem) + 1;'
+        spec%cuda_source = 'int elem = blockIdx.x * blockDim.x + threadIdx.x;'//NL//&
+            &'if (elem >= values_shape[0] * values_shape[1]) return;'//NL//&
+            &'sums[elem] = values[elem] + weights[elem / values_shape[1]];'//NL//&
+            &'positions[elem] = elem + 1;'
+        spec%grid = [12, 1, 1]
+        spec%threadgroup = [12, 1, 1]
+        spec%output_ranks = [2, 1]
+        spec%output_shapes = [4, 3, 12]
+        spec%output_dtypes = [MLX_DTYPES%float32, MLX_DTYPES%int32]
+    end function two_by_two_spec
+
     ! a dtype, an integer and a logical template parameter and a header function; two outputs share the listed
     ! extents equally; a second kernel with other template values gives other results from the same source
     subroutine test_template_and_header
-        type(mlx_metal_kernel)       :: k
-        type(mlx_metal_kernel_spec)  :: spec
+        type(mlx_custom_kernel)      :: k
+        type(mlx_custom_kernel_spec) :: spec
         type(mlx_array)              :: a
         type(mlx_array), allocatable :: outputs(:)
         real(real32)                 :: x(9), plain(9), flipped(3)
         integer                      :: i, st
         write(*,'(a)') 'test_template_and_header'
         x = [(real(i-4, real32)/16, i=1, 9)]
-        spec%name = 'mlxf_test_template'
-        spec%input_names = ['inp']
-        spec%output_names = [character(len=7) :: 'plain', 'flipped']
-        spec%header = 'inline float mlxf_test_twice(float v) { return v + v; }'
-        spec%source = 'uint elem = thread_position_in_grid.x;'//NL//&
-            &'T v = inp[elem];'//NL//&
-            &'plain[elem] = mlxf_test_twice(v) + T(SHIFT);'//NL//&
-            &'if (elem < 3) { flipped[elem] = NEGATE ? -v : v; }'
-        spec%grid = [size(x), 1, 1]
-        spec%threadgroup = [9, 1, 1]
-        spec%output_shapes = [9, 3]
-        spec%template_dtype_names = ['T']
-        spec%template_dtypes = [MLX_DTYPES%float32]
-        spec%template_int_names = ['SHIFT']
-        spec%template_ints = [3]
-        spec%template_bool_names = ['NEGATE']
-        spec%template_bools = [.true.]
+        spec = template_spec()
         a = mlx_from(x)
-        k = mlx_metal_kernel(spec)
+        k = mlx_custom_kernel(spec)
         call k%apply([a], outputs, status=st)
         if( st /= 0 ) write(*,'(a)') mlx_last_error()
         call assert_int(0, st, 'a kernel with template parameters and a header applies')
@@ -279,16 +306,45 @@ contains
         call mlx_to(plain, outputs(1), status=st)
         if( st /= 0 ) write(*,'(a)') mlx_last_error()
         call assert_int(0, st, 'a negative integer parameter compiles')
+        if( st /= 0 ) return
         call mlx_to(flipped, outputs(2))
         call assert_true(all(bits_equal(plain, 2*x-2)), 'the second integer value: 2x - 2')
         call assert_true(all(bits_equal(flipped, x(:3))), 'the second logical value selects the other branch')
     end subroutine test_template_and_header
 
+    ! the kernel of test_template_and_header, with SHIFT 3 and NEGATE true; its header serves both backends (CUDA
+    ! compiles a plain function as device code)
+    function template_spec() result(spec)
+        type(mlx_custom_kernel_spec) :: spec
+        spec%name = 'mlxf_test_template'
+        spec%input_names = ['inp']
+        spec%output_names = [character(len=7) :: 'plain', 'flipped']
+        spec%header = 'inline float mlxf_test_twice(float v) { return v + v; }'
+        spec%source = 'uint elem = thread_position_in_grid.x;'//NL//&
+            &'T v = inp[elem];'//NL//&
+            &'plain[elem] = mlxf_test_twice(v) + T(SHIFT);'//NL//&
+            &'if (elem < 3) { flipped[elem] = NEGATE ? -v : v; }'
+        spec%cuda_source = 'int elem = blockIdx.x * blockDim.x + threadIdx.x;'//NL//&
+            &'if (elem >= inp_shape[0]) return;'//NL//&
+            &'T v = inp[elem];'//NL//&
+            &'plain[elem] = mlxf_test_twice(v) + T(SHIFT);'//NL//&
+            &'if (elem < 3) { flipped[elem] = NEGATE ? -v : v; }'
+        spec%grid = [9, 1, 1]
+        spec%threadgroup = [9, 1, 1]
+        spec%output_shapes = [9, 3]
+        spec%template_dtype_names = ['T']
+        spec%template_dtypes = [MLX_DTYPES%float32]
+        spec%template_int_names = ['SHIFT']
+        spec%template_ints = [3]
+        spec%template_bool_names = ['NEGATE']
+        spec%template_bools = [.true.]
+    end function template_spec
+
     ! a transposed array is a strided view. By default MLX copies it, so the source sees the array's own elements
     ! in order; with ensure_row_contiguous false the source must go through the strides, else it reads storage order
     subroutine test_strided_input
-        type(mlx_metal_kernel)       :: k
-        type(mlx_metal_kernel_spec)  :: spec
+        type(mlx_custom_kernel)      :: k
+        type(mlx_custom_kernel_spec) :: spec
         type(mlx_array)              :: a, t
         type(mlx_array), allocatable :: outputs(:)
         real(real32)                 :: x(3, 5), y(5, 3), logical_order(5, 3), storage_order(5, 3)
@@ -308,7 +364,7 @@ contains
         a = mlx_from(x)
         t = transpose(a)
         spec = column_spec([5, 3])
-        k = mlx_metal_kernel(spec)
+        k = mlx_custom_kernel(spec)
         call k%apply([t], outputs, status=st)
         call assert_int(0, st, 'a kernel applies to a strided view')
         if( st /= 0 ) return
@@ -321,10 +377,7 @@ contains
         if( st /= 0 ) return
         call mlx_to(y, outputs(1))
         call assert_true(all(bits_equal(y, storage_order)), 'without the copy a source that ignores the strides reads the buffer in storage order')
-        spec%name = 'mlxf_test_add_column_strided'
-        spec%source = 'uint elem = thread_position_in_grid.x;'//NL//&
-            &'uint loc = elem_to_loc(elem, inp_shape, inp_strides, inp_ndim);'//NL//&
-            &'out[elem] = inp[loc] + float(elem / inp_shape[1] + 1);'
+        spec = strided_spec([5, 3])
         call k%new(spec)
         call k%apply([t], outputs, status=st)
         call assert_int(0, st, 'a source that uses the strides applies without the copy')
@@ -338,9 +391,8 @@ contains
     ! 4,096 weighted updates collide in 13 bins and in one rank-0 total: atomic int32 outputs add them exactly, on
     ! top of the initial value; the bins are 1-based in Fortran and the source subtracts one
     subroutine test_atomic_outputs
-        integer,         parameter   :: NUPDATES = 4096, NBINS = 13
-        type(mlx_metal_kernel)       :: k
-        type(mlx_metal_kernel_spec)  :: spec
+        type(mlx_custom_kernel)      :: k
+        type(mlx_custom_kernel_spec) :: spec
         type(mlx_array)              :: abins, aweights
         type(mlx_array), allocatable :: outputs(:)
         integer(int32)               :: bins(NUPDATES), weights(NUPDATES), hist(NBINS), expected(NBINS), total
@@ -352,22 +404,10 @@ contains
             weights(i) = int(1+modulo(i, 3), int32)
             expected(bins(i)) = expected(bins(i))+weights(i)
         end do
-        spec%name = 'mlxf_test_histogram'
-        spec%input_names = [character(len=7) :: 'bins', 'weights']
-        spec%output_names = [character(len=5) :: 'hist', 'total']
-        spec%source = 'uint elem = thread_position_in_grid.x;'//NL//&
-            &'atomic_fetch_add_explicit(&hist[bins[elem] - 1], weights[elem], memory_order_relaxed);'//NL//&
-            &'atomic_fetch_add_explicit(&total[0], weights[elem], memory_order_relaxed);'
-        spec%grid = [NUPDATES, 1, 1]
-        spec%threadgroup = [256, 1, 1]
-        spec%output_ranks = [1, 0]
-        spec%output_shapes = [NBINS]
-        spec%output_dtypes = [MLX_DTYPES%int32, MLX_DTYPES%int32]
-        spec%atomic_outputs = .true.
-        spec%init_value = 0.
+        spec = histogram_spec(NUPDATES, NBINS)
         abins = mlx_from(bins)
         aweights = mlx_from(weights)
-        k = mlx_metal_kernel(spec)
+        k = mlx_custom_kernel(spec)
         call k%apply([abins, aweights], outputs, status=st)
         call assert_int(0, st, 'a kernel with atomic outputs applies')
         if( st /= 0 ) return
@@ -387,11 +427,35 @@ contains
         call assert_true(all(hist == expected+5), 'the outputs start from init_value: every bin holds five more')
     end subroutine test_atomic_outputs
 
+    ! the kernel of test_atomic_outputs: nupdates weighted updates into nbins bins and a rank-0 total, from zero.
+    ! Metal adds to its atomic outputs; CUDA adds atomically to plain ones
+    function histogram_spec( nupdates, nbins ) result(spec)
+        integer, intent(in) :: nupdates, nbins
+        type(mlx_custom_kernel_spec) :: spec
+        spec%name = 'mlxf_test_histogram'
+        spec%input_names = [character(len=7) :: 'bins', 'weights']
+        spec%output_names = [character(len=5) :: 'hist', 'total']
+        spec%source = 'uint elem = thread_position_in_grid.x;'//NL//&
+            &'atomic_fetch_add_explicit(&hist[bins[elem] - 1], weights[elem], memory_order_relaxed);'//NL//&
+            &'atomic_fetch_add_explicit(&total[0], weights[elem], memory_order_relaxed);'
+        spec%cuda_source = 'int elem = blockIdx.x * blockDim.x + threadIdx.x;'//NL//&
+            &'if (elem >= bins_shape[0]) return;'//NL//&
+            &'atomicAdd(&hist[bins[elem] - 1], weights[elem]);'//NL//&
+            &'atomicAdd(&total[0], weights[elem]);'
+        spec%grid = [nupdates, 1, 1]
+        spec%threadgroup = [256, 1, 1]
+        spec%output_ranks = [1, 0]
+        spec%output_shapes = [nbins]
+        spec%output_dtypes = [MLX_DTYPES%int32, MLX_DTYPES%int32]
+        spec%atomic_outputs = .true.
+        spec%init_value = 0.
+    end function histogram_spec
+
     ! a complex64 input is a buffer of complex64_t with members real and imag, and a rank-0 input is a reference,
     ! used without a subscript; no input names at all is a kernel that only writes
     subroutine test_complex_and_scalar_inputs
-        type(mlx_metal_kernel)       :: k
-        type(mlx_metal_kernel_spec)  :: spec, iota
+        type(mlx_custom_kernel)      :: k
+        type(mlx_custom_kernel_spec) :: spec, iota
         type(mlx_array)              :: z, s, none(0)
         type(mlx_array), allocatable :: outputs(:)
         complex(real32)              :: c(8)
@@ -403,17 +467,10 @@ contains
             c(i) = cmplx(real(i, real32)/2, real(3-i, real32)/4, real32)
             expected(i) = 2*(real(c(i))**2+aimag(c(i))**2)
         end do
-        spec%name = 'mlxf_test_power'
-        spec%input_names = [character(len=5) :: 'z', 'scale']
-        spec%output_names = ['power']
-        spec%source = 'uint elem = thread_position_in_grid.x;'//NL//&
-            &'power[elem] = scale * (z[elem].real * z[elem].real + z[elem].imag * z[elem].imag);'
-        spec%grid = [8, 1, 1]
-        spec%threadgroup = [8, 1, 1]
-        spec%output_shapes = [8]
+        spec = power_spec()
         z = mlx_from(c)
         s = mlx_from(2._real32)
-        k = mlx_metal_kernel(spec)
+        k = mlx_custom_kernel(spec)
         call k%apply([z, s], outputs, status=st)
         call assert_int(0, st, 'a kernel with a complex64 and a rank-0 input applies')
         if( st /= 0 ) return
@@ -421,12 +478,7 @@ contains
         if( st /= 0 ) write(*,'(a)') mlx_last_error()
         call assert_int(0, st, 'complex64_t members and a scalar reference compile')
         call assert_true(all(bits_equal(power, expected)), 'the scaled squared modulus of each complex element is exact')
-        iota%name = 'mlxf_test_iota'
-        iota%output_names = ['out']
-        iota%source = 'out[thread_position_in_grid.x] = int(thread_position_in_grid.x) + 1;'
-        iota%grid = [8, 1, 1]
-        iota%output_shapes = [8]
-        iota%output_dtypes = [MLX_DTYPES%int32]
+        iota = iota_spec()
         call k%new(iota)
         call k%apply(none, outputs, status=st)
         if( st /= 0 ) write(*,'(a)') mlx_last_error()
@@ -436,6 +488,37 @@ contains
         call assert_int(0, st, 'a kernel without inputs evaluates')
         call assert_true(all(counted == [(i, i=1, 8)]), 'a kernel without inputs writes its output with the default threadgroup')
     end subroutine test_complex_and_scalar_inputs
+
+    ! the scaled squared modulus of eight complex64 values: Metal's complex64_t has members real and imag and a
+    ! rank-0 input is a reference; CUDA's complex type has methods real() and imag() and a rank-0 input a pointer
+    function power_spec() result(spec)
+        type(mlx_custom_kernel_spec) :: spec
+        spec%name = 'mlxf_test_power'
+        spec%input_names = [character(len=5) :: 'z', 'scale']
+        spec%output_names = ['power']
+        spec%source = 'uint elem = thread_position_in_grid.x;'//NL//&
+            &'power[elem] = scale * (z[elem].real * z[elem].real + z[elem].imag * z[elem].imag);'
+        spec%cuda_source = 'int elem = blockIdx.x * blockDim.x + threadIdx.x;'//NL//&
+            &'if (elem >= z_shape[0]) return;'//NL//&
+            &'power[elem] = scale[0] * (z[elem].real() * z[elem].real() + z[elem].imag() * z[elem].imag());'
+        spec%grid = [8, 1, 1]
+        spec%threadgroup = [8, 1, 1]
+        spec%output_shapes = [8]
+    end function power_spec
+
+    ! a kernel without inputs that writes 1 to 8; its launch is exact (threadgroups of one), so its CUDA source needs
+    ! no guard
+    function iota_spec() result(spec)
+        type(mlx_custom_kernel_spec) :: spec
+        spec%name = 'mlxf_test_iota'
+        spec%output_names = ['out']
+        spec%source = 'out[thread_position_in_grid.x] = int(thread_position_in_grid.x) + 1;'
+        spec%cuda_source = 'int i = blockIdx.x * blockDim.x + threadIdx.x;'//NL//&
+            &'out[i] = i + 1;'
+        spec%grid = [8, 1, 1]
+        spec%output_shapes = [8]
+        spec%output_dtypes = [MLX_DTYPES%int32]
+    end function iota_spec
 
     ! a kernel applied inside a callback: its result feeds an operation of the graph, the compiled function
     ! traces once for two arrays of one shape and gives the uncompiled results
@@ -481,9 +564,9 @@ contains
         type(mlx_array), intent(in)               :: inputs(:)
         type(mlx_array), allocatable, intent(out) :: outputs(:)
         integer,         intent(out)              :: status
-        type(mlx_metal_kernel)       :: k
+        type(mlx_custom_kernel)      :: k
         type(mlx_array), allocatable :: columns(:)
-        k = mlx_metal_kernel(column_spec(inputs(1)%shape()))
+        k = mlx_custom_kernel(column_spec(inputs(1)%shape()))
         call k%apply(inputs, columns, status=status)
         if( status /= 0 ) return
         allocate(outputs(1))
@@ -494,8 +577,8 @@ contains
     ! wrong number of inputs, an empty input, a float64 output, and at the evaluation a source that does not
     ! compile and a threadgroup above the device's limit
     subroutine test_refused_applications
-        type(mlx_metal_kernel)        :: k
-        type(mlx_metal_kernel_spec)   :: spec
+        type(mlx_custom_kernel)       :: k
+        type(mlx_custom_kernel_spec)  :: spec
         type(mlx_array)               :: a, never
         type(mlx_array),  allocatable :: outputs(:)
         real(real32)                  :: x(5, 3), y(5, 3)
@@ -505,7 +588,7 @@ contains
         x = 1._real32
         a = mlx_from(x)
         spec = column_spec(shape(x))
-        k = mlx_metal_kernel(spec)
+        k = mlx_custom_kernel(spec)
         call k%apply([a, a], outputs, status=st)
         call assert_true(st /= 0, 'more inputs than input names return a status')
         call assert_true(.not. allocated(outputs), 'a refused application publishes no output')
@@ -515,9 +598,8 @@ contains
         call assert_true(st /= 0, 'an empty input array returns a status')
         call assert_true(.not. allocated(outputs), 'an empty input publishes no output')
         message = mlx_last_error()
-        call assert_true(index(message, 'mlx_metal_kernel apply') > 0, 'the refusal of an empty input names the kernel''s apply')
-        spec%name = 'mlxf_test_broken'
-        spec%source = 'out[thread_position_in_grid.x] = no_such_buffer[0];'
+        call assert_true(index(message, 'mlx_custom_kernel apply') > 0, 'the refusal of an empty input names the kernel''s apply')
+        spec = broken_spec(shape(x))
         call k%new(spec)
         call k%apply([a], outputs, status=st)
         call assert_int(0, st, 'a source is not compiled when the kernel is applied')
@@ -533,14 +615,17 @@ contains
         call k%apply([a], outputs, status=st)
         call assert_int(0, st, 'a threadgroup is not checked when the kernel is applied')
         if( st == 0 )then
-            call mlx_eval(outputs, status=st)
-            call assert_true(st /= 0, 'a threadgroup above the device''s limit fails the evaluation with a status')
+            ! CUDA clips the block to the grid, so only Metal fails a threadgroup above the device's limit
+            if( metal_check_runs('a threadgroup above the device''s limit') )then
+                call mlx_eval(outputs, status=st)
+                call assert_true(st /= 0, 'a threadgroup above the device''s limit fails the evaluation with a status')
+            endif
         endif
         spec%output_dtypes = [MLX_DTYPES%float64]
         spec%threadgroup = [64, 1, 1]
         call k%new(spec)
         call k%apply([a], outputs, status=st)
-        call assert_true(st /= 0, 'a float64 output is refused with a status: Metal has no float64')
+        call assert_true(st /= 0, 'a float64 output is refused with a status: MLX has no float64 on the GPU')
         call k%new(column_spec(shape(x)))
         call k%apply([a], outputs, status=st)
         call assert_int(0, st, 'a kernel applies after the refusals')
@@ -550,10 +635,20 @@ contains
         call assert_true(all(bits_equal(y(:, 3), 4._real32)), 'the recovered kernel gives the expected values')
     end subroutine test_refused_applications
 
+    ! the column kernel whose sources name a buffer that does not exist: they do not compile
+    function broken_spec( shape ) result(spec)
+        integer, intent(in) :: shape(2)
+        type(mlx_custom_kernel_spec) :: spec
+        spec = column_spec(shape)
+        spec%name = 'mlxf_test_broken'
+        spec%source = 'out[thread_position_in_grid.x] = no_such_buffer[0];'
+        spec%cuda_source = 'out[blockIdx.x * blockDim.x + threadIdx.x] = no_such_buffer[0];'
+    end function broken_spec
+
     ! on the CPU device a kernel is built but not applied: the refusal is a status and a message, no output, and
     ! the CPU device stays usable
     subroutine test_cpu_refusal
-        type(mlx_metal_kernel)        :: k
+        type(mlx_custom_kernel)       :: k
         type(mlx_array)               :: a, b
         type(mlx_array),  allocatable :: outputs(:)
         real(real32)                  :: x(5, 3), y(5, 3)
@@ -562,20 +657,138 @@ contains
         write(*,'(a)') 'test_cpu_refusal'
         x = 0.25_real32
         a = mlx_from(x)
-        k = mlx_metal_kernel(column_spec(shape(x)))
+        k = mlx_custom_kernel(column_spec(shape(x)))
         call k%apply([a], outputs, status=st)
-        call assert_true(st /= 0, 'on the CPU device a Metal kernel is refused with a status')
+        call assert_true(st /= 0, 'on the CPU device a custom kernel is refused with a status')
         call assert_true(.not. allocated(outputs), 'the CPU refusal publishes no output')
         message = mlx_last_error()
         if( cpu_only_mlx() )then
             call assert_true(index(message, 'No Metal') > 0, 'on a CPU-only MLX the refusal says there is no Metal backend')
         else
-            call assert_true(index(message, 'GPU') > 0, 'the refusal says that a Metal kernel needs the GPU')
+            call assert_true(index(message, 'GPU') > 0, 'the refusal says that a custom kernel needs the GPU')
         endif
         b = a+a
         call mlx_to(y, b, status=st)
         call assert_int(0, st, 'the CPU device evaluates after the refusal')
         call assert_true(all(bits_equal(y, 0.5_real32)), 'the CPU result after the refusal is exact')
     end subroutine test_cpu_refusal
+
+    ! the named-only sub-suite kernel_sources: every kernel the wrapper's tests apply (a test that adds one adds its
+    ! line here) carries a CUDA source, written with records=<dir> for scripts/check_cuda_sources.sh, which compiles
+    ! it as MLX does without a GPU; and a spec without the source of the backend MLX was built with is refused
+    subroutine run_all_kernel_sources_tests
+        type(mlx_custom_kernel_spec) :: spec
+        type(mlx_custom_kernel)      :: k
+        character(len=4096)          :: arg, dir
+        integer                      :: i, n, st
+        write(*,'(a)') '**** running all kernel_sources tests ****'
+        dir = ''
+        do i = 1, command_argument_count()
+            call get_command_argument(i, arg)
+            if( index(arg, 'records=') == 1 ) dir = arg(9:)
+        end do
+        n = 0
+        call record_kernel(column_spec([5, 3]), [MLX_DTYPES%float32], [2], dir, n)
+        call record_kernel(strided_spec([5, 3]), [MLX_DTYPES%float32], [2], dir, n)
+        call record_kernel(grid_2d_spec(), [MLX_DTYPES%float32], [2], dir, n)
+        call record_kernel(two_by_two_spec(), [MLX_DTYPES%float32, MLX_DTYPES%float32], [2, 1], dir, n)
+        spec = template_spec()
+        call record_kernel(spec, [MLX_DTYPES%float32], [1], dir, n)
+        spec%template_ints = [-2]
+        spec%template_bools = [.false.]
+        call record_kernel(spec, [MLX_DTYPES%float32], [1], dir, n)
+        call record_kernel(histogram_spec(NUPDATES, NBINS), [MLX_DTYPES%int32, MLX_DTYPES%int32], [1, 1], dir, n)
+        call record_kernel(power_spec(), [MLX_DTYPES%complex64, MLX_DTYPES%float32], [1, 0], dir, n)
+        call record_kernel(iota_spec(), [integer ::], [integer ::], dir, n)
+        call record_kernel(broken_spec([5, 3]), [MLX_DTYPES%float32], [-2], dir, n)
+        write(*,'(a,i0,a)') '    ', n, ' kernel applications recorded'
+        spec = column_spec([5, 3])
+        if( mlx_cuda_is_available() )then
+            deallocate(spec%cuda_source)
+        else
+            deallocate(spec%source)
+        endif
+        call k%new(spec, status=st)
+        call assert_true(st /= 0, 'a spec without the source of the backend MLX was built with is refused with a status')
+        call assert_true(index(mlx_last_error(), 'source') > 0, 'the refusal says the spec has no source of its backend')
+        call k%kill()
+    end subroutine run_all_kernel_sources_tests
+
+    ! a kernel application as a record of scripts/check_cuda_sources.sh: the spec, and the dtypes and ranks of the
+    ! inputs (a negative rank: the source is expected not to compile), written as cuda_kernel_<n>.rec under dir
+    ! (nothing written when dir is blank)
+    subroutine record_kernel( spec, dtypes, ranks, dir, n )
+        type(mlx_custom_kernel_spec), intent(in)    :: spec
+        integer,                      intent(in)    :: dtypes(:), ranks(:)
+        character(len=*),             intent(in)    :: dir
+        integer,                      intent(inout) :: n
+        character(len=:), allocatable :: header, path
+        character(len=16)             :: num
+        integer                       :: u, ios, i
+        n = n+1
+        call assert_true(allocated(spec%cuda_source), 'the kernel '//trim(spec%name)//' carries a CUDA source')
+        if( len_trim(dir) == 0 .or. .not. allocated(spec%cuda_source) ) return
+        header = ''
+        if( allocated(spec%header) ) header = spec%header
+        write(num,'(i0)') n
+        path = trim(dir)//'/cuda_kernel_'//trim(num)//'.rec'
+        open(newunit=u, file=path, status='replace', action='write', iostat=ios)
+        if( ios == 0 )then
+            write(u,'(a)') 'name '//trim(spec%name)
+            if( any(ranks < 0) )then
+                write(u,'(a)') 'expect fail'
+            else
+                write(u,'(a)') 'expect compile'
+            endif
+            if( allocated(spec%input_names) )then
+                do i = 1, size(spec%input_names)
+                    write(u,'(a,1x,i0,1x,i0)') 'input '//trim(spec%input_names(i)), dtypes(i), abs(ranks(i))
+                end do
+            endif
+            call write_outputs(u, spec)
+            call write_templates(u, spec)
+            write(u,'(a,i0)') 'shared_memory ', spec%shared_memory
+            write(u,'(a,i0)') 'header ', len(header)
+            write(u,'(a)') header
+            write(u,'(a,i0)') 'source ', len(spec%cuda_source)
+            write(u,'(a)') spec%cuda_source
+            close(u, iostat=ios)
+        endif
+        call assert_int(0, ios, 'the record of '//trim(spec%name)//' is written')
+    end subroutine record_kernel
+
+    ! the record's output lines: each output's name and dtype (float32 when the spec gives none)
+    subroutine write_outputs( u, spec )
+        integer,                      intent(in) :: u
+        type(mlx_custom_kernel_spec), intent(in) :: spec
+        integer :: i, dtype
+        do i = 1, size(spec%output_names)
+            dtype = MLX_DTYPES%float32
+            if( allocated(spec%output_dtypes) ) dtype = spec%output_dtypes(i)
+            write(u,'(a,1x,i0)') 'output '//trim(spec%output_names(i)), dtype
+        end do
+    end subroutine write_outputs
+
+    ! the record's template lines, in the order the kernel adds them: dtypes, integers, logicals
+    subroutine write_templates( u, spec )
+        integer,                      intent(in) :: u
+        type(mlx_custom_kernel_spec), intent(in) :: spec
+        integer :: i
+        if( allocated(spec%template_dtypes) )then
+            do i = 1, size(spec%template_dtypes)
+                write(u,'(a,1x,i0)') 'template dtype '//trim(spec%template_dtype_names(i)), spec%template_dtypes(i)
+            end do
+        endif
+        if( allocated(spec%template_ints) )then
+            do i = 1, size(spec%template_ints)
+                write(u,'(a,1x,i0)') 'template int '//trim(spec%template_int_names(i)), spec%template_ints(i)
+            end do
+        endif
+        if( allocated(spec%template_bools) )then
+            do i = 1, size(spec%template_bools)
+                write(u,'(a,1x,l1)') 'template bool '//trim(spec%template_bool_names(i)), spec%template_bools(i)
+            end do
+        endif
+    end subroutine write_templates
 
 end module mlxf_fast_tester

@@ -227,23 +227,26 @@ type :: mlxf_group_spec
     character(len=:), allocatable :: proc
 end type mlxf_group_spec
 
-! a custom Metal kernel and its launch (mlx_metal_kernel): the body of the Metal function (source), declarations
-! put before it (header), the names its buffers take in the source, the thread grid and the threadgroup as
-! Metal's (x, y, z), and the outputs. output_shapes holds the outputs' Fortran shapes one after another and
-! output_ranks how many extents each takes (absent: the outputs share them equally); absent output_dtypes are
-! float32. A template parameter is a name with a dtype, an integer or a logical. With init_value every output
-! is filled with it before the kernel runs. The source indexes MLX's buffers, row-major and 0-based
-type :: mlx_metal_kernel_spec
-    character(len=:), allocatable :: name, source, header
+! a custom kernel and its launch (mlx_custom_kernel) for MLX's Metal or CUDA backend: the body of the Metal function
+! (source) and of the CUDA function (cuda_source), declarations put before either (header; CUDA compiles it with
+! NVRTC, where a plain function is device code), the names its buffers take in the sources, the thread grid and the
+! threadgroup as (x, y, z) (CUDA launches whole blocks of the threadgroup, so a CUDA source guards its index), the
+! dynamic shared memory of a CUDA launch in bytes, and the outputs. output_shapes holds the outputs' Fortran shapes
+! one after another and output_ranks how many extents each takes (absent: the outputs share them equally); absent
+! output_dtypes are float32. A template parameter is a name with a dtype, an integer or a logical. With init_value
+! every output is filled with it before the kernel runs (atomic_outputs is Metal's; a CUDA source adds atomically
+! to a plain output). The sources index MLX's buffers, row-major and 0-based
+type :: mlx_custom_kernel_spec
+    character(len=:), allocatable :: name, source, cuda_source, header
     character(len=:), allocatable :: input_names(:), output_names(:)
-    integer                       :: grid(3) = [1, 1, 1], threadgroup(3) = [1, 1, 1]
+    integer                       :: grid(3) = [1, 1, 1], threadgroup(3) = [1, 1, 1], shared_memory = 0
     integer,          allocatable :: output_shapes(:), output_ranks(:), output_dtypes(:)
     character(len=:), allocatable :: template_dtype_names(:), template_int_names(:), template_bool_names(:)
     integer,          allocatable :: template_dtypes(:), template_ints(:)
     logical,          allocatable :: template_bools(:)
     real(c_float),    allocatable :: init_value
     logical                       :: ensure_row_contiguous = .true., atomic_outputs = .false., verbose = .false.
-end type mlx_metal_kernel_spec
+end type mlx_custom_kernel_spec
 
 ! what lstat says of a path (mlxf_libc's c_file_info), the link itself and not what it names: whether it exists,
 ! is a symbolic link or a regular file, its permission bits (with set-id and sticky), its hard links and its owner

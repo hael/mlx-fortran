@@ -1,4 +1,4 @@
-!@descr: the one test executable: mlxf_test_exec test=<unit_area|list> [suite=] [device=], expect_abort(s), guard=
+!@descr: the one test executable: mlxf_test_exec test=<unit_area|list> [suite=] [device=] [records=], expect_abort(s), guard=
 ! Exits with status 1 when an assertion or a guard member fails, 2 on a usage error. expect_aborts <group> runs
 ! every member of a guard group in its own child process (guard=<member>) and accepts only the library's
 ! hard-error status; expect_abort <member> does the same for one member.
@@ -38,7 +38,7 @@ do i = 1, command_argument_count()
         suite = arg(7:)
     else if( index(arg, 'guard=') == 1 )then
         guard = arg(7:)
-    else if( index(arg, 'device=') /= 1 .and. index(test, 'bench_') /= 1 )then
+    else if( index(arg, 'device=') /= 1 .and. index(arg, 'records=') /= 1 .and. index(test, 'bench_') /= 1 )then
         write(*,'(A)') 'mlxf_test_exec: unknown argument '//trim(arg)
         call list_areas
         error stop 2

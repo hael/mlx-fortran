@@ -181,7 +181,7 @@ mlx_cosh                                         public     cosh
 mlx_count_nonzero                                public     count
 mlx_count_nonzero_axes                           public     count
 mlx_count_nonzero_axis                           public     count
-mlx_cuda_is_available                            excluded   CUDA: out of scope (Apple silicon only)
+mlx_cuda_is_available                            public     mlx_cuda_is_available
 mlx_cummax                                       public     mlx_cummax
 mlx_cummax_axis                                  public     mlx_cummax
 mlx_cummin                                       public     mlx_cummin
@@ -260,22 +260,22 @@ mlx_export_function_kwargs                       excluded   keyword-argument clo
 mlx_export_to_dot                                public     mlx_export_to_dot
 mlx_eye                                          public     mlx_eye
 mlx_fast_cross_entropy                           public     mlx_cross_entropy
-mlx_fast_cuda_kernel_apply                       excluded   CUDA: out of scope (Apple silicon only)
-mlx_fast_cuda_kernel_config_add_output_arg       excluded   CUDA: out of scope (Apple silicon only)
-mlx_fast_cuda_kernel_config_add_template_arg_bool excluded   CUDA: out of scope (Apple silicon only)
-mlx_fast_cuda_kernel_config_add_template_arg_dtype excluded   CUDA: out of scope (Apple silicon only)
-mlx_fast_cuda_kernel_config_add_template_arg_int excluded   CUDA: out of scope (Apple silicon only)
-mlx_fast_cuda_kernel_config_free                 excluded   CUDA: out of scope (Apple silicon only)
-mlx_fast_cuda_kernel_config_new                  excluded   CUDA: out of scope (Apple silicon only)
-mlx_fast_cuda_kernel_config_set_grid             excluded   CUDA: out of scope (Apple silicon only)
-mlx_fast_cuda_kernel_config_set_init_value       excluded   CUDA: out of scope (Apple silicon only)
-mlx_fast_cuda_kernel_config_set_thread_group     excluded   CUDA: out of scope (Apple silicon only)
-mlx_fast_cuda_kernel_config_set_verbose          excluded   CUDA: out of scope (Apple silicon only)
-mlx_fast_cuda_kernel_free                        excluded   CUDA: out of scope (Apple silicon only)
-mlx_fast_cuda_kernel_new                         excluded   CUDA: out of scope (Apple silicon only)
+mlx_fast_cuda_kernel_apply                       public     mlx_custom_kernel%apply
+mlx_fast_cuda_kernel_config_add_output_arg       plumbing   -
+mlx_fast_cuda_kernel_config_add_template_arg_bool plumbing   -
+mlx_fast_cuda_kernel_config_add_template_arg_dtype plumbing   -
+mlx_fast_cuda_kernel_config_add_template_arg_int plumbing   -
+mlx_fast_cuda_kernel_config_free                 plumbing   -
+mlx_fast_cuda_kernel_config_new                  plumbing   -
+mlx_fast_cuda_kernel_config_set_grid             plumbing   -
+mlx_fast_cuda_kernel_config_set_init_value       plumbing   -
+mlx_fast_cuda_kernel_config_set_thread_group     plumbing   -
+mlx_fast_cuda_kernel_config_set_verbose          plumbing   -
+mlx_fast_cuda_kernel_free                        plumbing   -
+mlx_fast_cuda_kernel_new                         public     mlx_custom_kernel
 mlx_fast_gated_delta_update                      excluded   decision 17: its shapes are not in MLX's header and do not fit a paragraph (seven arrays in five layouts, a recurrence over time)
 mlx_fast_layer_norm                              public     mlx_layer_norm
-mlx_fast_metal_kernel_apply                      public     mlx_metal_kernel%apply
+mlx_fast_metal_kernel_apply                      public     mlx_custom_kernel%apply
 mlx_fast_metal_kernel_config_add_output_arg      plumbing   -
 mlx_fast_metal_kernel_config_add_template_arg_bool plumbing   -
 mlx_fast_metal_kernel_config_add_template_arg_dtype plumbing   -
@@ -287,7 +287,7 @@ mlx_fast_metal_kernel_config_set_init_value      plumbing   -
 mlx_fast_metal_kernel_config_set_thread_group    plumbing   -
 mlx_fast_metal_kernel_config_set_verbose         plumbing   -
 mlx_fast_metal_kernel_free                       plumbing   -
-mlx_fast_metal_kernel_new                        public     mlx_metal_kernel
+mlx_fast_metal_kernel_new                        public     mlx_custom_kernel
 mlx_fast_rms_norm                                public     mlx_rms_norm
 mlx_fast_rope                                    public     mlx_rope
 mlx_fast_rope_dynamic                            public     mlx_rope

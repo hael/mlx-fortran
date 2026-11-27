@@ -12,7 +12,7 @@ use, intrinsic :: iso_c_binding,   only: c_int, c_double
 !$ use omp_lib,                  only: omp_get_max_threads
 use mlxf,                        only: mlx_set_default_device, mlx_default_device, mlx_peak_memory, &
                                        mlx_reset_peak_memory, mlx_synchronize, mlx_clear_cache, mlx_device_info_size, &
-                                       MLX_DEVICES, mlx_active_memory, mlx_cache_memory
+                                       MLX_DEVICES, mlx_active_memory, mlx_cache_memory, mlx_cuda_is_available
 use mlxf_test_defs,              only: POLAR_ROW_FACTOR, POLAR_BLOCK_ERR_CPU, POLAR_BLOCK_ROT_CPU, POLAR_BLOCK_ROT_Q, &
                                        POLAR_SEED_CALIBRATION, POLAR_SEED_JUDGED, POLAR_GRID_B, POLAR_GRID_R, &
                                        POLAR_BUDGET_SHARE, POLAR_CANON_BT, POLAR_CANON_RT, POLAR_BLOCK_BT, &
@@ -1321,7 +1321,7 @@ contains
         integer,          allocatable :: bs(:), rs(:)
         integer                       :: ib, ir, ic, i0
         write(*,'(a)') '**** bench_polar_table suite=time ****'
-        write(*,'(a,f0.1,a)') '    memory budget ', budget_bytes() / 1.e9_real64, ' GB (a share of the GPU''s memory_size)'
+        write(*,'(a,f0.1,a)') '    memory budget ', budget_bytes() / 1.e9_real64, ' GB (a share of the GPU''s '//budget_key()//')'
         call mlx_set_default_device(device_of_arg())
         names = arg_str('cases_list', arg_str('case', '2500_4'))
         bs    = POLAR_GRID_B
@@ -1350,17 +1350,25 @@ contains
         end do
     end subroutine bench_time
 
-    ! the memory budget of one configuration: POLAR_BUDGET_SHARE of the machine's memory as the GPU reports it;
-    ! without that report the benchmark cannot keep its budget, a usage error
+    ! the memory budget of one configuration: POLAR_BUDGET_SHARE of the GPU's memory as it reports it (budget_key):
+    ! on Apple silicon the machine's, on a CUDA card its own; without that report the benchmark cannot keep its
+    ! budget, a usage error
     real(real64) function budget_bytes()
         integer(int64) :: mem
-        mem = mlx_device_info_size(MLX_DEVICES%gpu, 'memory_size')
+        mem = mlx_device_info_size(MLX_DEVICES%gpu, budget_key())
         if( mem <= 0_int64 )then
-            write(*,'(a)') 'bench_polar_table: the GPU reports no memory_size; the memory budget cannot be set'
+            write(*,'(a)') 'bench_polar_table: the GPU reports no '//budget_key()//'; the memory budget cannot be set'
             error stop 2
         endif
         budget_bytes = POLAR_BUDGET_SHARE * real(mem, real64)
     end function budget_bytes
+
+    ! the GPU's memory key of the budget: Metal's memory_size, a CUDA card's total_memory (it has no memory_size)
+    function budget_key() result(key)
+        character(len=:), allocatable :: key
+        key = 'memory_size'
+        if( mlx_cuda_is_available() ) key = 'total_memory'
+    end function budget_key
 
     ! the status of a configuration pruned for the budget, with the budget in GB
     function budget_status() result(status)
@@ -1685,7 +1693,7 @@ contains
                 &'submitting thread)'
             error stop 2
         endif
-        write(*,'(a,f0.1,a)') '    memory budget ', budget_bytes() / 1.e9_real64, ' GB (a share of the GPU''s memory_size)'
+        write(*,'(a,f0.1,a)') '    memory budget ', budget_bytes() / 1.e9_real64, ' GB (a share of the GPU''s '//budget_key()//')'
         call mlx_set_default_device(device_of_arg())
         cs     = read_case(arg_str('cases', 'polar_case.txt'), arg_str('case', '2500_4'))
         d%cs   = cs

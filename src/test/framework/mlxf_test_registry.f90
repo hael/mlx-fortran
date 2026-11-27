@@ -7,8 +7,8 @@ module mlxf_test_registry
 use, intrinsic :: iso_fortran_env,      only: int32, real32, real64
 use mlxf,                               only: mlx_array, mlx_from, mlx_eval, mlx_live_count, mlx_last_error, &
                                               mlx_set_default_device, MLX_DEVICES, MLX_DTYPES, exp, mlx_fft, mlx_fft2, &
-                                              mlx_astype, mlx_zeros, mlx_arange, mlx_metal_kernel, &
-                                              mlx_metal_kernel_spec, mlx_segmented_mm, mlx_qr, mlx_eigvalsh, &
+                                              mlx_astype, mlx_zeros, mlx_arange, mlx_custom_kernel, &
+                                              mlx_custom_kernel_spec, mlx_segmented_mm, mlx_qr, mlx_eigvalsh, &
                                               mlx_conv2d, mlx_conv_spec, mlx_as_strided, matmul, &
                                               mlx_random_categorical, mlx_random_normal, mlx_function, &
                                               mlx_grad_function, mlx_value_and_grad, mlx_set_compile_mode, &
@@ -38,7 +38,7 @@ use mlxf_linalg_matrix_tester,          only: run_all_linalg_matrix_tests
 use mlxf_conv_tester,                   only: run_all_conv_tests
 use mlxf_fft_tester,                    only: run_all_fft_tests
 use mlxf_fft_nd_tester,                 only: run_all_fft_nd_tests
-use mlxf_fast_tester,                   only: run_all_fast_tests
+use mlxf_fast_tester,                   only: run_all_fast_tests, run_all_kernel_sources_tests
 use mlxf_fast_layers_tester,            only: run_all_fast_layers_tests
 use mlxf_random_tester,                 only: run_all_random_tests
 use mlxf_compile_tester,                only: run_all_compile_tests
@@ -82,8 +82,8 @@ character(len=*), parameter :: AREAS(12) = [character(len=16) :: 'core', 'array'
 character(len=*), parameter :: BENCHES(7) = [character(len=32) :: 'polar_table', 'recon_pcg', 'projector', &
     &'insert_probe', 'blas', 'kernel_forms', 'user_costs']
 ! sub-suites an area runs only when suite= names them (too costly for the fast gate)
-character(len=*), parameter :: NAMED_ONLY(4) = [character(len=32) :: 'recovery_half', 'polar_shiftmap_accuracy', &
-    &'reconstructor_pcg_n32', 'distributed_ring']
+character(len=*), parameter :: NAMED_ONLY(5) = [character(len=32) :: 'recovery_half', 'polar_shiftmap_accuracy', &
+    &'reconstructor_pcg_n32', 'distributed_ring', 'kernel_sources']
 
 ! a member of a guard group and the device its fixture needs: 'cpu' (any session that allocates) or 'gpu' (a
 ! GPU device; on a CPU-only MLX the member skips)
@@ -176,6 +176,8 @@ contains
             case('fast')
                 call run_suite('fast', run_all_fast_tests, suite, ran)
                 call run_suite('fast_layers', run_all_fast_layers_tests, suite, ran)
+                ! kernel_sources: the CUDA sources of the kernels' tests, written for scripts/check_cuda_sources.sh
+                call run_suite('kernel_sources', run_all_kernel_sources_tests, suite, ran)
             case('random')
                 call run_suite('random', run_all_random_tests, suite, ran)
             case('io')
@@ -430,23 +432,25 @@ contains
         r = mlx_arange(0.d0, 4.d0, dtype=99)
     end subroutine guard_dtype_arange
 
-    ! a Metal kernel spec that names no output stops when the kernel is built
+    ! a kernel spec that names no output stops when the kernel is built (it has both backends' sources, so the stop
+    ! is the missing output's on either)
     subroutine guard_kernel_spec
-        type(mlx_metal_kernel_spec) :: spec
-        type(mlx_metal_kernel)      :: k
-        write(*,'(a)') 'guard_kernel_spec: a Metal kernel built from a spec without outputs'
+        type(mlx_custom_kernel_spec) :: spec
+        type(mlx_custom_kernel)      :: k
+        write(*,'(a)') 'guard_kernel_spec: a custom kernel built from a spec without outputs'
         spec%name = 'mlxf_guard_no_output'
         spec%source = 'uint elem = thread_position_in_grid.x;'
-        k = mlx_metal_kernel(spec)
+        spec%cuda_source = 'int elem = blockIdx.x * blockDim.x + threadIdx.x;'
+        k = mlx_custom_kernel(spec)
     end subroutine guard_kernel_spec
 
-    ! applying a declared, never-built Metal kernel stops, with or without a status
+    ! applying a declared, never-built custom kernel stops, with or without a status
     subroutine guard_kernel_empty
-        type(mlx_metal_kernel)       :: k
+        type(mlx_custom_kernel)      :: k
         type(mlx_array)              :: none(0)
         type(mlx_array), allocatable :: outputs(:)
         integer                      :: st
-        write(*,'(a)') 'guard_kernel_empty: applying an empty Metal kernel'
+        write(*,'(a)') 'guard_kernel_empty: applying an empty custom kernel'
         call k%apply(none, outputs, status=st)
     end subroutine guard_kernel_empty
 

@@ -14,7 +14,9 @@
 #   the seconds from go to the last exit, the processes' rates (units per second over the best pass) and their sum,
 #   the largest and the summed peak footprint, maximum resident size, MLX peak and MLX cache, the machine's
 #   lowest free and available memory (sampled once a second from go), the load before and after, the status,
-#   the keys, and last the sum of the processes' median rates (each its units over its median pass).
+#   the keys, the sum of the processes' median rates (each its units over its median pass), and on a CUDA host
+#   the card's: its total, what it held before the start, its peak during the run, the parts' share of that peak
+#   (the peak less what it held before) and the predicted share.
 # OUTDIR/summary.txt adds the spread of the processes' exits (the last less the first).
 # OUTDIR/summary.txt has the same per process, with each digest line.
 #
@@ -23,7 +25,11 @@
 #               table's earlier rows, is above RUN_PARTS_MEM_SHARE (default 0.8) of the machine's memory:
 #               from one measured split, NPARTS times its largest process; from two or more, NPARTS times
 #               the line through the two finest splits' largest processes against the share 1/n. With no
-#               earlier row it is not run either. Status not_run, exit 3.
+#               earlier row it is not run either. Status not_run, exit 3. On a CUDA host (nvidia-smi answers for the
+#               first device CUDA_VISIBLE_DEVICES names, else device 0; never on macOS, where host memory is the
+#               GPU's) the card is guarded too: the parts' share of its memory, predicted the same way from the
+#               earlier splits' shares (each split's share over its processes), above RUN_PARTS_MEM_SHARE of the
+#               card's free memory now (nvidia-smi's total less used) is not run.
 #   quiet       another mlxf_test_exec, cmake or gfortran process on the machine: nothing is started,
 #               exit 4. One that appears during the run gives the row the status discarded: repeat it.
 #   the load    waits until the one-minute load is at most RUN_PARTS_LOAD (default 2), for at most
@@ -60,6 +66,18 @@ LOAD_MAX="${RUN_PARTS_LOAD:-2}"
 LOAD_WAIT="${RUN_PARTS_LOAD_WAIT:-1800}"
 OS=$(uname -s)
 TAB=$(printf '\t')
+# the CUDA device to read, or none: the first device CUDA_VISIBLE_DEVICES names (index, UUID or PCI id), else 0.
+# nvidia-smi numbers the cards by PCI bus, CUDA by default fastest first: the parts are started with CUDA's order set
+# to the bus's, so that an index names the same card for both (a UUID or PCI id names one card either way)
+CUDA_GPU=""
+if [ "$OS" != Darwin ] && command -v nvidia-smi > /dev/null 2>&1; then
+    export CUDA_DEVICE_ORDER=PCI_BUS_ID
+    if [ "${CUDA_VISIBLE_DEVICES+set}" != set ] || [ -n "$CUDA_VISIBLE_DEVICES" ]; then
+        CUDA_GPU="${CUDA_VISIBLE_DEVICES:-0}"
+        CUDA_GPU="${CUDA_GPU%%,*}"
+        nvidia-smi -i "$CUDA_GPU" --query-gpu=memory.total --format=csv,noheader,nounits > /dev/null 2>&1 || CUDA_GPU=""
+    fi
+fi
 
 now() { python3 -c 'import time; print("%.3f" % time.time())'; }
 load1() {
@@ -78,6 +96,11 @@ mem_free() {
         awk '/^MemFree:/{f = $2} /^MemAvailable:/{a = $2} END{printf "%.0f %.0f\n", f * 1024, a * 1024}' /proc/meminfo
     fi
 }
+# "used total" of the CUDA device in bytes (nvidia-smi reports MiB)
+dev_mem() {
+    nvidia-smi -i "$CUDA_GPU" --query-gpu=memory.used,memory.total --format=csv,noheader,nounits 2>/dev/null \
+        | awk -F', *' 'NR == 1 {printf "%.0f %.0f\n", $1 * 1048576, $2 * 1048576}'
+}
 # the processes that make a measurement unusable, other than this launcher's own NPARTS
 foreign() {
     local n_exec n_build
@@ -87,7 +110,14 @@ foreign() {
 }
 header() {
     [ -s "$TSV" ] && return
-    printf 'date\tdir\tnparts\tnthr\tstatus\tgo_to_last_exit_s\tsum_%s_per_s\tmin_%s_per_s\tmax_%s_per_s\tmax_footprint_B\tsum_footprint_B\tmax_rss_B\tsum_rss_B\tmax_mlx_peak_B\tsum_mlx_peak_B\tsum_mlx_cache_B\tmin_free_B\tmin_available_B\tmem_total_B\tpredicted_sum_footprint_B\tload_before\tload_after\tkeys\tsum_median_%s_per_s\n' "$UNIT" "$UNIT" "$UNIT" "$UNIT" > "$TSV"
+    printf 'date\tdir\tnparts\tnthr\tstatus\tgo_to_last_exit_s\tsum_%s_per_s\tmin_%s_per_s\tmax_%s_per_s\tmax_footprint_B\tsum_footprint_B\tmax_rss_B\tsum_rss_B\tmax_mlx_peak_B\tsum_mlx_peak_B\tsum_mlx_cache_B\tmin_free_B\tmin_available_B\tmem_total_B\tpredicted_sum_footprint_B\tload_before\tload_after\tkeys\tsum_median_%s_per_s' "$UNIT" "$UNIT" "$UNIT" "$UNIT" > "$TSV"
+    [ -n "$CUDA_GPU" ] && printf '\tdevice_total_B\tdevice_used_before_B\tdevice_peak_used_B\tdevice_parts_peak_B\tpredicted_device_parts_B' >> "$TSV"
+    printf '\n' >> "$TSV"
+}
+# the card's columns of a row on a CUDA host (nothing elsewhere): total, used before, peak used, the parts' share, the
+# predicted share
+dev_cols() {
+    [ -n "$CUDA_GPU" ] && printf '\t%s\t%s\t%s\t%s\t%s' "$DEV_TOTAL" "$DEV_USED0" "$1" "$2" "$PRED_DEV"
 }
 row() {
     header
@@ -96,12 +126,23 @@ row() {
 
 # a row without measurements: status, predicted footprint, load before
 row_unmeasured() {
-    row "$1$TAB$TAB$TAB$TAB$TAB$TAB$TAB$TAB$TAB$TAB$TAB$TAB$TAB$TAB$TOTAL$TAB$2$TAB$3$TAB$TAB${KEYS[*]}"
+    if [ -n "$CUDA_GPU" ]; then
+        row "$1$TAB$TAB$TAB$TAB$TAB$TAB$TAB$TAB$TAB$TAB$TAB$TAB$TAB$TAB$TOTAL$TAB$2$TAB$3$TAB$TAB${KEYS[*]}$TAB$(dev_cols "" "")"
+    else
+        row "$1$TAB$TAB$TAB$TAB$TAB$TAB$TAB$TAB$TAB$TAB$TAB$TAB$TAB$TAB$TOTAL$TAB$2$TAB$3$TAB$TAB${KEYS[*]}"
+    fi
 }
 
 # ---- the guard ----
 TOTAL=$(mem_total)
 PRED=-1
+PRED_DEV=""
+DEV_TOTAL=""
+DEV_USED0=""
+if [ -n "$CUDA_GPU" ]; then
+    set -- $(dev_mem)
+    DEV_USED0=${1:-0}; DEV_TOTAL=${2:-0}
+fi
 if [ "$NPARTS" -gt 1 ]; then
     [ -s "$TSV" ] && PRED=$(awk -F'\t' -v N="$NPARTS" '
         NR > 1 && $5 == "ok" && $3 + 0 < N && $10 + 0 > 0 { if ($10 + 0 > fp[$3 + 0]) fp[$3 + 0] = $10 + 0 }
@@ -118,8 +159,33 @@ if [ "$NPARTS" -gt 1 ]; then
         row_unmeasured not_run -1 ""
         exit 3
     fi
+    if [ -n "$CUDA_GPU" ]; then
+        # the card: the earlier splits' shares of its memory (column 28) over their processes, the same prediction
+        PRED_DEV=$(awk -F'\t' -v N="$NPARTS" '
+            NR > 1 && $5 == "ok" && $3 + 0 < N && $28 + 0 > 0 { f = $28 / $3; if (f > fp[$3 + 0]) fp[$3 + 0] = f }
+            END {
+                a = 0; b = 0
+                for (n in fp) { n += 0; if (n > b) { a = b; b = n } else if (n > a) a = n }
+                if (b == 0) { print -1; exit }
+                f = fp[b]
+                if (a > 0) f = fp[a] + (fp[b] - fp[a]) * (1 / N - 1 / a) / (1 / b - 1 / a)
+                printf "%.0f\n", N * f
+            }' "$TSV")
+        if [ "$PRED_DEV" = -1 ]; then
+            echo "run_parts: no measured split on the card in $TSV to predict $NPARTS processes from: not run" >&2
+            row_unmeasured not_run "$PRED" ""
+            exit 3
+        fi
+    fi
     if awk -v p="$PRED" -v t="$TOTAL" -v s="$SHARE" 'BEGIN{exit !(p > s * t)}'; then
         echo "run_parts: $NPARTS processes are predicted to hold $PRED B, above $SHARE of $TOTAL B: not run" >&2
+        row_unmeasured not_run "$PRED" ""
+        exit 3
+    fi
+    if [ -n "$CUDA_GPU" ] && awk -v p="$PRED_DEV" -v t="$DEV_TOTAL" -v u="$DEV_USED0" -v s="$SHARE" \
+            'BEGIN{exit !(p > s * (t - u))}'; then
+        echo "run_parts: $NPARTS processes are predicted to add $PRED_DEV B on the card, above $SHARE of its" \
+            "$((DEV_TOTAL - DEV_USED0)) free B: not run" >&2
         row_unmeasured not_run "$PRED" ""
         exit 3
     fi
@@ -138,6 +204,13 @@ while awk -v l="$(load1)" -v m="$LOAD_MAX" 'BEGIN{exit !(l > m)}'; do
 done
 LOAD_BEFORE=$(load1)
 UP_BEFORE=$(uptime)
+if [ -n "$CUDA_GPU" ]; then
+    set -- $(dev_mem)
+    DEV_USED0=${1:-0}; DEV_TOTAL=${2:-0}
+    DEV_PEAK=$DEV_USED0
+    DEV_APPS=$(nvidia-smi -i "$CUDA_GPU" --query-compute-apps=pid,process_name,used_memory --format=csv,noheader 2>/dev/null \
+        | tr '\n' ';')
+fi
 
 # ---- the processes ----
 GO="$OUTDIR/go"
@@ -192,7 +265,14 @@ T_GO=$(now)
 while [ "$(ls "$OUTDIR"/part_*/rc 2>/dev/null | wc -l | tr -d ' ')" -lt "$NPARTS" ]; do
     set -- $(mem_free)
     f=$1; a=$2
-    echo "$(date '+%T')$TAB$f$TAB$a$TAB$(load1)" >> "$OUTDIR/samples.tsv"
+    if [ -n "$CUDA_GPU" ]; then
+        set -- $(dev_mem)
+        du=${1:-0}
+        [ "$du" -gt "$DEV_PEAK" ] && DEV_PEAK=$du
+        echo "$(date '+%T')$TAB$f$TAB$a$TAB$(load1)$TAB$du" >> "$OUTDIR/samples.tsv"
+    else
+        echo "$(date '+%T')$TAB$f$TAB$a$TAB$(load1)" >> "$OUTDIR/samples.tsv"
+    fi
     [ "$f" -lt "$MINFREE" ] && MINFREE=$f
     [ "$a" -lt "$MINAVAIL" ] && MINAVAIL=$a
     # a part that has already ended is not a foreign process short
@@ -264,8 +344,17 @@ SPREAD=$(awk -v a="$T_FIRST" -v b="$T_LAST" 'BEGIN{printf "%.3f", b - a}')
     echo "mlx_peak_B: largest $MAXPK, summed $SUMPK; mlx_cache_B summed $SUMCA"
     echo "machine: lowest free $MINFREE B, lowest available $MINAVAIL B of $TOTAL B"
     echo "load: before $LOAD_BEFORE, after $LOAD_AFTER"
+    if [ -n "$CUDA_GPU" ]; then
+        echo "device $CUDA_GPU: total $DEV_TOTAL B, used before $DEV_USED0 B, peak used $DEV_PEAK B, the parts' share" \
+            "$((DEV_PEAK - DEV_USED0)) B (predicted ${PRED_DEV:-none}), sampled once a second"
+        echo "device processes before the start: ${DEV_APPS:-none}"
+    fi
 } >> "$OUTDIR/summary.txt"
-row "$status$TAB$ELAPSED$TAB$SUMR$TAB$MINR$TAB$MAXR$TAB$MAXFP$TAB$SUMFP$TAB$MAXRSS$TAB$SUMRSS$TAB$MAXPK$TAB$SUMPK$TAB$SUMCA$TAB$MINFREE$TAB$MINAVAIL$TAB$TOTAL$TAB$PRED$TAB$LOAD_BEFORE$TAB$LOAD_AFTER$TAB${KEYS[*]}$TAB$SUMMED"
+if [ -n "$CUDA_GPU" ]; then
+    row "$status$TAB$ELAPSED$TAB$SUMR$TAB$MINR$TAB$MAXR$TAB$MAXFP$TAB$SUMFP$TAB$MAXRSS$TAB$SUMRSS$TAB$MAXPK$TAB$SUMPK$TAB$SUMCA$TAB$MINFREE$TAB$MINAVAIL$TAB$TOTAL$TAB$PRED$TAB$LOAD_BEFORE$TAB$LOAD_AFTER$TAB${KEYS[*]}$TAB$SUMMED$(dev_cols "$DEV_PEAK" "$((DEV_PEAK - DEV_USED0))")"
+else
+    row "$status$TAB$ELAPSED$TAB$SUMR$TAB$MINR$TAB$MAXR$TAB$MAXFP$TAB$SUMFP$TAB$MAXRSS$TAB$SUMRSS$TAB$MAXPK$TAB$SUMPK$TAB$SUMCA$TAB$MINFREE$TAB$MINAVAIL$TAB$TOTAL$TAB$PRED$TAB$LOAD_BEFORE$TAB$LOAD_AFTER$TAB${KEYS[*]}$TAB$SUMMED"
+fi
 cat "$OUTDIR/summary.txt"
 case "$status" in
     ok) exit 0 ;;

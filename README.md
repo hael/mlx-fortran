@@ -83,7 +83,9 @@ does not depend on SIMPLE.
   `mlx_last_error()` has MLX's message. MLX's exceptions never cross into Fortran.
 - **Kinds and devices.** Transfers take eight kinds: `real32`, `real64`, `complex(real32)`, `int8`, `int16`,
   `int32`, `int64` and `logical(c_bool)`. The default device is the GPU (`MLX_DEVICES%gpu`); float64 runs only
-  on the CPU, as in MLX. A CPU-only MLX (`mlx_metal_is_available()` false) runs on the CPU device alone.
+  on the CPU, as in MLX. A CPU-only MLX (`mlx_metal_is_available()` and `mlx_cuda_is_available()` false) runs on
+  the CPU device alone; a CUDA build of MLX has an NVIDIA GPU for its GPU device (prepared and linked, not yet run
+  on a GPU).
 
 The full contract is [`doc/policies/binding_contract_policy.md`](doc/policies/binding_contract_policy.md).
 
@@ -111,9 +113,9 @@ The full contract is [`doc/policies/binding_contract_policy.md`](doc/policies/bi
 | functions in files | `mlx_export_function`, `mlx_function_exporter` (several traces), `mlx_imported_function` |
 | files | `mlx_save`, `mlx_load` (NumPy's `.npy`), `mlx_save_safetensors`, `mlx_load_safetensors`, `mlx_save_gguf`, `mlx_load_gguf`, `mlx_print_graph`, `mlx_export_to_dot` (a Fortran (m, n) array is a C-order (n, m) array on disk) |
 | distributed | `mlx_group` (`rank`, `size`, `split`; ranks one-based), `mlx_distributed_init`, `mlx_distributed_is_available`, `mlx_all_sum`, `mlx_all_max`, `mlx_all_min`, `mlx_all_gather`, `mlx_sum_scatter`, `mlx_send`, `mlx_recv`, `mlx_recv_like` |
-| custom kernels | `mlx_metal_kernel` (a Metal kernel from source text, GPU only), `mlx_metal_kernel_spec` |
+| custom kernels | `mlx_custom_kernel` (a kernel from Metal or CUDA source text, the one of the backend MLX was built with; GPU only), `mlx_custom_kernel_spec` |
 | fused layers | `mlx_layer_norm`, `mlx_rms_norm`, `mlx_rope` (`mlx_rope_spec`), `mlx_scaled_dot_product_attention` (`mlx_attention_spec`), `mlx_cross_entropy` (features along dimension 1, positions along dimension 2, classes one-based) |
-| devices and memory | `mlx_metal_is_available`, `mlx_device_count`, `mlx_device_is_available`, `mlx_default_device`, `mlx_set_default_device`, `mlx_device_info_*`, `mlx_active_memory`, `mlx_peak_memory`, `mlx_reset_peak_memory`, `mlx_cache_memory`, `mlx_clear_cache`, `mlx_memory_limit`, `mlx_set_memory_limit`, `mlx_set_cache_limit`, `mlx_set_wired_limit`, `mlx_buffer_size`, `a%nbytes()`, `a%itemsize()`, `mlx_metal_start_capture`, `mlx_metal_stop_capture` |
+| devices and memory | `mlx_metal_is_available`, `mlx_cuda_is_available`, `mlx_device_count`, `mlx_device_is_available`, `mlx_default_device`, `mlx_set_default_device`, `mlx_device_info_*`, `mlx_active_memory`, `mlx_peak_memory`, `mlx_reset_peak_memory`, `mlx_cache_memory`, `mlx_clear_cache`, `mlx_memory_limit`, `mlx_set_memory_limit`, `mlx_set_cache_limit`, `mlx_set_wired_limit`, `mlx_buffer_size`, `a%nbytes()`, `a%itemsize()`, `mlx_metal_start_capture`, `mlx_metal_stop_capture` |
 | streams | `mlx_stream`, `mlx_new_stream`, `mlx_default_stream`, `mlx_set_default_stream` (operations take no stream: they run on the default stream of the default device) |
 | runtime | `mlx_last_error`, `mlx_live_count`, `mlx_runtime_version`, `mlxf_version_string`, `mlxf_build_description`, `mlxf_runtime_description`, `MLX_DTYPES`, `MLX_DEVICES`, `MLXF_HARD_ERROR_STATUS` |
 
@@ -144,7 +146,10 @@ reconstruction (`reconstructor_pcg` with its engine) that assembles and solves o
 with compiled reductions: a shift lattice and fused reductions were built, measured and not kept
 ([K4](doc/implementation_notes/completed/mlxf_kernel_k4_report.md)). The polar toy also scores arbitrary reference
 lists, with a neighbourhood driver after SIMPLE's (cones and the two-stage state fill) and a pair-list kernel for
-sparse lists ([K3](doc/implementation_notes/completed/mlxf_kernel_k3_report.md)). The three models have the file layout an
+sparse lists ([K3](doc/implementation_notes/completed/mlxf_kernel_k3_report.md)). For NVIDIA's GPUs the build, a
+backend query, one kernel type for Metal and CUDA sources and a measurement session are prepared on Linux without a
+GPU ([report](doc/implementation_notes/completed/mlxf_cuda_report.md)); the measurements on a Blackwell card come
+next. The three models have the file layout an
 integration in SIMPLE would have: host files that build without MLX, glue submodules beside them and device
 modules behind one opaque component
 ([report](doc/implementation_notes/completed/mlxf_toy_seam_report.md)). The API is still growing, so expect
@@ -164,6 +169,11 @@ On Linux (x86-64) the library runs on the CPU device alone: GFortran 14+ and GCC
 `scripts/build_mlx_deps.sh` builds the pinned pair CPU-only there, from clones or from GitHub's archives of the tags,
 into `.deps/install-cpu`, which a build is pointed at with `MLXC_ROOT`; MLX's CPU backend compiles the kernels of
 compiled graphs with `g++` at run time, as on a Mac. Every test runs on the CPU device; the GPU-only checks skip.
+
+On Linux with an NVIDIA GPU, `scripts/build_mlx_deps.sh --cuda` builds MLX with its CUDA backend (CUDA 12.8, 12.9 or
+13.0, cuDNN 9; for Blackwell `--cuda-arch 100a` or `120a` where the build host has no GPU) into `.deps/install-cuda`.
+The library and its tests build and link against it; nothing has run on a GPU yet (the roadmap's rank 5;
+[the setup guide](doc/how2s/how2set_up_dev.md), section 8).
 
 ```bash
 ./compile_clean.sh                        # Release build, static and fast test gates, install into build/

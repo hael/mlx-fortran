@@ -125,12 +125,13 @@ endfunction()
 #   controls. A process of its own: it switches compilation off and on for the whole process and writes files
 #   (and deletes them) in its working directory. Above 0.5 s in Release beside the other entries (0.4 s alone): its
 #   leak check runs every transform 300 times on each device.
-# fast (a new area the parity plan names): custom Metal kernels, which MLX compiles from source text at their
+# fast (a new area the parity plan names): custom kernels (Metal or CUDA), which MLX compiles from source text at their
 #   first evaluation; on the GPU they are checked exactly, on the CPU device their refusal is. A process of its
 #   own keeps a kernel that fails to compile, which the suite provokes on purpose, apart from the other areas.
 #   Alone it takes 0.1 s in Release; beside the gate's other entries, which share the GPU, 0.6 s. Its sub-suite
 #   fast_layers checks the fused layers (normalisations, rotary embeddings, attention, cross entropy) against
-#   real64 loops on both devices.
+#   real64 loops on both devices. Its sub-suite kernel_sources, run by name only, holds the kernels' CUDA sources
+#   to their records for scripts/check_cuda_sources.sh, which compiles them without a GPU.
 # random (a new area the parity plan names): keys and samplers, each judged by the mean and the variance of 2^20
 #   values against its distribution's, on both devices and three seeds; a process of its own keeps MLX's global
 #   key, which the suite seeds, apart from the other areas. Above 0.5 s in Release (0.7 s alone): the moments are
@@ -156,7 +157,7 @@ endforeach()
 # object_contracts: an operation on an empty array, a stale handle used, a call inside an OpenMP region, a
 #   float64 operation built on the GPU, and the one-thread guard on the paths that touch no operand (an empty
 #   evaluation list, mlx_live_count, mlx_last_error) and on a live private copy released in a region; a
-#   invalid 1D/2D FFT normalizations; a Metal kernel built from a spec without outputs and an empty kernel
+#   invalid 1D/2D FFT normalizations; a custom kernel built from a spec without outputs and an empty kernel
 #   applied; segments of the wrong shape; a factorisation of a rank-1 array, a triangle that is neither 'L' nor
 #   'U' and a convolution spec with a list of the wrong length; a strided view reaching past its input; matmul of
 #   two integer arrays; a categorical draw given num_samples and shape together and a normal draw whose array mean

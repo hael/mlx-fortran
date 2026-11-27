@@ -1,10 +1,11 @@
 !@descr: tests of mlxf_device: the backend, device counts, the default device, device information
 module mlxf_device_tester
 use, intrinsic :: iso_fortran_env, only: int64, real32
-use mlxf,            only: MLX_DEVICES, mlx_array, mlx_from, mlx_to, mlx_metal_is_available, mlx_device_count, &
-                           mlx_default_device, mlx_set_default_device, mlx_device_info_size, mlx_device_info_string, &
-                           mlx_last_error
-use mlxf_test_utils, only: assert_true, assert_int, test_devices, device_name, gpu_present, gpu_only_skip
+use mlxf,            only: MLX_DEVICES, mlx_array, mlx_from, mlx_to, mlx_metal_is_available, mlx_cuda_is_available, &
+                           mlx_device_count, mlx_default_device, mlx_set_default_device, mlx_device_info_size, &
+                           mlx_device_info_string, mlx_last_error
+use mlxf_test_utils, only: assert_true, assert_int, test_devices, device_name, gpu_present, gpu_only_skip, &
+                           cpu_only_mlx, metal_check_runs
 implicit none
 private
 
@@ -30,21 +31,25 @@ contains
         call assert_int(1, mlx_device_count(MLX_DEVICES%cpu), 'MLX has one CPU device')
     end subroutine test_counts
 
-    ! the Metal backend is compiled in or not, the same at every call; a GPU device is a Metal device here, and
-    ! without the backend there is no GPU and the CPU device allocates (MLX's heap allocator)
+    ! one GPU backend (Metal or CUDA) is compiled in, or none, the same at every call; a GPU device belongs to it,
+    ! and without a GPU backend there is no GPU and the CPU device allocates (MLX's heap allocator)
     subroutine test_backend
         real(real32)    :: y(3)
         type(mlx_array) :: a
-        logical         :: metal, again, gpu
+        logical         :: metal, cuda, metal_again, cuda_again, gpu
         integer         :: st, original
         write(*,'(A)') 'test_backend'
-        metal = mlx_metal_is_available()
-        again = mlx_metal_is_available()
-        gpu   = gpu_present()
+        metal       = mlx_metal_is_available()
+        cuda        = mlx_cuda_is_available()
+        metal_again = mlx_metal_is_available()
+        cuda_again  = mlx_cuda_is_available()
+        gpu         = gpu_present()
         write(*,'(A,L1)') '    Metal backend: ', metal
-        call assert_true(metal .eqv. again, 'whether the Metal backend is built in is stable')
-        call assert_true(metal .or. .not. gpu, 'without the Metal backend MLX opens no GPU')
-        if( metal ) return
+        write(*,'(A,L1)') '    CUDA backend: ', cuda
+        call assert_true((metal .eqv. metal_again) .and. (cuda .eqv. cuda_again) .and. .not. (metal .and. cuda), &
+            &'the GPU backend built in (Metal, CUDA or none) is one and stable')
+        call assert_true(metal .or. cuda .or. .not. gpu, 'without a GPU backend MLX opens no GPU')
+        if( metal .or. cuda ) return
         original = mlx_default_device()
         call mlx_set_default_device(MLX_DEVICES%cpu)
         a = mlx_from([1._real32, 2._real32, 3._real32]) * 2._real32
@@ -84,7 +89,7 @@ contains
 
     subroutine test_device_info
         character(len=:), allocatable :: msg, str
-        integer(int64)                :: maxbuf, memsize, n
+        integer(int64)                :: maxbuf, memsize, total_mem, free_mem, n
         integer                       :: st
         write(*,'(A)') 'test_device_info'
         ! a device type MLX does not know is refused before it reaches mlx-c (which indexes a table with it):
@@ -100,7 +105,7 @@ contains
         if( .not. gpu_present() )then
             n = mlx_device_info_size(MLX_DEVICES%gpu, 'memory_size', status=st)
             call assert_true(n == -1_int64 .and. st == 0, 'an absent GPU gives -1 with status 0, not an error')
-            if( mlx_metal_is_available() )then
+            if( .not. cpu_only_mlx() )then
                 write(*,'(A)') '    SKIP: no GPU device'
             else
                 call gpu_only_skip('the information of the GPU')
@@ -109,13 +114,26 @@ contains
         endif
         write(*,'(A)') '    GPU: '//mlx_device_info_string(MLX_DEVICES%gpu, 'device_name')//', '//&
             &mlx_device_info_string(MLX_DEVICES%gpu, 'architecture')
-        maxbuf  = mlx_device_info_size(MLX_DEVICES%gpu, 'max_buffer_length')
-        memsize = mlx_device_info_size(MLX_DEVICES%gpu, 'memory_size', status=st)
-        write(*,'(A,I0,A,I0)') '    max_buffer_length ', maxbuf, ', memory_size ', memsize
-        call assert_true(st == 0 .and. memsize > 0_int64, 'a present size key gives its value with status 0')
-        call assert_true(len(mlx_device_info_string(MLX_DEVICES%gpu, 'architecture')) > 0, 'the GPU reports its architecture')
-        call assert_true(maxbuf > 0_int64 .and. maxbuf <= memsize, &
-            &'the GPU reports a maximum buffer length no larger than its memory')
+        if( metal_check_runs('the keys max_buffer_length and memory_size') )then
+            maxbuf  = mlx_device_info_size(MLX_DEVICES%gpu, 'max_buffer_length')
+            memsize = mlx_device_info_size(MLX_DEVICES%gpu, 'memory_size', status=st)
+            write(*,'(A,I0,A,I0)') '    max_buffer_length ', maxbuf, ', memory_size ', memsize
+            call assert_true(st == 0 .and. memsize > 0_int64, 'a present size key gives its value with status 0')
+            call assert_true(len(mlx_device_info_string(MLX_DEVICES%gpu, 'architecture')) > 0, &
+                &'the GPU reports its architecture')
+            call assert_true(maxbuf > 0_int64 .and. maxbuf <= memsize, &
+                &'the GPU reports a maximum buffer length no larger than its memory')
+        else
+            ! a CUDA GPU reports its total and free memory and an sm_XY architecture instead
+            total_mem = mlx_device_info_size(MLX_DEVICES%gpu, 'total_memory', status=st)
+            free_mem  = mlx_device_info_size(MLX_DEVICES%gpu, 'free_memory')
+            write(*,'(A,I0,A,I0)') '    total_memory ', total_mem, ', free_memory ', free_mem
+            call assert_true(st == 0 .and. total_mem > 0_int64, 'a present size key gives its value with status 0')
+            call assert_true(index(mlx_device_info_string(MLX_DEVICES%gpu, 'architecture'), 'sm_') == 1, &
+                &'the CUDA GPU reports its architecture as sm_XY')
+            call assert_true(free_mem >= 0_int64 .and. free_mem <= total_mem, &
+                &'the GPU reports free memory no larger than its total')
+        endif
         n = mlx_device_info_size(MLX_DEVICES%gpu, 'no_such_key', status=st)
         call assert_true(n == -1_int64 .and. st == 0, 'an absent size key gives -1 with status 0')
         str = mlx_device_info_string(MLX_DEVICES%gpu, 'no_such_key', status=st)

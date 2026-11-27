@@ -4,9 +4,9 @@ program mlxf_api_names
 use mlxf, only: mlxf_version_string, mlxf_build_description, mlx_runtime_version, mlxf_runtime_description, &
                 MLXF_HARD_ERROR_STATUS, MLX_DEVICES, MLX_DTYPES, mlx_last_error, mlx_live_count, &
                 mlx_metal_is_available, mlx_device_count, mlx_default_device, mlx_set_default_device, &
-                mlx_device_info_size, mlx_device_info_string, mlx_active_memory, mlx_peak_memory, &
-                mlx_reset_peak_memory, mlx_cache_memory, mlx_clear_cache, mlx_set_memory_limit, mlx_set_cache_limit, &
-                mlx_memory_limit, mlx_set_wired_limit, mlx_buffer_size, mlx_device_is_available, &
+                mlx_device_info_size, mlx_device_info_string, mlx_cuda_is_available, mlx_active_memory, &
+                mlx_peak_memory, mlx_reset_peak_memory, mlx_cache_memory, mlx_clear_cache, mlx_set_memory_limit, &
+                mlx_set_cache_limit, mlx_memory_limit, mlx_set_wired_limit, mlx_buffer_size, mlx_device_is_available, &
                 mlx_metal_start_capture, mlx_metal_stop_capture, mlx_stream, mlx_new_stream, mlx_default_stream, &
                 mlx_set_default_stream, mlx_save, mlx_load, mlx_save_safetensors, mlx_load_safetensors, mlx_save_gguf, &
                 mlx_load_gguf, mlx_print_graph, mlx_export_to_dot, mlx_group, mlx_distributed_init, &
@@ -42,12 +42,12 @@ use mlxf, only: mlxf_version_string, mlxf_build_description, mlx_runtime_version
                 MLX_FFT_NORMS, mlx_function, mlx_compile, mlx_enable_compile, mlx_disable_compile, &
                 mlx_set_compile_mode, MLX_COMPILE_MODES, mlx_grad_function, mlx_value_and_grad, mlx_vjp, mlx_jvp, &
                 mlx_custom_vjp, mlx_custom_function, mlx_checkpoint, mlx_depends, mlx_export_function, &
-                mlx_function_exporter, mlx_imported_function, mlx_metal_kernel, mlx_metal_kernel_spec, mlx_layer_norm, &
-                mlx_rms_norm, mlx_rope, mlx_rope_spec, mlx_scaled_dot_product_attention, mlx_attention_spec, &
-                mlx_cross_entropy, mlx_random_seed, mlx_random_key, mlx_random_split, mlx_random_bits, &
-                mlx_random_uniform, mlx_random_normal, mlx_random_laplace, mlx_random_gumbel, &
+                mlx_function_exporter, mlx_imported_function, mlx_custom_kernel, mlx_custom_kernel_spec, &
+                mlx_layer_norm, mlx_rms_norm, mlx_rope, mlx_rope_spec, mlx_scaled_dot_product_attention, &
+                mlx_attention_spec, mlx_cross_entropy, mlx_random_seed, mlx_random_key, mlx_random_split, &
+                mlx_random_bits, mlx_random_uniform, mlx_random_normal, mlx_random_laplace, mlx_random_gumbel, &
                 mlx_random_truncated_normal, mlx_random_randint, mlx_random_bernoulli, mlx_random_multivariate_normal, &
                 mlx_random_categorical, mlx_random_permutation
 implicit none
-print '(A,I0)', 'mlxf public names: ', 316
+print '(A,I0)', 'mlxf public names: ', 317
 end program mlxf_api_names

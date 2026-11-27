@@ -1,6 +1,6 @@
 # cmake/Dependencies.cmake
 #
-# mlx-c (the C API of MLX), OpenMP and the Python of the build scripts.
+# mlx-c (the C API of MLX), OpenMP, the Python of the build scripts and, for a CUDA MLX without a driver, its stub.
 # ------------------------------------------------------------------------------
 # mlx-c: an installed package with its CMake config (share/cmake/MLXC). Searched, in order, under
 # MLXC_ROOT (cache or environment), the tree scripts/build_mlx_deps.sh installs (.deps/install) and the
@@ -74,6 +74,21 @@ if(NOT MLXC_VERSION VERSION_EQUAL MLXF_MLXC_PINNED_VERSION)
     message(WARNING "mlx-c ${MLXC_VERSION} found; mlx-fortran is written against ${MLXF_MLXC_PINNED_VERSION}. "
         "The generated layer follows the headers found, the hand-written layer may not.")
 endif()
+# Whether the MLX under mlx-c is a CUDA build, read from libmlx.so beside libmlxc: a CUDA build of MLX links NVIDIA's
+# driver library (libcuda.so.1). Off Apple only, where MLX's GPU backend is Metal. MLXF_REQUIRE_GPU defaults ON then.
+set(MLXF_MLX_CUDA OFF)
+get_filename_component(_mlxf_mlxc_dir "${MLXF_MLXC_LIBRARY}" DIRECTORY)
+if(NOT APPLE AND CMAKE_READELF AND EXISTS "${_mlxf_mlxc_dir}/libmlx.so")
+    execute_process(COMMAND "${CMAKE_READELF}" -d "${_mlxf_mlxc_dir}/libmlx.so"
+        OUTPUT_VARIABLE _mlxf_dynamic RESULT_VARIABLE _mlxf_readelf_status ERROR_QUIET)
+    if(_mlxf_readelf_status EQUAL 0 AND _mlxf_dynamic MATCHES "\\[libcuda\\.so\\.1\\]")
+        set(MLXF_MLX_CUDA ON)
+        message(STATUS "MLX is a CUDA build (its libmlx.so links libcuda.so.1)")
+    endif()
+elseif(NOT APPLE)
+    message(STATUS "No libmlx.so read beside ${MLXF_MLXC_LIBRARY}: whether MLX is a CUDA build is not known, and "
+        "MLXF_REQUIRE_GPU defaults OFF")
+endif()
 # libmlxc and libmlx are named @rpath/... when built from source; CMAKE_INSTALL_RPATH_USE_LINK_PATH adds
 # only directories outside the project, and .deps/install is inside it, so installed executables get the
 # mlx-c library directory explicitly (dyld searches the executable's rpaths for libmlx too).
@@ -105,3 +120,37 @@ if(NOT Python3_Interpreter_FOUND)
         "  A specific one: cmake -S . -B build -DPython3_EXECUTABLE=/path/to/python3")
 endif()
 set(MLXF_PYTHON3 "${Python3_EXECUTABLE}" CACHE INTERNAL "Python of the build scripts and the fast gate")
+
+# ------------------------------------------------------------------------------
+# A CUDA build of MLX linked where NVIDIA's driver is not installed (build only): libmlx.so needs the driver's
+# libcuda.so.1, and MLXF_CUDA_STUB_DIR names a directory holding libcuda.so.1, the toolkit's stub
+# (scripts/build_mlx_deps.sh --cuda makes <prefix>/cuda-stub there and names it in mlxf_deps.txt). Only the linker
+# reads it (-rpath-link), never the loader: what links this way runs only where the driver is. Refused where the
+# loader finds the driver, which needs no stub.
+# ------------------------------------------------------------------------------
+set(MLXF_CUDA_STUB_DIR "" CACHE PATH
+    "Build only: a directory holding libcuda.so.1 (the CUDA toolkit's stub) to link against a CUDA MLX without a driver")
+if(MLXF_CUDA_STUB_DIR)
+    if(APPLE)
+        message(FATAL_ERROR "MLXF_CUDA_STUB_DIR is for a CUDA build of MLX on Linux; unset it on macOS")
+    endif()
+    if(NOT EXISTS "${MLXF_CUDA_STUB_DIR}/libcuda.so.1")
+        message(FATAL_ERROR "MLXF_CUDA_STUB_DIR=${MLXF_CUDA_STUB_DIR} holds no libcuda.so.1 (the toolkit's "
+            "lib64/stubs/libcuda.so under that name: scripts/build_mlx_deps.sh --cuda makes <prefix>/cuda-stub)")
+    endif()
+    execute_process(COMMAND "${MLXF_PYTHON3}" -I -c "import ctypes; ctypes.CDLL('libcuda.so.1')"
+        RESULT_VARIABLE _mlxf_driver_status OUTPUT_QUIET ERROR_QUIET)
+    if(_mlxf_driver_status EQUAL 0)
+        message(FATAL_ERROR "The loader finds NVIDIA's driver (libcuda.so.1) on this host, so the link needs no stub: "
+            "reconfigure with -DMLXF_CUDA_STUB_DIR= (MLXF_CUDA_STUB_DIR is for hosts without a driver)")
+    endif()
+    target_link_options(mlxf_build_flags INTERFACE "LINKER:-rpath-link,${MLXF_CUDA_STUB_DIR}")
+    message(STATUS "Linking through the CUDA driver's stub in ${MLXF_CUDA_STUB_DIR}: build only, nothing runs here")
+elseif(MLXF_MLX_CUDA)
+    execute_process(COMMAND "${MLXF_PYTHON3}" -I -c "import ctypes; ctypes.CDLL('libcuda.so.1')"
+        RESULT_VARIABLE _mlxf_driver_status OUTPUT_QUIET ERROR_QUIET)
+    if(NOT _mlxf_driver_status EQUAL 0)
+        message(STATUS "No NVIDIA driver (libcuda.so.1) here: an executable links against this CUDA MLX only "
+            "through the toolkit's stub, -DMLXF_CUDA_STUB_DIR=<the mlx-c prefix>/cuda-stub (build only)")
+    endif()
+endif()

@@ -214,6 +214,12 @@ written, the skill `mlxf-modern-fortran`.
   The owner is a named variable: a view of an expression, `call mlx_view(exp(a), p)`, dangles when the
   statement ends, because the expression's result is finalized there (the library cannot detect it).
   `w = exp(a)`, then `call mlx_view(w, p)`, keeps `p` valid while `w` is unchanged.
+- **On a discrete GPU (a CUDA card)** every rule above holds and only the cost changes. MLX keeps a GPU array in
+  the card's memory; the first host access (`mlx_view`, `mlx_to`, `mlx_to_alloc`) moves the buffer, with a copy,
+  into memory both sides reach (managed where the card has concurrent managed access, else pinned host memory), and
+  `mlx_from` and `mlx_alloc` cross the bus the other way (`mlx_alloc`'s buffer is copied: `zero_copy` false). So a
+  view is correct and costs a transfer, where on Apple silicon it costs nothing. What each costs per byte is
+  measured at work (the CUDA plan's E2, `bench_user_costs`), not here; nothing of it has run on a GPU yet.
 
 ## 5. Kinds and scalars
 
@@ -266,8 +272,8 @@ written, the skill `mlxf-modern-fortran`.
   is a program error). Every stop is `error stop MLXF_HARD_ERROR_STATUS` (86).
 - **Checked procedures** take an optional `integer, intent(out) :: status` and leave the message in
   `mlx_last_error()`: `mlx_eval`, `mlx_async_eval`, `mlx_synchronize`, `mlx_to`, `mlx_to_alloc`, `mlx_view`,
-  `mlx_alloc`, `mlx_set_default_device`, `mlx_set_memory_limit`, `mlx_device_info_size`,
-  `mlx_device_info_string`, the `apply` of `mlx_function`, of `mlx_metal_kernel`, of `mlx_grad_function`, of
+  `mlx_alloc`, `mlx_set_default_device`, `mlx_set_memory_limit`, `mlx_device_info_size`, `mlx_device_info_string`,
+  the `apply` of `mlx_function`, of `mlx_custom_kernel` (and its `new` given `status`), of `mlx_grad_function`, of
   `mlx_function_exporter` and of `mlx_imported_function`, `mlx_export_function`, the binding `new` of the last
   two, the file procedures of section 17, `mlx_buffer_size`, `mlx_set_wired_limit`, the Metal capture, and the
   distributed procedures of section 18. Without `status` they stop. A failure the
@@ -281,7 +287,9 @@ written, the skill `mlxf-modern-fortran`.
   buffer beyond the device's `max_buffer_length` returns a status whose message names the allocation, and the
   same graph at a batch that fits evaluates (1 GiB in the fast gate; half the failing batch in the sub-suite
   `recovery_half` of `unit_core`, run by name). Over-subscribing unified memory does not fail, it pages: size work
-  from `mlx_peak_memory()` and a budget, not by catching failures.
+  from `mlx_peak_memory()` and a budget, not by catching failures. A CUDA card's memory is its own, apart from the
+  host's: MLX's limit there defaults to 95 % of it and is soft, and several part processes share the card's memory
+  (`scripts/run_parts.sh` guards it on a CUDA host).
 - A procedure C++ calls (the error handler, a deleter, a closure trampoline) never stops; it records and
   returns. That holds for the trampoline's own work too: importing its inputs (mlx-c, the registry, an
   allocation) and exporting its outputs report a status.
@@ -296,13 +304,16 @@ written, the skill `mlxf-modern-fortran`.
   (`scripts/build_mlx_deps.sh`; every Linux build is the third session below). The contract is the same on both;
   what differs is the device set. On both MLX compiles the CPU kernels of compiled graphs (section 11) with `g++`
   at run time when one answers on `PATH` (on a Mac, the Command Line Tools'; else they run uncompiled) and caches
-  them under `TMPDIR`. MLX's CUDA backend is not bound yet (the roadmap's rank 5).
-- A GPU is present when `mlx_device_count(MLX_DEVICES%gpu) > 0`; `mlx_metal_is_available()` says whether MLX
-  was built with its Metal backend. Three sessions follow: Metal with a GPU (both devices); Metal without one
-  (headless, sandboxed, virtual), where a Metal build of MLX cannot allocate on either device and the first
-  operation that would allocate stops saying so; and a CPU-only MLX (`MLX_BUILD_METAL=OFF`, and every Linux
-  build), which has no GPU and allocates on the CPU device (heap memory; no maximum buffer length, no Metal
-  kernels). The default device is
+  them under `TMPDIR`. MLX's CUDA backend (`scripts/build_mlx_deps.sh --cuda`, Linux) is told apart and its
+  sessions are below; nothing of it has run on a GPU yet (the roadmap's rank 5, `mlxf_cuda.md`, Part C).
+- A GPU is present when `mlx_device_count(MLX_DEVICES%gpu) > 0`; `mlx_metal_is_available()` and
+  `mlx_cuda_is_available()` say whether MLX was built with its Metal or its CUDA backend (at most one). The
+  sessions follow: Metal or CUDA with a GPU (both devices; on CUDA the count is `cudaGetDeviceCount`'s, so
+  `CUDA_VISIBLE_DEVICES` applies); either without one (Metal: headless, sandboxed, virtual; CUDA: no device, or
+  none visible; without NVIDIA's driver library a CUDA build does not load at all), where MLX cannot allocate on
+  either device and the first operation that would allocate stops saying so, naming the backend; and a CPU-only
+  MLX (`MLX_BUILD_METAL=OFF` without CUDA, and every Linux build but `--cuda`), which has no GPU and allocates on
+  the CPU device (heap memory; no maximum buffer length, no Metal kernels). The default device is
   MLX's (the GPU when present); `mlx_set_default_device(MLX_DEVICES%cpu)` or `(MLX_DEVICES%gpu)` changes it. Operations take no stream argument;
   a stream of one's own is made the default of its device (section 16).
   One choice of stream is the library's own: the factorisations, inverses, determinants, eigenvalues and
@@ -342,12 +353,15 @@ written, the skill `mlxf-modern-fortran`.
   may keep wired; 0, the default, holds none; a limit above what the system allows is refused with a status);
   `a%nbytes()` (int64) and `a%itemsize()` are the bytes of an array's elements and of one of them, and
   `mlx_buffer_size(arrays[, status])` the bytes of the buffers the arrays hold, after evaluating them; device facts through `mlx_device_info_size` and
-  `mlx_device_info_string` (`max_buffer_length`, `memory_size`, `architecture`, ...).
+  `mlx_device_info_string` (`max_buffer_length`, `memory_size`, `architecture`, ...; a CUDA card reports
+  `total_memory`, `free_memory`, `architecture` as `sm_XY`, `uuid`, `pci_bus_id` and no `memory_size` or
+  `max_buffer_length`). On CUDA `mlx_set_wired_limit` has no effect (MLX 0.32.4 returns 0).
 
 ## 9. Coming with later phases (the contract they keep)
 
-- **Custom Metal kernels** (`mlx_metal_kernel`) are delivered: section 12. They are configured through a spec
-  type and kept for a measured bottleneck that ordinary or compiled operations cannot handle.
+- **Custom kernels** (`mlx_custom_kernel`, a Metal and a CUDA source in one spec) are delivered: section 12. They
+  are configured through a spec type and kept for a measured bottleneck that ordinary or compiled operations
+  cannot handle.
 
 
 ## 10. Operations, matrices and Fourier transforms
@@ -653,7 +667,8 @@ written, the skill `mlxf-modern-fortran`.
   - **Device.** MLX v0.32.4 implements all of these on the CPU only (the probe
     `scripts/probes/mlx_behaviour_probe.c` lists each refusal of the GPU stream). The wrappers submit them to
     the CPU's default stream whatever the default device; the transposes and the index shift stay on the
-    default device, and MLX evaluates a graph that crosses the two (unified memory, no copy). float64 remains a
+    default device, and MLX evaluates a graph that crosses the two (unified memory, no copy; on a CUDA card a
+    transfer MLX manages). float64 remains a
     CPU-device dtype: a float64 operand needs the CPU as the default device.
   - **Dtypes.** Real float32 and float64; `mlx_svd`, `mlx_eigh`, `mlx_eigvalsh`, `mlx_eig` and `mlx_eigvals`
     also take complex64. `mlx_eig` and `mlx_eigvals` return complex64 whatever the operand.
@@ -797,34 +812,40 @@ end subroutine callback
   Gradients, vector-Jacobian and Jacobian-vector products are section 14; `vmap` is not wrapped (mlx-c 0.8.0
   exposes it only as `detail_`).
 
-## 12. Custom Metal kernels
+## 12. Custom kernels: Metal and CUDA sources
 
-`k = mlx_metal_kernel(spec)` (or `call k%new(spec)`) builds a kernel from the record `mlx_metal_kernel_spec`,
-and `call k%apply(inputs, outputs[, status])` adds one application of it to the graph. A kernel is for a
-measured bottleneck that ordinary or compiled operations cannot handle. It runs on the GPU only, so the
-graph form of the same computation stays as the CPU path and as the reference.
+`k = mlx_custom_kernel(spec)` (or `call k%new(spec[, status])`) builds a kernel from the record
+`mlx_custom_kernel_spec`, and `call k%apply(inputs, outputs[, status])` adds one application of it to the graph. A
+kernel is for a measured bottleneck that ordinary or compiled operations cannot handle. It runs on the GPU only, so
+the graph form of the same computation stays as the CPU path and as the reference. One spec holds a source per
+backend, and the kernel takes the one of the backend MLX was built with, read once when it is built: `cuda_source`
+on a CUDA build, else `source` (Metal's, also on a CPU-only MLX, which refuses it at `apply`). A kernel that gains
+a CUDA source changes nothing else: not its spec's other components, not its caller.
 
 - **The spec** is a record of plain components, filled by assignment:
 
   | component | meaning | default |
   | --- | --- | --- |
-  | `name` | the kernel's name (MLX builds the Metal function's name from it) | required |
-  | `source` | the body of the Metal function; MLX writes its signature | required |
-  | `header` | declarations placed before the function (helper functions) | none |
+  | `name` | the kernel's name (MLX builds the function's name from it) | required |
+  | `source` | the body of the Metal function; MLX writes its signature | required on a Metal or CPU-only MLX |
+  | `cuda_source` | the body of the CUDA function; MLX writes its signature | required on a CUDA build |
+  | `header` | declarations placed before the function (helper functions), by both backends: a CUDA build compiles them with NVRTC, where a plain function is device code; a header only Metal compiles needs a CUDA header of its own, added when a kernel needs one | none |
   | `input_names(:)`, `output_names(:)` | the names the buffers take in the source, in the order of `inputs` and `outputs` | no input; at least one output |
-  | `grid(3)`, `threadgroup(3)` | the threads launched and their grouping, as Metal's (x, y, z); they are not array shapes and are not reversed | `[1, 1, 1]` each |
+  | `grid(3)`, `threadgroup(3)` | the threads launched and their grouping, as (x, y, z); they are not array shapes and are not reversed. Metal launches exactly the grid; CUDA launches `ceil(grid/threadgroup)` whole blocks of `min(threadgroup, grid)` threads, so a CUDA source guards its index | `[1, 1, 1]` each |
+  | `shared_memory` | the dynamic shared memory of a CUDA launch, in bytes (MLX raises the function's limit above 48,000 B); Metal sizes `threadgroup` memory in the source | 0 |
   | `output_shapes(:)` | the outputs' Fortran shapes, one after another | required |
   | `output_ranks(:)` | how many extents of `output_shapes` each output takes (0 for a rank-0 output) | the outputs share the extents equally |
   | `output_dtypes(:)` | one `MLX_DTYPES` member per output | float32 |
   | `template_dtype_names(:)` with `template_dtypes(:)`, `template_int_names(:)` with `template_ints(:)`, `template_bool_names(:)` with `template_bools(:)` | template parameters of the Metal function: a type name, an `int` or a `bool` per name | none |
   | `init_value` | when set, every output is filled with it before the kernel runs | not set: the outputs start undefined |
   | `ensure_row_contiguous` | MLX copies a strided input (a transpose, a section) first, so the source sees the array's elements in array element order | `.true.` |
-  | `atomic_outputs` | the outputs are `atomic<T>` buffers, for threads that add to the same element | `.false.` |
-  | `verbose` | MLX prints the Metal source it generates at each application | `.false.` |
+  | `atomic_outputs` | Metal's: the outputs are `atomic<T>` buffers, for threads that add to the same element (a CUDA source calls `atomicAdd` on a plain output) | `.false.` |
+  | `verbose` | MLX prints the source it generates at each application | `.false.` |
 
-  `new` validates the spec once and stops on an invalid one (no name, no source, no output, shapes that do
-  not match the outputs, a dtype outside `MLX_DTYPES`, a grid or threadgroup below 1, a template name without
-  its value). The launch configuration belongs to the kernel object: another grid or output shape is another
+  `new` validates the spec once and stops on an invalid one (no name, no output, shapes that do not match the
+  outputs, a dtype outside `MLX_DTYPES`, a grid or threadgroup below 1, a negative `shared_memory`, a template name
+  without its value). A spec without the source of the backend MLX was built with is refused: with `status` a
+  status and a message, the kernel left empty, so that the caller runs its graph form; without it a stop. The launch configuration belongs to the kernel object: another grid or output shape is another
   kernel, built from the edited spec. That is cheap, because MLX compiles a generated source once per process:
   on the M5 Ultra the first evaluation of a new source took 60 ms, and building, applying and evaluating a
   second kernel object with the same source and another grid took 0.2 ms.
@@ -835,6 +856,17 @@ graph form of the same computation stays as the CPU path and as the reference.
   `device atomic<T>* out` under `atomic_outputs`, rank 0 included (`out[0]`). The Metal attributes the source
   names (`thread_position_in_grid`, `threads_per_grid`, `threads_per_simdgroup`, ...) become arguments, and
   MLX's kernel utilities (`elem_to_loc`, ...) are in scope.
+- **What MLX generates on CUDA** (`mlx/backend/cuda/custom_kernel.cpp`, MLX 0.32.4). The function is
+  `__global__ void custom_kernel_<name><template values>(...)` in namespace `mlx::core::cu`, with
+  `cooperative_groups` as `cg` and MLX's device utilities in scope. An input named `a` is `const T* a`
+  (complex64 is `mlx::core::cu::complex64_t`, `cuda::std::complex<float>`, with methods `real()` and `imag()`), a
+  rank-0 input too (`scale[0]`); `a_shape` and `a_strides` are fixed arrays of ten (`Shape`, `Strides`; pass
+  `a_shape.data()` to `elem_to_loc`) and `a_ndim` an `int`, when the source names them. An output named `out` is
+  `T* out`. Template parameters become `constexpr int` and `constexpr bool` locals and `using` aliases. A thread's
+  index is `blockIdx.x * blockDim.x + threadIdx.x` (y and z alike); since whole blocks run, the source compares it
+  with the extent before it reads or writes. MLX compiles the source with NVRTC at the first evaluation, once per
+  source, for the GPU's architecture. `scripts/check_cuda_sources.sh` wraps and compiles the tree's CUDA sources
+  the same way on a machine without a GPU.
 - **The source sees MLX's layout: row-major, 0-based, the shape reversed.** A Fortran array `a(n1, n2)` is
   MLX's `[n2, n1]`: in the source `a_shape[0]` is n2, `a_shape[1]` is n1, and element `a(i, j)` is
   `a[(j-1)*n1 + (i-1)]`. In general element (i1, ..., ir) is at `(i1-1) + n1*((i2-1) + n2*(...))`, its
@@ -851,24 +883,31 @@ graph form of the same computation stays as the CPU path and as the reference.
   spec%output_names = ['out']
   spec%source = 'uint elem = thread_position_in_grid.x;'//new_line('a')// &
                 'out[elem] = inp[elem] + float(elem / inp_shape[1] + 1);'
+  spec%cuda_source = 'int elem = blockIdx.x * blockDim.x + threadIdx.x;'//new_line('a')// &
+                     'if (elem >= inp_shape[0] * inp_shape[1]) return;'//new_line('a')// &
+                     'out[elem] = inp[elem] + float(elem / inp_shape[1] + 1);'
   spec%grid = [size(x), 1, 1]
   spec%threadgroup = [64, 1, 1]
   spec%output_shapes = shape(x)
-  k = mlx_metal_kernel(spec)
+  k = mlx_custom_kernel(spec)
   call k%apply([a], outputs)          ! outputs(1) has x's shape and holds x(i, j) + j
   ```
 
   With `ensure_row_contiguous = .false.` a strided input reaches the source as its buffer, in storage order:
-  the source then goes through `elem_to_loc(elem, a_shape, a_strides, a_ndim)`.
+  the source then goes through `elem_to_loc(elem, a_shape, a_strides, a_ndim)` (on CUDA
+  `elem_to_loc(int64_t(elem), a_shape.data(), a_strides.data(), a_ndim)`).
 - **Errors.** `apply` is a checked procedure. It returns a status, with `outputs` unallocated and MLX usable,
   when the default device is the CPU ("[metal_kernel] Only supports the GPU"; on a CPU-only MLX "[metal_kernel]
-  No Metal back-end"), when the number of inputs is
-  not the number of input names, when an input is empty or stale ("mlx_metal_kernel apply: an input array is
-  empty or stale"), and when an output is float64. The source
-  is compiled at the first evaluation of a result, so a source that does not compile, and a threadgroup above
-  the device's limit (1,024 threads on the M5 Ultra, checked before the grid clips it), fail `mlx_eval`,
-  `mlx_to` or `mlx_view` with a status; `mlx_last_error()` then holds the Metal compiler's message with the
-  source line. An empty or stale kernel stops in `apply`, as an empty array stops an operation.
+  No Metal back-end"; on CUDA "[custom_kernel] Only supports the GPU"), when the number of inputs is
+  not the number of input names, when an input is empty or stale ("mlx_custom_kernel apply: an input array is
+  empty or stale"), and when an output is float64 (MLX has no float64 on the GPU). The source
+  is compiled at the first evaluation of a result, so a source that does not compile fails `mlx_eval`, `mlx_to`
+  or `mlx_view` with a status; `mlx_last_error()` then holds the compiler's message (Metal's, or NVRTC's) with the
+  source line. On Metal a threadgroup above the device's limit (1,024 threads on the M5 Ultra, checked before the
+  grid clips it) fails the evaluation too; CUDA clips the block to the grid and checks no limit. On CUDA, MLX
+  0.32.4 names the function of a negative integer template argument with a `-`, which does not compile (question
+  39 of the Apple questions): such a value goes in as an input or a shifted constant there. An empty or stale
+  kernel stops in `apply`, as an empty array stops an operation.
 - **Lifetime.** A kernel is a counted handle like `mlx_function`: assignment shares it, `kill` is idempotent,
   finalization releases it, and it counts as one object in `mlx_live_count()`. A graph keeps what it needs of
   an applied kernel, so the kernel object may be killed before its outputs are evaluated. Empty kernels may be
@@ -887,10 +926,14 @@ graph form of the same computation stays as the CPU path and as the reference.
 - The gates: `unit_fast` (exact results on the GPU for the layout, a two-dimensional grid, two inputs and two
   outputs, templates and a header, a strided input with and without the copy, atomic int32 outputs with
   colliding updates, complex64 and rank-0 inputs, a kernel without inputs, a kernel inside a compiled
-  function; the refusals above through `status`; the refusal on the CPU device), and two guards of
-  `object_contracts` (a spec without outputs, an empty kernel applied). Not tested in `unit_fast`: the other stops
-  of `new`, a stale kernel, an output above rank 2 (rank 3 worked in a probe with MLX 0.32.4), a template dtype
-  other than float32.
+  function; the refusals above through `status`, the threadgroup's on Metal only, with a named skip on CUDA; the
+  refusal on the CPU device), and two guards of `object_contracts` (a spec without outputs, an empty kernel
+  applied). Every test kernel carries both sources, the CUDA ones with their index guards. The named-only
+  sub-suite `kernel_sources` checks that, and that a spec without its backend's source is refused through
+  `status`; with `records=<dir>` it writes the records `scripts/check_cuda_sources.sh` compiles (NVRTC, MLX's
+  wrapping and options, `sm_100a` and `sm_120a`: compiled, not run). The CUDA path has not run on a GPU yet (the
+  CUDA plan's Part C). Not tested in `unit_fast`: the other stops of `new`, a stale kernel, an output above rank 2
+  (rank 3 worked in a probe with MLX 0.32.4), a template dtype other than float32.
 - **Measured by the toys** (MLX 0.32.4, M5 Ultra). A complex64 output of rank 2 (`complex64_t`, written by
   members) holds its values bit for bit; the toy projector's fused gather writes its bank so (`unit_kernels`,
   suite `projector`). A float32 output under `atomic_outputs` adds colliding `atomic_fetch_add_explicit` updates
@@ -1138,7 +1181,8 @@ dimension 1 and, where there is a sequence, positions along dimension 2**; the f
   `call mlx_synchronize(stream[, status])` for one stream's. Work queued on a stream that is no longer a default,
   or never was, is waited for through its handle.
 - `mlx_device_is_available(device_type)` says whether MLX has the backend of a device type and that backend has a
-  device (the CPU always; the GPU on an MLX built with Metal, on a Mac whose session has a Metal device).
+  device (the CPU always; the GPU on an MLX built with Metal, on a Mac whose session has a Metal device, or built
+  with CUDA, in a session that sees a CUDA device).
 - `call mlx_metal_start_capture(path[, status])` and `call mlx_metal_stop_capture([status])` record the GPU's
   work in a trace for Xcode. Metal grants a capture only to a process started with `MTL_CAPTURE_ENABLED=1`;
   otherwise the start is refused with a status ("Capture layer is not inserted"). The gate tests the refusal; a
@@ -1186,7 +1230,7 @@ dimension 1 and, where there is a sequence, positions along dimension 2**; the f
   file with 24).
 - **Devices.** MLX reads files on the CPU only (a load built on the GPU's stream fails its evaluation), so what
   is read is built on the CPU's default stream whatever the default device, and is used from there by
-  operations on either device (unified memory, no copy).
+  operations on either device (unified memory, no copy; on a CUDA card a transfer MLX manages).
 - **Errors.** Every procedure here is checked: a file that is missing, that cannot be written or that holds
   something else, an empty array, names that do not pair with the arrays or a name given twice return a status,
   with the lists unallocated or the array empty, and MLX usable.

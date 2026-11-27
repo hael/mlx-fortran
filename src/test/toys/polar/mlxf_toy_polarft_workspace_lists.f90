@@ -91,7 +91,7 @@ contains
     function pair_spec( self, cap ) result(spec)
         class(polarft_workspace), intent(in) :: self
         integer,                  intent(in) :: cap
-        type(mlx_metal_kernel_spec) :: spec
+        type(mlx_custom_kernel_spec) :: spec
         spec%name          = 'polar_pair_products'
         spec%source        = PAIR_SRC
         spec%input_names   = [character(len=4) :: 'bank', 'pt', 'pp', 'pr', 'sz']
@@ -131,8 +131,8 @@ contains
                 self%msg = 'polarft_workspace%submit: refused: the pair list exceeds the pair-list kernel''s grid'
                 return
             endif
-            self%pair_kernel = mlx_metal_kernel(pair_spec(self, self%pair_cap))
-            self%pair_tail   = mlx_metal_kernel(tail_spec(polarft_tile_spec(pftsz=self%pftsz, nk=self%nk, rt=1, &
+            self%pair_kernel = mlx_custom_kernel(pair_spec(self, self%pair_cap))
+            self%pair_tail   = mlx_custom_kernel(tail_spec(polarft_tile_spec(pftsz=self%pftsz, nk=self%nk, rt=1, &
                 &bt=self%pair_cap), .false.))
         endif
         ! the block's particle terms, and per pair its particle, reference, 1/(2 wsq), inverse temperature and

@@ -2,15 +2,15 @@
 ! Users write `use mlxf` (with an only: list). The generated mlxc_* layer and the library's mlxf_* helpers
 ! stay private to the library.
 module mlxf
-use mlxf_defs,            only: MLXF_HARD_ERROR_STATUS, MLX_DEVICES, MLX_DTYPES, MLX_FFT_NORMS, mlx_metal_kernel_spec, &
+use mlxf_defs,            only: MLXF_HARD_ERROR_STATUS, MLX_DEVICES, MLX_DTYPES, MLX_FFT_NORMS, mlx_custom_kernel_spec, &
                                 mlx_conv_spec, MLX_COMPILE_MODES, mlx_rope_spec, mlx_attention_spec
 use mlxf_version,         only: mlxf_version_string, mlxf_build_description, mlx_runtime_version, &
                                 mlxf_runtime_description
 use mlxf_error,           only: mlx_last_error
 use mlxf_registry,        only: mlx_live_count
-use mlxf_device,          only: mlx_metal_is_available, mlx_device_count, mlx_default_device, mlx_set_default_device, &
-                                mlx_device_info_size, mlx_device_info_string, mlx_device_is_available, &
-                                mlx_metal_start_capture, mlx_metal_stop_capture
+use mlxf_device,          only: mlx_metal_is_available, mlx_cuda_is_available, mlx_device_count, mlx_default_device, &
+                                mlx_set_default_device, mlx_device_info_size, mlx_device_info_string, &
+                                mlx_device_is_available, mlx_metal_start_capture, mlx_metal_stop_capture
 use mlxf_stream,          only: mlx_stream, mlx_new_stream, mlx_default_stream, mlx_set_default_stream, mlx_synchronize
 use mlxf_memory,          only: mlx_active_memory, mlx_peak_memory, mlx_reset_peak_memory, mlx_cache_memory, &
                                 mlx_clear_cache, mlx_set_memory_limit, mlx_set_cache_limit, mlx_memory_limit, &
@@ -63,7 +63,7 @@ use mlxf_compile,         only: mlx_function, mlx_compile, mlx_enable_compile, m
 use mlxf_transforms,      only: mlx_grad_function, mlx_value_and_grad, mlx_vjp, mlx_jvp, mlx_custom_vjp, &
                                 mlx_custom_function, mlx_checkpoint, mlx_depends
 use mlxf_export,          only: mlx_export_function, mlx_function_exporter, mlx_imported_function
-use mlxf_fast,            only: mlx_metal_kernel, mlx_layer_norm, mlx_rms_norm, mlx_rope, &
+use mlxf_fast,            only: mlx_custom_kernel, mlx_layer_norm, mlx_rms_norm, mlx_rope, &
                                 mlx_scaled_dot_product_attention, mlx_cross_entropy
 use mlxf_random,          only: mlx_random_seed, mlx_random_key, mlx_random_split, mlx_random_bits, mlx_random_uniform, &
                                 mlx_random_normal, mlx_random_laplace, mlx_random_gumbel, mlx_random_truncated_normal, &
@@ -74,7 +74,7 @@ implicit none
 public :: mlxf_version_string, mlxf_build_description, mlx_runtime_version, mlxf_runtime_description
 public :: MLXF_HARD_ERROR_STATUS, MLX_DEVICES, MLX_DTYPES, mlx_last_error, mlx_live_count
 public :: mlx_metal_is_available, mlx_device_count, mlx_default_device, mlx_set_default_device, mlx_device_info_size
-public :: mlx_device_info_string
+public :: mlx_device_info_string, mlx_cuda_is_available
 public :: mlx_active_memory, mlx_peak_memory, mlx_reset_peak_memory, mlx_cache_memory, mlx_clear_cache
 public :: mlx_set_memory_limit, mlx_set_cache_limit, mlx_memory_limit, mlx_set_wired_limit, mlx_buffer_size
 public :: mlx_device_is_available, mlx_metal_start_capture, mlx_metal_stop_capture
@@ -114,7 +114,7 @@ public :: mlx_fft, mlx_ifft, mlx_rfft, mlx_irfft, mlx_fft2, mlx_ifft2, mlx_fftn,
 public :: mlx_function, mlx_compile, mlx_enable_compile, mlx_disable_compile, mlx_set_compile_mode, MLX_COMPILE_MODES
 public :: mlx_grad_function, mlx_value_and_grad, mlx_vjp, mlx_jvp, mlx_custom_vjp, mlx_custom_function, mlx_checkpoint
 public :: mlx_depends, mlx_export_function, mlx_function_exporter, mlx_imported_function
-public :: mlx_metal_kernel, mlx_metal_kernel_spec
+public :: mlx_custom_kernel, mlx_custom_kernel_spec
 public :: mlx_layer_norm, mlx_rms_norm, mlx_rope, mlx_rope_spec, mlx_scaled_dot_product_attention, mlx_attention_spec
 public :: mlx_cross_entropy
 public :: mlx_random_seed, mlx_random_key, mlx_random_split, mlx_random_bits, mlx_random_uniform, mlx_random_normal

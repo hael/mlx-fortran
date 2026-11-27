@@ -248,21 +248,28 @@ the first evaluations of new sizes in a fresh process. A key a suite does not re
 
 ## 4. Devices
 
-- MLX runs an operation on the CPU device or the GPU device (Metal). A test of an operation runs on
+- MLX runs an operation on the CPU device or the GPU device (Metal or CUDA). A test of an operation runs on
   every device present; `mlxf_test_exec device=cpu|gpu|all` (default `all`) restricts it. A tester takes
   its devices from `test_devices(devs)` of `mlxf_test_utils`.
-- Three sessions, one classification (`mlxf_test_utils`: `test_devices`, `gpu_present`, `cpu_only_mlx`,
-  `gpu_check_runs`; the guard gate of `mlxf_test_exec` and the outside programs of `test/consumer/` follow it):
+- The sessions, one classification (`mlxf_test_utils`: `test_devices`, `gpu_present`, `cpu_only_mlx`,
+  `gpu_check_runs`, `metal_check_runs`; the guard gate of `mlxf_test_exec` and the outside programs of
+  `test/consumer/` follow it). The GPU backend is what `mlx_metal_is_available()` and `mlx_cuda_is_available()`
+  report (at most one is true):
 
-  | `mlx_metal_is_available()` | GPU count | session | tests | under `MLXF_REQUIRE_GPU` |
+  | GPU backend | GPU count | session | tests | under `MLXF_REQUIRE_GPU` |
   | --- | --- | --- | --- | --- |
-  | true | > 0 | Metal with a device | the devices `device=` asks for | as they are |
-  | true | 0 | Metal without a device (headless, sandboxed, virtual) | skip: `SKIP: no GPU device in this session` | failure |
-  | false | 0 | CPU-only MLX (`scripts/build_mlx_deps.sh --cpu-only`; on Linux every build) | the CPU device; a check that needs the GPU or Metal's allocator skips with `SKIP: GPU-only check on a CPU-only MLX build` | failure |
+  | Metal | > 0 | Metal with a device | the devices `device=` asks for | as they are |
+  | Metal | 0 | Metal without a device (headless, sandboxed, virtual) | skip: `SKIP: no GPU device in this session; a Metal build of MLX cannot allocate` | failure |
+  | CUDA | > 0 | CUDA with a GPU (`scripts/build_mlx_deps.sh --cuda`; the count is `cudaGetDeviceCount`'s, `CUDA_VISIBLE_DEVICES` applies) | the devices `device=` asks for; a check of Metal's own behaviour skips with `SKIP: Metal-only check on a CUDA build` | as they are |
+  | CUDA | 0 | CUDA without a GPU (none present, or none visible through `CUDA_VISIBLE_DEVICES`) | skip: `SKIP: no GPU device in this session; a CUDA build of MLX cannot allocate` | failure |
+  | none | 0 | CPU-only MLX (`scripts/build_mlx_deps.sh --cpu-only`; on Linux every build but `--cuda`) | the CPU device; a check that needs the GPU or Metal's allocator skips with `SKIP: GPU-only check on a CPU-only MLX build` | failure |
 
-  A GPU is present when `mlx_device_count(MLX_DEVICES%gpu) > 0`; `mlx_metal_is_available()` says only that the
-  Metal backend was compiled in. A Metal build of MLX without a GPU cannot allocate arrays on either device, the
-  memory limits (the Metal allocator's) included; a CPU-only MLX allocates on the heap. A test asserts no more
+  A GPU is present when `mlx_device_count(MLX_DEVICES%gpu) > 0`; the two backend queries say only what was
+  compiled in. A Metal or CUDA build of MLX without a GPU cannot allocate arrays on either device (CUDA's
+  allocator needs a GPU at its construction), the memory limits included; a CPU-only MLX allocates on the heap.
+  Without NVIDIA's driver library a CUDA build does not load at all (its `libmlx.so` needs `libcuda.so.1`): a
+  build host such as dell2 links through the toolkit's stub (`MLXF_CUDA_STUB_DIR`) and runs nothing. Nothing of
+  the CUDA sessions has run yet; they run at work (the CUDA plan's Part C). A test asserts no more
   about an absent device than that the call returns: MLX 0.32 accepts an absent GPU as the default device and
   fails only at the first allocation. Test code asks for the GPU only through `mlxf_test_utils` (rule
   `devquery`; the device tester, which tests the count itself, is its ledger). Each `GUARDS` member names the
@@ -270,12 +277,18 @@ the first evaluations of new sizes in a fresh process. A key a suite does not re
   GPU-only checks of the fast gate on a CPU-only MLX, five: in `unit_core` the GPU's device information, the
   recovery gate (the maximum buffer is the Metal allocator's), the memory and wired limits (Metal's allocator) and
   a Metal capture, and `guard_float64_on_gpu`; the Metal kernels' GPU tests run only on the GPU anyway. The
+  Metal-only checks (`metal_check_runs`) are the recovery gate, the memory and wired limits, the Metal capture,
+  the failed evaluation beyond the maximum buffer of `unit_io`, the device tester's `max_buffer_length` and
+  `memory_size` keys (a CUDA GPU checks its `total_memory`, `free_memory` and `sm_XY` architecture instead), and
+  the kernel wrapper's threadgroup above the device's limit (CUDA clips the block to the grid): with
+  a GPU they run on Metal and skip by name on CUDA, without one they skip as the GPU-only checks do, and a
+  session's counts stay those of its backend. The
   headless gate is reproduced on a Mac with `sandbox-exec -p "(version 1)(allow default)(deny iokit-open)"` around a
   build configured with `-DMLXF_REQUIRE_GPU=OFF`; the CPU-only gate with `scripts/ci_cpu_job.sh`, and on Linux with
   `scripts/ci_linux_job.sh` (the same job, then the embedding and off-state checks).
-- CMake option `MLXF_REQUIRE_GPU` (default ON on macOS arm64, OFF in the CI), a compile definition of the
-  test executable, turns those skips into failures, so a development Mac can never pass the gate without
-  running the device tests.
+- CMake option `MLXF_REQUIRE_GPU` (default ON on macOS arm64 and with a CUDA build of MLX, whose `libmlx.so`
+  links NVIDIA's `libcuda.so.1`; OFF in the CI), a compile definition of the test executable, turns those skips
+  into failures, so a development Mac or a CUDA machine can never pass the gate without running the device tests.
 - GPU results are compared with tolerances, never bytes: the GPU computes in float32 and complex64 only,
   and atomic reductions sum in an order that changes from run to run. Identity tests (bytes) are for
   pure data movement; float64 is tested on the CPU device only.
@@ -297,7 +310,11 @@ the first evaluations of new sizes in a fresh process. A key a suite does not re
   it, and `test=list` lists it. The fast gate keeps a form that tests the same guarantee at a fixed cost. A
   plan names the points where the named-only form runs (a new machine, a phase exit);
   `check_test_registry.py` holds every `NAMED_ONLY` name to a `run_suite` row. Today: `unit_core
-  suite=recovery_half`.
+  suite=recovery_half`. `unit_fast suite=kernel_sources` is named-only for another reason: every kernel of the
+  wrapper's tests carries a CUDA source, and a spec without its backend's source is refused through `status`;
+  with `records=<dir>` it writes one record per kernel application for `scripts/check_cuda_sources.sh`, which
+  wraps each CUDA source as MLX does and compiles it with NVRTC for `sm_100a` and `sm_120a` on a machine without a
+  GPU (compiled, not run). Its checks stay out of the fast gate so that the gate's counts are those of the base.
 - Both build types: a change to tests is verified in Debug and Release.
 
 ## 6. Testers

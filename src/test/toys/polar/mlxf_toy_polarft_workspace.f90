@@ -7,7 +7,7 @@
 ! a user writes; lifecycle, scoring, the list tiles, the fused tail and the shift maps are submodules.
 module mlxf_toy_polarft_workspace
 use, intrinsic :: iso_fortran_env, only: int64, real32, real64
-use mlxf,                 only: mlx_array, mlx_function, mlx_metal_kernel, mlx_metal_kernel_spec
+use mlxf,                 only: mlx_array, mlx_function, mlx_custom_kernel, mlx_custom_kernel_spec
 use mlxf_test_defs,       only: NSHIFTMAPS, POLARFT_TAILS, polarft_tile_spec, polarft_block_spec, polarft_map_spec, &
                                 polarft_map_block, polar_map_results
 use mlxf_toy_device_work, only: device_work
@@ -128,38 +128,38 @@ end type tail_outputs
 ! it as
 type, extends(device_work) :: polarft_workspace
     private
-    logical                       :: prepared   = .false.
-    integer                       :: pftsz      = 0
-    integer                       :: nk         = 0
-    integer                       :: nrots      = 0
-    integer                       :: rt         = 0
-    integer                       :: bt         = 0
-    integer                       :: nrefs      = 0
-    integer                       :: ntiles     = 0
-    integer                       :: tail_form  = POLARFT_TAILS%graph
-    logical                       :: l_tail_rows = .false.
-    real(real64)                  :: stage_s(5) = 0._real64
-    real(real64)                  :: mstage_s(4) = 0._real64
-    type(polarft_workspace_map)   :: maps(NSHIFTMAPS)
+    logical                      :: prepared   = .false.
+    integer                      :: pftsz      = 0
+    integer                      :: nk         = 0
+    integer                      :: nrots      = 0
+    integer                      :: rt         = 0
+    integer                      :: bt         = 0
+    integer                      :: nrefs      = 0
+    integer                      :: ntiles     = 0
+    integer                      :: tail_form  = POLARFT_TAILS%graph
+    logical                      :: l_tail_rows = .false.
+    real(real64)                 :: stage_s(5) = 0._real64
+    real(real64)                 :: mstage_s(4) = 0._real64
+    type(polarft_workspace_map)  :: maps(NSHIFTMAPS)
     real(real32),     allocatable :: rows_host(:,:,:)
-    type(mlx_array)               :: refs
+    type(mlx_array)              :: refs
     integer,          allocatable :: list_refs(:)
-    type(mlx_array)               :: list_tiles
-    integer                       :: pair_cap   = 0
-    integer                       :: pair_grown = 0
-    type(mlx_metal_kernel)        :: pair_kernel
-    type(mlx_metal_kernel)        :: pair_tail
-    type(mlx_function)            :: tail
-    type(mlx_metal_kernel)        :: tail_kernel
-    type(mlx_metal_kernel)        :: tail_kernel_rows
-    type(mlx_array)               :: tail_par
-    type(polarft_workspace_slot)  :: slots(POLARFT_NSLOTS)
-    logical                       :: l_sections = .false.
-    logical                       :: l_memos    = .false.
-    integer                       :: sec_npts   = 0
-    integer                       :: sec_nrefs  = 0
-    type(mlx_array)               :: sections
-    type(mlx_array)               :: memo_terms
+    type(mlx_array)              :: list_tiles
+    integer                      :: pair_cap   = 0
+    integer                      :: pair_grown = 0
+    type(mlx_custom_kernel)      :: pair_kernel
+    type(mlx_custom_kernel)      :: pair_tail
+    type(mlx_function)           :: tail
+    type(mlx_custom_kernel)      :: tail_kernel
+    type(mlx_custom_kernel)      :: tail_kernel_rows
+    type(mlx_array)              :: tail_par
+    type(polarft_workspace_slot) :: slots(POLARFT_NSLOTS)
+    logical                      :: l_sections = .false.
+    logical                      :: l_memos    = .false.
+    integer                      :: sec_npts   = 0
+    integer                      :: sec_nrefs  = 0
+    type(mlx_array)              :: sections
+    type(mlx_array)              :: memo_terms
     character(len=:), allocatable :: msg
   contains
     procedure :: new           => polarft_workspace_new
@@ -265,7 +265,7 @@ interface
     module function tail_spec( spec_t, rows ) result(spec)
         type(polarft_tile_spec), intent(in) :: spec_t
         logical,                 intent(in) :: rows
-        type(mlx_metal_kernel_spec) :: spec
+        type(mlx_custom_kernel_spec) :: spec
     end function tail_spec
 
     ! the fused tail of the tile plan spec: its constants and its kernel, on the GPU only (a refusal sets msg);

@@ -38,7 +38,7 @@ Python 3.7 or newer, standard library only.
 """
 import re
 
-HANDLE_TYPES = ('mlx_array', 'mlx_function', 'mlx_metal_kernel', 'mlx_grad_function', 'mlx_function_exporter',
+HANDLE_TYPES = ('mlx_array', 'mlx_function', 'mlx_custom_kernel', 'mlx_grad_function', 'mlx_function_exporter',
                 'mlx_imported_function', 'mlx_stream', 'mlx_group')
 HANDLE_DECL = re.compile(r'^(type|class)\s*\(\s*(' + '|'.join(HANDLE_TYPES) + r')\s*\)(.*)$', re.I)
 HANDLE_PREFIX = re.compile(r'\b(type|class)\s*\(\s*(' + '|'.join(HANDLE_TYPES) + r')\s*\)', re.I)

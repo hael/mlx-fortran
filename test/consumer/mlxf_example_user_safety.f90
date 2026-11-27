@@ -8,7 +8,8 @@ use, intrinsic :: iso_fortran_env, only: real32, real64, int32
 use, intrinsic :: iso_c_binding,   only: c_bool
 use mlxf, only: mlx_array, mlx_from, mlx_to, mlx_item, mlx_eval, mlx_mean, mlx_take, mlx_concatenate, &
                 mlx_check_indices, mlx_save_safetensors, mlx_live_count, mlx_last_error, mlx_device_count, &
-                mlx_metal_is_available, mlx_set_default_device, MLX_DEVICES, exp, abs, all, maxval, norm2, mlx_zeros
+                mlx_metal_is_available, mlx_cuda_is_available, mlx_set_default_device, MLX_DEVICES, exp, abs, all, &
+                maxval, norm2, mlx_zeros
 implicit none
 type(mlx_array)      :: k, m, x, t, c, ix, v(2), w(1)
 real(real32)         :: mean, y(2), nrm, s
@@ -16,15 +17,18 @@ integer(int32)       :: raw(2)
 logical(c_bool)      :: positive
 character(len=32)    :: arg
 integer              :: status, i, n0, u, nbytes, n0bytes
+logical              :: gpu_backend
 call get_command_argument(1, arg)
+gpu_backend = mlx_metal_is_available()
+if( mlx_cuda_is_available() ) gpu_backend = .true.
 if( mlx_device_count(MLX_DEVICES%gpu) > 0 )then
     call mlx_set_default_device(MLX_DEVICES%gpu)
 else if( trim(arg) == 'require-gpu' )then
     error stop 'mlxf_example_user_safety: require-gpu, and no GPU device in this session'
-else if( .not. mlx_metal_is_available() )then
+else if( .not. gpu_backend )then
     call mlx_set_default_device(MLX_DEVICES%cpu)
 else
-    write(*,'(a)') 'SKIP: mlxf_example_user_safety: Metal without a GPU (headless, sandboxed, virtual)'
+    write(*,'(a)') 'SKIP: mlxf_example_user_safety: Metal or CUDA without a GPU (headless, sandboxed, virtual, none visible)'
     stop
 endif
 n0 = mlx_live_count()

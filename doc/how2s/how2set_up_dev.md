@@ -54,9 +54,10 @@ Options: `MLXF_REQUIRE_GPU` (ON on Apple silicon) fails the device tests when th
 (a headless or sandboxed session, a virtual machine, or a CPU-only MLX); `MLXF_WERROR` turns warnings into
 errors. The compile scripts pass the environment variable `MLXF_CMAKE_ARGS` to CMake, as the CI's Metal
 build-only jobs do: `MLXF_CMAKE_ARGS="-DMLXF_REQUIRE_GPU=OFF -DMLXF_WERROR=ON -DFORTLS=OFF" ./compile_clean.sh`.
-The tests tell three sessions apart (`mlxf_test_utils`): Metal with a GPU runs both devices; Metal without one
-cannot allocate and skips; a CPU-only MLX runs the CPU device, and the checks that need the GPU or Metal's
-allocator skip with `SKIP: GPU-only check on a CPU-only MLX build`. The build generates the
+The tests tell the sessions apart (`mlxf_test_utils`): Metal or CUDA with a GPU runs both devices (on CUDA the
+checks of Metal's own behaviour skip by name); either without one cannot allocate and skips; a CPU-only MLX runs the
+CPU device, and the checks that need the GPU or Metal's allocator skip with `SKIP: GPU-only check on a CPU-only MLX
+build`. The build generates the
 `bind(c)` layer from the mlx-c headers it links (`build/gen/mlxf_c_*.f90`) and fails if the generator and
 the independent prototype list disagree. `unit_core`'s recovery test evaluates 1 GiB per device after the
 failure; its half-batch form, `build/bin/mlxf_test_exec test=unit_core suite=recovery_half`, allocates half
@@ -225,8 +226,8 @@ settings.
 ## 7. Linux, CPU only
 
 Tested on Ubuntu 26.04 (x86-64) with GNU Fortran 15.2 and 14.3, CMake 4.2 and Python 3.14, and written for
-GitHub's Ubuntu 24.04 runners. MLX has no GPU backend here in this project (the CUDA step is the roadmap's rank 5):
-every test runs on the CPU device and the GPU-only checks skip, as with a CPU-only MLX on a Mac.
+GitHub's Ubuntu 24.04 runners. A CPU-only MLX has no GPU backend (CUDA is section 8): every test runs on the CPU
+device and the GPU-only checks skip, as with a CPU-only MLX on a Mac.
 
 - **Packages:** `gfortran` 14 or newer, `gcc`, `g++`, `cmake`, `pkg-config`, and BLAS and LAPACK with LAPACKE's
   headers: `libopenblas-openmp-dev liblapacke-dev` (MLX's guide names `libblas-dev liblapack-dev liblapacke-dev`;
@@ -251,3 +252,47 @@ every test runs on the CPU device and the GPU-only checks skip, as with a CPU-on
 - **Compiler notes:** GCC built with native-language support quotes names in its messages with typographic quotes
   in a UTF-8 locale (the scripts match around them); GNU Fortran 15 on Linux gives a private module procedure whose
   body is in its module internal linkage, so a submodule cannot call it (`scripts/check_submodule_linkage.py`).
+
+## 8. Linux with CUDA (NVIDIA)
+
+Prepared on dell2 (Ubuntu 26.04, no GPU, no driver) with CUDA 12.9 and cuDNN 9.28: MLX, mlx-c, the library and
+`mlxf_test_exec` build and link, and the tests' CUDA sources compile for Blackwell. Nothing has run on a GPU yet; the
+first session is at work (`doc/implementation_notes/planned/mlxf_cuda.md`, Part C).
+
+- **The toolkit:** CUDA 12.8, 12.9 or 13.0 (Blackwell, `sm_100`/`sm_120`, needs 12.8 or newer; MLX 0.32.4 refuses 13.1),
+  with the NVIDIA driver it needs (575 or newer for 12.9, 580 for 13.0). Only 12.9 has been built so far. Where NVIDIA's
+  installer cannot run (on Ubuntu 26.04 it needs `libxml2.so.2`), the runfile's components can be unpacked into a
+  directory of one's own.
+- **cuDNN 9** for that CUDA major (`libcudnn9-dev-cuda-12`, or the archive unpacked anywhere and named by `CUDNN_ROOT`).
+- **The host compiler:** nvcc 12.x accepts GCC 14 at most, 13.0 GCC 15 (`gcc-14`/`g++-14` beside a newer GCC are fine).
+  `build_mlx_deps.sh` picks the newest `g++-N` nvcc accepts, or `CUDAHOSTCXX`; it compiles all of MLX and mlx-c.
+  mlx-fortran itself keeps its own GNU Fortran.
+- **glibc 2.41 or newer with CUDA 12.x:** glibc declares `cospi`, `sinpi`, `rsqrt` and their `f` forms `noexcept`,
+  CUDA 12's `crt/math_functions.h` does not, and nvcc fails on every file. The toolkit's owner adds `noexcept (true)`
+  to the six declarations once, keeping the original:
+  `sed -i.orig -E 's/^(extern .*[[:space:]](rsqrtf?|sinpif?|cospif?)\((double|float) x\));/\1 noexcept (true);/'
+  <toolkit>/include/crt/math_functions.h`. `build_mlx_deps.sh --cuda` stops with this command when the header
+  needs it and never edits the toolkit; CUDA 13.0 has the fix.
+- **MLX and mlx-c:** `CUDA_HOME=<toolkit> CUDNN_ROOT=<cudnn> scripts/build_mlx_deps.sh --cuda` (into
+  `.deps/install-cuda`; both took 9 minutes on dell2's 16 cores, and MLX's configure needs the network). On a machine
+  with the GPU MLX compiles for that GPU; elsewhere name the architectures: `--cuda-arch 100a` (B200, GB200), `120a`
+  (RTX-class Blackwell) or `'100a;120a'`. `libmlx.so` finds the toolkit's and cuDNN's libraries through its run path;
+  `mlxf_deps.txt` records the toolkit, cuDNN, the host compiler, the architectures, glibc and the driver.
+- **Build:** `MLXC_ROOT=$PWD/.deps/install-cuda`; nothing CUDA-specific is passed. CMake recognises the CUDA build (its
+  `libmlx.so` links `libcuda.so.1`) and makes `MLXF_REQUIRE_GPU` default ON. On a machine without a driver the test
+  executable links only through the toolkit's stub: `-DMLXF_CUDA_STUB_DIR=<prefix>/cuda-stub` (made by `--cuda`; build
+  only, refused where a driver is installed).
+- **At run time:** the driver's `libcuda.so.1` comes from the system. MLX compiles kernels with NVRTC, which needs the
+  toolkit's headers (`CUDA_HOME` or `CUDA_PATH`, MLX's variables, unless the toolkit is `/usr/local/cuda`) and opens
+  `libnvrtc-builtins` by name: a toolkit outside the loader's default path needs its `lib64` on `LD_LIBRARY_PATH` or in
+  `ld.so.conf`. MLX caches the compiled kernels under `TMPDIR` (`mlx/<version>/ptx`, or `MLX_PTX_CACHE_DIR`).
+  `CUDA_VISIBLE_DEVICES` selects the card; `MLX_ENABLE_TF32=0` keeps float32 products in full precision, as in CTest.
+- **Checks without a GPU:** `scripts/check_cuda_sources.sh <build>` (with `CUDA_HOME` and `MLX_SRC`, MLX's source or its
+  tag's archive) wraps every CUDA source of the tests' kernels as MLX does and compiles it with NVRTC for `sm_100a` and
+  `sm_120a`.
+- **The session at work:** `scripts/cuda_session.sh [--gate] [--cases polar_case.txt --grid shiftmap_grid.txt]` builds
+  both trees, runs the bring-up and the measurements of the CUDA plan, and packs them with the machine's facts into
+  `build/cuda_session/<date>.tar.gz`; `--gate` is the CUDA release check.
+- **Known:** on CUDA, MLX 0.32.4 names a kernel with a negative integer template argument with a `-`, which does not
+  compile (Apple question 40); one assertion of `unit_fast` ("a negative integer parameter compiles") fails there
+  until MLX changes.

@@ -13,7 +13,7 @@ use mlxf,            only: mlx_array, mlx_from, mlx_to, mlx_astype, mlx_is_live,
                            mlx_buffer_size, mlx_zeros, mlx_device_info_size
 use mlxf_io,         only: mlxf_save_begin, mlxf_save_end
 use mlxf_libc,       only: c_file_info, c_chmod, c_getpid, c_symlink, c_link, c_mkdir, c_rmdir
-use mlxf_test_utils, only: assert_true, assert_int, test_devices, device_name, bits_equal
+use mlxf_test_utils, only: assert_true, assert_int, test_devices, device_name, bits_equal, metal_check_runs
 implicit none
 private
 public :: run_all_io_tests
@@ -449,17 +449,20 @@ contains
         call mlx_save_safetensors(CKPT, ['w'], [a], metadata=triple, status=st)
         facts(1) = same(contents(CKPT), old)
         call assert_true(st /= 0 .and. facts(1), 'metadata that are not pairs: refused, bytes kept')
-        ! an evaluation that fails (one buffer beyond the GPU's maximum length) fails before the file is touched
+        ! an evaluation that fails (one buffer beyond the GPU's maximum length, the Metal allocator's) fails before
+        ! the file is touched
         if( device == MLX_DEVICES%gpu )then
-            maxbuf = mlx_device_info_size(MLX_DEVICES%gpu, 'max_buffer_length')
-            beyond = mlx_zeros([65536, int(maxbuf/(4_int64*65536_int64))+1])
-            call mlx_save_safetensors(CKPT, ['w'], [beyond], status=st)
-            facts(1) = same(contents(CKPT), old)
-            call assert_true(st /= 0 .and. facts(1), 'a failed evaluation: refused, bytes kept')
-            call mlx_save(GG, beyond, status=st)
-            facts(1) = exists(GG//'.npy')
-            call assert_true(st /= 0 .and. .not. facts(1), 'and no .npy file is made')
-            call beyond%kill()
+            if( metal_check_runs('a failed evaluation (one buffer beyond the Metal allocator''s maximum)') )then
+                maxbuf = mlx_device_info_size(MLX_DEVICES%gpu, 'max_buffer_length')
+                beyond = mlx_zeros([65536, int(maxbuf/(4_int64*65536_int64))+1])
+                call mlx_save_safetensors(CKPT, ['w'], [beyond], status=st)
+                facts(1) = same(contents(CKPT), old)
+                call assert_true(st /= 0 .and. facts(1), 'a failed evaluation: refused, bytes kept')
+                call mlx_save(GG, beyond, status=st)
+                facts(1) = exists(GG//'.npy')
+                call assert_true(st /= 0 .and. .not. facts(1), 'and no .npy file is made')
+                call beyond%kill()
+            endif
         endif
         ! a failed write: the transaction's steps driven one by one, a partial temporary file, the writer's status 1
         call mlxf_save_begin(CKPT, '.safetensors', 'test', t, st)

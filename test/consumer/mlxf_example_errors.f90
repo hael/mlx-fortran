@@ -1,28 +1,33 @@
 !@descr: failures and ownership a caller handles: a status with mlx_last_error(), the named owner of mlx_view, the session's devices
-! mlxf_example_errors [require-gpu]: tells the three sessions apart (Metal with a GPU, Metal without one, a CPU-only
-! MLX), runs where MLX can allocate, prints SKIP and exits 0 where it cannot (a failure under require-gpu).
+! mlxf_example_errors [require-gpu]: tells the sessions apart (a GPU, Metal or CUDA; a GPU backend without a GPU; a
+! CPU-only MLX), runs where MLX can allocate, prints SKIP and exits 0 where it cannot (a failure under require-gpu).
 program mlxf_example_errors
 use, intrinsic :: iso_fortran_env, only: real32
-use mlxf, only: mlx_array, mlx_from, mlx_to, mlx_view, mlx_last_error, mlx_metal_is_available, mlx_device_count, &
-                mlx_set_default_device, MLX_DEVICES, exp
+use mlxf, only: mlx_array, mlx_from, mlx_to, mlx_view, mlx_last_error, mlx_metal_is_available, mlx_cuda_is_available, &
+                mlx_device_count, mlx_set_default_device, MLX_DEVICES, exp
 implicit none
 type(mlx_array)       :: a, w
 real(real32)          :: x(6), y(5)
 real(real32), pointer :: p(:)
 character(len=32)     :: arg
 integer               :: status
+logical               :: gpu_backend
 call get_command_argument(1, arg)
-! the session: a GPU opens; or Metal is built in but no GPU opens (MLX cannot allocate at all); or MLX is CPU-only
+! the session: a GPU opens (Metal or CUDA); or a GPU backend is built in but no GPU opens (MLX cannot allocate at
+! all); or MLX is CPU-only
+gpu_backend = mlx_metal_is_available()
+if( mlx_cuda_is_available() ) gpu_backend = .true.
 if( mlx_device_count(MLX_DEVICES%gpu) > 0 )then
-    write(*,'(a)') 'session: Metal with a GPU; both devices allocate'
+    write(*,'(a)') 'session: a GPU (Metal or CUDA); both devices allocate'
     call mlx_set_default_device(MLX_DEVICES%gpu)
 else if( trim(arg) == 'require-gpu' )then
     error stop 'mlxf_example_errors: require-gpu, and no GPU device in this session'
-else if( .not. mlx_metal_is_available() )then
+else if( .not. gpu_backend )then
     write(*,'(a)') 'session: a CPU-only MLX; the CPU device allocates'
     call mlx_set_default_device(MLX_DEVICES%cpu)
 else
-    write(*,'(a)') 'SKIP: mlxf_example_errors: Metal without a GPU (headless, sandboxed, virtual); MLX cannot allocate'
+    write(*,'(a)') 'SKIP: mlxf_example_errors: Metal or CUDA without a GPU (headless, sandboxed, virtual, none '//&
+        &'visible); MLX cannot allocate'
     stop
 endif
 x = [1., 2., 3., 4., 5., 6.]

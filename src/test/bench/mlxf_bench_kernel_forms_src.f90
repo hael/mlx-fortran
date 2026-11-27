@@ -3,7 +3,7 @@
 ! from a current one (the tail without its compensation) is derived from that spec's source at run time. Every
 ! source sees MLX's layout, row-major and 0-based; sizes come from the inputs' shapes or from template integers.
 module mlxf_bench_kernel_forms_src
-use mlxf,                       only: mlx_metal_kernel_spec, MLX_DTYPES
+use mlxf,                       only: mlx_custom_kernel_spec, MLX_DTYPES
 use mlxf_test_defs,             only: polarft_tile_spec
 use mlxf_toy_polarft_workspace, only: tail_spec
 implicit none
@@ -364,7 +364,7 @@ contains
     ! the group sum's kernel for ng groups of tg threads (tg a power of two, at most 1,024)
     function group_sum_spec( ng, tg ) result(spec)
         integer, intent(in) :: ng, tg
-        type(mlx_metal_kernel_spec) :: spec
+        type(mlx_custom_kernel_spec) :: spec
         spec%name          = 'forms_probe_group_sum'
         spec%source        = GROUP_LOAD//GROUP_BARRIER//GROUP_LEVEL//'  '//GROUP_BARRIER//GROUP_TAIL
         spec%input_names   = [character(len=1) :: 'x']
@@ -379,7 +379,7 @@ contains
     ! the SIMD probe's kernel: n threads in threadgroups of tg, nout values per thread as (nout, n)
     function simd_probe_spec( n, tg, nout ) result(spec)
         integer, intent(in) :: n, tg, nout
-        type(mlx_metal_kernel_spec) :: spec
+        type(mlx_custom_kernel_spec) :: spec
         spec%name          = 'forms_probe_simd'
         spec%source        = SIMD_SOURCE
         spec%input_names   = [character(len=1) :: 'x']
@@ -394,7 +394,7 @@ contains
     ! a threadgroup array of nbytes bytes, one group of nthr threads
     function tgmem_probe_spec( nbytes, nthr ) result(spec)
         integer, intent(in) :: nbytes, nthr
-        type(mlx_metal_kernel_spec) :: spec
+        type(mlx_custom_kernel_spec) :: spec
         spec%name               = 'forms_probe_tgmem'
         spec%source             = TGMEM_SOURCE
         spec%input_names        = [character(len=1) :: 'x']
@@ -413,8 +413,8 @@ contains
     ! T1: the current tail's inputs and outputs, one SIMD group of 32 lanes per pair, two pairs a threadgroup
     function tail_simd_spec( spec_t ) result(spec)
         type(polarft_tile_spec), intent(in) :: spec_t
-        type(mlx_metal_kernel_spec) :: spec
-        integer                     :: np
+        type(mlx_custom_kernel_spec) :: spec
+        integer                      :: np
         spec             = tail_spec(spec_t, .false.)
         np               = spec_t%rt * spec_t%bt
         spec%name        = 'forms_tail_simd'
@@ -428,7 +428,7 @@ contains
     function tail_plain_spec( spec_t, ok ) result(spec)
         type(polarft_tile_spec), intent(in)  :: spec_t
         logical,                 intent(out) :: ok
-        type(mlx_metal_kernel_spec)   :: spec
+        type(mlx_custom_kernel_spec)  :: spec
         character(len=:), allocatable :: src
         integer                       :: n, i
         spec = tail_spec(spec_t, .false.)
@@ -451,7 +451,7 @@ contains
     ! inputs x (nt, ne) and y (ns, nt), output (ns, ne)
     function reduce_spec( form, ne, ns, tg ) result(spec)
         integer, intent(in) :: form, ne, ns, tg
-        type(mlx_metal_kernel_spec) :: spec
+        type(mlx_custom_kernel_spec) :: spec
         spec%input_names        = [character(len=1) :: 'x', 'y']
         spec%output_names       = [character(len=3) :: 'out']
         spec%output_shapes      = [ns, ne]
@@ -481,8 +481,8 @@ contains
     ! spec with its template integers read instead from an int32 input sz appended to the inputs: each template
     ! name becomes a constant of the body from sz in the templates' order; the source is otherwise unchanged
     function sizes_in_input( spec ) result(s1)
-        type(mlx_metal_kernel_spec), intent(in) :: spec
-        type(mlx_metal_kernel_spec)   :: s1
+        type(mlx_custom_kernel_spec), intent(in) :: spec
+        type(mlx_custom_kernel_spec)  :: s1
         character(len=:), allocatable :: head
         character(len=16)             :: buf
         character(len=32)             :: names(size(spec%input_names) + 1)
@@ -508,7 +508,7 @@ contains
     function select_spec( simd, npart, k ) result(spec)
         logical, intent(in) :: simd
         integer, intent(in) :: npart, k
-        type(mlx_metal_kernel_spec) :: spec
+        type(mlx_custom_kernel_spec) :: spec
         spec%input_names        = [character(len=1) :: 't']
         spec%output_names       = [character(len=3) :: 'idx', 'val']
         spec%output_shapes      = [k, npart, k, npart]
@@ -537,8 +537,8 @@ contains
     function insert_pull_spec( staged, nh, nk ) result(spec)
         logical, intent(in) :: staged
         integer, intent(in) :: nh, nk
-        type(mlx_metal_kernel_spec) :: spec
-        integer                     :: nvox
+        type(mlx_custom_kernel_spec) :: spec
+        integer                      :: nvox
         nvox = nh * nk * nk
         spec%input_names   = [character(len=5) :: 'pmap', 'rot', 'omega', 'c', 'q', 'coef', 'par']
         spec%output_names  = [character(len=4) :: 'num', 'dens']

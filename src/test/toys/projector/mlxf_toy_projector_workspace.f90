@@ -10,7 +10,7 @@
 ! sign(t) floor(|t| + 0.5) - 1, each axis divided by its sum, the 27 values summed and multiplied by OSMPL_PAD_FAC**3.
 module mlxf_toy_projector_workspace
 use, intrinsic :: iso_fortran_env, only: int32, int64, real32, real64
-use mlxf,                 only: mlx_array, mlx_metal_kernel, mlx_metal_kernel_spec, mlx_from, mlx_to, mlx_eval, &
+use mlxf,                 only: mlx_array, mlx_custom_kernel, mlx_custom_kernel_spec, mlx_from, mlx_to, mlx_eval, &
                                 mlx_rfftn, mlx_take, mlx_slice, mlx_concatenate, mlx_astype, mlx_sign, mlx_zeros_like, &
                                 mlx_default_device, reshape, conjg, floor, abs, max, merge, sum, MLX_DTYPES, &
                                 MLX_DEVICES
@@ -85,18 +85,18 @@ character(len=*), parameter :: GATHER_SOURCE = &
 ! projector holds it as
 type, extends(device_work) :: projector_workspace
     private
-    integer                       :: m              = 0
-    integer                       :: form           = PROJ_FORMS%graph
-    integer                       :: tile           = PROJ_TILE_DEFAULT
-    integer                       :: tg             = PROJ_TG_DEFAULT
-    logical                       :: l_ft           = .false.
-    logical                       :: l_cube         = .false.
-    integer                       :: kern_conf(4, 2) = 0
-    real(real64)                  :: stage_s(2)     = 0._real64
-    type(mlx_array)               :: ft
-    type(mlx_array)               :: cube
-    type(mlx_array)               :: coef
-    type(mlx_metal_kernel)        :: kern(2)
+    integer                 :: m              = 0
+    integer                 :: form           = PROJ_FORMS%graph
+    integer                 :: tile           = PROJ_TILE_DEFAULT
+    integer                 :: tg             = PROJ_TG_DEFAULT
+    logical                 :: l_ft           = .false.
+    logical                 :: l_cube         = .false.
+    integer                 :: kern_conf(4, 2) = 0
+    real(real64)            :: stage_s(2)     = 0._real64
+    type(mlx_array)         :: ft
+    type(mlx_array)         :: cube
+    type(mlx_array)         :: coef
+    type(mlx_custom_kernel) :: kern(2)
     character(len=:), allocatable :: msg
   contains
     procedure :: transform
@@ -404,7 +404,7 @@ contains
         slot = 1
         if( tn /= self%tile ) slot = 2
         if( any(self%kern_conf(:, slot) /= [npts, tn, self%tg, self%m]) )then
-            self%kern(slot) = mlx_metal_kernel(gather_spec(self%m, npts, tn, self%tg))
+            self%kern(slot) = mlx_custom_kernel(gather_spec(self%m, npts, tn, self%tg))
             self%kern_conf(:, slot) = [npts, tn, self%tg, self%m]
         endif
         call self%kern(slot)%apply([self%cube, hkd, rt, self%coef], outs, status)
@@ -416,7 +416,7 @@ contains
     ! the fused gather's kernel for npts points and tn directions of a padded box m, tg threads per group
     function gather_spec( m, npts, tn, tg ) result(spec)
         integer, intent(in) :: m, npts, tn, tg
-        type(mlx_metal_kernel_spec) :: spec
+        type(mlx_custom_kernel_spec) :: spec
         spec%name               = 'fproject_polar_batch_opt_kernel'
         spec%source             = GATHER_SOURCE
         spec%input_names        = [character(len=4) :: 'cube', 'hk', 'rot', 'coef']

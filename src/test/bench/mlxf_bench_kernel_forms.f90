@@ -5,9 +5,9 @@
 ! (mode=time; mode=part is one process of scripts/run_parts.sh). A key a suite does not read stops the program.
 module mlxf_bench_kernel_forms
 use, intrinsic :: iso_fortran_env, only: int32, int64, real32, real64
-use mlxf,                         only: mlx_array, mlx_metal_kernel, mlx_from, mlx_to, mlx_eval, mlx_async_eval, &
+use mlxf,                         only: mlx_array, mlx_custom_kernel, mlx_from, mlx_to, mlx_eval, mlx_async_eval, &
                                         mlx_synchronize, mlx_set_default_device, mlx_last_error, mlx_peak_memory, &
-                                        mlx_reset_peak_memory, mlx_cache_memory, mlx_metal_kernel_spec, reshape, sum, &
+                                        mlx_reset_peak_memory, mlx_cache_memory, mlx_custom_kernel_spec, reshape, sum, &
                                         maxloc, merge, mlx_take_along_dim, mlx_put_along_dim, mlx_concatenate, &
                                         mlx_argpartition, mlx_argsort, mlx_slice, mlx_cumsum, mlx_astype, mlx_full, &
                                         mlx_take, matmul, MLX_DEVICES, MLX_DTYPES
@@ -141,19 +141,19 @@ end interface
 ! the tail's tiles on the device, their variates and temperatures on the host, and the forms' kernels: 1 the
 ! current tail, 2 one SIMD group per pair, 3 the plain sum; 4 the current tail's rows variant
 type, extends(form_bench) :: tail_bench
-    integer                             :: ntiles = 0
-    type(mlx_array),        allocatable :: raw(:), iw(:), temps(:), u(:)
-    type(mlx_array)                     :: tmin, uzero, utwo, par
-    type(mlx_metal_kernel)              :: kern(4)
-    real(real32),           allocatable :: temps_h(:,:), u_h(:,:,:)
+    integer                      :: ntiles = 0
+    type(mlx_array), allocatable :: raw(:), iw(:), temps(:), u(:)
+    type(mlx_array)              :: tmin, uzero, utwo, par
+    type(mlx_custom_kernel)      :: kern(4)
+    real(real32),    allocatable :: temps_h(:,:), u_h(:,:,:)
   contains
     procedure :: seconds => tail_seconds
 end type tail_bench
 
 ! the reduction's operands x (nt, ne) and y (ns, nt), y's transpose for the graph, and the kernels of forms 1 to 3
 type, extends(form_bench) :: reduce_bench
-    type(mlx_array)        :: x, y, yt
-    type(mlx_metal_kernel) :: kern(3)
+    type(mlx_array)         :: x, y, yt
+    type(mlx_custom_kernel) :: kern(3)
   contains
     procedure :: seconds => reduce_seconds
 end type reduce_bench
@@ -161,26 +161,26 @@ end type reduce_bench
 ! the sizes: forms 1 and 2 the gather with sizes as templates and in an input, on both parities' cubes; 3 and 4
 ! the insertion's kernel likewise on one batch
 type, extends(form_bench) :: sizes_bench
-    type(mlx_array)        :: cube(2), hk, rot, coef, szg
-    type(mlx_array)        :: ihk, irot, iom, ic, iq, icoef, szi
-    type(mlx_metal_kernel) :: kern(4)
+    type(mlx_array)         :: cube(2), hk, rot, coef, szg
+    type(mlx_array)         :: ihk, irot, iom, ic, iq, icoef, szi
+    type(mlx_custom_kernel) :: kern(4)
   contains
     procedure :: seconds => sizes_seconds
 end type sizes_bench
 
 ! the selection's table (nref, npart) and its negation, the sentinels, the K of the run and the kernels of E2, E3
 type, extends(form_bench) :: select_bench
-    type(mlx_array)        :: tabd, tneg, low, high
-    integer                :: k = 0
-    type(mlx_metal_kernel) :: kern(2)
+    type(mlx_array)         :: tabd, tneg, low, high
+    integer                 :: k = 0
+    type(mlx_custom_kernel) :: kern(2)
   contains
     procedure :: seconds => select_seconds
 end type select_bench
 
 ! the insertion of one batch at one box: the probe's kernel (form 1) and the two pulls (2, 3), the inputs of each
 type, extends(form_bench) :: insert_bench
-    type(mlx_array)        :: hk, rot, om, c, q, coef, pmap, par
-    type(mlx_metal_kernel) :: kern(3)
+    type(mlx_array)         :: hk, rot, om, c, q, coef, pmap, par
+    type(mlx_custom_kernel) :: kern(3)
   contains
     procedure :: seconds => insert_seconds
 end type insert_bench
@@ -429,10 +429,10 @@ contains
 
     ! the group sums of x (ng groups of tg values) on the device; status 0 when they were evaluated and copied
     subroutine group_sums( kern, x, sums, status )
-        type(mlx_metal_kernel), intent(in)  :: kern
-        real(real32),           intent(in)  :: x(:)
-        real(real32),           intent(out) :: sums(:)
-        integer,                intent(out) :: status
+        type(mlx_custom_kernel), intent(in)  :: kern
+        real(real32),            intent(in)  :: x(:)
+        real(real32),            intent(out) :: sums(:)
+        integer,                 intent(out) :: status
         type(mlx_array), allocatable :: outs(:)
         type(mlx_array)              :: xd
         xd = mlx_from(x)
@@ -443,7 +443,7 @@ contains
 
     ! (a) small integers sum exactly in any order: each group's sum is compared with the host's, bit for bit
     subroutine probe_group_sums
-        type(mlx_metal_kernel)    :: kern
+        type(mlx_custom_kernel)   :: kern
         real(real32), allocatable :: x(:), sums(:)
         real(real64), allocatable :: ref(:)
         integer                   :: k, tg, st, nbad, g
@@ -455,7 +455,7 @@ contains
                 ref(g) = sum(real(x((g-1)*tg+1:g*tg), real64))
             end do
             allocate(sums(GROUP_NG))
-            kern = mlx_metal_kernel(group_sum_spec(GROUP_NG, tg))
+            kern = mlx_custom_kernel(group_sum_spec(GROUP_NG, tg))
             call group_sums(kern, x, sums, st)
             nbad = GROUP_NG
             if( st == 0 ) nbad = count(.not. bits_equal(sums, real(ref, real32)))
@@ -471,7 +471,7 @@ contains
     ! (b) the SIMD-group functions on integers: lane and SIMD-group indices, the width, sum, minimum, inclusive
     ! prefix sum and a shuffle, each compared with the host's for every thread
     subroutine probe_simd
-        type(mlx_metal_kernel)       :: kern
+        type(mlx_custom_kernel)      :: kern
         type(mlx_array), allocatable :: outs(:)
         type(mlx_array)              :: xd
         real(real32),    allocatable :: x(:), res(:,:), ref(:,:)
@@ -479,7 +479,7 @@ contains
             &'width', 'simd_sum', 'simd_min', 'simd_prefix_inclusive_sum', 'simd_shuffle']
         integer :: st, k
         x    = small_integers(SIMD_N, PROBE_SEED)
-        kern = mlx_metal_kernel(simd_probe_spec(SIMD_N, SIMD_TG, SIMD_NOUT))
+        kern = mlx_custom_kernel(simd_probe_spec(SIMD_N, SIMD_TG, SIMD_NOUT))
         xd   = mlx_from(x)
         allocate(res(SIMD_NOUT, SIMD_N))
         call kern%apply([xd], outs, st)
@@ -523,13 +523,13 @@ contains
     ! (c) a fixed tree on values that are not integers: three runs in this process are equal bit for bit; the
     ! digest is for the comparison of invocations; the host's float32 tree in the same order is reported
     subroutine probe_tree
-        type(mlx_metal_kernel)    :: kern
+        type(mlx_custom_kernel)   :: kern
         real(real32), allocatable :: x(:), sums(:,:), host(:)
         integer(int64)            :: h
         integer                   :: r, st, nst, g
         x = real(seeded_uniform(GROUP_NG * TREE_TG, PROBE_SEED), real32)
         allocate(sums(GROUP_NG, NREPEAT))
-        kern = mlx_metal_kernel(group_sum_spec(GROUP_NG, TREE_TG))
+        kern = mlx_custom_kernel(group_sum_spec(GROUP_NG, TREE_TG))
         nst  = 0
         do r = 1, NREPEAT
             call group_sums(kern, x, sums(:, r), st)
@@ -573,7 +573,7 @@ contains
     ! (d) the largest threadgroup array that builds: doubling its size until the first refusal, which is
     ! recorded with its status and message; every size that builds must read back its indices
     subroutine probe_tgmem
-        type(mlx_metal_kernel)       :: kern
+        type(mlx_custom_kernel)      :: kern
         type(mlx_array), allocatable :: outs(:)
         type(mlx_array)              :: xd
         real(real32)                 :: x(TGMEM_THREADS), out(TGMEM_THREADS), ref(TGMEM_THREADS)
@@ -583,7 +583,7 @@ contains
         largest = 0
         nbytes  = TGMEM_FIRST
         do while( nbytes <= TGMEM_LAST )
-            kern = mlx_metal_kernel(tgmem_probe_spec(nbytes, TGMEM_THREADS))
+            kern = mlx_custom_kernel(tgmem_probe_spec(nbytes, TGMEM_THREADS))
             call kern%apply([xd], outs, st)
             if( st == 0 ) call mlx_eval(outs(1), status=st)
             if( st == 0 ) call mlx_to(out, outs(1), status=st)
@@ -641,10 +641,10 @@ contains
         integer                   :: t, st
         logical                   :: ok
         spec_t = polarft_tile_spec(pftsz=TAIL_PFTSZ, nk=TAIL_NK, rt=TAIL_RT, bt=TAIL_BT)
-        b%kern(1) = mlx_metal_kernel(tail_spec(spec_t, .false.))
-        b%kern(2) = mlx_metal_kernel(tail_simd_spec(spec_t))
-        b%kern(3) = mlx_metal_kernel(tail_plain_spec(spec_t, ok))
-        b%kern(4) = mlx_metal_kernel(tail_spec(spec_t, .true.))
+        b%kern(1) = mlx_custom_kernel(tail_spec(spec_t, .false.))
+        b%kern(2) = mlx_custom_kernel(tail_simd_spec(spec_t))
+        b%kern(3) = mlx_custom_kernel(tail_plain_spec(spec_t, ok))
+        b%kern(4) = mlx_custom_kernel(tail_spec(spec_t, .true.))
         call assert_true(ok, 't2: the plain-sum form is derived from the current tail''s two compensated steps')
         par    = 0._real32
         par(1) = real(POLAR_DIST_MAX, real32)
@@ -955,7 +955,7 @@ contains
         b%y  = mlx_from(y)
         b%yt = mlx_from(transpose(y))
         do f = 1, 3
-            b%kern(f) = mlx_metal_kernel(reduce_spec(f - 1, RED_NE, RED_NS, RED_TG))
+            b%kern(f) = mlx_custom_kernel(reduce_spec(f - 1, RED_NE, RED_NS, RED_TG))
         end do
         select case( mode )
             case( 'agree' )
@@ -1114,10 +1114,10 @@ contains
     subroutine sizes_prepare( b, seed )
         type(sizes_bench), intent(inout) :: b
         integer,           intent(in)    :: seed
-        type(mlx_metal_kernel_spec) :: g0, i0
-        type(probe_case)            :: cs
-        real(real32), allocatable   :: hk(:,:), rot(:,:,:)
-        integer                     :: p, st
+        type(mlx_custom_kernel_spec) :: g0, i0
+        type(probe_case)             :: cs
+        real(real32), allocatable    :: hk(:,:), rot(:,:,:)
+        integer                      :: p, st
         call set_fixed_seed(seed)
         call gather_points(hk, rot, SZ_TN)
         b%hk   = mlx_from(hk)
@@ -1128,13 +1128,13 @@ contains
         end do
         g0 = gather_spec(SZ_M, size(hk, 2), SZ_TN, SZ_TG)
         b%szg     = mlx_from(int(g0%template_ints, int32))
-        b%kern(1) = mlx_metal_kernel(g0)
-        b%kern(2) = mlx_metal_kernel(sizes_in_input(g0))
+        b%kern(1) = mlx_custom_kernel(g0)
+        b%kern(2) = mlx_custom_kernel(sizes_in_input(g0))
         cs = seeded_case('sizes n=64', SZ_N, SZ_PLANES, .false.)
         i0 = probe_spec(cs, SZ_PLANES, .true.)
         b%szi     = mlx_from(int(i0%template_ints, int32))
-        b%kern(3) = mlx_metal_kernel(i0)
-        b%kern(4) = mlx_metal_kernel(sizes_in_input(i0))
+        b%kern(3) = mlx_custom_kernel(i0)
+        b%kern(4) = mlx_custom_kernel(sizes_in_input(i0))
         b%ihk   = mlx_from(cs%hk)
         b%irot  = mlx_from(cs%rot)
         b%iom   = mlx_from(cs%omega)
@@ -1260,8 +1260,8 @@ contains
     subroutine sizes_sparse( b )
         type(sizes_bench), intent(inout) :: b
         type(probe_case)             :: cs
-        type(mlx_metal_kernel_spec)  :: i0
-        type(mlx_metal_kernel)       :: k0, k1
+        type(mlx_custom_kernel_spec) :: i0
+        type(mlx_custom_kernel)      :: k0, k1
         type(mlx_array), allocatable :: outs(:)
         type(mlx_array)              :: hk, rot, om, c, q, sz
         real(real32),    allocatable :: x(:,:,:)
@@ -1275,8 +1275,8 @@ contains
         end do
         i0   = probe_spec(cs, 1, .true.)
         nvox = i0%output_shapes(3)
-        k0   = mlx_metal_kernel(i0)
-        k1   = mlx_metal_kernel(sizes_in_input(i0))
+        k0   = mlx_custom_kernel(i0)
+        k1   = mlx_custom_kernel(sizes_in_input(i0))
         hk   = mlx_from(cs%hk)
         rot  = mlx_from(cs%rot)
         om   = mlx_from(cs%omega)
@@ -1310,8 +1310,8 @@ contains
     subroutine sizes_compile( form, set, seed )
         character(len=*), intent(in) :: form
         integer,          intent(in) :: set, seed
-        type(mlx_metal_kernel_spec)  :: spec
-        type(mlx_metal_kernel)       :: kern
+        type(mlx_custom_kernel_spec) :: spec
+        type(mlx_custom_kernel)      :: kern
         type(mlx_array), allocatable :: outs(:)
         type(mlx_array)              :: cube, hkd, rotd, coef, sz
         real(real32),    allocatable :: hk(:,:), rot(:,:,:)
@@ -1329,7 +1329,7 @@ contains
             spec = gather_spec(SZ_M, npts, SZ_TN, SZ_TG)
             sz   = mlx_from(int(spec%template_ints, int32))
             if( form == 'g1' ) spec = sizes_in_input(spec)
-            kern = mlx_metal_kernel(spec)
+            kern = mlx_custom_kernel(spec)
             call mlx_eval(hkd, status=st)
             call mlx_eval(sz, status=st)
             call mlx_synchronize()
@@ -1351,11 +1351,11 @@ contains
 
     ! the gather of one launch: the template form takes the first four inputs, the input form all five
     subroutine compile_apply( kern, form, inputs, outs, status )
-        type(mlx_metal_kernel),       intent(in)  :: kern
-        character(len=*),             intent(in)  :: form
-        type(mlx_array),              intent(in)  :: inputs(:)
-        type(mlx_array), allocatable, intent(out) :: outs(:)
-        integer,                      intent(out) :: status
+        type(mlx_custom_kernel), intent(in)               :: kern
+        character(len=*),        intent(in)               :: form
+        type(mlx_array),         intent(in)               :: inputs(:)
+        type(mlx_array),         allocatable, intent(out) :: outs(:)
+        integer,                 intent(out)              :: status
         if( form == 'g1' )then
             call kern%apply(inputs, outs, status)
         else
@@ -1382,8 +1382,8 @@ contains
             call plant_ties(tab, b%k, seed)
             b%tabd     = mlx_from(tab)
             b%tneg  = -b%tabd
-            b%kern(1) = mlx_metal_kernel(select_spec(.false., SEL_NPART, b%k))
-            b%kern(2) = mlx_metal_kernel(select_spec(.true., SEL_NPART, b%k))
+            b%kern(1) = mlx_custom_kernel(select_spec(.false., SEL_NPART, b%k))
+            b%kern(2) = mlx_custom_kernel(select_spec(.true., SEL_NPART, b%k))
             write(*,'(a,i0)') '    K = ', b%k
             select case( mode )
                 case( 'agree' )
@@ -1611,9 +1611,9 @@ contains
         type(probe_case),   intent(in)    :: cs
         integer,            intent(in)    :: seed
         logical,            intent(in)    :: absolute
-        type(mlx_metal_kernel_spec) :: d0
-        integer,        allocatable :: pmap(:,:)
-        integer                     :: p0, p1, nyq, i
+        type(mlx_custom_kernel_spec) :: d0
+        integer, allocatable         :: pmap(:,:)
+        integer                      :: p0, p1, nyq, i
         p0  = (seed - 1) * INS_PLANES + 1
         p1  = seed * INS_PLANES
         nyq = cs%n / 2
@@ -1636,9 +1636,9 @@ contains
         b%pmap = mlx_from(int(pmap, int32))
         d0     = probe_spec(cs, INS_PLANES, .true.)
         b%par  = mlx_from(int([d0%template_ints, nyq, INS_PLANES], int32))
-        b%kern(1) = mlx_metal_kernel(d0)
-        b%kern(2) = mlx_metal_kernel(insert_pull_spec(.false., d0%template_ints(4), d0%template_ints(5)))
-        b%kern(3) = mlx_metal_kernel(insert_pull_spec(.true., d0%template_ints(4), d0%template_ints(5)))
+        b%kern(1) = mlx_custom_kernel(d0)
+        b%kern(2) = mlx_custom_kernel(insert_pull_spec(.false., d0%template_ints(4), d0%template_ints(5)))
+        b%kern(3) = mlx_custom_kernel(insert_pull_spec(.true., d0%template_ints(4), d0%template_ints(5)))
     end subroutine insert_prepare
 
     ! form f's numerator and density, evaluated

@@ -126,11 +126,12 @@ Rules:
              installed package, -Dmlxf_DIR= or a consumer/ source, or the release gate's mlx-c probe), and every
              MLXF_CMAKE_ARGS they set names -DFORTLS=OFF. The developer's compile scripts are outside the rule
   devquery   test code (src/test/, *_tester.f90, test/*.f90) asks whether a GPU is present only through
-             mlxf_test_utils (test_devices, gpu_present, gpu_check_runs), which tells the three situations apart
-             (Metal with a GPU, Metal without one, a CPU-only MLX): a call of mlx_device_count(MLX_DEVICES%gpu)
+             mlxf_test_utils (test_devices, gpu_present, gpu_check_runs, metal_check_runs), which tells the
+             sessions apart (Metal or CUDA with a GPU, either without one, a CPU-only MLX) and so asks both
+             backends, mlx_metal_is_available and mlx_cuda_is_available: a call of mlx_device_count(MLX_DEVICES%gpu)
              elsewhere is in DEVQUERY_LEDGER or fails. The outside programs of test/consumer/, which cannot use the
-             test library, classify for themselves: a file that asks for the GPU count also calls
-             mlx_metal_is_available
+             test library, classify for themselves: a file that asks for the GPU count also calls both backend
+             queries, else a CUDA build without a GPU looks like a CPU-only MLX
   docex      the documents' Fortran is run: every fenced fortran block of README.md, doc/quickstart.md and
              CONTRIBUTING.md is preceded by <!-- example: test/consumer/<file> --> and is a verbatim run of that
              file's lines (scripts/check_install.sh compiles and runs those programs against the installed
@@ -193,8 +194,8 @@ ENTRY_CALLS = ('mlxf_enter', 'mlxf_guard_thread', 'mlxf_require_device')
 ENTRY_HELPERS = ('mlxf_unary', 'mlxf_binary', 'mlxf_weak_scalar', 'mlxf_int_op', 'mlxf_dtype_op', 'mlxf_vector_op', 'mlxf_reduce_op', 'mlxf_ternary_op', 'mlxf_take_op', 'mlxf_scan_op', 'mlxf_slice_op', 'mlxf_concat_op', 'mlxf_zeros_op', 'mlxf_range_op', 'mlxf_fft_op', 'mlxf_fftn_op', 'mlxf_freq_op', 'mlxf_close_op', 'mlxf_compare_op', 'mlxf_nan_op', 'mlxf_binary_vector_op', 'mlxf_full_op', 'mlxf_binary_int_op', 'mlxf_reduce_all_op', 'mlxf_reduce_dims_op', 'mlxf_var_all_op', 'mlxf_var_op', 'mlxf_var_dims_op', 'mlxf_int2_op', 'mlxf_int3_op', 'mlxf_trace_op', 'mlxf_scan_all_op', 'mlxf_scan_plain_op', 'mlxf_scan_plain_all_op', 'mlxf_roll_op', 'mlxf_unflatten_op', 'mlxf_vector2_op', 'mlxf_strided_op', 'mlxf_count_op', 'mlxf_window_op', 'mlxf_identity_op', 'mlxf_eye_op', 'mlxf_linspace_op', 'mlxf_linspace_endpoint_op', 'mlxf_list_op', 'mlxf_vector_list_op', 'mlxf_meshgrid_op', 'mlxf_split_op', 'mlxf_split_sections_op', 'mlxf_unstack_op', 'mlxf_unstack_dim_op', 'mlxf_pad_op', 'mlxf_pad_width_op', 'mlxf_gather_op', 'mlxf_gather_single_op', 'mlxf_slice_dynamic_op', 'mlxf_scatter_op', 'mlxf_put_op', 'mlxf_ternary_vector_op', 'mlxf_text_op', 'mlxf_slice_update_op', 'mlxf_unique_op', 'mlxf_gather_mm_op', 'mlxf_masked_mm_op', 'mlxf_cpu_unary', 'mlxf_cpu_binary', 'mlxf_cpu_flag_op', 'mlxf_cpu_compare_op', 'mlxf_cpu_pair_op', 'mlxf_cpu_pair_text_op', 'mlxf_cpu_text_op', 'mlxf_cpu_unstack_op', 'mlxf_cpu_svd_op', 'mlxf_norm_op', 'mlxf_norm_text_op', 'mlxf_binary_axis_op', 'mlxf_optional_float_op', 'mlxf_addmm_op', 'mlxf_einsum_op', 'mlxf_tensordot_op', 'mlxf_conv1d_op', 'mlxf_conv2d_op', 'mlxf_conv3d_op', 'mlxf_conv_general_op', 'mlxf_conv_transpose1d_op', 'mlxf_conv_transpose2d_op', 'mlxf_conv_transpose3d_op', 'mlxf_pair_op', 'mlxf_random_key_op', 'mlxf_random_shape_op', 'mlxf_random_float_op', 'mlxf_random_int_op', 'mlxf_random_array_op', 'mlxf_random_axis_op', 'mlxf_random_axis_shape_op', 'mlxf_random_axis_int_op', 'mlxf_random_binary_op', 'mlxf_random_broadcast_op', 'mlxf_layer_norm_op', 'mlxf_rms_norm_op', 'mlxf_rope_op', 'mlxf_rope_dynamic_op', 'mlxf_attention_op', 'mlxf_load_op', 'mlxf_group_op', 'mlxf_group_peer_op', 'mlxf_group_recv_op')
 # the lifetime bindings touch shared state only through a live handle: they may open with the one-thread guard
 # conditional on one (between empty handles they run anywhere; nothing they do needs initialisation)
-ENTRY_IF_LIVE = ('assign_array', 'kill_array', 'function_assign', 'function_kill', 'metal_kernel_assign',
-                 'metal_kernel_kill', 'grad_function_assign', 'grad_function_kill', 'exporter_assign', 'exporter_kill',
+ENTRY_IF_LIVE = ('assign_array', 'kill_array', 'function_assign', 'function_kill', 'custom_kernel_assign',
+                 'custom_kernel_kill', 'grad_function_assign', 'grad_function_kill', 'exporter_assign', 'exporter_kill',
                  'imported_assign', 'imported_kill', 'stream_assign', 'stream_kill', 'group_assign', 'group_kill')
 ENTRY_EXEMPT = {
     'mlxf_version_string': 'pure: returns a build constant, touches no state and calls no MLX function',
@@ -882,6 +883,7 @@ def check_fortlsoff(root, out):
 
 GPU_COUNT = re.compile(r'\bmlx_device_count\s*\(\s*MLX_DEVICES\s*%\s*gpu\s*\)', re.I)
 METAL_QUERY = re.compile(r'\bmlx_metal_is_available\s*\(', re.I)
+CUDA_QUERY = re.compile(r'\bmlx_cuda_is_available\s*\(', re.I)
 TEST_UTILS = 'src/test/framework/mlxf_test_utils.f90'
 CONSUMER_DIR = 'test/consumer/'
 
@@ -898,11 +900,12 @@ def check_devquery(root, files, out):
         n = sum(len(GPU_COUNT.findall(c)) for c in codes)
         if not n:
             continue
-        if rel.startswith(CONSUMER_DIR):
-            if not any(METAL_QUERY.search(c) for c in codes):
-                out.append('%s: devquery: an outside program asks for the GPU count without mlx_metal_is_available: '
-                           'a CPU-only MLX and a session without a GPU look alike' % rel)
-        elif is_test_code(rel) and rel != TEST_UTILS:
+        if rel.startswith(CONSUMER_DIR) or rel == TEST_UTILS:
+            for query, name in ((METAL_QUERY, 'mlx_metal_is_available'), (CUDA_QUERY, 'mlx_cuda_is_available')):
+                if not any(query.search(c) for c in codes):
+                    out.append('%s: devquery: a session classification asks for the GPU count without %s: a '
+                               'CPU-only MLX and a GPU backend without a GPU look alike' % (rel, name))
+        if is_test_code(rel) and rel != TEST_UTILS:
             counts[rel] = n
     ledger_check('devquery', counts, DEVQUERY_LEDGER, out)
     return out

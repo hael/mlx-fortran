@@ -5,7 +5,7 @@ use, intrinsic :: iso_c_binding,   only: c_int
 use, intrinsic :: iso_fortran_env, only: output_unit, int32, int64, real32, real64
 use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
 use mlxf,             only: MLX_DEVICES, MLX_DTYPES, mlx_array, mlx_from, mlx_to, reshape, mlx_device_count, &
-                            mlx_default_device, mlx_metal_is_available
+                            mlx_default_device, mlx_metal_is_available, mlx_cuda_is_available
 use mlxf_test_defs,   only: elem_tolerance, ELEM_SEED_CALIBRATION, ELEM_SEEDS_JUDGED
 use mlxf_test_reduce, only: nan_maxval
 implicit none
@@ -15,7 +15,7 @@ public :: assert_true, assert_false, assert_int, assert_real, assert_double, ass
 public :: begin_test_suite, end_test_suite, report_summary
 public :: tests_run, tests_failed
 public :: set_fixed_seed, bits_equal, test_devices, device_name, gpu_present, cpu_only_mlx, gpu_check_runs
-public :: gpu_only_skip, cpu_matmul_shape_exact
+public :: gpu_only_skip, cpu_matmul_shape_exact, metal_check_runs
 public :: judge_error, find_tolerance, family_seeds, seeded_uniform, seeded_array, shaped_error, digest_bits
 public :: wait_for_go_file
 
@@ -84,12 +84,9 @@ contains
         bits_equal_c32 = transfer(a, 0_int64) == transfer(b, 0_int64)
     end function bits_equal_c32
 
-    ! the devices this run tests on: those named by device=cpu|gpu|all (default all) that can allocate.
-    ! Without a GPU a Metal build of MLX allocates on neither device: the tests are skipped, and a run built
-    ! with MLXF_REQUIRE_GPU records a failure instead.
-    ! the devices a test runs on, by the session: Metal with a GPU, the devices device= asks for; Metal without
-    ! one (headless, sandboxed, virtual), none, since MLX cannot allocate (a skip); a CPU-only MLX, the CPU device
-    ! (device=gpu asks for a GPU-only check, which skips). Without a GPU, MLXF_REQUIRE_GPU makes either a failure
+    ! the devices a test runs on, by the session and device=cpu|gpu|all (default all): with a GPU (Metal or CUDA),
+    ! those asked for; a GPU backend without a GPU, none, since MLX cannot allocate (a skip, or a failure under
+    ! MLXF_REQUIRE_GPU); a CPU-only MLX, the CPU device (device=gpu asks for a GPU-only check, which skips)
     subroutine test_devices( devs )
         integer, allocatable, intent(out) :: devs(:)
         character(len=64) :: arg, which
@@ -102,7 +99,7 @@ contains
         allocate(devs(0))
         if( .not. gpu_present() )then
             if( .not. cpu_only_mlx() )then
-                call no_gpu('    SKIP: no GPU device in this session; a Metal build of MLX cannot allocate')
+                call no_gpu(no_device_skip())
                 return
             endif
             call no_gpu('')
@@ -128,13 +125,24 @@ contains
         gpu_present = mlx_device_count(MLX_DEVICES%gpu) > 0
     end function gpu_present
 
-    ! this MLX was built without its Metal backend: no GPU, and the CPU device allocates on the heap
+    ! this MLX was built without a GPU backend (neither Metal nor CUDA): no GPU, and the CPU device allocates on
+    ! the heap
     logical function cpu_only_mlx()
-        cpu_only_mlx = .not. mlx_metal_is_available()
+        logical :: metal, cuda
+        metal = mlx_metal_is_available()
+        cuda  = mlx_cuda_is_available()
+        cpu_only_mlx = .not. (metal .or. cuda)
     end function cpu_only_mlx
 
+    ! the skip of a session whose GPU backend opens no GPU, naming the backend (MLX allocates on neither device)
+    function no_device_skip() result(line)
+        character(len=:), allocatable :: line
+        line = '    SKIP: no GPU device in this session; a Metal build of MLX cannot allocate'
+        if( mlx_cuda_is_available() ) line = '    SKIP: no GPU device in this session; a CUDA build of MLX cannot allocate'
+    end function no_device_skip
+
     ! whether a check that needs the GPU, or Metal's allocator, can run; when it cannot, the skip says why (the
-    ! GPU-only skip on a CPU-only MLX, the no-device skip on Metal without a GPU), or MLXF_REQUIRE_GPU fails
+    ! GPU-only skip on a CPU-only MLX, the no-device skip on Metal or CUDA without a GPU), or MLXF_REQUIRE_GPU fails
     logical function gpu_check_runs( what )
         character(len=*), intent(in) :: what
         gpu_check_runs = gpu_present()
@@ -143,9 +151,19 @@ contains
             call no_gpu('')
             call gpu_only_skip(what)
         else
-            call no_gpu('    SKIP: no GPU device in this session; a Metal build of MLX cannot allocate')
+            call no_gpu(no_device_skip())
         endif
     end function gpu_check_runs
+
+    ! whether a check of Metal's own behaviour (its allocator's maximum buffer and keys, the wired limit, a capture)
+    ! can run: a GPU on Metal. A CUDA GPU skips it by name; without a GPU it skips (or fails) as gpu_check_runs does
+    logical function metal_check_runs( what )
+        character(len=*), intent(in) :: what
+        metal_check_runs = gpu_check_runs(what)
+        if( .not. metal_check_runs ) return
+        metal_check_runs = mlx_metal_is_available()
+        if( .not. metal_check_runs ) write(output_unit,'(A)') '    SKIP: Metal-only check on a CUDA build: '//trim(what)
+    end function metal_check_runs
 
     ! no GPU in this session: a failure under MLXF_REQUIRE_GPU, else the skip line given (none when empty)
     subroutine no_gpu( skip )

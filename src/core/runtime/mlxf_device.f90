@@ -1,7 +1,7 @@
 !@descr: devices and initialisation: the backend, the device count, the default device, device information, the default stream
 ! The first public call installs the error handler. A GPU is present when MLX can open one; without one a
-! Metal build of MLX cannot allocate on either device, and the first operation that would allocate stops. A
-! CPU-only build of MLX (no Metal backend) has no GPU and allocates on the CPU device.
+! Metal or CUDA build of MLX cannot allocate on either device, and the first operation that would allocate stops.
+! A CPU-only build of MLX (no GPU backend) has no GPU and allocates on the CPU device.
 module mlxf_device
 use, intrinsic :: iso_c_binding,   only: c_bool, c_int, c_null_char, c_ptr, c_size_t
 use, intrinsic :: iso_fortran_env, only: int64
@@ -11,17 +11,19 @@ use mlxf_c_device, only: mlxc_device_new, mlxc_device_new_type, mlxc_device_free
                          mlxc_device_info_get, mlxc_device_info_free, mlxc_device_info_get_size, &
                          mlxc_device_info_get_string, mlxc_device_info_has_key, mlxc_device_is_available
 use mlxf_c_metal,  only: mlxc_metal_is_available, mlxc_metal_start_capture, mlxc_metal_stop_capture
+use mlxf_c_cuda,   only: mlxc_cuda_is_available
 use mlxf_c_stream, only: mlxc_stream_new, mlxc_get_default_stream, mlxc_stream_free, mlxc_synchronize
 use mlxf_libc,     only: c_string_copy
 use mlxf_error,    only: mlxf_check, mlxf_fail, mlxf_report, mlxf_install_error_handler, mlxf_guard_thread
 implicit none
 
-public :: mlx_metal_is_available, mlx_device_count, mlx_default_device, mlx_set_default_device, mlx_device_info_size
+public :: mlx_metal_is_available, mlx_cuda_is_available, mlx_device_count, mlx_default_device, mlx_set_default_device
+public :: mlx_device_info_size
 public :: mlx_device_info_string, mlxf_enter, mlxf_require_device, mlxf_default_stream, mlxf_synchronize_device
 public :: mlx_device_is_available, mlx_metal_start_capture, mlx_metal_stop_capture
 private
 
-integer, parameter :: NOT_INITIALISED = 0, WITH_DEVICE = 1, WITHOUT_DEVICE = 2
+integer, parameter :: NOT_INITIALISED = 0, WITH_DEVICE = 1, METAL_WITHOUT_DEVICE = 2, CUDA_WITHOUT_DEVICE = 3
 
 ! whether the library has initialised (error handler installed) and whether it can allocate on a device
 integer :: init_state = NOT_INITIALISED
@@ -31,26 +33,33 @@ contains
     ! every public entry: the one-thread guard, then initialisation on the first call
     subroutine mlxf_enter( proc )
         character(len=*), intent(in) :: proc
-        logical(c_bool) :: metal
+        logical(c_bool) :: metal, cuda
         integer(c_int)  :: n
         call mlxf_guard_thread(proc)
         if( init_state /= NOT_INITIALISED ) return
         call mlxf_install_error_handler()
         init_state = WITH_DEVICE
         metal = .false.
+        cuda  = .false.
         call mlxf_check(mlxc_metal_is_available(metal), proc)
-        if( .not. metal ) return
+        call mlxf_check(mlxc_cuda_is_available(cuda), proc)
+        if( .not. (metal .or. cuda) ) return
         n = 0
         call mlxf_check(mlxc_device_count(n, MLXC_GPU), proc)
-        if( n == 0 ) init_state = WITHOUT_DEVICE
+        if( n > 0 ) return
+        init_state = METAL_WITHOUT_DEVICE
+        if( cuda ) init_state = CUDA_WITHOUT_DEVICE
     end subroutine mlxf_enter
 
     ! an operation that allocates: stops when MLX cannot allocate in this session
     subroutine mlxf_require_device( proc )
         character(len=*), intent(in) :: proc
         call mlxf_enter(proc)
-        if( init_state == WITHOUT_DEVICE ) call mlxf_fail(proc, 'no Metal device can be opened in this session '//&
-            &'(headless, sandboxed or virtual); a Metal build of MLX cannot allocate on either device')
+        if( init_state == METAL_WITHOUT_DEVICE ) call mlxf_fail(proc, 'no Metal device can be opened in this '//&
+            &'session (headless, sandboxed or virtual); a Metal build of MLX cannot allocate on either device')
+        if( init_state == CUDA_WITHOUT_DEVICE ) call mlxf_fail(proc, 'no CUDA GPU can be opened in this session '//&
+            &'(none present, or none visible through CUDA_VISIBLE_DEVICES); a CUDA build of MLX cannot allocate on '//&
+            &'either device')
     end subroutine mlxf_require_device
 
     ! whether MLX was built with its Metal backend; true on a Metal build also when no GPU opens in this session
@@ -62,6 +71,16 @@ contains
         call mlxf_check(mlxc_metal_is_available(metal), 'mlx_metal_is_available')
         mlx_metal_is_available = logical(metal)
     end function mlx_metal_is_available
+
+    ! whether MLX was built with its CUDA backend; true on a CUDA build also when no GPU opens in this session (none
+    ! present, or none visible through CUDA_VISIBLE_DEVICES: mlx_device_count says whether one does)
+    logical function mlx_cuda_is_available()
+        logical(c_bool) :: cuda
+        call mlxf_enter('mlx_cuda_is_available')
+        cuda = .false.
+        call mlxf_check(mlxc_cuda_is_available(cuda), 'mlx_cuda_is_available')
+        mlx_cuda_is_available = logical(cuda)
+    end function mlx_cuda_is_available
 
     ! the number of devices of a type (MLX_DEVICES%cpu or %gpu) MLX can open here
     integer function mlx_device_count( device_type )

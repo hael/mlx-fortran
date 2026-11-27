@@ -12,7 +12,7 @@
 ! the seconds per batch.
 module mlxf_bench_insert_probe
 use, intrinsic :: iso_fortran_env, only: int32, int64, real32, real64
-use mlxf,                   only: mlx_array, mlx_metal_kernel, mlx_metal_kernel_spec, mlx_from, mlx_to, mlx_eval, &
+use mlxf,                   only: mlx_array, mlx_custom_kernel, mlx_custom_kernel_spec, mlx_from, mlx_to, mlx_eval, &
                                   mlx_synchronize, mlx_set_default_device, mlx_peak_memory, mlx_reset_peak_memory, &
                                   mlx_zeros, MLX_DEVICES, MLX_DTYPES
 use mlxf_test_defs,         only: KBWINSZ, KBALPHA, MAXIMGBATCHSZ, PROJ_TIE_MARGIN, PROBE_ERR_CAP, probe_case
@@ -328,8 +328,8 @@ contains
         type(probe_case), intent(in) :: cs
         integer,          intent(in) :: nb
         logical,          intent(in) :: atomic
-        type(mlx_metal_kernel_spec) :: spec
-        integer                     :: nvox
+        type(mlx_custom_kernel_spec) :: spec
+        integer                      :: nvox
         nvox = (cs%n / 2 + HALO_LOW + HALO + 1) * (cs%n + 2 * HALO + 1)**2
         spec%name = 'insert_plane_atomic'
         if( .not. atomic ) spec%name = 'insert_plane_plain'
@@ -358,7 +358,7 @@ contains
         logical,          intent(in)  :: atomic
         type(probe_run),  intent(out) :: run
         integer,          intent(out) :: status
-        type(mlx_metal_kernel)       :: kern
+        type(mlx_custom_kernel)      :: kern
         type(mlx_array), allocatable :: outs(:)
         type(mlx_array)              :: num, dens, hk, coef, rotd, omd, cd, qd
         integer(int64)               :: t0, t1, rate
@@ -376,7 +376,7 @@ contains
         do ib = 1, nbatches
             b0 = (ib - 1) * MAXIMGBATCHSZ + 1
             nb = min(MAXIMGBATCHSZ, np - b0 + 1)
-            kern = mlx_metal_kernel(probe_spec(cs, nb, atomic))
+            kern = mlx_custom_kernel(probe_spec(cs, nb, atomic))
             call mlx_synchronize()
             call system_clock(t0, rate)
             rotd = mlx_from(cs%rot(:, :, b0:b0+nb-1))

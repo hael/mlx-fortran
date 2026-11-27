@@ -32,10 +32,10 @@ descriptions come from `<dir>/<dir>.inf`. Regenerate with
       - `mlxf_distributed_calls.f90` — signature-class helpers of the distributed operations: an array or a shape, a peer, a group that may be absent
       - `mlxf_distributed_tester.f90` — distributed groups and collectives on the group of one process, and, by name only, a ring of two processes
     - **fast/** — fast: fused layers (normalisations, rotary embeddings, attention, cross entropy) and custom Metal kernels behind a counted handle, and their tests
-      - `mlxf_fast.f90` — MLX's fast module: fused layers along dimension 1, and custom Metal kernels behind a counted handle, applied on the GPU
+      - `mlxf_fast.f90` — MLX's fast module: fused layers along dimension 1, and custom Metal or CUDA kernels behind a counted handle, applied on the GPU
       - `mlxf_fast_calls.f90` — signature-class helpers of the fused layers: normalisations with optional weights, rotary embeddings, attention
       - `mlxf_fast_layers_tester.f90` — the fused layers against plain Fortran loops: layer and RMS normalisation, cross entropy, rotary embeddings, attention
-      - `mlxf_fast_tester.f90` — custom Metal kernels against exact Fortran references: buffer layout, several buffers, templates, atomics, compiled use, refusals
+      - `mlxf_fast_tester.f90` — custom kernels against exact Fortran references: buffer layout, several buffers, templates, atomics, compiled use, refusals, backend sources
     - **fft/** — fft operations and their two-device tests
       - `mlxf_fft.f90` — real and complex Fourier transforms along Fortran dimensions, their shifts and their frequencies
       - `mlxf_fft_nd_tester.f90` — transforms over several dimensions, the real ones' half-size dimension, the shifts and the frequencies against direct double-precision transforms
@@ -183,6 +183,6 @@ descriptions come from `<dir>/<dir>.inf`. Regenerate with
     - `mlxf_example_user_safety.f90` — the safe spellings of today's limits, and what the library now protects: integer statistics, checkpoints, untrusted indices, handle lists, long loops, host tests, wide-range norms
   - **offstate/** — the off-state build of the toys: a project of its own that compiles their host files and glue stubs without USE_MLX and without the library, and its program
     - `mlxf_offstate_exec.f90` — the off-state program of the toys: what a build without MLX runs, built without USE_MLX and without the library
-  - `mlxf_test_exec.f90` — the one test executable: mlxf_test_exec test=<unit_area|list> [suite=] [device=], expect_abort(s), guard=
+  - `mlxf_test_exec.f90` — the one test executable: mlxf_test_exec test=<unit_area|list> [suite=] [device=] [records=], expect_abort(s), guard=
 - **scripts/** — the static gate and its checks, the formatters, the build and gate helpers, the generator of the bind(c) layer and its prototype list, the install, embed, off-state and release checks
   - **probes/** — C programs that probe MLX behaviour and accuracy through mlx-c, run by hand; their findings are recorded where the wrappers depend on them

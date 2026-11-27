@@ -1,6 +1,6 @@
 # The mlxf API reference
 
-Generated from the source by `scripts/generate_api_reference.py`, never edited; `scripts/check_tree.sh` fails when it is not current. One entry per public name of `mlxf`, in the order of `src/core/mlxf.f90`: each specific with its dummies as the source declares them (`[x]` is optional, passed by keyword), the comment above it in the source, and the section of the binding policy that holds the contract (what stops, what returns a status, kinds and shapes). 316 names.
+Generated from the source by `scripts/generate_api_reference.py`, never edited; `scripts/check_tree.sh` fails when it is not current. One entry per public name of `mlxf`, in the order of `src/core/mlxf.f90`: each specific with its dummies as the source declares them (`[x]` is optional, passed by keyword), the comment above it in the source, and the section of the binding policy that holds the contract (what stops, what returns a status, kinds and shapes). 317 names.
 
 ## `mlxf_version_string`
 
@@ -173,6 +173,16 @@ MLX_DTYPES (a named constant)
         status         integer, optional, intent(out) :: status
         result         character(len=:), allocatable :: s
         ! a string MLX reports for a device (device_name, architecture, ...); empty with status 0 when the device or the key is absent. A failure inside MLX is an error, never an empty string alone: the status, or a stop
+```
+
+## `mlx_cuda_is_available`
+
+*Module* `mlxf_device`; *contract:* [7. Devices, threads, precision](policies/binding_contract_policy.md#7-devices-threads-precision)
+
+```text
+    function mlx_cuda_is_available()
+        result         logical
+        ! whether MLX was built with its CUDA backend; true on a CUDA build also when no GPU opens in this session (none present, or none visible through CUDA_VISIBLE_DEVICES: mlx_device_count says whether one does)
 ```
 
 ## `mlx_active_memory`
@@ -4407,27 +4417,27 @@ generic mlx_imported_function
         ! the function a file holds; a file that cannot be read stops (the binding new takes a status)
 ```
 
-## `mlx_metal_kernel`
+## `mlx_custom_kernel`
 
 *Module* `mlxf_fast`; *contract:* [15. Fused layers](policies/binding_contract_policy.md#15-fused-layers)
 
 ```text
-generic mlx_metal_kernel
-    function mlx_metal_kernel(spec)
-        spec           type(mlx_metal_kernel_spec), intent(in) :: spec
-        result         type(mlx_metal_kernel) :: k
+generic mlx_custom_kernel
+    function mlx_custom_kernel(spec)
+        spec           type(mlx_custom_kernel_spec), intent(in) :: spec
+        result         type(mlx_custom_kernel) :: k
         ! the kernel a spec describes
 ```
 
-## `mlx_metal_kernel_spec`
+## `mlx_custom_kernel_spec`
 
 *Module* `mlxf_defs`; *contract:* [5. Kinds and scalars](policies/binding_contract_policy.md#5-kinds-and-scalars)
 
 ```text
-mlx_metal_kernel_spec (a derived type): a custom Metal kernel and its launch (mlx_metal_kernel): the body of the Metal function (source), declarations put before it (header), the names its buffers take in the source, the thread grid and the threadgroup as Metal's (x, y, z), and the outputs. output_shapes holds the outputs' Fortran shapes one after another and output_ranks how many extents each takes (absent: the outputs share them equally); absent output_dtypes are float32. A template parameter is a name with a dtype, an integer or a logical. With init_value every output is filled with it before the kernel runs. The source indexes MLX's buffers, row-major and 0-based
-    component  character(len=:), allocatable :: name, source, header
+mlx_custom_kernel_spec (a derived type): a custom kernel and its launch (mlx_custom_kernel) for MLX's Metal or CUDA backend: the body of the Metal function (source) and of the CUDA function (cuda_source), declarations put before either (header; CUDA compiles it with NVRTC, where a plain function is device code), the names its buffers take in the sources, the thread grid and the threadgroup as (x, y, z) (CUDA launches whole blocks of the threadgroup, so a CUDA source guards its index), the dynamic shared memory of a CUDA launch in bytes, and the outputs. output_shapes holds the outputs' Fortran shapes one after another and output_ranks how many extents each takes (absent: the outputs share them equally); absent output_dtypes are float32. A template parameter is a name with a dtype, an integer or a logical. With init_value every output is filled with it before the kernel runs (atomic_outputs is Metal's; a CUDA source adds atomically to a plain output). The sources index MLX's buffers, row-major and 0-based
+    component  character(len=:), allocatable :: name, source, cuda_source, header
     component  character(len=:), allocatable :: input_names(:), output_names(:)
-    component  integer :: grid(3) = [1, 1, 1], threadgroup(3) = [1, 1, 1]
+    component  integer :: grid(3) = [1, 1, 1], threadgroup(3) = [1, 1, 1], shared_memory = 0
     component  integer, allocatable :: output_shapes(:), output_ranks(:), output_dtypes(:)
     component  character(len=:), allocatable :: template_dtype_names(:), template_int_names(:), template_bool_names(:)
     component  integer, allocatable :: template_dtypes(:), template_ints(:)

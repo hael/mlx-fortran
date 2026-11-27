@@ -104,24 +104,27 @@ end do
 | memory | size work from `mlx_peak_memory()` and a budget | over-subscribed unified memory pages rather than fails; one buffer above the device's maximum fails with a status |
 | `mlx_view` | the owner is a named variable: `w = exp(a)`, then `call mlx_view(w, p)`; `p` is valid until `w` changes and is never written through | a refused view leaves `p` disassociated; a view of an expression, `call mlx_view(exp(a), p)`, dangles at the end of the statement and is not detected |
 | `mlx_alloc` | write through `view` only until the array is first passed to any library procedure | the buffer is handed to MLX without a copy when Metal accepts it, else copied once; later writes are not detected |
-| devices | choose the device; float64 on the CPU only | three sessions: Metal with a GPU (both devices), Metal without one (headless, sandboxed, virtual: MLX cannot allocate, and the first operation that would stops), a CPU-only MLX (the CPU device); a float64 operation built on the GPU stops |
+| devices | choose the device; float64 on the CPU only | the sessions: Metal or CUDA with a GPU (both devices), either without one (headless, sandboxed, virtual; no CUDA device, or none visible through `CUDA_VISIBLE_DEVICES`: MLX cannot allocate, and the first operation that would stops; without NVIDIA's driver a CUDA build does not load at all), a CPU-only MLX (the CPU device); a float64 operation built on the GPU stops |
 | precision | `MLX_ENABLE_TF32=0` in the environment for full float32 matrix products | the library never changes it; `mlxf_runtime_description()` reports it |
 
-A program tells the three sessions apart with `mlx_metal_is_available()` and `mlx_device_count`, as
-[`test/consumer/mlxf_example_errors.f90`](../test/consumer/mlxf_example_errors.f90) does:
+A program tells the sessions apart with `mlx_metal_is_available()`, `mlx_cuda_is_available()` and
+`mlx_device_count`, as [`test/consumer/mlxf_example_errors.f90`](../test/consumer/mlxf_example_errors.f90) does:
 
 <!-- example: test/consumer/mlxf_example_errors.f90 -->
 ```fortran
+gpu_backend = mlx_metal_is_available()
+if( mlx_cuda_is_available() ) gpu_backend = .true.
 if( mlx_device_count(MLX_DEVICES%gpu) > 0 )then
-    write(*,'(a)') 'session: Metal with a GPU; both devices allocate'
+    write(*,'(a)') 'session: a GPU (Metal or CUDA); both devices allocate'
     call mlx_set_default_device(MLX_DEVICES%gpu)
 else if( trim(arg) == 'require-gpu' )then
     error stop 'mlxf_example_errors: require-gpu, and no GPU device in this session'
-else if( .not. mlx_metal_is_available() )then
+else if( .not. gpu_backend )then
     write(*,'(a)') 'session: a CPU-only MLX; the CPU device allocates'
     call mlx_set_default_device(MLX_DEVICES%cpu)
 else
-    write(*,'(a)') 'SKIP: mlxf_example_errors: Metal without a GPU (headless, sandboxed, virtual); MLX cannot allocate'
+    write(*,'(a)') 'SKIP: mlxf_example_errors: Metal or CUDA without a GPU (headless, sandboxed, virtual, none '//&
+        &'visible); MLX cannot allocate'
     stop
 endif
 ```

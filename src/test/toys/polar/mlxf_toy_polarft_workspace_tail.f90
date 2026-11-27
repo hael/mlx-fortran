@@ -77,8 +77,8 @@ contains
     module function tail_spec( spec_t, rows ) result(spec)
         type(polarft_tile_spec), intent(in) :: spec_t
         logical,                 intent(in) :: rows
-        type(mlx_metal_kernel_spec) :: spec
-        integer                     :: np, nrots
+        type(mlx_custom_kernel_spec) :: spec
+        integer                      :: np, nrots
         np               = spec_t%rt * spec_t%bt
         nrots            = 2 * spec_t%pftsz
         spec%name        = 'draw_posterior_rvec'
@@ -121,7 +121,7 @@ contains
         par(4) = POLAR_ARG_CUTOFF
         par(5) = POLAR_DRAW_FLOOR
         self%tail_par    = mlx_from(par)
-        self%tail_kernel = mlx_metal_kernel(tail_spec(spec, .false.))
+        self%tail_kernel = mlx_custom_kernel(tail_spec(spec, .false.))
         self%tail_form   = POLARFT_TAILS%metal
         status = 0
     end subroutine polarft_workspace_new_tail
@@ -136,7 +136,7 @@ contains
         if( rows )then
             ! the rows variant, built on the first block that asks for the rows
             if( .not. self%l_tail_rows )then
-                self%tail_kernel_rows = mlx_metal_kernel(tail_spec(polarft_tile_spec(pftsz=self%pftsz, nk=self%nk, &
+                self%tail_kernel_rows = mlx_custom_kernel(tail_spec(polarft_tile_spec(pftsz=self%pftsz, nk=self%nk, &
                     &rt=self%rt, bt=self%bt), .true.))
                 self%l_tail_rows      = .true.
             endif
