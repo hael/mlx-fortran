@@ -102,3 +102,12 @@ function result before finalization (reproducer: `doc/compiler_issues/gfortran_f
 The C trampoline imports and exports vectors through `mlxf_array_closure`, checks every status and returns
 it to C; callbacks validate their arguments and return failures, never stop. A new `mlxc_array_new()`
 output handle may have a null context until an mlx-c getter fills it; check the getter status before adoption.
+
+## Custom kernels
+
+- Sizes that change per call are an int32 input of fewer than 8 elements (constant space); template constants
+  only for what is fixed for a run. Per launch the two cost the same; a new template value costs a new Metal
+  source (about 42 ms), a new value in an input a new kernel object (about 3 ms).
+- A kernel that reduces to one output per item (a row, a pair, a column) gives each item a SIMD group or a
+  threadgroup, not one thread: 3.3 (tail), 8.1 (reduction) and 2 to 4 (selection) times faster on the M5; the
+  per-thread form stays only where the items are many and each reduction short.

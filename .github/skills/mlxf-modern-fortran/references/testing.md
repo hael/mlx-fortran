@@ -19,6 +19,9 @@ admission rules; `doc/architecture_principles.md`, section 7).
 - Conventions are asserted: memory order, index base, dimension numbering, sign of transforms,
   normalisation of FFTs.
 - A negative control where cheap (a transposed input does not compare equal; a freed handle is not live).
+- A planted violation must exercise the rule it targets: a gate whose expected value the code reaches by
+  another path (a draw that lands on the first minimum by itself) passes a broken rule. Plant where only the
+  rule decides the outcome, and show the plant fails.
 - Every random draw from a fixed seed (`set_fixed_seed`, and MLX's own key for MLX draws).
 - A fixture is the same in every build type: compute its single-precision values in double precision and
   round once (`real(a + b*x, real32)` with `a`, `b`, `x` real64). Single-precision `a + b*x` is contracted to

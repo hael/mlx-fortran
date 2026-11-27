@@ -164,6 +164,12 @@ holds is `doc/architecture_principles.md`; `scripts/check_tree.sh` checks what r
   `scripts/check_submodule_linkage.py`).
 - Keep function-like preprocessor macro invocations on one physical line.
 - gfortran warns about no unused imported name: delete an import with the code that used it.
+- `-Wfunction-elimination` (Release): an impure function as a later operand of `.and.` or `.or.` may be skipped,
+  which with warnings as errors fails the build; make the function `pure` or call it in its own statement.
+- In an OpenMP build every local is recursive: an intrinsic such as `reshape` with a constant target shape of
+  tens of MB puts a temporary of that size on the stack and crashes; give the shape at run time.
+- Rule `ctorexpr` reads names file-wide: a real array that shares a name with a handle elsewhere in the file is
+  flagged; rename one of them.
 
 ## Compile time
 
@@ -178,6 +184,8 @@ derived type held inside another is an `allocatable` component.
   it.
 - Self-contained: never cite a plan, a section number or a date in code; state the reason itself. No names,
   commit hashes, measurements, narration or rejected alternatives in code (those go to `doc/history/`).
+- A comment belongs to the procedure under it: a new procedure inserted before another goes above that
+  procedure's header comment, never between the comment and its procedure.
 
 ## Threading
 

@@ -151,7 +151,8 @@ endforeach()
 #   does not broadcast to its shape; a gradient with respect to position 0 and a compile mode outside its
 #   vocabulary; a causal attention given a mask, a rotary
 #   embedding given one offset for two batches, a normalisation given an empty weight, the fused attention
-#   kernel demanded on the CPU device and a message sent to rank 0; a separate entry because every member ends its process.
+#   kernel demanded on the CPU device, a message sent to rank 0 and mlx_from of an array of unknown size; a separate
+#   entry because every member ends its process.
 mlxf_add_test(object_contracts fast 600 COMMAND $<TARGET_FILE:mlxf_test_exec> expect_aborts object_contracts)
 
 # ---- the budget ----------------------------------------------------------------------------------

@@ -31,6 +31,11 @@ contains
         call mlxf_require_device(proc)
         n = size(fshape)
         if( n > MAX_RANK ) call mlxf_fail(proc, 'rank above 15')
+        ! an extent of -1 is an assumed-size actual, or an empty array constructor that GNU Fortran passes with a
+        ! corrupt descriptor (size -1); the two cannot be told apart here, so neither guesses a size
+        if( any(fshape < 0_int64) ) call mlxf_fail(proc, 'an array of unknown size (an assumed-size array, or '//&
+            &'an empty array constructor, which GNU Fortran passes with extent -1): pass a named array, x(0) '//&
+            &'for an empty one')
         if( any(fshape > int(huge(1_c_int), int64)) ) call mlxf_fail(proc, 'a dimension above 2**31 - 1')
         cshape(1:n) = int(fshape(n:1:-1), c_int)
         call mlxf_adopt(a, mlxc_array_new_data(p, cshape, int(n, c_int), dtype), proc)

@@ -139,6 +139,11 @@ C4 (1000 rounds of `[a, exp(b)]`, `[a, b*2.0]` or `v = exp(a)` keep 1000 handles
   blocker RB1 in [the hardening report](../implementation_notes/completed/mlxf_user_hardening_report.md).
   Consumer and Fortran-only reproducers/logs: `~/m2_evidence/closeout_2026-11-27/`. No workaround is added
   by this documentation closeout.
+- **RB1 closed, 2026-11-27 (Hans: ruling (a)):** `mlx_from` refuses any negative extent with a message naming
+  both causes (an assumed-size actual, which the standard gives extent -1, and this constructor), instead of
+  asking MLX for 2^64 - 4 bytes; the guard `guard_from_unknown_size` tests it on an empty constructor (an
+  assumed-size actual draws a compile-time warning, an error under `-Werror`). When the compiler is fixed, the
+  guard stops failing: that is the signal to revisit this entry. The binding policy's section 4 states the limit.
 
 ## Trunk check and proposed reports, 2026-11-22
 

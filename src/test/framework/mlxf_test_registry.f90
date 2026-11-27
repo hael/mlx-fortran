@@ -89,7 +89,7 @@ type :: guard_member
     character(len=3)  :: device = 'cpu'
 end type guard_member
 
-type(guard_member), parameter :: GUARDS(33) = [&
+type(guard_member), parameter :: GUARDS(34) = [&
     &guard_member('guard_empty_operation',   'object_contracts', 'cpu'), &
     &guard_member('guard_stale_handle',      'object_contracts', 'cpu'), &
     &guard_member('guard_openmp_region',     'object_contracts', 'cpu'), &
@@ -120,6 +120,7 @@ type(guard_member), parameter :: GUARDS(33) = [&
     &guard_member('guard_optional_empty',    'object_contracts', 'cpu'), &
     &guard_member('guard_fused_on_cpu',      'object_contracts', 'cpu'), &
     &guard_member('guard_send_rank',         'object_contracts', 'cpu'), &
+    &guard_member('guard_from_unknown_size', 'object_contracts', 'cpu'), &
     &guard_member('guard_scalar_int8',       'object_contracts', 'cpu'), &
     &guard_member('guard_scalar_unsigned',   'object_contracts', 'cpu'), &
     &guard_member('guard_scalar_uint8',      'object_contracts', 'cpu')]
@@ -301,6 +302,8 @@ contains
                 call guard_scalar_unsigned
             case('guard_scalar_uint8')
                 call guard_scalar_uint8
+            case('guard_from_unknown_size')
+                call guard_from_unknown_size
             case('guard_dtype_zeros')
                 call guard_dtype_zeros
             case('guard_dtype_arange')
@@ -588,6 +591,15 @@ contains
         a = mlx_from(x)
         r = mlx_send(a, 0, status=st)
     end subroutine guard_send_rank
+
+    ! mlx_from of an array of unknown size stops: GNU Fortran passes an empty array constructor to the assumed-rank
+    ! dummy with extent -1 (an assumed-size actual has the same extent, and the compiler warns of it). When a
+    ! compiler passes the constructor with extent 0, this guard stops failing and becomes a plain empty array
+    subroutine guard_from_unknown_size
+        type(mlx_array) :: a
+        write(*,'(a)') 'guard_from_unknown_size: mlx_from of an empty array constructor'
+        a = mlx_from([real(real32) ::])
+    end subroutine guard_from_unknown_size
 
     ! the callback of the guards that need a function: its first input back
     subroutine guard_callback( inputs, outputs, status )

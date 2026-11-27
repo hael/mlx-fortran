@@ -189,7 +189,10 @@ written, the skill `mlxf-modern-fortran`.
 - **Copies are the default.** `mlx_from(x)` copies a Fortran array of any rank (assumed rank, `contiguous`:
   a strided actual is copied in by the compiler) of kind `real32`, `real64`, `complex(real32)`, `int32`,
   `int64` or `logical(c_bool)` into a new MLX array; a zero-size array becomes an empty MLX array without
-  taking an address. `mlx_to(y, a)` evaluates `a` and copies it into an existing array of `a`'s kind and
+  taking an address. An array of unknown size stops (`guard_from_unknown_size`): an empty array constructor such
+  as `[integer(int32) ::]`, which GNU Fortran 16.2 passes to the assumed-rank dummy with extent -1 (compiler
+  issue 6), and an assumed-size actual, whose last extent is -1 by the standard (gfortran warns of it at compile
+  time); the two cannot be told apart, so neither is guessed empty. Pass a named array, `x(0)` for an empty one. `mlx_to(y, a)` evaluates `a` and copies it into an existing array of `a`'s kind and
   shape, or into a rank-1 array of its size, which receives the elements in Fortran order (a strided view, a
   transpose, is made contiguous first). Any other shape of the same size returns a status: it would
   reinterpret the data, as a (3,5) array filled from the (5,3) transpose does. `mlx_to_alloc(y, a)`
