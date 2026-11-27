@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
-"""check_submodule_linkage.py -- a submodule calls no private plain procedure of its module.
+"""check_submodule_linkage.py -- a submodule calls no private procedure whose body is in its module.
 
 gfortran before 16 gives a private module procedure internal linkage, so a submodule (another object
 file), production code or tester, that calls one by name compiles and then fails to link: on the Linux
-builds, not on a macOS build with gfortran 16. Private type-bound procedures (also called by name: they
-are bound), private constants and variables, and separate module procedures link. A procedure a
-submodule calls is its own, public, bound to a type, or a separate module procedure
-(doc/policies/test_environment_policy.md, testers).
+builds, not on a macOS build with gfortran 16. That holds for a plain procedure and, with gfortran 15 on
+Linux, for a separate module procedure whose body is in the module too. Private type-bound procedures
+(also called by name: they are bound), private constants and variables, and separate module procedures
+whose bodies are in a submodule link. A procedure a submodule calls is its own, public, bound to a type,
+or a separate module procedure with its body in a submodule (doc/policies/test_environment_policy.md,
+testers).
 usage: scripts/check_submodule_linkage.py [ROOT]
-exit status: 0 none found, 1 a submodule calls a private plain procedure
+exit status: 0 none found, 1 a submodule calls a private procedure whose body is in its module
 """
 
 import os
@@ -46,6 +48,7 @@ def module_contains(lines):
 
 
 def private_plain_procedures(lines):
+    """the private procedures whose bodies are in the module: plain ones and separate module procedures"""
     ic = module_contains(lines)
     if ic is None:
         return set()
@@ -74,7 +77,7 @@ def private_plain_procedures(lines):
             continue
         m = PROC_RE.match(l)
         if m and not re.match(r"\s*module\s+procedure\b", l):
-            if depth == 0 and not m.group(1):
+            if depth == 0:
                 plain.add(m.group(3))
             depth += 1
     return {n for n in plain if n not in public and n not in bound and n not in KEYWORDS}
@@ -109,7 +112,8 @@ def main():
         print("check_submodule_linkage:", b)
     if bad:
         print("check_submodule_linkage: move each into the submodule that calls it, make it public, bind it to a "
-              "type, or make it a separate module procedure (gfortran before 16 does not link it)")
+              "type, or make it a separate module procedure with its body in a submodule (gfortran before 16 does "
+              "not link it)")
         return 1
     return 0
 

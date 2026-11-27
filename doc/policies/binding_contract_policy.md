@@ -292,11 +292,17 @@ written, the skill `mlxf-modern-fortran`.
 
 ## 7. Devices, threads, precision
 
+- **Platforms.** macOS on Apple silicon (the CPU and the Metal GPU) and Linux on x86-64 with a CPU-only MLX
+  (`scripts/build_mlx_deps.sh`; every Linux build is the third session below). The contract is the same on both;
+  what differs is the device set. On both MLX compiles the CPU kernels of compiled graphs (section 11) with `g++`
+  at run time when one answers on `PATH` (on a Mac, the Command Line Tools'; else they run uncompiled) and caches
+  them under `TMPDIR`. MLX's CUDA backend is not bound yet (the roadmap's rank 5).
 - A GPU is present when `mlx_device_count(MLX_DEVICES%gpu) > 0`; `mlx_metal_is_available()` says whether MLX
   was built with its Metal backend. Three sessions follow: Metal with a GPU (both devices); Metal without one
   (headless, sandboxed, virtual), where a Metal build of MLX cannot allocate on either device and the first
-  operation that would allocate stops saying so; and a CPU-only MLX (`MLX_BUILD_METAL=OFF`), which has no GPU and
-  allocates on the CPU device (heap memory; no maximum buffer length, no Metal kernels). The default device is
+  operation that would allocate stops saying so; and a CPU-only MLX (`MLX_BUILD_METAL=OFF`, and every Linux
+  build), which has no GPU and allocates on the CPU device (heap memory; no maximum buffer length, no Metal
+  kernels). The default device is
   MLX's (the GPU when present); `mlx_set_default_device(MLX_DEVICES%cpu)` or `(MLX_DEVICES%gpu)` changes it. Operations take no stream argument;
   a stream of one's own is made the default of its device (section 16).
   One choice of stream is the library's own: the factorisations, inverses, determinants, eigenvalues and

@@ -86,7 +86,9 @@ if cmake --build "$WORK/build" --target parent_private > "$WORK/private.log" 2>&
     echo "check_embed: FAILED: a parent source imported the private module mlxf_c_array"
     exit 1
 fi
-if ! tr '[:upper:]' '[:lower:]' < "$WORK/private.log" | grep -q "cannot open module file 'mlxf_c_array.mod'"; then
+# GCC quotes the module's name with ' or, built with native-language support in a UTF-8 locale (Linux), with
+# typographic quotes: the line is matched around them
+if ! tr '[:upper:]' '[:lower:]' < "$WORK/private.log" | grep -q "cannot open module file .*mlxf_c_array\.mod"; then
     tail -n 40 "$WORK/private.log"
     echo "check_embed: FAILED: the private import failed for another reason than the missing module"
     exit 1

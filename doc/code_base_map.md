@@ -80,7 +80,7 @@ descriptions come from `<dir>/<dir>.inf`. Regenerate with
       - `mlxf_device_tester.f90` — tests of mlxf_device: the backend, device counts, the default device, device information
       - `mlxf_error.f90` — errors: the mlx-c error handler, the hard-error stop, checked statuses, the last error and the one-thread guard
       - `mlxf_error_tester.f90` — tests of mlxf_error: recorded messages, checked statuses, and recovery from a failed evaluation
-      - `mlxf_libc.f90` — the C library entry points the library calls (strlen, memcpy, posix_memalign, free, fopen, fclose, dup, fdopen, rename, unlink, chmod, lstat, getpid, geteuid; symlink, link, mkdir, rmdir for the tests), C-string copies and a file's facts
+      - `mlxf_libc.f90` — the C library entry points the library calls (strlen, memcpy, posix_memalign, free, fopen, fclose, dup, fdopen, rename, unlink, chmod, lstat through a C helper, getpid, geteuid; symlink, link, mkdir, rmdir for the tests), C-string copies and a file's facts
       - `mlxf_memory.f90` — MLX's memory controls: active, peak and cache memory, the cache and memory limits
       - `mlxf_memory_tester.f90` — tests of mlxf_memory: active, peak and cache memory follow an array's life; the limits are set and restored
       - `mlxf_registry.f90` — the handle registry: each live MLX object (its ctx address) with a serial and a Fortran-side reference count

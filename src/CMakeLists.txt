@@ -5,7 +5,10 @@
 # library: test/CMakeLists.txt compiles them into mlxf_test_exec, so that the installed library holds no
 # test, kernel or benchmark code and a test-only dependency (FFTW for a benchmark) never reaches it.
 
-file(GLOB_RECURSE MLXF_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*.[Ff]90")
+# The C helpers of src/core (the lstat of mlxf_libc) are library sources too; src/test's C, the ABI probe, is
+# compiled by test/CMakeLists.txt.
+file(GLOB_RECURSE MLXF_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*.[Ff]90"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/*.c")
 file(GLOB_RECURSE MLXF_TEST_ONLY_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/test/*.[Ff]90"
     "${CMAKE_CURRENT_SOURCE_DIR}/*_tester.[Ff]90")

@@ -8,7 +8,7 @@
 module mlxf_toy_reconstructor_pcg_tester
 use, intrinsic :: iso_fortran_env, only: int64, real32, real64
 use mlxf,                       only: mlx_array, mlx_from, mlx_to, mlx_eval, mlx_set_default_device, mlx_live_count, &
-                                      mlx_active_memory, mlx_default_device, mlx_synchronize
+                                      mlx_active_memory, mlx_synchronize
 use mlxf_test_defs,             only: RECON_PCG_N_SMALL, RECON_PCG_N_NAMED, RECON_PCG_MSKRAD_SMALL, &
                                       RECON_PCG_MSKRAD_NAMED, RECON_PCG_PLANES_PER_N, RECON_PCG_LAMBDA_REL, &
                                       RECON_PCG_TOLERANCES, parameters
@@ -175,19 +175,6 @@ contains
         if( any(.not. (RECON_PCG_TOLERANCES(first:last)%frozen > 0._real64)) ) seeds = seeds(1:1)
     end function judged_seeds
 
-    ! the tolerance of a named gate: frozen, or its ceiling while it is not
-    module function tol( name ) result(t)
-        character(len=*), intent(in) :: name
-        real(real64) :: t
-        integer      :: k
-        t = -1._real64
-        do k = 1, size(RECON_PCG_TOLERANCES)
-            if( trim(RECON_PCG_TOLERANCES(k)%name) /= name ) cycle
-            t = RECON_PCG_TOLERANCES(k)%ceiling
-            if( RECON_PCG_TOLERANCES(k)%frozen > 0._real64 ) t = RECON_PCG_TOLERANCES(k)%frozen
-        end do
-    end function tol
-
     ! the fixture of box n and seed: 4 n planes from the seed's variates, the accumulators rounded once
     module subroutine make_fixture( n, mskrad, seed, fx )
         integer,             intent(in)    :: n, seed
@@ -206,50 +193,6 @@ contains
         fx%b64 = cmplx(real(real(fx%b32), real64), real(aimag(fx%b32), real64), real64)
         fx%d64 = real(fx%d32, real64)
     end subroutine make_fixture
-
-    ! the toy's assembly of a fixture under system R (relative ridge) up to end_accum
-    module subroutine assemble( fx, rec )
-        type(recon_fixture),     intent(in)    :: fx
-        type(reconstructor_pcg), intent(inout) :: rec
-        call rec%new(fx%n)
-        call rec%set_window_sphere(real(fx%mskrad, real32))
-        call rec%set_lambda_relative(RECON_PCG_LAMBDA_REL)
-        call rec%set_raw_accum(fx%b32, fx%d32)
-        call rec%end_accum(.true.)
-    end subroutine assemble
-
-    ! a fixed vector of the n-cube from integers
-    module function fixed_volume( n, k ) result(v)
-        integer, intent(in) :: n, k
-        real(real32) :: v(n, n, n)
-        real(real64) :: w(n**3)
-        integer      :: i
-        do i = 1, n**3
-            w(i) = real(modulo(5 * i + 11 * k, 17) - 8, real64) / 8._real64 + real(modulo(i * k, 7), real64) / 14._real64
-        end do
-        v = real(reshape(w, [n, n, n]), real32)
-    end function fixed_volume
-
-    ! a relative error in the 2-norm, +Inf when the result is not finite
-    module function rel2( a, ref ) result(e)
-        real(real64), intent(in) :: a(:), ref(:)
-        real(real64) :: e
-        e = huge(1._real64)
-        if( nan_maxval(abs(a)) < huge(1._real64) ) e = norm2(a - ref) / norm2(ref)
-    end function rel2
-
-    module subroutine report( label, fx, err, limit )
-        character(len=*),    intent(in) :: label
-        type(recon_fixture), intent(in) :: fx
-        real(real64),        intent(in) :: err, limit
-        write(*,'(a,a,a,i0,a,i0,a,a,a,es12.5,a,es10.3)') '    error ', label, ' n=', fx%n, ' seed=', fx%seed, ' ', &
-            device_name_now(), ': ', err, ' tol ', limit
-    end subroutine report
-
-    module function device_name_now() result(name)
-        character(len=:), allocatable :: name
-        name = device_name(mlx_default_device())
-    end function device_name_now
 
     ! the columns of a device operator on the n-cube, one unit vector each, NCOLS built before one evaluation
     subroutine device_columns( rec, n, which, cols )

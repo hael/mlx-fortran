@@ -221,3 +221,33 @@ Corrections from the M5 run (`mlxf_m1_m5`, 2026-11-24):
 
 For arun itself, follow `SETUP.md` in the `agent_runs` checkout; the run spec supplies the machine-specific
 settings.
+
+## 7. Linux, CPU only
+
+Tested on Ubuntu 26.04 (x86-64) with GNU Fortran 15.2 and 14.3, CMake 4.2 and Python 3.14, and written for
+GitHub's Ubuntu 24.04 runners. MLX has no GPU backend here in this project (the CUDA step is the roadmap's rank 5):
+every test runs on the CPU device and the GPU-only checks skip, as with a CPU-only MLX on a Mac.
+
+- **Packages:** `gfortran` 14 or newer, `gcc`, `g++`, `cmake`, `pkg-config`, and BLAS and LAPACK with LAPACKE's
+  headers: `libopenblas-openmp-dev liblapacke-dev` (MLX's guide names `libblas-dev liblapack-dev liblapacke-dev`;
+  OpenBLAS's development package provides the first two). GNU Fortran 14 builds and passes the whole tree on Linux
+  (14.3), unlike 14.4 on macOS (section 1).
+- **MLX and mlx-c:** `scripts/build_mlx_deps.sh` (CPU only: `--cpu-only` is implied; into `.deps/install-cpu`; about
+  1.5 minutes on 16 cores). `MLX_SRC` and `MLXC_SRC` name clones, or GitHub's archives of the tags
+  (`https://github.com/ml-explore/mlx/archive/refs/tags/v0.32.4.tar.gz`, mlx-c's likewise), whose commit the script
+  checks and records in `mlxf_deps.txt`; an unattended run whose fence refuses `git clone` uses the archives. GCC
+  builds both, and the installed libraries find each other through `$ORIGIN`.
+- **Build:** point the build at the prefix, as for a CPU-only MLX on a Mac:
+  `export MLXC_ROOT=$PWD/.deps/install-cpu` and
+  `MLXF_CMAKE_ARGS="-DMLXF_REQUIRE_GPU=OFF -DMLXF_WERROR=ON -DFORTLS=OFF" ./compile_clean.sh`;
+  `scripts/check_install.sh` finds mlx-c through the same `MLXC_ROOT`.
+- **CI:** `scripts/ci_linux_job.sh Debug|Release gfortran-1x` is the Linux job: `scripts/ci_cpu_job.sh` (the CPU-only
+  MLX, the build, the fast gate, the installed consumer), then `scripts/check_embed.sh` and
+  `scripts/check_toy_offstate.sh` (with `--exec` in Release).
+- **At run time** MLX compiles the CPU kernels of compiled graphs with `g++`, as on a Mac (it must be on `PATH`;
+  without it they run uncompiled) and caches them under `$TMPDIR/mlx/0.32.4/cpu`; where Open MPI is installed,
+  `unit_distributed` starts an MPI singleton, whose session directory also goes to `$TMPDIR`. On a shared machine
+  point `TMPDIR` at a scratch directory for test runs.
+- **Compiler notes:** GCC built with native-language support quotes names in its messages with typographic quotes
+  in a UTF-8 locale (the scripts match around them); GNU Fortran 15 on Linux gives a private module procedure whose
+  body is in its module internal linkage, so a submodule cannot call it (`scripts/check_submodule_linkage.py`).

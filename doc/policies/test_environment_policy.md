@@ -39,7 +39,9 @@ changes only with an owner decision or a plan that names the new entry, recorded
 `unit_core`'s sub-suite `abi` is the ABI probe of the generated layer: the interfaces of `src/test/framework/mlxf_abi_probe.h`
 are generated with the library's mapping table (`scripts/gen_mlxc_bindings.py --probe`, into `build/gen_test/`) and
 its echo functions are compiled by Apple's clang (`xcrun clang`, the compiler of mlx-c; CMake's C compiler is GCC)
-into an object of `mlxf_test_exec`. Each of the 35 classes of argument and result is echoed at least once; `int`,
+into an object of `mlxf_test_exec`; elsewhere than macOS by the build's C compiler, which reads mlx-c's headers as
+system headers (GCC reports an unused static of `mlx/c/array.h`). Each of the 35 classes of argument and result
+is echoed at least once; `int`,
 `bool`, `float`, `double` and the three optional pairs both in a register and on the stack; the size, alignment,
 field offsets and field sizes of the 36 structs and the values of the 23 enumerators are compared with C's by name.
 It calls no MLX function and runs in every session. A struct or enumerator that mlx-c adds fails it until the C
@@ -245,7 +247,7 @@ the first evaluations of new sizes in a fresh process. A key a suite does not re
   | --- | --- | --- | --- | --- |
   | true | > 0 | Metal with a device | the devices `device=` asks for | as they are |
   | true | 0 | Metal without a device (headless, sandboxed, virtual) | skip: `SKIP: no GPU device in this session` | failure |
-  | false | 0 | CPU-only MLX (`scripts/build_mlx_deps.sh --cpu-only`) | the CPU device; a check that needs the GPU or Metal's allocator skips with `SKIP: GPU-only check on a CPU-only MLX build` | failure |
+  | false | 0 | CPU-only MLX (`scripts/build_mlx_deps.sh --cpu-only`; on Linux every build) | the CPU device; a check that needs the GPU or Metal's allocator skips with `SKIP: GPU-only check on a CPU-only MLX build` | failure |
 
   A GPU is present when `mlx_device_count(MLX_DEVICES%gpu) > 0`; `mlx_metal_is_available()` says only that the
   Metal backend was compiled in. A Metal build of MLX without a GPU cannot allocate arrays on either device, the
@@ -254,11 +256,12 @@ the first evaluations of new sizes in a fresh process. A key a suite does not re
   fails only at the first allocation. Test code asks for the GPU only through `mlxf_test_utils` (rule
   `devquery`; the device tester, which tests the count itself, is its ledger). Each `GUARDS` member names the
   device its fixture needs (`cpu` or `gpu`); on a CPU-only MLX the `gpu` members skip with the same message. The
-  GPU-only checks of the fast gate on a CPU-only MLX: the GPU's device information (`unit_core`, `device`), the
-  recovery gate (`error`: the maximum buffer is the Metal allocator's) and `guard_float64_on_gpu`; the Metal
-  kernels' GPU tests run only on the GPU anyway. The headless gate is reproduced on a Mac with
-  `sandbox-exec -p "(version 1)(allow default)(deny iokit-open)"` around a build configured with
-  `-DMLXF_REQUIRE_GPU=OFF`; the CPU-only gate with `scripts/ci_cpu_job.sh`.
+  GPU-only checks of the fast gate on a CPU-only MLX, five: in `unit_core` the GPU's device information, the
+  recovery gate (the maximum buffer is the Metal allocator's), the memory and wired limits (Metal's allocator) and
+  a Metal capture, and `guard_float64_on_gpu`; the Metal kernels' GPU tests run only on the GPU anyway. The
+  headless gate is reproduced on a Mac with `sandbox-exec -p "(version 1)(allow default)(deny iokit-open)"` around a
+  build configured with `-DMLXF_REQUIRE_GPU=OFF`; the CPU-only gate with `scripts/ci_cpu_job.sh`, and on Linux with
+  `scripts/ci_linux_job.sh` (the same job, then the embedding and off-state checks).
 - CMake option `MLXF_REQUIRE_GPU` (default ON on macOS arm64, OFF in the CI), a compile definition of the
   test executable, turns those skips into failures, so a development Mac can never pass the gate without
   running the device tests.
@@ -293,8 +296,10 @@ the first evaluations of new sizes in a fresh process. A key a suite does not re
   its name first. A tester that owns a named-only sub-suite (section 5) also exports that sub-suite's
   `run_all_<name>_tests`. No `stop` or `error stop` in a tester outside a guard-group member.
 - A tester that needs private entities is a submodule of the module it tests; no entity is public only
-  for a tester. A submodule calls no private plain procedure of its module (gfortran before 16 does not
-  link it; `scripts/check_submodule_linkage.py`).
+  for a tester. A submodule calls no private procedure whose body is in its module: no plain one (gfortran
+  before 16 does not link it) and no separate module procedure either (gfortran 15 on Linux does not link that);
+  a separate module procedure the module and its submodule share has its body in the submodule
+  (`scripts/check_submodule_linkage.py`).
 - Deleting a test needs a kept test that reaches the same branch with the same assertion.
 
 ## 7. Python

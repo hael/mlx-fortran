@@ -29,6 +29,66 @@ integer, parameter :: SEED_STOP_REPORTED = 1
 
 contains
 
+    ! the helpers the module shares with this submodule have their bodies here: gfortran 15 on Linux gives a
+    ! private procedure whose body is in the module internal linkage, which a submodule cannot link to
+    ! the tolerance of a named gate: frozen, or its ceiling while it is not
+    module function tol( name ) result(t)
+        character(len=*), intent(in) :: name
+        real(real64) :: t
+        integer      :: k
+        t = -1._real64
+        do k = 1, size(RECON_PCG_TOLERANCES)
+            if( trim(RECON_PCG_TOLERANCES(k)%name) /= name ) cycle
+            t = RECON_PCG_TOLERANCES(k)%ceiling
+            if( RECON_PCG_TOLERANCES(k)%frozen > 0._real64 ) t = RECON_PCG_TOLERANCES(k)%frozen
+        end do
+    end function tol
+
+    ! the toy's assembly of a fixture under system R (relative ridge) up to end_accum
+    module subroutine assemble( fx, rec )
+        type(recon_fixture),     intent(in)    :: fx
+        type(reconstructor_pcg), intent(inout) :: rec
+        call rec%new(fx%n)
+        call rec%set_window_sphere(real(fx%mskrad, real32))
+        call rec%set_lambda_relative(RECON_PCG_LAMBDA_REL)
+        call rec%set_raw_accum(fx%b32, fx%d32)
+        call rec%end_accum(.true.)
+    end subroutine assemble
+
+    ! a fixed vector of the n-cube from integers
+    module function fixed_volume( n, k ) result(v)
+        integer, intent(in) :: n, k
+        real(real32) :: v(n, n, n)
+        real(real64) :: w(n**3)
+        integer      :: i
+        do i = 1, n**3
+            w(i) = real(modulo(5 * i + 11 * k, 17) - 8, real64) / 8._real64 + real(modulo(i * k, 7), real64) / 14._real64
+        end do
+        v = real(reshape(w, [n, n, n]), real32)
+    end function fixed_volume
+
+    ! a relative error in the 2-norm, +Inf when the result is not finite
+    module function rel2( a, ref ) result(e)
+        real(real64), intent(in) :: a(:), ref(:)
+        real(real64) :: e
+        e = huge(1._real64)
+        if( nan_maxval(abs(a)) < huge(1._real64) ) e = norm2(a - ref) / norm2(ref)
+    end function rel2
+
+    module subroutine report( label, fx, err, limit )
+        character(len=*),    intent(in) :: label
+        type(recon_fixture), intent(in) :: fx
+        real(real64),        intent(in) :: err, limit
+        write(*,'(a,a,a,i0,a,i0,a,a,a,es12.5,a,es10.3)') '    error ', label, ' n=', fx%n, ' seed=', fx%seed, ' ', &
+            device_name_now(), ': ', err, ' tol ', limit
+    end subroutine report
+
+    module function device_name_now() result(name)
+        use mlxf, only: mlx_default_device
+        character(len=:), allocatable :: name
+        name = device_name(mlx_default_device())
+    end function device_name_now
+
     ! H x by the reconstructor's operator on the device (P H P with a support), unevaluated
     module function device_apply( rec, x ) result(y)
         type(reconstructor_pcg), target, intent(inout) :: rec

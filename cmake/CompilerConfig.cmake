@@ -35,7 +35,9 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 # Fortran flags
 # ------------------------------------------------------------------------------
 add_library(mlxf_build_flags INTERFACE)
-target_compile_options(mlxf_build_flags INTERFACE
+# GNU Fortran's options reach the Fortran sources only; the library's one C source (the lstat helper of mlxf_libc,
+# which reads the platform's own struct stat) gets the C warnings below.
+set(_mlxf_fortran_options
     # -cpp: the generated build-information include. -std=f2018: a public library stays standard Fortran
     # (XEMA rejects -std because it disables GNU intrinsics XEMA uses; this library uses none).
     -cpp -ffree-line-length-none -fimplicit-none -std=f2018
@@ -58,6 +60,9 @@ target_compile_options(mlxf_build_flags INTERFACE
     # kernels in the same process, which may legitimately produce infinities.
     $<$<AND:$<CONFIG:Debug>,$<BOOL:${MLXF_DEBUG_TRAPS}>>:-ffpe-trap=invalid,zero,overflow;-finit-real=snan>
     $<$<CONFIG:RelWithDebInfo>:-O2;-g>)
+target_compile_options(mlxf_build_flags INTERFACE
+    "$<$<COMPILE_LANGUAGE:Fortran>:${_mlxf_fortran_options}>"
+    "$<$<COMPILE_LANGUAGE:C>:-Wall;-Wextra;$<$<BOOL:${MLXF_WERROR}>:-Werror>>")
 
 # mlxf_add_library(<name> <sources...>): a static library whose module files live in its own directory,
 # reachable only through its build interface (XEMA's per-library module directories): installing the

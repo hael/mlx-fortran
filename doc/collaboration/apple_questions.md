@@ -525,6 +525,25 @@ layout does 2.9 million pairs per second on 24 cores; the target machine is an M
       Do not suppress all floating-point diagnostics or clear a caller's pre-existing flags. No runtime
       workaround was added. Reproduce on other configurations and check upstream reports before filing.
 
+## P. Linux (CPU-only MLX, GCC)
+
+38. **`mlx/c/array.h` defines an unused static variable, which GCC reports in every C file that includes
+    `mlx/c/mlx.h`.** Status: open, not sent; seen 2026-11-26 with mlx-c 0.8.0 built CPU-only on Ubuntu 26.04 with
+    GCC 15.2.
+    - Ask: `array.h` line 42 reads `static mlx_array mlx_array_empty;`, and nothing in mlx-c's headers refers to
+      it. GCC's `-Wall` (`-Wunused-variable`) warns "'mlx_array_empty' defined but not used" in every translation
+      unit that includes `mlx/c/mlx.h` and does not use it, so a C consumer built with `-Wall -Werror` fails on a
+      file that only includes the header. Apple's clang compiles the same header under `-Wall -Wextra -Werror`
+      without it (mlx-fortran's macOS builds do so on every build), so the failure appears with GCC, on Linux.
+      Could the variable go, or become a function (`mlx_array_new()` already returns an empty array), or be marked
+      `__attribute__((unused))`?
+    - Where: mlx-c `mlx/c/array.h:42`. Reproducer: a C file holding `#include "mlx/c/mlx.h"` and an empty `main`,
+      compiled with `gcc -std=c11 -Wall -Werror -I<prefix>/include -c`: error, exit 1 (without `-Werror`: one
+      warning).
+    - Meanwhile: our ABI probe, the one C file of mlx-fortran that includes mlx-c's headers, reads them as system
+      headers off Apple (`-isystem`, `test/CMakeLists.txt`), so the header's warning is mlx-c's and the probe's own
+      code keeps `-Werror`.
+
 ## For information (not Apple's to fix)
 
 - gfortran mis-finalizes derived types in four patterns (allocatable components with defined assignment,

@@ -1,4 +1,4 @@
-name: CI (macOS arm64; CPU-only MLX tests, Metal build-only)
+name: CI (macOS arm64 and Linux x86-64; CPU-only MLX tests, Metal build-only)
 
 on:
   push:
@@ -55,6 +55,51 @@ jobs:
           MLX_SRC: ${{ runner.temp }}/mlx
           MLXC_SRC: ${{ runner.temp }}/mlx-c
         run: scripts/ci_cpu_job.sh ${{ matrix.build }} ${{ matrix.compiler }}
+
+  # Linux has no Metal: scripts/build_mlx_deps.sh builds MLX CPU-only there, with GCC and the system's OpenBLAS (BLAS,
+  # LAPACK) and LAPACKE's headers, and every device test runs on the CPU, as in the jobs above.
+  # scripts/ci_linux_job.sh is the whole job (scripts/ci_cpu_job.sh, then the library inside a parent project and the
+  # toys without MLX); the steps before it only provide the toolchain and the cached CPU-only MLX. GNU Fortran 14 is
+  # Ubuntu 24.04's, 15 comes from the toolchain PPA; the runner's own CMake, Python and g++ (MLX's build, and its CPU
+  # backend's kernels of compiled graphs at run time) serve as they are.
+  linux:
+    name: Linux CPU-only MLX, ${{ matrix.build }}, ${{ matrix.compiler }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        build: [Debug, Release]
+        compiler: [gfortran-14, gfortran-15]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install dependencies
+        run: |
+          if [ "${{ matrix.compiler }}" = gfortran-15 ]; then sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test; fi
+          sudo apt-get update
+          sudo apt-get install -y ${{ matrix.compiler }} pkg-config libopenblas-openmp-dev liblapacke-dev
+          ${{ matrix.compiler }} --version | head -n 1
+          cmake --version | head -n 1
+          g++ --version | head -n 1
+
+      - name: Cache the CPU-only MLX
+        id: mlx-cache
+        uses: actions/cache@v4
+        with:
+          path: .deps/install-cpu
+          key: mlx-cpu-${{ runner.os }}-${{ runner.arch }}-${{ env.ImageOS }}-${{ env.ImageVersion }}-${{ env.MLX_REF }}-${{ env.MLXC_REF }}-${{ hashFiles('scripts/build_mlx_deps.sh') }}
+
+      - name: Clone MLX and mlx-c at the pinned tags
+        if: steps.mlx-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch "$MLX_REF" https://github.com/ml-explore/mlx.git "$RUNNER_TEMP/mlx"
+          git clone --depth 1 --branch "$MLXC_REF" https://github.com/ml-explore/mlx-c.git "$RUNNER_TEMP/mlx-c"
+
+      - name: Linux job (scripts/ci_linux_job.sh)
+        env:
+          MLX_SRC: ${{ runner.temp }}/mlx
+          MLXC_SRC: ${{ runner.temp }}/mlx-c
+        run: scripts/ci_linux_job.sh ${{ matrix.build }} ${{ matrix.compiler }}
 
   # Homebrew's mlx is a Metal build: here it only builds, with warnings as errors, and runs the source checks; its
   # device tests skip. Neither these jobs nor the CPU-only ones gate a release: that is scripts/release_gate.sh on

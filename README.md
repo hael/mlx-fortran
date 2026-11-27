@@ -157,6 +157,12 @@ and 14.4.0 for the library and its installed consumer), and mlx-c as a
 shared library, either `brew install mlx-c` (no Xcode needed) or the pinned source build
 `scripts/build_mlx_deps.sh` (MLX v0.32.4 and mlx-c v0.8.0 from local clones; needs Xcode's Metal toolchain).
 
+On Linux (x86-64) the library runs on the CPU device alone: GFortran 14+ and GCC (tested with 15.2 and 14.3 on Ubuntu
+26.04), CMake 3.25+, and BLAS, LAPACK and LAPACKE's headers (Ubuntu: `libopenblas-openmp-dev liblapacke-dev`).
+`scripts/build_mlx_deps.sh` builds the pinned pair CPU-only there, from clones or from GitHub's archives of the tags,
+into `.deps/install-cpu`, which a build is pointed at with `MLXC_ROOT`; MLX's CPU backend compiles the kernels of
+compiled graphs with `g++` at run time, as on a Mac. Every test runs on the CPU device; the GPU-only checks skip.
+
 ```bash
 ./compile_clean.sh                        # Release build, static and fast test gates, install into build/
 ./compile_debug.sh                        # the same in Debug
@@ -174,7 +180,9 @@ can pass `-DFORTLS=OFF`.
 The CI on GitHub's macOS arm64 runners, which open no Metal device, runs the fast gate and the installed-consumer
 check against MLX built without Metal (`scripts/build_mlx_deps.sh --cpu-only`, cached), where the device tests run
 on the CPU, in Debug and Release with GNU Fortran 15 and 16 (`scripts/ci_cpu_job.sh`), and builds the tree against
-Homebrew's Metal MLX, whose device tests skip there. A release needs `scripts/release_gate.sh` on an Apple-silicon
+Homebrew's Metal MLX, whose device tests skip there. On GitHub's Ubuntu 24.04 runners the same CPU-only job runs
+against MLX built on Linux, with GNU Fortran 14 and 15, followed by the embedding and off-state checks
+(`scripts/ci_linux_job.sh`). A release needs `scripts/release_gate.sh` on an Apple-silicon
 Mac with a GPU: a snapshot of the commit (`git archive`), Debug and Release from scratch with
 `MLXF_REQUIRE_GPU=ON`, the fast gate and the installed-consumer check on each, the embedding check, and a
 failure on any skip or editor side effect; its log names the commit, the toolchain, mlx-c and the device.

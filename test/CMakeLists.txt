@@ -35,12 +35,18 @@ if(APPLE)
     execute_process(COMMAND sw_vers -productVersion OUTPUT_VARIABLE _probe_macos OUTPUT_STRIP_TRAILING_WHITESPACE)
     string(REGEX REPLACE "^([0-9]+).*" "\\1.0" _probe_macos "${_probe_macos}")
     set(_probe_cc xcrun clang "-mmacosx-version-min=${_probe_macos}")
+    set(_probe_system "")
 else()
     set(_probe_cc "${CMAKE_C_COMPILER}")
+    # mlx-c's array.h defines a static it does not use, which GCC reports in every file that includes it: GCC reads a
+    # directory named by -isystem and -I as a system directory, so mlx-c's headers are a dependency's and the
+    # probe's own code keeps every warning
+    set(_probe_system -isystem "${MLX_C_INCLUDE_DIRS}")
 endif()
 add_custom_command(
     OUTPUT "${_probe_obj}"
-    COMMAND ${_probe_cc} -std=c11 -O1 -Wall -Wextra -Werror "-I${MLX_C_INCLUDE_DIRS}" -c "${_probe_c}" -o "${_probe_obj}"
+    COMMAND ${_probe_cc} -std=c11 -O1 -Wall -Wextra -Werror ${_probe_system} "-I${MLX_C_INCLUDE_DIRS}" -c "${_probe_c}"
+            -o "${_probe_obj}"
     DEPENDS "${_probe_c}" "${_probe_header}" ${_probe_mlxc_headers}
     COMMENT "Compiling the ABI probe's echo functions with the compiler of mlx-c"
     VERBATIM)

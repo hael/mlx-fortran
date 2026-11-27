@@ -1,7 +1,7 @@
-!@descr: the C library entry points the library calls (strlen, memcpy, posix_memalign, free, fopen, fclose, dup, fdopen, rename, unlink, chmod, lstat, getpid, geteuid; symlink, link, mkdir, rmdir for the tests), C-string copies and a file's facts
+!@descr: the C library entry points the library calls (strlen, memcpy, posix_memalign, free, fopen, fclose, dup, fdopen, rename, unlink, chmod, lstat through a C helper, getpid, geteuid; symlink, link, mkdir, rmdir for the tests), C-string copies and a file's facts
 module mlxf_libc
-use, intrinsic :: iso_c_binding, only: c_char, c_int, c_int8_t, c_int16_t, c_int32_t, c_ptr, c_size_t, c_associated, &
-                                       c_f_pointer, c_null_char
+use, intrinsic :: iso_c_binding, only: c_char, c_int, c_int16_t, c_int32_t, c_ptr, c_size_t, c_associated, c_f_pointer, &
+                                       c_null_char
 use mlxf_defs, only: mlxf_file_info
 implicit none
 
@@ -9,9 +9,8 @@ public :: c_strlen, c_memcpy, c_posix_memalign, c_free, c_string_copy, c_fopen, 
     &c_unlink, c_chmod, c_getpid, c_geteuid, c_file_info, c_symlink, c_link, c_mkdir, c_rmdir
 private
 
-! macOS's struct stat (144 bytes on arm64): st_mode is the uint16 at byte offset 4, st_nlink the uint16 at 6,
-! st_uid the uint32 at 16; S_IFMT, S_IFLNK and S_IFREG are the file-type bits of st_mode
-integer, parameter :: STAT_BYTES = 256, S_IFMT = int(o'170000'), S_IFLNK = int(o'120000'), S_IFREG = int(o'100000')
+! the file types the lstat helper reports (mlxf_libc_lstat.c); anything else is 0
+integer, parameter :: LSTAT_LINK = 1, LSTAT_REGULAR = 2
 
 interface
     function c_strlen( s ) bind(c, name='strlen') result(n)
@@ -83,12 +82,14 @@ interface
         integer(c_int) :: ierr
     end function c_chmod
 
-    function c_lstat( path, buf ) bind(c, name='lstat') result(ierr)
-        import :: c_int, c_int8_t, c_char
+    ! lstat through the C helper, which reads the platform's own struct stat (its layout differs between macOS and
+    ! glibc): the file type, the permission bits with set-id and sticky, the hard links and the owner
+    function c_lstat_facts( path, ftype, perm, nlink, uid ) bind(c, name='mlxf_lstat_facts') result(ierr)
+        import :: c_int, c_int32_t, c_char
         character(kind=c_char), intent(in)  :: path(*)
-        integer(c_int8_t),      intent(out) :: buf(*)
+        integer(c_int32_t),     intent(out) :: ftype, perm, nlink, uid
         integer(c_int) :: ierr
-    end function c_lstat
+    end function c_lstat_facts
 
     function c_getpid() bind(c, name='getpid') result(pid)
         import :: c_int
@@ -151,23 +152,14 @@ contains
     function c_file_info( path ) result(info)
         character(len=*), intent(in) :: path
         type(mlxf_file_info) :: info
-        integer(c_int8_t)    :: buf(STAT_BYTES)
-        integer              :: mode
-        buf = 0_c_int8_t
-        if( c_lstat(trim(path)//c_null_char, buf) /= 0 ) return
+        integer(c_int32_t)   :: ftype, perm, nlink, uid
+        if( c_lstat_facts(trim(path)//c_null_char, ftype, perm, nlink, uid) /= 0 ) return
         info%exists  = .true.
-        mode         = unsigned16(buf(5:6))
-        info%link    = iand(mode, S_IFMT) == S_IFLNK
-        info%regular = iand(mode, S_IFMT) == S_IFREG
-        info%mode    = iand(mode, int(o'7777'))
-        info%nlink   = unsigned16(buf(7:8))
-        info%uid     = int(transfer(buf(17:20), 0_c_int32_t))
+        info%link    = ftype == LSTAT_LINK
+        info%regular = ftype == LSTAT_REGULAR
+        info%mode    = int(perm)
+        info%nlink   = int(nlink)
+        info%uid     = int(uid)
     end function c_file_info
-
-    ! the little-endian unsigned 16-bit value of two bytes
-    integer function unsigned16( b )
-        integer(c_int8_t), intent(in) :: b(2)
-        unsigned16 = iand(int(b(1)), 255) + 256*iand(int(b(2)), 255)
-    end function unsigned16
 
 end module mlxf_libc
