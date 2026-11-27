@@ -21,9 +21,10 @@ private
 ! calculator and the parameters stand for SIMPLE's builder and parameters pointers. The rest serves the
 ! additions: the keys of the draws (the seed and each reference's full index), the candidates of the maps and
 ! their width cutoffs, the fixture's map, the fill's options and stages, the order of the batch (porder: the
-! even half's particles, then the odd half's), the maps' results, the fill's seconds, the last refusal.
+! even half's particles, then the odd half's), the maps' results, the fill's seconds, the last refusal. The
+! components are open to the extensions (SIMPLE's eul_prob_tab_neigh reads its parent's members); the fill's
+! callers use the bindings.
 type :: eul_prob_tab
-    private
     type(polarft_calc), pointer   :: pftc => null()
     type(parameters)              :: params
     integer,          allocatable :: pinds(:)

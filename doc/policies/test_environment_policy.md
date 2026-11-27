@@ -143,6 +143,13 @@ seeds 1, 2 and 3, and the refusals; it writes the table as lines `polarft_host .
 and without the library) in Debug and Release, runs its program and, with `--exec`, holds its table to the lines
 of `unit_kernels suite=polarft_host` byte for byte; the release gate runs it, and it is not a CTest entry.
 Constants several test modules share live in `src/test/framework/mlxf_test_defs.f90`, a defs module (rule `defs`).
+Its sub-suite `eul_prob_tab_neigh` checks the reference lists on the polar host route's fixture: the calculator's
+list route (any list, the dense route for every reference in order) against the memo oracle within bounds
+calibrated on the CPU device (`POLAR_NEIGH_*`), against the dense route bit for bit on the host and the CPU device
+and within the tail's tolerance on the GPU; the driver `eul_prob_tab_neigh` (cones, the two-stage state fill, both
+block orders, the covers route, dense and pairs) against the oracle of the lists `mlxf_oracle_neigh` (sub-suite
+`oracle_neigh`, its self-checks), exactly for the lists, pools and occupancy; repeatability over repeats, slots,
+teams and invocations; and the pair-list kernel's frozen tolerance on the GPU and its refusal elsewhere.
 
 **Benchmarks** are `mlxf_test_exec test=bench_<x> suite=<mode> [key=value ...]`, listed in the registry's
 `BENCHES` table and reached through `run_bench` (`check_test_registry.py` holds the two to each other). They
@@ -173,7 +180,11 @@ rates. Timed runs
 follow the plan's rules: Release, an idle machine with the load recorded, best of 3 after a warm-up, two
 invocations, and the precision mode in every row. `suite=shiftmap` refuses `nthr=`: the maps run on the
 device with one submitting thread. A key a suite does not read stops the benchmark (exit status 2), as in the
-other benchmarks. `suite=maps` times one map's maps (`maps=window|screen`, one `ptiles=`) of one part
+other benchmarks. `suite=neigh` times the neighbourhood fill of one part (`lists=route|dense|pairs`: the list
+route, the dense fill with selection, the pair-list kernel; comma lists of `bt rt mode cone order orient`;
+`seed=`), appending the list's columns (listed and computed pairs, occupancy, blocks, the pools, the host step)
+to the 30 that `scripts/run_parts.sh` reads; `check=1` holds the list route on the accuracy block to its frozen
+bounds (`POLAR_NEIGH_BLOCK_*`). `suite=maps` times one map's maps (`maps=window|screen`, one `ptiles=`) of one part
 (`nparts=`, `part=`, `go=`) with `passes=` timed passes and writes one row of `bench_polar_table.tsv` in the time
 suite's column order, so that `scripts/run_parts.sh` (`RUN_PARTS_SUITE=maps RUN_PARTS_UNIT=maps`) times the maps at
 one or more processes; `nthr=` sizes the host team only. `widths=quarter|none` selects synthetic

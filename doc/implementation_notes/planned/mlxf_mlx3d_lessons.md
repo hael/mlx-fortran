@@ -163,7 +163,11 @@ rule: preferred at 1.30 with four of five at or above it, equivalent within 0.95
 2. K3's plan measures sorted `mlx_gather_mm` on P2's runs before writing any masked-tile kernel.
    Recommended: yes. *Still a proposal* (the K3 draft found that the dense products do not fit the sorted route;
    owner: K3). P2's sort must not rely on stability (Apple question 36), and its buffers take P3's form
-   (measured, suite `waits`).
+   (measured, suite `waits`). **Outcome (run `mlxf_kernel_k3`, 2026-11-27):** measured in the only layout the
+   code admits (one column per product), the sorted route runs (4 times the unsorted one) and equals `matmul` bit
+   for bit, but it computes whole tiles per particle, 0.40 times the gathered union's rate per listed pair. No
+   masked-tile kernel was written: the list route gathers the listed references into tiles (`mlx_gather`), and a
+   pair-list kernel (a SIMD group per pair and bin) serves the cones; no sort is used.
 3. K7 is delivered inside K1's fused tail (P4), with `mlx_argpartition` as the graph form. Recommended:
    yes. *Measured in part:* one SIMD group per particle is the fastest exact form and `mlx_argpartition` the
    slowest (suite `select`), and the tail itself is best written a SIMD group per pair (suite `tail`); K rounds

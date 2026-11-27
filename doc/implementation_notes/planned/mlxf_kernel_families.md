@@ -58,7 +58,7 @@ of `d354efee2` added.
 
 | Family | Domain object (SIMPLE's class) | Methods kept | Driver (SIMPLE's caller) |
 | --- | --- | --- | --- |
-| A | `polarft_calc` (`pftc/simple_polarft_calc.f90` and its submodules) | `new`, `kill`, `reallocate_ptcls`, `set_ref_pft`, `set_ptcl_pft`, `set_ptcl_ctfmat`, `set_eo`, `memoize_refs`, `memoize_ptcls`, `memoize_ref_bins`, `score_block_posterior`, `new_shiftmap`, `setup_shiftmaps`, `kill_shiftmap`, `gen_shiftmap`, `shiftmap_mode`, and the inquiries `get_nrefs`, `get_pftsz`, `ptcl_iseven`, `wsqsum_ptcl_band` (built: `src/test/mlxf_toy_polarft_calc.f90`) | `eul_prob_tab` with `new_pipeline`, `fill_tab_range` (its steps `cut_blocks`, `process_block`, `finish_particle_map`) and `kill` (built: `src/test/mlxf_toy_eul_prob_tab.f90`); later `eul_prob_tab_neigh` and `shiftmap_srch` |
+| A | `polarft_calc` (`pftc/simple_polarft_calc.f90` and its submodules) | `new`, `kill`, `reallocate_ptcls`, `set_ref_pft`, `set_ptcl_pft`, `set_ptcl_ctfmat`, `set_eo`, `memoize_refs`, `memoize_ptcls`, `memoize_ref_bins`, `score_block_posterior`, `new_shiftmap`, `setup_shiftmaps`, `kill_shiftmap`, `gen_shiftmap`, `shiftmap_mode`, and the inquiries `get_nrefs`, `get_pftsz`, `ptcl_iseven`, `wsqsum_ptcl_band` (built: `src/test/mlxf_toy_polarft_calc.f90`) | `eul_prob_tab` with `new_pipeline`, `fill_tab_range` (its steps `cut_blocks`, `process_block`, `finish_particle_map`) and `kill` (built: `src/test/mlxf_toy_eul_prob_tab.f90`); `eul_prob_tab_neigh` with `new_neigh_pipeline`, `fill_tab_range` (modes `geom` and `state`, covers route, dense and pairs) and `kill` (built by K3: `src/test/toys/polar/mlxf_toy_eul_prob_tab_neigh.f90`, with `srchspace_map` and `cone_view_dist`); later `shiftmap_srch` |
 | B1 | `projector` (`image/simple_projector.f90`, `simple_projector_pft_batch.f90`) | `new`, `set_rmat`, `get_cmat`, `pad_fft`, `expand_cmat`, `is_expanded`, `kill_expanded`, `kill`; `fproject_polar_batch_opt` (built: `src/test/mlxf_toy_projector.f90`, `_workspace.f90`, `_pft_batch.f90`, K2) | the reprojection model's `vol_pad2ref_pfts_opt`, which fills `polarft_calc` through `set_ref_pft`, or on the toy's device route through the workspace (built: `src/test/mlxf_toy_polarft_core.f90`) |
 | B2 | `cartft_calc` (`cftc/simple_cartft_calc.f90`) | `new`, `kill`, `set_ref`, `new_ptcls`, the particle setters, `pose_normal_terms`, `shift_normal_terms` | `cartft_pose_opt` (`cftc/simple_cartft_pose_opt.f90`) |
 | C | `reconstructor` (`volume/simple_reconstructor.f90`) | `insert_plane_oversamp`, `compress_exp`, `sampl_dens_correct` | `calc_3Drec` (`strategies/search/simple_matcher_3Drec.f90`) with its batches of prepared planes |
@@ -191,9 +191,10 @@ as mirrored or as an addition with its reason):
   fixture's shifted FT(X.CTF), where SIMPLE shifts and transforms the particle itself.
 - **The weights:** `set_sigma2_weights` (an addition) invalidates the particle memo, and `memoize_ptcls` makes the
   terms again; SIMPLE's `memoize_sigma2_weights` remakes them itself when the particle memo is current.
-- **The block:** all the references in their order (`irefs` = 1..`nrefs`; arbitrary lists are deliverable
-  K3's), any number of particles of one half, tiled by `set_tile_plan`; SIMPLE's block is at most 16
-  particles against tiles of 32 references.
+- **The block:** any list of the references without a repeat (K3: on the MLX backend gathered from the resident
+  tiles into list tiles of the same plan, every reference in order staying the dense route; on the GPU also a
+  pair list through the pair-list kernel, `set_block_pairs`), any number of particles of one half, tiled by
+  `set_tile_plan`; SIMPLE's block is at most 16 particles against tiles of 32 references.
 - **What the fixture hands in through additions:** the shell weights `k / sigma2` (`set_sigma2_weights`;
   SIMPLE is given the spectra), the keys of the draws (`set_draw_keys`; SIMPLE takes its scope from the
   iteration), the dense temperatures (`set_temps`), the maps' candidates (`set_candidates`; SIMPLE's pool
@@ -264,10 +265,13 @@ reference-side variant must also reproduce the Fourier-Bessel oracle's cells.
 **Open decisions.**
 - A3's variant: decided by K4 (roadmap decision 13, ruled B): neither lattice is kept; the Fourier-Bessel form
   stays.
-- Whether a pair's arithmetic may depend on its tile. This fixes what repeatability can promise for
-  arbitrary sets.
+- Whether a pair's arithmetic may depend on its tile: answered by K3 (decision 4, measured). On the host and the
+  CPU device a listed pair is the dense entry bit for bit in any list, block and team; on the GPU its bits move
+  with the tile's width and the particles' grouping (not with a reference's position in a tile), so the GPU's
+  promise is the tail's tolerance; repeatability holds for fixed lists, order, plan, device and build.
 - Which reductions enter first.
-- The tile shapes.
+- The tile shapes: for the list route K3 measured bt 64 and rt 64 the fastest at the 10-degree cone and for the
+  `state` fill (fused tail; [report](../completed/mlxf_kernel_k3_report.md)).
 
 ## 4. Family B: the 3D Fourier gather
 
@@ -602,7 +606,7 @@ solution of the near-singular system either way. Reported for SIMPLE, not a K8 g
 | --- | --- | --- | --- |
 | K1 | A1: the fused tail of the dense score | Metal kernel wrapper; the refactored polar toy and its baseline (roadmap rank 0b) | the polar-table checks pass on the GPU at their recorded counts; judged on the canonical driver's elapsed time against the compiled graph tail (roadmap decision 15), alone and at 3 and 6 processes. **Kept** (2026-11-25, the maintainer's ruling): 1.80 (`2500_4`) and 1.65 (`2500_1`) at one process, 1.74 at six of `2500_1`; `2500_4` at three not resolved by per-process rates (1.52 to 1.59 on the time to the last exit); +6e9 B peak per process; selectable, the default `graph` ([report](../completed/mlxf_kernel_k1_report.md)) |
 | K2 | B1: the polar projection | Metal kernel wrapper; `mlx_rfftn` for the bench | the host matrix oracle and controls pass; the chained test with A passes; timed at 2,500 directions, pftsz 182, 61 shells. **Delivered** (2026-11-25, [report](../completed/mlxf_kernel_k2_report.md)): the fused gather kept (24.6 and 24.4 at one process, 5.27 and 6.30 at three from go to the last exit), the device route kept (32.5 and 35.1); the probe's outcome C by the letter, B by the diagnosis, **ruled B**; the defaults kept (graph form, host route) |
-| K3 | A2: arbitrary reference sets | `mlx_gather_mm` or `mlx_block_masked_mm` | listed pairs equal the dense kernel's; occupancy and rate reported for cone-shaped sets, with and without orientation order |
+| K3 | A2: arbitrary reference sets | `mlx_gather_mm` or `mlx_block_masked_mm` | listed pairs equal the dense kernel's; occupancy and rate reported for cone-shaped sets, with and without orientation order. **Delivered 2026-11-27, the list route and the pair-list kernel kept** ([report](../completed/mlxf_kernel_k3_report.md)): neither wrapper is used; the listed references are gathered (`mlx_gather`) into list tiles of the dense graph; on `2500_4` the route is 2.49 times faster than the dense fill with selection at the 10-degree cone and 1.84 times for the `state` fill; the pair-list kernel (a SIMD group per pair and bin) is 3.65 times faster than the route at the cone and is not built for `state`; occupancy 5 to 15 % at the cone, 67 to 80 % for `state` |
 | K4 | A3: the shift lattice and the map reductions | K1's tail | the reference-side variant reproduces the Fourier-Bessel oracle's cells; a particle-side variant passes a decision-level test frozen before timing (roadmap decision 13); the chosen variant passes the map gates; timed against milestone 1's maps at the M5 grids. **Delivered 2026-11-27, nothing kept** ([report](../completed/mlxf_kernel_k4_report.md)): both lattices reproduce the oracle's cells; the particle-side one failed the decision-level test (2 of 12 rows) and the reference-side one its ceiling (0.18); the fused map reductions gave 1.23 (below 1.30, rulings R1 and R2); the Fourier-Bessel maps with the graph reductions stay; the oracles' self-checks and the modes' shifts (`shiftmap_shifts`) were added |
 | K5 | B2: the pose objective with gradient and Gauss-Newton matrix | Metal kernel wrapper | the objective, gradient and matrix match the host oracle; planted poses are recovered; evaluations per second timed |
 | K6 | C: the insertion, three forms | `mlx_scatter_add`, `mlx_argsort`, the scans, Metal kernel wrapper; K2 | the adjoint identity, numerator and density pass; the repeatability gate is applied to each form, and only a form that passes it is kept (roadmap decision 14); timed. A protected-update probe on a collision-heavy fixture follows K2 directly |

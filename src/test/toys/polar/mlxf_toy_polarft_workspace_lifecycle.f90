@@ -272,10 +272,12 @@ contains
         self%sec_nrefs  = 0
     end subroutine polarft_workspace_kill
 
-    ! the reference tiles, the blocks in flight and the record of their preparation; the shift maps stay
+    ! the reference tiles with the list tiles gathered from them, the blocks in flight and the record of their
+    ! preparation; the shift maps stay
     subroutine drop_tiles( self )
         class(polarft_workspace), intent(inout) :: self
         integer :: i
+        call polarft_workspace_drop_list(self)
         call self%refs%kill()
         call self%tail%kill()
         call self%tail_kernel%kill()

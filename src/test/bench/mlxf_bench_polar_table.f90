@@ -1,30 +1,37 @@
-!@descr: benchmark of the polar table workspace at SIMPLE's sizes: accuracy block, timing sweep, profile, overlap, shift maps
-! mlxf_test_exec test=bench_polar_table suite=<accuracy|time|profile|overlap|stream|shiftmap|maps> [key=value ...]. The
+!@descr: benchmark of the polar table workspace at SIMPLE's sizes: accuracy block, timing sweep, profile, overlap, shift maps, reference lists
+! mlxf_test_exec test=bench_polar_table suite=<accuracy|time|profile|overlap|stream|shiftmap|maps|neigh> [key=value ...]. The
 ! case geometry comes from a key = value file of SIMPLE's measured cases (cases=, case=), the shift maps' grid from
 ! another (grid=, maps=); the data are synthetic. Every suite hands the rings to the toy calculator and fills
 ! its tables through the toy driver; a key the suite does not read stops the program. The accuracy mode holds the 64,000-pair block to its oracle and the frozen bounds; the others append
 ! measure-only rows to ./bench_polar_table*.tsv. suite=time scores one part (nparts=, part=) after a go file (go=),
-! and so does suite=maps, one map's maps of one part, in the same row layout.
+! and so does suite=maps, one map's maps of one part, in the same row layout; suite=neigh the neighbourhood fill's
+! passes (the list route or the dense fill with selection) of one part, its list columns appended.
 module mlxf_bench_polar_table
 use, intrinsic :: iso_fortran_env, only: int32, int64, real32, real64
 use, intrinsic :: iso_c_binding,   only: c_int, c_double
-!$ use omp_lib,            only: omp_get_max_threads
-use mlxf,                  only: mlx_set_default_device, mlx_default_device, mlx_peak_memory, mlx_reset_peak_memory, &
-                                 mlx_synchronize, mlx_clear_cache, mlx_device_info_size, MLX_DEVICES, &
-                                 mlx_active_memory, mlx_cache_memory
-use mlxf_test_defs,        only: POLAR_ROW_FACTOR, POLAR_BLOCK_ERR_CPU, POLAR_BLOCK_ROT_CPU, POLAR_BLOCK_ROT_Q, &
-                                 POLAR_SEED_CALIBRATION, POLAR_SEED_JUDGED, POLAR_GRID_B, POLAR_GRID_R, &
-                                 POLAR_BUDGET_SHARE, POLAR_CANON_BT, POLAR_CANON_RT, POLAR_BLOCK_BT, POLAR_BLOCK_RT, &
-                                 POLAR_PROB_BETA, POLAR_DIST_VALID, POLARFT_TAILS, POLARFT_TAIL_ROW_TOL, &
-                                 POLARFT_TAIL_ROT_BLK, polar_table_refs, polar_table_block, polar_table_entries, &
-                                 polar_map_results, polar_row_check, parameters, SHIFTMAP_SCREEN, SHIFTMAP_WINDOW
-use mlxf_toy_polarft_calc, only: polarft_calc
-use mlxf_toy_eul_prob_tab, only: eul_prob_tab
-use mlxf_oracle_polar,     only: polar_dft_matrix, polar_keyed_u, polar_compare_rows, polar_draws_off, &
-                                 polar_report_draws, polar_memo_rows
-use mlxf_test_utils,       only: assert_true, assert_int, test_devices, device_name, set_fixed_seed, bits_equal, &
-                                 digest_bits, wait_for_go_file
-use mlxf_test_reduce,      only: nan_maxval, nan_max
+!$ use omp_lib,                  only: omp_get_max_threads
+use mlxf,                        only: mlx_set_default_device, mlx_default_device, mlx_peak_memory, &
+                                       mlx_reset_peak_memory, mlx_synchronize, mlx_clear_cache, mlx_device_info_size, &
+                                       MLX_DEVICES, mlx_active_memory, mlx_cache_memory
+use mlxf_test_defs,              only: POLAR_ROW_FACTOR, POLAR_BLOCK_ERR_CPU, POLAR_BLOCK_ROT_CPU, POLAR_BLOCK_ROT_Q, &
+                                       POLAR_SEED_CALIBRATION, POLAR_SEED_JUDGED, POLAR_GRID_B, POLAR_GRID_R, &
+                                       POLAR_BUDGET_SHARE, POLAR_CANON_BT, POLAR_CANON_RT, POLAR_BLOCK_BT, &
+                                       POLAR_BLOCK_RT, POLAR_PROB_BETA, POLAR_DIST_VALID, POLARFT_TAILS, &
+                                       POLARFT_TAIL_ROW_TOL, POLARFT_TAIL_ROT_BLK, polar_table_refs, polar_table_block, &
+                                       polar_table_entries, polar_map_results, polar_row_check, parameters, &
+                                       SHIFTMAP_SCREEN, SHIFTMAP_WINDOW, NEIGH_ORDERS, POLAR_NEIGH_BLOCK_ERR_CPU, &
+                                       POLAR_NEIGH_BLOCK_ROT_CPU, POLAR_DIST_INVALID, POLAR_DIST_MAX, &
+                                       POLAR_VALID_MARGIN, polar_list_entries
+use mlxf_toy_polarft_calc,       only: polarft_calc
+use mlxf_toy_eul_prob_tab,       only: eul_prob_tab
+use mlxf_toy_eul_prob_tab_neigh, only: eul_prob_tab_neigh
+use mlxf_toy_eul_prob_tab_utils, only: cone_view_dist
+use mlxf_toy_srchspace_map,      only: srchspace_map
+use mlxf_oracle_polar,           only: polar_dft_matrix, polar_keyed_u, polar_compare_rows, polar_draws_off, &
+                                       polar_report_draws, polar_memo_rows, polar_draw_row
+use mlxf_test_utils,             only: assert_true, assert_int, test_devices, device_name, set_fixed_seed, bits_equal, &
+                                       digest_bits, wait_for_go_file
+use mlxf_test_reduce,            only: nan_maxval, nan_max
 implicit none
 private
 
@@ -62,14 +69,15 @@ type :: bench_case
 end type bench_case
 
 ! the keys each suite reads, blank separated; test and suite belong to the executable
-character(len=*), parameter :: SUITE_KEYS(7) = [character(len=96) :: &
+character(len=*), parameter :: SUITE_KEYS(8) = [character(len=128) :: &
     &'accuracy cases case bt rt device tail', &
     &'time cases case cases_list bt rt device nthr nparts part go passes tail', &
     &'profile cases case bt rt device nthr tail', &
     &'overlap cases case bt rt device nthr outer load', &
     &'stream seconds nthr', &
     &'shiftmap cases case grid maps ptiles device evidence widths revision nthr', &
-    &'maps cases case grid maps ptiles device nthr nparts part go passes revision']
+    &'maps cases case grid maps ptiles device nthr nparts part go passes revision', &
+    &'neigh cases case bt rt device nthr nparts part go passes tail mode cone order orient lists check npeaks cells seed']
 
 ! one shift map of SIMPLE's measured grid (blocks [map name]) and SIMPLE's full-team rate on it (two invocations)
 type :: bench_map
@@ -178,6 +186,57 @@ type :: form_check
     integer      :: npairs    = 0
 end type form_check
 
+! the neighbourhood geometry of a case: the directions, each direction's cell and each cell's representative, the
+! peaks per state, and every particle's previous orientation, uniform and clustered (3 x particles)
+type :: neigh_geometry
+    integer                   :: nspace = 0
+    integer                   :: ncells = 0
+    integer                   :: npeaks = 3
+    real(real64), allocatable :: dirs(:,:)
+    integer,      allocatable :: full2sub(:)
+    integer,      allocatable :: sub2full(:)
+    real(real64), allocatable :: uniform(:,:)
+    real(real64), allocatable :: clustered(:,:)
+end type neigh_geometry
+
+! one neighbourhood configuration and its measurements: mode, cone, block order, orientations, cover, the
+! driver's block size and slots, the passes' seconds, the preparation, MLX's peak and cache, the load, the fill's
+! statistics and the digest of its listed entries
+type :: neigh_run
+    character(len=16)         :: mode     = 'geom'
+    real(real64)              :: cone     = 10._real64
+    integer                   :: order    = 2
+    character(len=16)         :: orient   = 'uniform'
+    character(len=16)         :: lists    = 'route'
+    integer                   :: block_nb = 0
+    integer                   :: nslots   = 1
+    integer                   :: npasses  = 0
+    real(real64), allocatable :: walls(:)
+    real(real64)              :: prep     = -1._real64
+    real(real64)              :: peak     = -1._real64
+    real(real64)              :: cache    = -1._real64
+    real                      :: load1    = -1.
+    real(real64)              :: stats(10) = 0._real64
+    integer(int64)            :: digest   = 0_int64
+end type neigh_run
+
+! one listed entry of the accuracy check: its particle, reference, distance and drawn rotation
+type :: neigh_pair
+    integer      :: pid  = 0
+    integer      :: ref  = 0
+    real(real32) :: dist = 0._real32
+    integer      :: irot = 0
+end type neigh_pair
+
+! the accuracy check's tally: the largest error, the entries of other validity, the drawn rotations that differ
+! from the oracle's draw, the pairs
+type :: neigh_tally
+    real(real64) :: err    = 0._real64
+    integer      :: nvalid = 0
+    integer      :: ndraw  = 0
+    integer      :: npairs = 0
+end type neigh_tally
+
 interface
     integer(c_int) function getloadavg( loadavg, nelem ) bind(c, name='getloadavg')
         import :: c_int, c_double
@@ -208,6 +267,8 @@ contains
                 call bench_shiftmap
             case( 'maps' )
                 call bench_maps
+            case( 'neigh' )
+                call bench_neigh
             case default
                 found = .false.
         end select
@@ -245,7 +306,7 @@ contains
     subroutine check_keys( suite )
         character(len=*), intent(in) :: suite
         character(len=512) :: arg
-        character(len=96)  :: keys
+        character(len=128) :: keys
         integer            :: i, ieq
         keys = ''
         do i = 1, size(SUITE_KEYS)
@@ -289,17 +350,21 @@ contains
         type(bench_config) :: cfg
         cfg%bt   = arg_int('bt', dflt%bt)
         cfg%rt   = arg_int('rt', dflt%rt)
-        cfg%tail = dflt%tail
+        cfg%tail = arg_tail()
+    end function arg_config
+
+    ! the tail form of tail= (graph by default)
+    integer function arg_tail()
         select case( arg_str('tail', 'graph') )
             case( 'graph' )
-                cfg%tail = POLARFT_TAILS%graph
+                arg_tail = POLARFT_TAILS%graph
             case( 'metal' )
-                cfg%tail = POLARFT_TAILS%metal
+                arg_tail = POLARFT_TAILS%metal
             case default
                 write(*,'(a)') 'bench_polar_table: tail= is graph or metal'
                 error stop 2
         end select
-    end function arg_config
+    end function arg_tail
 
     ! the formulation of a configuration's dense rows
     function formulation_of( cfg ) result(f)
@@ -2164,5 +2229,469 @@ contains
             &' maps/s (x', ratio, ' SIMPLE full team), peak ', tm%peak, ' B, cache ', tm%cache, ' B, prep ', &
             &sum(tm%prep), ' s, copy-out ', tm%stages(4), ' s: '//tm%status
     end subroutine write_map_row
+
+    ! ---- neigh -------------------------------------------------------------------------------------------------
+
+    ! suite=neigh: the neighbourhood fill of one part of the case (case=, nparts=, part=, go=) through
+    ! eul_prob_tab_neigh, for every combination of the comma lists bt=, rt=, mode= (geom, state), cone= (degrees),
+    ! order= (simple, batch), orient= (uniform, clustered) and lists= (route: the lists' unions; dense: the dense
+    ! fill with selection), tail= one form; passes= timed fills after a warm-up, one row each of
+    ! bench_polar_table.tsv. The directions are a spiral of the case's nspace, its cells= cells (64) on a spiral of
+    ! their own, npeaks= peaks (3), the data of seed= (2). check=1 times nothing: the list route on the accuracy
+    ! block against the oracle, on every device
+    subroutine bench_neigh
+        type(bench_case)               :: cs
+        type(bench_data)               :: d
+        type(polarft_calc)             :: pftc
+        type(bench_config)             :: cfg
+        type(neigh_geometry)           :: geo
+        type(neigh_run)                :: run
+        integer,           allocatable :: bs(:), rs(:)
+        real(real64),      allocatable :: cones(:)
+        character(len=16), allocatable :: modes(:), orders(:), orients(:), lists(:)
+        integer                        :: ib, ir, im, ic, io, ig, il
+        write(*,'(a)') '**** bench_polar_table suite=neigh ****'
+        call mlx_set_default_device(device_of_arg())
+        cs = read_case(arg_str('cases', 'polar_case.txt'), arg_str('case', '2500_4'))
+        if( arg_int('check', 0) == 1 )then
+            call neigh_check(cs)
+            return
+        endif
+        call make_data(d, cs, arg_int('seed', POLAR_SEED_JUDGED), .false., pftc=pftc)
+        d%pfromto = part_range(cs%nptcls)
+        geo  = neigh_geometry_of(cs, d%seed)
+        bs   = int_list(arg_str('bt', '64'))
+        rs   = int_list(arg_str('rt', '250'))
+        cones   = real_list(arg_str('cone', '10'))
+        modes   = word_list(arg_str('mode', 'geom'))
+        orders  = word_list(arg_str('order', 'simple'))
+        orients = word_list(arg_str('orient', 'uniform'))
+        lists   = word_list(arg_str('lists', 'route'))
+        call wait_for_go
+        do ib = 1, size(bs)
+            do ir = 1, size(rs)
+                cfg      = bench_config()
+                cfg%tail = arg_tail()
+                cfg%bt   = bs(ib)
+                cfg%rt = rs(ir)
+                call prepare(pftc, cfg)
+                do il = 1, size(lists)
+                    do im = 1, size(modes)
+                        do ic = 1, size(cones)
+                            ! the state fill has no cone: one row
+                            if( trim(modes(im)) == 'state' .and. ic > 1 ) cycle
+                            do io = 1, size(orders)
+                                do ig = 1, size(orients)
+                                    run        = neigh_run()
+                                    run%mode   = modes(im)
+                                    run%cone   = cones(ic)
+                                    run%order  = merge(NEIGH_ORDERS%batch, NEIGH_ORDERS%simple, trim(orders(io)) == 'batch')
+                                    run%orient = orients(ig)
+                                    run%lists  = lists(il)
+                                    call time_neigh(pftc, d, geo, cfg, run)
+                                end do
+                            end do
+                        end do
+                    end do
+                end do
+                call pftc%kill_ref_tiles
+                call mlx_clear_cache()
+            end do
+        end do
+        call pftc%kill
+    end subroutine bench_neigh
+
+    ! the reals of a comma list
+    function real_list( s ) result(v)
+        character(len=*), intent(in) :: s
+        real(real64), allocatable :: v(:)
+        integer                   :: ic, i0, ios
+        real(real64)              :: x
+        allocate(v(0))
+        i0 = 1
+        do ic = 1, len(s) + 1
+            if( ic <= len(s) )then
+                if( s(ic:ic) /= ',' ) cycle
+            endif
+            read(s(i0:ic-1), *, iostat=ios) x
+            if( ios == 0 ) v = [v, x]
+            i0 = ic + 1
+        end do
+    end function real_list
+
+    ! the words of a comma list
+    function word_list( s ) result(v)
+        character(len=*), intent(in) :: s
+        character(len=16), allocatable :: v(:)
+        integer                        :: ic, i0
+        allocate(v(0))
+        i0 = 1
+        do ic = 1, len(s) + 1
+            if( ic <= len(s) )then
+                if( s(ic:ic) /= ',' ) cycle
+            endif
+            if( ic > i0 ) v = [v, s(i0:ic-1)]
+            i0 = ic + 1
+        end do
+    end function word_list
+
+    ! n unit vectors on the golden-angle spiral
+    function neigh_spiral( n ) result(v)
+        integer, intent(in) :: n
+        real(real64) :: v(3, n), th, ph
+        integer      :: i
+        do i = 1, n
+            th = acos(1._real64 - real(2 * i - 1, real64) / real(n, real64))
+            ph = real(i, real64) * acos(-1._real64) * (3._real64 - sqrt(5._real64))
+            v(:, i) = [sin(th) * cos(ph), sin(th) * sin(ph), cos(th)]
+        end do
+    end function neigh_spiral
+
+    ! the case's neighbourhood geometry: the directions (a spiral of nspace), the cells of cells= centres on a
+    ! spiral of their own (srchspace_map), and every particle's previous orientation, uniform on the sphere or
+    ! clustered (every other particle of a half within 20 degrees of one of 4 seeded axes), from the seed
+    function neigh_geometry_of( cs, seed ) result(geo)
+        type(bench_case), intent(in) :: cs
+        integer,          intent(in) :: seed
+        type(neigh_geometry)      :: geo
+        type(srchspace_map)       :: map
+        real(real64), allocatable :: centres(:,:)
+        real,         allocatable :: distmat(:,:)
+        real(real64)              :: axes(3, 4), u(3), a, ph, z, e1(3), e2(3), v(3)
+        integer                   :: i, c, k
+        geo%nspace = cs%nrefs / cs%nstates
+        geo%ncells = arg_int('cells', 64)
+        geo%npeaks = arg_int('npeaks', 3)
+        geo%dirs   = neigh_spiral(geo%nspace)
+        centres    = neigh_spiral(geo%ncells)
+        allocate(distmat(geo%ncells, geo%nspace))
+        do i = 1, geo%nspace
+            do c = 1, geo%ncells
+                distmat(c, i) = real(cone_view_dist(centres(:, c), geo%dirs(:, i)))
+            end do
+        end do
+        call map%new(geo%nspace, geo%ncells, distmat)
+        geo%full2sub = map%get_full2sub_map()
+        geo%sub2full = map%get_sub2full_map()
+        call map%kill
+        call set_fixed_seed(seed + 101)
+        allocate(geo%uniform(3, cs%nptcls), geo%clustered(3, cs%nptcls))
+        do k = 1, 4
+            call random_number(u)
+            z  = 2._real64 * u(1) - 1._real64
+            ph = 2._real64 * acos(-1._real64) * u(2)
+            axes(:, k) = [sqrt(1._real64 - z * z) * cos(ph), sqrt(1._real64 - z * z) * sin(ph), z]
+        end do
+        do i = 1, cs%nptcls
+            call random_number(u)
+            z  = 2._real64 * u(1) - 1._real64
+            ph = 2._real64 * acos(-1._real64) * u(2)
+            geo%uniform(:, i)   = [sqrt(1._real64 - z * z) * cos(ph), sqrt(1._real64 - z * z) * sin(ph), z]
+            geo%clustered(:, i) = geo%uniform(:, i)
+            if( mod((i + 1) / 2, 2) == 0 )then
+                v  = axes(:, mod(i, 4) + 1)
+                e1 = [-v(2), v(1), 0._real64]
+                if( norm2(e1) < 1.e-6_real64 ) e1 = [1._real64, 0._real64, 0._real64]
+                e1 = e1 / norm2(e1)
+                e2 = [v(2) * e1(3) - v(3) * e1(2), v(3) * e1(1) - v(1) * e1(3), v(1) * e1(2) - v(2) * e1(1)]
+                a  = 20._real64 * acos(-1._real64) / 180._real64 * sqrt(u(3))
+                geo%clustered(:, i) = cos(a) * v + sin(a) * (cos(ph) * e1 + sin(ph) * e2)
+            endif
+        end do
+    end function neigh_geometry_of
+
+    ! the driver of the part's particles under run (route: blocks of bt particles, two in flight; dense: a block
+    ! per half, one in flight) on the calculator prepared under cfg
+    subroutine neigh_driver( drv, pftc, d, geo, run )
+        type(eul_prob_tab_neigh), intent(inout) :: drv
+        type(polarft_calc),       intent(inout) :: pftc
+        type(bench_data),         intent(in)    :: d
+        type(neigh_geometry),     intent(in)    :: geo
+        type(neigh_run),          intent(inout) :: run
+        type(parameters)     :: params
+        integer, allocatable :: pids(:)
+        integer              :: i, nbad, bt_rt(2)
+        params%pftsz = d%cs%pftsz
+        params%box   = d%cs%box
+        params%nthr  = arg_int('nthr', 24)
+        pids = [(i, i = d%pfromto(1), d%pfromto(2))]
+        bt_rt = pftc%get_tile_plan()
+        call drv%new_neigh_pipeline(params, pftc, pids)
+        nbad = merge(1, 0, len(drv%message()) > 0)
+        call drv%set_draw_keys(d%seed, d%ids)
+        nbad = nbad + merge(1, 0, len(drv%message()) > 0)
+        call drv%set_temps(d%temps(pids))
+        nbad = nbad + merge(1, 0, len(drv%message()) > 0)
+        if( trim(run%lists) == 'dense' )then
+            run%block_nb = max(size(part_ptcls(d, 1)), size(part_ptcls(d, 2)))
+            run%nslots   = 1
+        else
+            run%block_nb = bt_rt(1)
+            run%nslots   = 2
+        endif
+        call drv%set_fill_options(run%block_nb, run%nslots, .false., .false.)
+        nbad = nbad + merge(1, 0, len(drv%message()) > 0)
+        if( trim(run%orient) == 'clustered' )then
+            call drv%set_eulspace(geo%dirs, geo%clustered(:, pids))
+        else
+            call drv%set_eulspace(geo%dirs, geo%uniform(:, pids))
+        endif
+        nbad = nbad + merge(1, 0, len(drv%message()) > 0)
+        call drv%set_subspace(geo%full2sub, geo%sub2full)
+        nbad = nbad + merge(1, 0, len(drv%message()) > 0)
+        call drv%set_neigh_options(trim(run%mode), run%cone, geo%npeaks, run%order)
+        nbad = nbad + merge(1, 0, len(drv%message()) > 0)
+        call drv%set_neigh_cover(trim(run%lists))
+        nbad = nbad + merge(1, 0, len(drv%message()) > 0)
+        call assert_int(0, nbad, 'bench_polar_table: the neighbourhood driver is made: '//drv%message())
+    end subroutine neigh_driver
+
+    ! one configuration: the driver made, a warm-up fill, passes= timed fills (the part's particles, from the
+    ! block cuts through the listed entries in Fortran arrays), the best and the median pass, the fill's statistics
+    ! and the digest of its listed entries; one row
+    subroutine time_neigh( pftc, d, geo, cfg, run )
+        type(polarft_calc),   intent(inout) :: pftc
+        type(bench_data),     intent(in)    :: d
+        type(neigh_geometry), intent(in)    :: geo
+        type(bench_config),   intent(in)    :: cfg
+        type(neigh_run),      intent(inout) :: run
+        type(eul_prob_tab_neigh) :: drv
+        type(polar_list_entries) :: lst
+        integer, allocatable     :: pptr(:), pcells(:)
+        real(real64)             :: t0
+        integer(int64)           :: h0
+        integer                  :: rep, n
+        run%load1   = load_average()
+        run%npasses = arg_int('passes', 3)
+        if( run%npasses < 1 )then
+            write(*,'(a)') 'bench_polar_table: passes= needs at least one pass'
+            error stop 2
+        endif
+        allocate(run%walls(run%npasses))
+        t0 = clock_s()
+        call neigh_driver(drv, pftc, d, geo, run)
+        n = d%pfromto(2) - d%pfromto(1) + 1
+        call drv%fill_tab_range(1, n)
+        call assert_int(0, len(drv%message()), 'bench_polar_table: the neighbourhood fill runs: '//drv%message())
+        if( len(drv%message()) > 0 ) return
+        call mlx_synchronize()
+        run%prep = clock_s() - t0
+        ! the warm-up fill's digest, which the last timed fill repeats
+        call drv%batch_list_entries(lst)
+        call drv%batch_pooled_cells(pptr, pcells)
+        h0 = list_digest(lst, pptr, pcells)
+        call mlx_reset_peak_memory()
+        do rep = 1, run%npasses
+            t0 = clock_s()
+            call drv%fill_tab_range(1, n)
+            run%walls(rep) = clock_s() - t0
+        end do
+        run%peak  = real(mlx_peak_memory(), real64)
+        run%cache = real(mlx_cache_memory(), real64)
+        run%stats = drv%fill_occupancy()
+        call drv%batch_list_entries(lst)
+        call drv%batch_pooled_cells(pptr, pcells)
+        run%digest = list_digest(lst, pptr, pcells)
+        call assert_true(run%digest == h0, 'bench_polar_table: the warm-up and the last timed fill give one digest')
+        call report_digest('neigh', trim(d%cs%name)//' '//neigh_label(cfg, run), run%digest)
+        call drv%kill
+        call write_neigh_row(d, cfg, run)
+    end subroutine time_neigh
+
+    ! the digest of a fill's listed entries and pooled cells
+    function list_digest( lst, pptr, pcells ) result(h)
+        type(polar_list_entries), intent(in) :: lst
+        integer, allocatable,     intent(in) :: pptr(:), pcells(:)
+        integer(int64) :: h
+        h = DIGEST_START
+        if( .not. allocated(lst%refs) ) return
+        call digest_bits(h, int(lst%order, int32))
+        call digest_bits(h, int(lst%refs, int32))
+        call digest_bits(h, transfer(lst%dists, [0_int32]))
+        call digest_bits(h, int(lst%irots, int32))
+        if( allocated(pcells) )then
+            call digest_bits(h, int(pptr, int32))
+            call digest_bits(h, int(pcells, int32))
+        endif
+    end function list_digest
+
+    ! a configuration as a digest line's label
+    function neigh_label( cfg, run ) result(label)
+        type(bench_config), intent(in) :: cfg
+        type(neigh_run),    intent(in) :: run
+        character(len=:), allocatable :: label
+        character(len=160)            :: buf
+        write(buf, '(2(a,i0),a,f0.1,a,i0,a)') 'B=', cfg%bt, ' R=', cfg%rt, ' mode='//trim(run%mode)//' cone=', run%cone, &
+            &' order=', run%order, ' orient='//trim(run%orient)//' lists='//trim(run%lists)//' '//formulation_of(cfg)
+        label = trim(buf)
+    end function neigh_label
+
+    ! a row of bench_polar_table.tsv: the dense rows' 30 columns (the work the listed pairs, the padded pairs the
+    ! computed ones, the rate the listed pairs over the best pass), then the list's: mode, cone, order, orient,
+    ! lists, listed and computed pairs, occupancy, blocks, the largest and the mean list of a block, the pooled
+    ! cells per particle, the poolers per cell, the host step's seconds, the representatives' listed and computed
+    ! pairs, the rate over the median pass
+    subroutine write_neigh_row( d, cfg, run )
+        type(bench_data),   intent(in) :: d
+        type(bench_config), intent(in) :: cfg
+        type(neigh_run),    intent(in) :: run
+        character(len=*), parameter :: TSV = 'bench_polar_table.tsv'
+        character(len=1), parameter :: T = achar(9)
+        real(real64)                :: wall, wmed, listed, w3(3)
+        integer                     :: u, i
+        logical                     :: l_new
+        w3 = -1._real64
+        do i = 1, min(3, run%npasses)
+            w3(i) = run%walls(i)
+        end do
+        wall   = minval(run%walls)
+        wmed   = median_of(run%walls)
+        listed = run%stats(1)
+        inquire(file=TSV, exist=l_new)
+        l_new = .not. l_new
+        open(newunit=u, file=TSV, position='append', action='write', status='unknown')
+        if( l_new ) write(u,'(a)') 'case'//T//'nspace'//T//'nstates'//T//'nrefs'//T//'nptcls'//T//'pftsz'//T//&
+            &'nrots'//T//'kfrom'//T//'kto'//T//'B'//T//'R'//T//'formulation'//T//'device'//T//'precision'//T//&
+            &'load1'//T//'wall_s'//T//'wall_rep1'//T//'wall_rep2'//T//'wall_rep3'//T//'pairs_per_s'//T//&
+            &'useful_pairs'//T//'padded_pairs'//T//'prep_s'//T//'host_cpu_s'//T//'est_bytes'//T//'mlx_peak_bytes'//&
+            &T//'mlx_cache_bytes'//T//'status'//T//'passes'//T//'wall_median_s'//T//'mode'//T//'cone'//T//'order'//&
+            &T//'orient'//T//'lists'//T//'listed'//T//'computed'//T//'occupancy'//T//'blocks'//T//'list_max'//T//&
+            &'list_mean'//T//'pooled_per_ptcl'//T//'poolers_per_cell'//T//'host_step_s'//T//'reps_listed'//T//&
+            &'reps_computed'//T//'median_pairs_per_s'
+        write(u,'(a,10(a,i0),a,a,a,a,a,a,a,f6.2,4(a,f10.4),a,es12.5,2(a,es12.5),2(a,f10.4),3(a,es12.5),a,a,a,i0,a,f10.4,'//&
+            &'a,a,a,f6.1,a,i0,a,a,a,a,2(a,es12.5),a,f8.5,a,i0,2(a,f10.2),2(a,f10.3),a,f10.4,2(a,es12.5),a,es12.5)') &
+            &trim(d%cs%name), T, d%cs%nspace, T, d%cs%nstates, T, d%cs%nrefs, T, d%cs%nptcls, T, d%cs%pftsz, T, &
+            &2 * d%cs%pftsz, T, d%cs%kfrom, T, d%cs%kto, T, cfg%bt, T, cfg%rt, T, formulation_of(cfg), T, &
+            &device_name(mlx_default_device()), T, precision_mode(), T, run%load1, T, wall, T, w3(1), T, w3(2), T, &
+            &w3(3), T, listed / wall, T, listed, T, &
+            &run%stats(2), T, run%prep, T, 0._real64, T, -1._real64, T, run%peak, T, run%cache, T, 'timed', T, &
+            &run%npasses, T, wmed, T, trim(run%mode), T, run%cone, T, run%order, T, trim(run%orient), T, &
+            &trim(run%lists), T, listed, T, run%stats(2), T, listed / max(1._real64, run%stats(2)), T, &
+            &nint(run%stats(3)), T, run%stats(7), T, run%stats(8), T, run%stats(9), T, run%stats(10), T, run%stats(4), &
+            &T, run%stats(5), T, run%stats(6), T, listed / wmed
+        close(u)
+        write(*,'(a,es11.4,a,es11.4,a,f8.5,a,f9.4,a,f9.4,a,es11.4,a)') '    '//neigh_label(cfg, run)//': listed ', &
+            &listed, ' computed ', run%stats(2), ' occupancy ', listed / max(1._real64, run%stats(2)), ' best ', wall, &
+            &' s, median ', wmed, ' s, ', listed / wmed, ' listed pairs/s'
+    end subroutine write_neigh_row
+
+    ! check=1: the list route on the accuracy block (BLOCK_NPTCLS particles, BLOCK_NREFS references per half, the
+    ! case's states), the data of seed=, on every device: geom at cone= (20 degrees) and state, every listed entry
+    ! and representative entry against the DFT-matrix oracle's row at its drawn rotation (validity, the error
+    ! relative to the row's largest valid |d|) and against the oracle's draw on its own row with the pair's variate
+    subroutine neigh_check( cs0 )
+        type(bench_case), intent(in) :: cs0
+        type(bench_case)          :: cs
+        type(bench_data)          :: d
+        type(polarft_calc)        :: pftc
+        type(bench_config)        :: cfg
+        type(neigh_geometry)      :: geo
+        type(neigh_run)           :: run
+        type(eul_prob_tab_neigh)  :: drv
+        type(polar_list_entries)  :: lst
+        type(neigh_tally)         :: tal, dev_tal
+        real(real64), allocatable :: dor(:,:,:,:)
+        integer,      allocatable :: devs(:)
+        character(len=8)          :: modes(2) = [character(len=8) :: 'geom', 'state']
+        integer                   :: id, im, original
+        cs        = cs0
+        cs%nrefs  = BLOCK_NREFS
+        cs%nptcls = BLOCK_NPTCLS
+        call make_data(d, cs, arg_int('seed', POLAR_SEED_JUDGED), .true.)
+        dor = oracle_halves(d)
+        call feed_calc(pftc, d)
+        geo = neigh_geometry_of(cs, d%seed)
+        cfg = arg_config(bench_config())
+        call test_devices(devs)
+        original = mlx_default_device()
+        do id = 1, size(devs)
+            call mlx_set_default_device(devs(id))
+            call prepare(pftc, cfg)
+            dev_tal = neigh_tally()
+            do im = 1, 2
+                run        = neigh_run()
+                run%mode   = modes(im)
+                run%cone   = real(arg_int('cone', 20), real64)
+                run%order  = NEIGH_ORDERS%simple
+                run%orient = 'uniform'
+                run%lists  = 'route'
+                call neigh_driver(drv, pftc, d, geo, run)
+                call drv%fill_tab_range(1, cs%nptcls)
+                call assert_int(0, len(drv%message()), 'bench_polar_table: the block''s neighbourhood fill runs: '//&
+                    &drv%message())
+                call drv%batch_list_entries(lst)
+                call drv%kill
+                tal = judge_lists(d, dor, lst)
+                write(*,'(a,es23.16,a,i0,a,i0,a,i0)') '    neigh block seed='//trim(int_str(d%seed))//' '//&
+                    &device_name(devs(id))//' '//formulation_of(cfg)//' '//trim(run%mode)//': error ', tal%err, &
+                    &', drawn rotations differing from the oracle''s draw ', tal%ndraw, ', validity off ', tal%nvalid, &
+                    &' of ', tal%npairs
+                call assert_int(0, tal%nvalid, 'neigh block: every listed entry is valid or invalid as the oracle''s '//&
+                    &'row at its rotation')
+                dev_tal%err   = nan_max(dev_tal%err, tal%err)
+                dev_tal%ndraw = dev_tal%ndraw + tal%ndraw
+            end do
+            call assert_true(dev_tal%err <= POLAR_ROW_FACTOR * POLAR_NEIGH_BLOCK_ERR_CPU, 'neigh block '//&
+                &device_name(devs(id))//': the listed entries'' error is within twice the lists'' block e_cpu')
+            call assert_true(dev_tal%ndraw <= max(nint(POLAR_ROW_FACTOR) * POLAR_NEIGH_BLOCK_ROT_CPU, POLAR_BLOCK_ROT_Q), &
+                &'neigh block '//device_name(devs(id))//': the drawn rotations differ from the oracle''s draw in at '//&
+                &'most max(2 n_cpu, 5) pairs')
+            call pftc%kill_ref_tiles
+        end do
+        call mlx_set_default_device(original)
+        call pftc%kill
+    end subroutine neigh_check
+
+    ! every listed and representative entry of a block's fill against the oracle's rows (rotations, references,
+    ! particles of the half, half)
+    function judge_lists( d, dor, lst ) result(tal)
+        type(bench_data),         intent(in) :: d
+        real(real64),             intent(in) :: dor(:,:,:,:)
+        type(polar_list_entries), intent(in) :: lst
+        type(neigh_tally) :: tal
+        integer           :: j, k, pid, h, idx
+        do j = 1, size(lst%order)
+            pid = d%pfromto(1) - 1 + lst%order(j)
+            h   = half_of(pid)
+            idx = (pid - h) / 2 + 1
+            do k = lst%ptr(j), lst%ptr(j + 1) - 1
+                call judge_entry(d, dor(:, lst%refs(k), idx, h), neigh_pair(pid, lst%refs(k), lst%dists(k), &
+                    &lst%irots(k)), tal)
+            end do
+            if( .not. allocated(lst%reps) ) cycle
+            do k = 1, size(lst%reps)
+                call judge_entry(d, dor(:, lst%reps(k), idx, h), neigh_pair(pid, lst%reps(k), lst%rep_dists(k, j), &
+                    &lst%rep_irots(k, j)), tal)
+            end do
+        end do
+    end function judge_lists
+
+    ! one entry (distance, rotation) of a pair (particle, reference) against the oracle's row
+    subroutine judge_entry( d, row, pair, tal )
+        type(bench_data),  intent(in)    :: d
+        real(real64),      intent(in)    :: row(:)
+        type(neigh_pair),  intent(in)    :: pair
+        type(neigh_tally), intent(inout) :: tal
+        real(real64) :: dmax, u
+        integer      :: io
+        tal%npairs = tal%npairs + 1
+        u  = real(real(polar_keyed_u(d%seed, pair%pid, d%ids(pair%ref)), real32), real64)
+        io = polar_draw_row(row, d%temps(pair%pid), u)
+        if( io == 0 )then
+            if( pair%irot /= 1 .or. .not. bits_equal(pair%dist, POLAR_DIST_INVALID) ) tal%nvalid = tal%nvalid + 1
+            return
+        endif
+        if( pair%irot /= io ) tal%ndraw = tal%ndraw + 1
+        if( pair%irot < 1 .or. pair%irot > size(row) )then
+            tal%nvalid = tal%nvalid + 1
+            return
+        endif
+        dmax = nan_maxval(abs(pack(row, row < real(POLAR_DIST_VALID, real64))))
+        if( (row(pair%irot) < real(POLAR_DIST_VALID, real64)) .neqv. (pair%dist < POLAR_DIST_VALID) )then
+            if( abs(row(pair%irot) - POLAR_DIST_MAX) > POLAR_VALID_MARGIN * dmax ) tal%nvalid = tal%nvalid + 1
+            return
+        endif
+        if( pair%dist < POLAR_DIST_VALID ) tal%err = nan_max(tal%err, abs(real(pair%dist, real64) - row(pair%irot)) / dmax)
+    end subroutine judge_entry
 
 end module mlxf_bench_polar_table

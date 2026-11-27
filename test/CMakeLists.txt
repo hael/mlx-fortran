@@ -72,6 +72,12 @@ endif()
 # beside them, as SIMPLE holds a device body under USE_OPENMP_OFFLOAD. This executable always has MLX; the project
 # test/offstate compiles the same files without the definition and without the library.
 target_compile_definitions(mlxf_test_exec PRIVATE USE_MLX)
+# MLXF_ACCELERATE_CPU: on Apple, MLX's CPU device computes its products with Accelerate, whose bits do not depend on
+# the shape of the tile a product is computed in (measured); OpenBLAS elsewhere blocks by shape. Tests that promise
+# bit identity across tile shapes on the CPU device read it through cpu_matmul_shape_exact.
+if(APPLE)
+    target_compile_definitions(mlxf_test_exec PRIVATE MLXF_ACCELERATE_CPU)
+endif()
 # The BLAS crossover bench (test=bench_blas) times the host's sgemm and cgemm through CBLAS. On macOS the system's
 # BLAS is Accelerate, linked to this executable only, never to the library; elsewhere, or when it is not found,
 # MLXF_HAVE_BLAS stays undefined and the bench's host route is Fortran's matmul.

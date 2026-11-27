@@ -94,6 +94,8 @@ contains
         if( allocated(self%u_next) ) deallocate(self%u_next)
         if( allocated(self%banks_next) ) deallocate(self%banks_next)
         if( allocated(self%l_bank_next) ) deallocate(self%l_bank_next)
+        if( allocated(self%refs_next) ) deallocate(self%refs_next)
+        if( allocated(self%pair_ptr_next) ) deallocate(self%pair_ptr_next)
         if( allocated(self%rows) ) deallocate(self%rows)
         if( allocated(self%ref_full) ) deallocate(self%ref_full)
         call kill_block_work(self)
@@ -273,6 +275,12 @@ contains
         class(polarft_calc), intent(in) :: self
         get_pftsz = self%pftsz
     end function get_pftsz
+
+    pure module function get_tile_plan( self ) result(plan)
+        class(polarft_calc), intent(in) :: self
+        integer :: plan(2)
+        plan = [self%bt, self%rt]
+    end function get_tile_plan
 
     pure module function get_kfromto( self ) result(kfromto)
         class(polarft_calc), intent(in) :: self

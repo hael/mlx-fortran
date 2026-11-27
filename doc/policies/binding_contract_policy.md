@@ -576,7 +576,11 @@ written, the skill `mlxf-modern-fortran`.
     follows dimensions 1 and 2 of the result. An absent list takes the operand's matrices in order, with the
     shape of its batch dimensions; with neither list the result is `matmul`'s, bit for bit.
     `sorted_indices=.true.` tells MLX that the one list given is ascending. Index arrays are of any integer
-    dtype, shifted in the graph and unchecked, as every index.
+    dtype, shifted in the graph and unchecked, as every index. With lists the bits are not promised against
+    `matmul` of the same matrices: measured on MLX 0.32.4 (run `mlxf_kernel_k3`), the GPU's generic route
+    differed from a loop of `matmul` in most elements at one small shape (16 by 128 by 244) and in none at three
+    larger ones, the sorted route (one column, the list ascending) equalled it and the unsorted matrix-vector
+    route did not; the CPU device equalled it everywhere.
   - `mlx_block_masked_mm(a,b[,block_size,mask_out,operand_masks])`: `matmul(a,b)`, batched, with blocks of
     `block_size` rows and columns left out (32 or 64, MLX's two sizes; 64 by default). A mask has one element
     per block, `ceiling(extent/block_size)` along each of its two matrix dimensions, then the batch

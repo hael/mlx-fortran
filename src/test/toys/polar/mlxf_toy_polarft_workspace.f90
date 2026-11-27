@@ -2,8 +2,9 @@
 ! Every MLX handle and compiled function of the toy calculator lives here: the references of one parity as
 ! resident tiles, and the blocks queued against them, each scored into one entry (distance, rotation) per pair
 ! with the rotation drawn from the pair's posterior on the device. The calculator owns the host memos and hands
-! them in; a block that does not match the tiles is refused before anything is queued. Written against mlxf as
-! a user writes; lifecycle, scoring, the fused tail and the shift maps are submodules.
+! them in; a block that does not match the tiles is refused before anything is queued. A block may name a list
+! of the references, gathered from the resident tiles into list tiles of the same plan. Written against mlxf as
+! a user writes; lifecycle, scoring, the list tiles, the fused tail and the shift maps are submodules.
 module mlxf_toy_polarft_workspace
 use, intrinsic :: iso_fortran_env, only: int64, real32, real64
 use mlxf,                 only: mlx_array, mlx_function, mlx_metal_kernel, mlx_metal_kernel_spec
@@ -119,7 +120,10 @@ end type tail_outputs
 ! compiled distances and draw, or tail_kernel the fused one, tail_kernel_rows its rows variant (built on the
 ! first block that asks for rows, l_tail_rows) and tail_par the constants they read; stage_s the
 ! profiled stages' seconds: particle terms, products, inverse transform, distances and draw, concatenation;
-! rows_host the full rows of the last block collected with them; maps the shift maps, and mstage_s their
+! rows_host the full rows of the last block collected with them; list_tiles the tiles (4nk, 2rt, pftsz+1, list
+! tiles) of the reference list list_refs, gathered from refs and kept while blocks name the same list; pair_kernel
+! and pair_tail the pair-list kernel and the fused tail of pair_cap pairs (the kernels are made again when a pair
+! list outgrows the capacity, counted in pair_grown); maps the shift maps, and mstage_s their
 ! profiled seconds: construction, mode, width, copy-out. It extends device_work, the opaque type a calculator holds
 ! it as
 type, extends(device_work) :: polarft_workspace
@@ -139,6 +143,12 @@ type, extends(device_work) :: polarft_workspace
     type(polarft_workspace_map)   :: maps(NSHIFTMAPS)
     real(real32),     allocatable :: rows_host(:,:,:)
     type(mlx_array)               :: refs
+    integer,          allocatable :: list_refs(:)
+    type(mlx_array)               :: list_tiles
+    integer                       :: pair_cap   = 0
+    integer                       :: pair_grown = 0
+    type(mlx_metal_kernel)        :: pair_kernel
+    type(mlx_metal_kernel)        :: pair_tail
     type(mlx_function)            :: tail
     type(mlx_metal_kernel)        :: tail_kernel
     type(mlx_metal_kernel)        :: tail_kernel_rows
@@ -290,6 +300,31 @@ interface
         complex(real32),          intent(in)    :: ft_ptcl_wterms(:,:,:)
         integer,                  intent(out)   :: status
     end subroutine polarft_workspace_submit
+
+    ! the list tiles of the references irefs (of 1..nrefs, checked by the caller): every reference's packed
+    ! columns gathered from the resident tiles in place, the last tile padded with the list's first reference;
+    ! kept, and not gathered again, while the list is the same
+    module subroutine polarft_workspace_list_tiles( self, irefs, status )
+        class(polarft_workspace), intent(inout) :: self
+        integer,                  intent(in)    :: irefs(:)
+        integer,                  intent(out)   :: status
+    end subroutine polarft_workspace_list_tiles
+
+    ! a block of pair_ptr's pair list (blk%irefs the references of particle b at pair_ptr(b)..pair_ptr(b+1)-1)
+    ! queued in its slot, GPU only: the pair-list kernel's packed sums of every listed pair and bin from the resident
+    ! tiles and the block's particle terms, the inverse transform and the tail on the listed rows only; the entries
+    ! and variates are (1, pairs); nothing is queued on a refusal (status /= 0)
+    module subroutine polarft_workspace_submit_pairs( self, blk, ft_ptcl_wterms, status )
+        class(polarft_workspace), intent(inout) :: self
+        type(polarft_block_spec), intent(in)    :: blk
+        complex(real32),          intent(in)    :: ft_ptcl_wterms(:,:,:)
+        integer,                  intent(out)   :: status
+    end subroutine polarft_workspace_submit_pairs
+
+    ! the list tiles and their list released, and the pair-list kernels
+    module subroutine polarft_workspace_drop_list( self )
+        class(polarft_workspace), intent(inout) :: self
+    end subroutine polarft_workspace_drop_list
 
     ! waits for slot's block and copies its entries into dists and irots (references, particles of the block),
     ! which a refusal leaves as they are; the slot is free afterwards

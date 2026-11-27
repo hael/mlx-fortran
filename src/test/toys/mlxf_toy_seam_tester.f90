@@ -4,17 +4,23 @@
 ! deallocates and resolves the dynamic type where it needs the device. The checks count the registry's live
 ! handles: an explicit kill releases them whatever the compiler finalizes afterwards. Of each toy class (the
 ! calculator, the projector, the reconstructor): 1,000 cycles of new and kill leave the registry's count as it was,
-! the host backend makes no device object, and what the host backend cannot do is refused with a message.
+! the host backend makes no device object, and what the host backend cannot do is refused with a message. The
+! neighbourhood driver: 1,000 cycles of new_neigh_pipeline and kill around list fills leave the count, and its
+! refusals.
 module mlxf_toy_seam_tester
 use, intrinsic :: iso_fortran_env, only: int64, real32, real64
-use mlxf,                       only: mlx_array, mlx_from, mlx_to, mlx_eval, mlx_live_count, mlx_active_memory, &
-                                      mlx_synchronize, mlx_set_default_device, mlx_default_device, mlx_clear_cache, sum
-use mlxf_test_defs,             only: POLARFT_REF_ROUTES, parameters
-use mlxf_toy_device_work,       only: device_work
-use mlxf_toy_polarft_calc,      only: polarft_calc
-use mlxf_toy_projector,         only: projector
-use mlxf_toy_reconstructor_pcg, only: reconstructor_pcg
-use mlxf_test_utils,            only: assert_true, assert_int, device_name, test_devices
+use mlxf,                        only: mlx_array, mlx_from, mlx_to, mlx_eval, mlx_live_count, mlx_active_memory, &
+                                       mlx_synchronize, mlx_set_default_device, mlx_default_device, mlx_clear_cache, &
+                                       sum
+use mlxf_test_defs,              only: POLARFT_REF_ROUTES, PH_PFTSZ, PH_NPTCLS, PH_NCELLS, NEIGH_ORDERS, parameters, &
+                                       polarft_host_fixture
+use mlxf_toy_device_work,        only: device_work
+use mlxf_toy_polarft_calc,       only: polarft_calc
+use mlxf_toy_eul_prob_tab_neigh, only: eul_prob_tab_neigh
+use mlxf_polarft_host_fixture,   only: make_polarft_host_fixture, polarft_host_calc
+use mlxf_toy_projector,          only: projector
+use mlxf_toy_reconstructor_pcg,  only: reconstructor_pcg
+use mlxf_test_utils,             only: assert_true, assert_int, device_name, test_devices
 implicit none
 private
 public :: run_all_seam_tests
@@ -76,6 +82,7 @@ contains
             call test_wrong_type(devs(i))
             call test_polarft_calc(devs(i))
             call test_polarft_maps(devs(i))
+            call test_neigh_driver(devs(i))
             call test_projector(devs(i))
             call test_reconstructor_pcg(devs(i))
         end do
@@ -351,6 +358,82 @@ contains
         call assert_int(live0, mlx_live_count(), device_name(dev)//': polarft_calc on the host backend left no '// &
             &'device object')
     end subroutine test_polarft_calc
+
+    ! the neighbourhood driver on the fixture of the polar host route: 1,000 cycles of new_neigh_pipeline and kill,
+    ! a list fill every FULL_EVERY of them, leave the registry's count once the calculator is killed; its refusals:
+    ! a fill before the directions, an unknown mode, a cone outside 0 to 180 degrees, the state fill without the
+    ! subspace, directions that do not divide the references, a cell out of range
+    subroutine test_neigh_driver( dev )
+        integer, intent(in) :: dev
+        type(polarft_host_fixture)    :: fx
+        type(polarft_calc), target    :: pftc
+        type(eul_prob_tab_neigh)      :: drv
+        type(parameters)              :: params
+        character(len=:), allocatable :: msg
+        integer                       :: live0, i, nbad, k
+        write(*,'(a)') 'test_neigh_driver'
+        fx     = make_polarft_host_fixture(1)
+        params = parameters(pftsz=PH_PFTSZ, box=2 * PH_PFTSZ, l_mlx=.true.)
+        live0  = mlx_live_count()
+        call polarft_host_calc(fx, params, pftc, msg)
+        call assert_int(0, len(msg), device_name(dev)//': the fixture''s calculator is made: '//msg)
+        nbad = 0
+        do i = 1, NCYCLES
+            call drv%new_neigh_pipeline(params, pftc, [(k, k = 1, PH_NPTCLS)])
+            if( len(drv%message()) > 0 ) nbad = nbad + 1
+            if( mod(i, FULL_EVERY) == 0 )then
+                call set_neigh(drv, fx, 'geom', 30._real64)
+                call drv%fill_tab_range(1, PH_NPTCLS)
+                if( len(drv%message()) > 0 ) nbad = nbad + 1
+            endif
+            call drv%kill()
+        end do
+        call assert_int(0, nbad, device_name(dev)//': eul_prob_tab_neigh: every cycle and fill was carried out')
+        ! the refusals
+        call drv%new_neigh_pipeline(params, pftc, [(k, k = 1, PH_NPTCLS)])
+        call drv%set_draw_keys(fx%seed, fx%ref_full)
+        call drv%set_temps(fx%temps)
+        call drv%set_neigh_options('geom', 30._real64, 2, NEIGH_ORDERS%batch)
+        call drv%fill_tab_range(1, PH_NPTCLS)
+        call assert_true(index(drv%message(), 'set_eulspace') > 0, device_name(dev)//': a fill before the '//&
+            &'directions is refused')
+        call drv%set_neigh_options('cones', 30._real64, 2, NEIGH_ORDERS%batch)
+        call assert_true(index(drv%message(), 'unknown mode') > 0, device_name(dev)//': an unknown mode is refused')
+        call drv%set_neigh_options('geom', 180.5_real64, 2, NEIGH_ORDERS%batch)
+        call assert_true(index(drv%message(), '0 to 180') > 0, device_name(dev)//': a cone above 180 degrees is '//&
+            &'refused')
+        call drv%set_neigh_options('geom', -1._real64, 2, NEIGH_ORDERS%batch)
+        call assert_true(index(drv%message(), '0 to 180') > 0, device_name(dev)//': a negative cone is refused')
+        call drv%set_eulspace(fx%dirs(:, 1:3), fx%prev)
+        call assert_true(index(drv%message(), 'states of nspace') > 0, device_name(dev)//': directions that do not '//&
+            &'divide the references are refused')
+        call drv%set_eulspace(fx%dirs, fx%prev)
+        call drv%set_neigh_options('state', 30._real64, 2, NEIGH_ORDERS%batch)
+        call drv%fill_tab_range(1, PH_NPTCLS)
+        call assert_true(index(drv%message(), 'set_subspace') > 0, device_name(dev)//': the state fill without the '//&
+            &'subspace is refused')
+        call drv%set_subspace([(PH_NCELLS + 1, k = 1, size(fx%dirs, 2))], [(k, k = 1, PH_NCELLS)])
+        call assert_true(index(drv%message(), 'out of range') > 0, device_name(dev)//': a cell out of range is refused')
+        call drv%kill()
+        call pftc%kill()
+        call assert_int(live0, mlx_live_count(), device_name(dev)//': eul_prob_tab_neigh: 1,000 cycles of '//&
+            &'new_neigh_pipeline and kill around list fills leave the live handles as they were')
+    end subroutine test_neigh_driver
+
+    ! a driver's keys, temperatures, directions, cells (by direction: a cell of PH_NCELLS each, in turn) and mode
+    subroutine set_neigh( drv, fx, mode, cone )
+        type(eul_prob_tab_neigh),   intent(inout) :: drv
+        type(polarft_host_fixture), intent(in)    :: fx
+        character(len=*),           intent(in)    :: mode
+        real(real64),               intent(in)    :: cone
+        integer :: k
+        call drv%set_draw_keys(fx%seed, fx%ref_full)
+        call drv%set_temps(fx%temps)
+        call drv%set_fill_options(8, 2, .false., .false.)
+        call drv%set_eulspace(fx%dirs, fx%prev)
+        call drv%set_subspace([(mod(k - 1, PH_NCELLS) + 1, k = 1, size(fx%dirs, 2))], [(k, k = 1, PH_NCELLS)])
+        call drv%set_neigh_options(mode, cone, 2, NEIGH_ORDERS%simple)
+    end subroutine set_neigh
 
     ! the smallest calculator with its particles and weights memoized; nbad counts the refusals
     subroutine small_map_calc( pftc, nbad )

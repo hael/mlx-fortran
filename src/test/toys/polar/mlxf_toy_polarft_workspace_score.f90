@@ -3,7 +3,8 @@
 ! tile (2nk, rt) are one real product of packed (Re, Im) parts, batched over the bins; the inverse real FFT
 ! gives the rows, and the tail (the distances and the posterior draw: compiled, or the fused kernel) picks each
 ! pair's rotation on the device. Tiles are always full (padded), so a pair's entry depends on its tile position
-! only, never on the outer batch or slot.
+! only, never on the outer batch or slot. A block with a reference list is scored by the same graph on its list
+! tiles, gathered from the resident ones.
 submodule (mlxf_toy_polarft_workspace) mlxf_toy_polarft_workspace_score
 use, intrinsic :: iso_fortran_env, only: int64
 use mlxf,           only: mlx_from, mlx_to, mlx_eval, mlx_async_eval, mlx_slice, mlx_permute, mlx_concatenate, reshape, &
@@ -30,21 +31,36 @@ contains
         complex(real32), allocatable :: terms(:,:,:)
         real(real32),    allocatable :: iw(:), temps(:), u(:,:)
         type(mlx_array), allocatable :: dcol(:), icol(:), rcol(:), drow(:), irow(:), rrow(:)
-        type(mlx_array)              :: pt, ptj, iwa, ta, ua, dd, ii, rr, prod
+        type(mlx_array)              :: pt, ptj, iwa, ta, ua, dd, ii, rr, prod, tiles
         type(tile_inputs)            :: inp
         type(tail_inputs)            :: tin
         type(tail_outputs)           :: tout
         real(real64)                 :: t0
-        integer                      :: nb, n1, nbt, bpad, rpad, j, t, b, b0, b1, r0, ierr, gk, gr, slot
+        integer                      :: nb, n1, nbt, bpad, rpad, j, t, b, b0, b1, r0, ierr, gk, gr, slot, nr, ntl
         status = 1
+        if( allocated(blk%pair_ptr) )then
+            call polarft_workspace_submit_pairs(self, blk, ft_ptcl_wterms, status)
+            return
+        endif
         call check_block(self, blk, shape(ft_ptcl_wterms), self%msg)
         if( len(self%msg) > 0 ) return
+        ! the tiles scored: the resident ones, or the list tiles of the block's references
+        if( allocated(blk%irefs) )then
+            call polarft_workspace_list_tiles(self, blk%irefs, ierr)
+            if( ierr /= 0 ) return
+            tiles = self%list_tiles
+            nr    = size(blk%irefs)
+        else
+            tiles = self%refs
+            nr    = self%nrefs
+        endif
+        ntl  = (nr + self%rt - 1) / self%rt
         slot = blk%slot
         n1   = self%pftsz + 1
         nb   = size(blk%islots)
         nbt  = (nb + self%bt - 1) / self%bt
         bpad = nbt * self%bt
-        rpad = self%ntiles * self%rt
+        rpad = ntl * self%rt
         ! the block's particle terms gathered on the host (a seed bank where l_bank), padded to whole tiles:
         ! padded particles score zero sums
         allocate(terms(2 * self%nk, n1, bpad), iw(bpad), temps(bpad), u(rpad, bpad), stat=ierr)
@@ -64,7 +80,7 @@ contains
             iw(b)    = real(1._real64 / (2._real64 * blk%wsq(b)), real32)
             temps(b) = max(0._real32, blk%temps(b))
         end do
-        u(1:self%nrefs, 1:nb) = blk%u
+        u(1:nr, 1:nb) = blk%u
         t0 = clock_s()
         ! the particle terms of every bin (2nk, pftsz+1, bpad): w_k CTF2 on rows 1..nk, -2 w_k X.CTF on rows
         ! nk+1..2nk, as the calculator made them
@@ -76,7 +92,7 @@ contains
         ! the reference tile's rows and columns in the resident (packed) layout
         gk = 4 * self%nk
         gr = 2 * self%rt
-        allocate(dcol(self%ntiles), icol(self%ntiles), rcol(self%ntiles), drow(nbt), irow(nbt), rrow(nbt))
+        allocate(dcol(ntl), icol(ntl), rcol(ntl), drow(nbt), irow(nbt), rrow(nbt))
         do j = 1, nbt
             b0  = (j - 1) * self%bt + 1
             b1  = j * self%bt
@@ -84,9 +100,9 @@ contains
             inp%pt = packed_terms(ptj)
             tin%iw    = mlx_slice(iwa, [1, 1, b0], [1, 1, b1])
             tin%temps = mlx_slice(ta, [1, 1, b0], [1, 1, b1])
-            do t = 1, self%ntiles
+            do t = 1, ntl
                 r0     = (t - 1) * self%rt + 1
-                inp%g  = reshape(mlx_slice(self%refs, [1, 1, 1, t], [gk, gr, n1, t]), [gk, gr, n1])
+                inp%g  = reshape(mlx_slice(tiles, [1, 1, 1, t], [gk, gr, n1, t]), [gk, gr, n1])
                 tin%u  = mlx_slice(ua, [r0, b0], [r0 + self%rt - 1, b1])
                 t0     = clock_s()
                 prod   = matmul(inp%pt, inp%g)
@@ -129,7 +145,7 @@ contains
         if( blk%rows ) self%slots(slot)%rows = rr
         self%slots(slot)%busy   = .true.
         self%slots(slot)%l_rows = blk%rows
-        self%slots(slot)%nrefs  = self%nrefs
+        self%slots(slot)%nrefs  = nr
         self%slots(slot)%nptcls = nb
         self%slots(slot)%nrots  = self%nrots
         self%slots(slot)%rpad   = rpad
@@ -274,7 +290,7 @@ contains
         type(polarft_block_spec),      intent(in)  :: blk
         integer,                       intent(in)  :: shpt(3)
         character(len=:), allocatable, intent(out) :: msg
-        integer :: n1, nb
+        integer :: n1, nb, nr
         msg = ''
         if( blk%slot < 1 .or. blk%slot > POLARFT_NSLOTS )then
             msg = 'polarft_workspace%submit: no such slot'
@@ -291,8 +307,18 @@ contains
         if( len(msg) > 0 ) return
         n1 = self%pftsz + 1
         nb = size(blk%islots)
+        nr = self%nrefs
+        if( allocated(blk%irefs) )then
+            nr = size(blk%irefs)
+            if( nr < 1 )then
+                msg = 'polarft_workspace%submit: refused: an empty reference list'
+            else if( any(blk%irefs < 1 .or. blk%irefs > self%nrefs) )then
+                msg = 'polarft_workspace%submit: refused: a reference of the list is not prepared'
+            endif
+            if( len(msg) > 0 ) return
+        endif
         if( nb < 1 .or. any(shpt /= [2 * self%nk, n1, shpt(3)]) .or. size(blk%wsq) /= nb .or. &
-            &size(blk%temps) /= nb .or. any(shape(blk%u) /= [self%nrefs, nb]) )then
+            &size(blk%temps) /= nb .or. any(shape(blk%u) /= [nr, nb]) )then
             msg = 'polarft_workspace%submit: refused: the block''s shapes do not match the prepared references'
             return
         endif

@@ -120,7 +120,9 @@ procedures (`fproject_polar_batch_opt`, `vol_pad2ref_pfts_opt`) brought public p
   as mirrored keeps SIMPLE's dummy list, as a `bind(c)` procedure keeps C's. Additions obey the rule. Rule
   `arity` reads the ledger for the exemption; that change enters with rule `mirror` (section 4).
 - **A driver per strategy, under the strategy's name** (`eul_prob_tab` with `fill_tab_range` for the dense
-  table), trimmed like the calculators.
+  table; `eul_prob_tab_neigh`, which extends it as SIMPLE's does, for the neighbourhood fill), trimmed like the
+  calculators. An extension in another module reads its parent's components, so a driver that is extended
+  keeps them public and its callers use the bindings.
 
 ## 8. The integration shape (Hans, 2026-11-25: "implement the toy examples in mlx-fortran in the same way so that we can model safely over here and make the integration easier downstream")
 

@@ -101,7 +101,7 @@ descriptions come from `<dir>/<dir>.inf`. Regenerate with
       - `mlxf_bench_insert_probe.f90` — the protected-update probe: SIMPLE's gridding insertion as one Metal kernel with atomic float32 deposits, against the oracle
       - `mlxf_bench_kernel_forms.f90` — the kernel-forms benchmark: ways of writing a Metal kernel, set beside the toys' current kernels on the GPU
       - `mlxf_bench_kernel_forms_src.f90` — the kernel-forms benchmark's Metal sources and their specs: the probe's kernels and the alternative forms
-      - `mlxf_bench_polar_table.f90` — benchmark of the polar table workspace at SIMPLE's sizes: accuracy block, timing sweep, profile, overlap, shift maps
+      - `mlxf_bench_polar_table.f90` — benchmark of the polar table workspace at SIMPLE's sizes: accuracy block, timing sweep, profile, overlap, shift maps, reference lists
       - `mlxf_bench_projector.f90` — benchmark of the toy projector at SIMPLE's sizes: the reprojection of one state timed, chained to family A, and judged
       - `mlxf_bench_recon_pcg.f90` — benchmark of the toy reconstructor_pcg at SIMPLE's boxes: transforms, timing, profile, probe, accuracy
       - `mlxf_bench_user_costs.f90` — the costs a porter meets: evaluation per step against batched, element reads, copies against the shared buffer, warm compiled callbacks
@@ -111,9 +111,11 @@ descriptions come from `<dir>/<dir>.inf`. Regenerate with
       - `mlxf_test_reduce.f90` — NaN-safe maximum for test code: a NaN anywhere makes the result +infinity, so no tolerance accepts it
       - `mlxf_test_registry.f90` — the area suites and guard groups of mlxf_test_exec: sub-suites per area, and the members of each guard group
       - `mlxf_test_utils.f90` — assertions, suite tracking and the summary of mlxf_test_exec
-    - **oracles/** — independent double-precision references the toys and the benchmarks are judged against: DFTs, polar scores and shift maps, poses, projections, gridding, the reconstruction's fixture and PCG, with their self-checks and the testers that assert them
+    - **oracles/** — independent double-precision references the toys and the benchmarks are judged against: DFTs, polar scores and shift maps, neighbourhood lists and pools, poses, projections, gridding, the reconstruction's fixture and PCG, with their self-checks and the testers that assert them
       - `mlxf_oracle_dft.f90` — host oracle: direct discrete Fourier transforms in complex double precision, 1D and 3D, and their self-check
       - `mlxf_oracle_gridding.f90` — host oracle of the gridding insertion on the native grid: accumulators, stored half, density correction, map
+      - `mlxf_oracle_neigh.f90` — host oracle of the neighbourhood lists: spiral directions, cones, cells, block orders, SIMPLE's peaks and pool, and the covers' pair counts
+      - `mlxf_oracle_neigh_tester.f90` — tests of the neighbourhood lists' host oracle: its self-checks asserted
       - `mlxf_oracle_pcg.f90` — host oracle of the PCG problem: stencil matrix, transform operator, preconditioner, Cholesky and PCG solves
       - `mlxf_oracle_polar.f90` — the polar fixtures' shared tools: ring DFT, keyed variates, the memo-level oracle, checks of rows and draws
       - `mlxf_oracle_polar_objfun.f90` — host oracle of the polar objectives: Euclidean loss, two correlations, in-plane and reference reductions
@@ -125,10 +127,13 @@ descriptions come from `<dir>/<dir>.inf`. Regenerate with
       - `mlxf_oracle_recon_fixture.f90` — the full-coverage fixture of the reconstruction's PCG solve: planes on a golden-angle spiral, two blobs, packed accumulators
       - `mlxf_oracle_recon_pcg.f90` — host oracle of the reconstruction as its conjugate-gradient solver sees it: lattice, kernel, operator, solve
     - **toys/** — the toys that mirror SIMPLE's classes: the opaque device state they hold, the seam tester, and one folder per toy (polar, projector, recon)
-      - **polar/** — the polar toy: polarft_calc with its GPU workspace, the table driver eul_prob_tab, the fixture of the polar host route, and their testers
+      - **polar/** — the polar toy: polarft_calc with its GPU workspace and its reference lists, the table drivers eul_prob_tab and eul_prob_tab_neigh with their helpers, the fixture of the polar host route, and their testers
         - `mlxf_polarft_host_fixture.f90` — the fixture of the polar host route: seeded rings, a table filled through the toy driver on either backend, the table's lines
         - `mlxf_toy_eul_prob_tab.f90` — the toy table driver (test only): a miniature of SIMPLE's eul_prob_tab that fills the dense table through the polar calculator
+        - `mlxf_toy_eul_prob_tab_neigh.f90` — the toy neighbourhood driver (test only): a miniature of SIMPLE's eul_prob_tab_neigh that scores each particle's reference list through the polar calculator
+        - `mlxf_toy_eul_prob_tab_neigh_tester.f90` — tests of the polar toy's reference lists: the calculator's list route against the memo oracle and the dense route, its repeatability and refusals
         - `mlxf_toy_eul_prob_tab_tester.f90` — tests of the toy table driver: the fill's order, blocks and keyed draws, the two coarse maps set up by SIMPLE's rule, refusals
+        - `mlxf_toy_eul_prob_tab_utils.f90` — the toy's neighbourhood utilities (test only): the view distance of SIMPLE's cone test, in c1 and without the mirror view
         - `mlxf_toy_polarft_block.f90` — the toy polar calculator's block scoring: score_block_posterior with SIMPLE's block kernel, and the blocks in flight
         - `mlxf_toy_polarft_block_mlx.f90` — the toy polar calculator's block scoring on MLX (glue): a block queued in its parity's workspace and collected from it
         - `mlxf_toy_polarft_calc.f90` — the toy polar calculator (test only): a miniature of SIMPLE's polarft_calc with its device state as one opaque component
@@ -144,10 +149,12 @@ descriptions come from `<dir>/<dir>.inf`. Regenerate with
         - `mlxf_toy_polarft_tail_tester.f90` — tests of the polar calculator's fused tail: the refusal on the CPU device, the two kernels' identity, repeatability, small tiles, objects
         - `mlxf_toy_polarft_workspace.f90` — the polar calculator's GPU workspace (test only): one parity's resident reference tiles, the entries' graph, the shift maps
         - `mlxf_toy_polarft_workspace_lifecycle.f90` — the polar workspace's lifecycle: reference memos validated and prepared as resident tiles with their tail, teardown
+        - `mlxf_toy_polarft_workspace_lists.f90` — the polar workspace's list tiles: a block's reference list gathered from the resident tiles into tiles of the same plan
         - `mlxf_toy_polarft_workspace_mapreduce.f90` — the polar workspace's shift-map reductions: a tile's mode, widths and evidence from its maps, and their compiled callbacks
         - `mlxf_toy_polarft_workspace_score.f90` — the polar workspace's scoring: block validation, the per-tile graph, the draw, copy-out
         - `mlxf_toy_polarft_workspace_shiftmap.f90` — the polar workspace's shift maps: the particle-reusing contraction, the direction transform and requested posterior outputs
         - `mlxf_toy_polarft_workspace_tail.f90` — the polar workspace's fused tail: a Metal kernel per tile for the distances and the posterior draw of every pair
+        - `mlxf_toy_srchspace_map.f90` — the toy search-space map (test only): SIMPLE's srchspace_map, a full space of directions mapped to the cells of a subspace
       - **projector/** — the projector toy: projector with its GPU workspace and the batch projector, and their tester
         - `mlxf_toy_projector.f90` — the toy projector (test only): a miniature of SIMPLE's projector with the image procedures the reprojection calls
         - `mlxf_toy_projector_mlx.f90` — the toy projector on MLX (glue): its device state, the padded transform, the expanded cube and the gather's settings

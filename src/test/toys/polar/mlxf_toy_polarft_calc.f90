@@ -50,7 +50,7 @@ end type polarft_block_work
 ! layout, read in place by every kernel), ft_ptcl_ctf and ft_ctf2 per particle of the batch, and from them
 ! ft_ptcl_wterms, the particle's terms of the objective in the same layout (rows 1..nk w_k FT(CTF2), rows
 ! nk+1..2nk -2 w_k FT(X.CTF), SIMPLE's euclid terms); dft_e holds the transform's factors. The rest serves the
-! additions: the tile plan, the options, variates, seed banks and rows of a block, the parity of the block in
+! additions: the tile plan, the options, the reference list, variates, seed banks and rows of a block, the parity of the block in
 ! each slot, the reason of the last refusal. Of the shift maps the calculator keeps what tells whether a map
 ! is that of the memoized references and weights (map_ref_gen, map_wk_gen), its band's last shell, the pairs
 ! gen_shiftmap was given (sm_*), the options and the requested outputs of the last modes. l_mlx is the backend
@@ -113,6 +113,8 @@ type :: polarft_calc
     logical        :: l_profile        = .false.
     integer        :: slot_ieo(NSLOTS) = 0
     real(real32),             allocatable :: u_next(:,:)
+    integer,                  allocatable :: refs_next(:)
+    integer,                  allocatable :: pair_ptr_next(:)
     complex(real32),          allocatable :: banks_next(:,:,:)
     logical,                  allocatable :: l_bank_next(:)
     real(real32),             allocatable :: rows(:,:,:)
@@ -144,6 +146,7 @@ type :: polarft_calc
     procedure :: set_ref_route
     procedure :: message
     procedure :: get_nrefs
+    procedure :: get_tile_plan
     procedure :: get_pftsz
     procedure :: get_kfromto
     procedure :: get_polar_coords
@@ -161,6 +164,8 @@ type :: polarft_calc
     ! block scoring
     procedure :: score_block_posterior
     procedure :: set_block_variates
+    procedure :: set_block_refs
+    procedure :: set_block_pairs
     procedure :: set_block_banks
     procedure :: shifted_ptcl_terms
     procedure :: set_block_options
@@ -261,6 +266,12 @@ interface
     pure module integer function get_pftsz( self )
         class(polarft_calc), intent(in) :: self
     end function get_pftsz
+
+    ! the tile plan (bt, rt) the MLX backend pads a block's particles and references to
+    pure module function get_tile_plan( self ) result(plan)
+        class(polarft_calc), intent(in) :: self
+        integer :: plan(2)
+    end function get_tile_plan
 
     pure module function get_kfromto( self ) result(kfromto)
         class(polarft_calc), intent(in) :: self
@@ -380,9 +391,9 @@ interface
     ! the particles iptcls (project indices of one half) against the references irefs: per pair the distance at
     ! the rotation drawn from its posterior at the particle's inverse temperature, and that rotation (1..nrots).
     ! On the host backend it is SIMPLE's block kernel, thread-safe (the calling thread's work): at most
-    ! PFTC_BLOCK_NB particles, any references, the variate keyed by set_draw_keys; inside a parallel region a
-    ! refused block leaves SIMPLE's invalid entries and no message. On the MLX backend: all the references in
-    ! order, the variates of set_block_variates, one calling thread. Seed banks (2nk, pftsz+1, nb), as
+    ! PFTC_BLOCK_NB particles, the variate keyed by set_draw_keys; inside a parallel region a refused block leaves
+    ! SIMPLE's invalid entries and no message. On the MLX backend: the variates of set_block_variates, one calling
+    ! thread. On both, any list of references of 1..nrefs without a repeat. Seed banks (2nk, pftsz+1, nb), as
     ! shifted_ptcl_terms makes them, replace a particle's terms where l_bank. A refused block (message) leaves
     ! dists at huge and irots at 1.
     module subroutine score_block_posterior( self, nb, iptcls, nr, irefs, temps, dists, irots, banks, l_bank )
@@ -468,8 +479,8 @@ interface
         logical,             intent(in)    :: rows, profile
     end subroutine set_block_options
 
-    ! queues the block of particles iptcls against all the references in slot (1 or 2) and returns while the
-    ! device works; nothing is queued on a refusal
+    ! queues the block of particles iptcls against all the references, or the list of set_block_refs, in slot (1
+    ! or 2) and returns while the device works; nothing is queued on a refusal
     module subroutine submit_block( self, slot, nb, iptcls, temps )
         class(polarft_calc), intent(inout) :: self
         integer,             intent(in)    :: slot, nb
@@ -485,6 +496,30 @@ interface
         real(real32),        intent(inout) :: dists(:,:)
         integer,             intent(inout) :: irots(:,:)
     end subroutine collect_block
+
+    ! the reference list of the next block queued by submit_block, references of 1..nrefs without a repeat in any
+    ! order: its entries and variates are (list, particles); without one, or with every reference in order, the
+    ! block is scored against all the references. A refused list (message) is not kept
+    module subroutine set_block_refs( self, irefs )
+        class(polarft_calc), intent(inout) :: self
+        integer,             intent(in)    :: irefs(:)
+    end subroutine set_block_refs
+
+    ! the pair list of the next block queued by submit_block on the MLX backend's GPU: particle b of the block
+    ! against the references irefs(ptr(b):ptr(b+1)-1), scored by the pair-list kernel; its entries and variates are
+    ! (1, pairs). A refused list (message) is not kept
+    module subroutine set_block_pairs( self, ptr, irefs )
+        class(polarft_calc), intent(inout) :: self
+        integer,             intent(in)    :: ptr(:), irefs(:)
+    end subroutine set_block_pairs
+
+    ! the reason a block's reference list cannot be scored (empty, a reference outside 1..nrefs, a repeat), or an
+    ! empty string; both backends ask it
+    pure module function block_list_refusal( self, irefs ) result(msg)
+        class(polarft_calc), intent(in) :: self
+        integer,             intent(in) :: irefs(:)
+        character(len=:), allocatable :: msg
+    end function block_list_refusal
 
     ! hands over the full rows (rotations, references, particles) of the last block collected with rows; on the
     ! host backend those of the calling thread's last block

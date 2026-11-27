@@ -15,7 +15,7 @@ public :: assert_true, assert_false, assert_int, assert_real, assert_double, ass
 public :: begin_test_suite, end_test_suite, report_summary
 public :: tests_run, tests_failed
 public :: set_fixed_seed, bits_equal, test_devices, device_name, gpu_present, cpu_only_mlx, gpu_check_runs
-public :: gpu_only_skip
+public :: gpu_only_skip, cpu_matmul_shape_exact
 public :: judge_error, find_tolerance, family_seeds, seeded_uniform, seeded_array, shaped_error, digest_bits
 public :: wait_for_go_file
 
@@ -162,6 +162,17 @@ contains
         character(len=*), intent(in) :: what
         write(output_unit,'(A)') '    SKIP: GPU-only check on a CPU-only MLX build: '//trim(what)
     end subroutine gpu_only_skip
+
+    ! whether a product on MLX's CPU device has the same bits whatever the shape of the tile it is computed in:
+    ! measured so on Apple's CPU (Accelerate, MLXF_ACCELERATE_CPU from test/CMakeLists.txt); OpenBLAS on Linux
+    ! blocks by shape, and a list tile and a dense tile of the same pairs differ in the last bits there
+    logical function cpu_matmul_shape_exact()
+#ifdef MLXF_ACCELERATE_CPU
+        cpu_matmul_shape_exact = .true.
+#else
+        cpu_matmul_shape_exact = .false.
+#endif
+    end function cpu_matmul_shape_exact
 
     function device_name( dev ) result(name)
         integer, intent(in) :: dev

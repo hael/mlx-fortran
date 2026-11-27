@@ -49,6 +49,7 @@ mlxf_toy_polarft_calc polarft_calc%get_polar_coords simple_polarft_calc polarft_
 mlxf_toy_polarft_calc polarft_calc%get_ref_pft simple_polarft_calc polarft_calc%get_ref_pft
 mlxf_toy_polarft_calc vol_pad2ref_pfts_opt simple_polarft_calc vol_pad2ref_pfts_opt
 mlxf_toy_polarft_calc polarft_calc%set_sigma2_weights addition the fixtures have the shell weights k / sigma2 themselves; SIMPLE derives them from the spectra of assign_sigma2_noise in memoize_sigma2_weights
+mlxf_toy_polarft_calc polarft_calc%get_tile_plan addition inquiry: the tile plan, which the neighbourhood driver's occupancy pads the blocks to; SIMPLE has no tiles
 mlxf_toy_polarft_calc polarft_calc%set_tile_plan addition the particles and references of a workspace tile; no SIMPLE procedure or parameter carries the GPU route's layout
 mlxf_toy_polarft_calc polarft_calc%set_tail_form addition the dense score's tail as the compiled graph or the fused Metal kernel; SIMPLE has one CPU kernel
 mlxf_toy_polarft_calc polarft_calc%set_ref_route addition the projected references through the host memos or resident on the device to the tiles; SIMPLE's bank is a host section of pfts_refs
@@ -56,6 +57,8 @@ mlxf_toy_polarft_calc polarft_calc%kill_ref_tiles addition releases the device's
 mlxf_toy_polarft_calc polarft_calc%ref_tiles_current addition inquiry: the reference tiles are those of the memoized references, tile plan and tail, which the driver requires (SIMPLE's kernels read the one memo and stop when it is not memoized)
 mlxf_toy_polarft_calc polarft_calc%message addition inquiry: the reason of the last refusal; a mirrored procedure has no status argument and SIMPLE stops where the toy refuses
 mlxf_toy_polarft_calc polarft_calc%set_block_variates addition the fixture owns each pair's keyed variate; SIMPLE draws them inside the scorer from the scope of set_rnd_scope
+mlxf_toy_polarft_calc polarft_calc%set_block_refs addition the reference list of a block queued by submit_block, which is held to five dummies (score_block_posterior takes the list as SIMPLE's does)
+mlxf_toy_polarft_calc polarft_calc%set_block_pairs addition the pair list of a block queued by submit_block for the pair-list kernel, which is held to five dummies; SIMPLE scores listed pairs one at a time
 mlxf_toy_polarft_calc polarft_calc%set_block_banks addition the seed banks of a block queued by submit_block, which is held to five dummies
 mlxf_toy_polarft_calc polarft_calc%shifted_ptcl_terms addition a seed bank as the particle's terms with a shifted cross term, from a fixture's shifted FT(X.CTF); SIMPLE's memoize_shifted_ptcl shifts and transforms the particle itself
 mlxf_toy_polarft_calc polarft_calc%set_block_options addition the full rows of distances for the oracle's comparison, and the profiled stages
@@ -89,6 +92,27 @@ mlxf_toy_eul_prob_tab eul_prob_tab%batch_full_rows addition hands over every rot
 mlxf_toy_eul_prob_tab eul_prob_tab%batch_map_results addition hands over the maps' modes, losses and widths; SIMPLE refines them in the cell and keeps the refined entries
 mlxf_toy_eul_prob_tab eul_prob_tab%fill_seconds addition inquiry: the fill's host seconds by stage, the benchmark's columns (SIMPLE: get_fill_profile)
 mlxf_toy_eul_prob_tab eul_prob_tab%message addition inquiry: the reason of the last refusal; SIMPLE stops where the toy refuses
+
+# ---- the neighbourhood driver (src/main/strategies/search/probabilistic/simple_eul_prob_tab_neigh.f90), its view
+# distance (simple_eul_prob_tab_utils.f90) and the search-space map (src/main/strategies/search/simple_srchspace_map.f90) ----
+mlxf_toy_eul_prob_tab_neigh eul_prob_tab_neigh simple_eul_prob_tab_neigh eul_prob_tab_neigh
+mlxf_toy_eul_prob_tab_neigh eul_prob_tab_neigh%new_neigh_pipeline simple_eul_prob_tab_neigh eul_prob_tab_neigh%new_neigh_pipeline
+mlxf_toy_eul_prob_tab_neigh eul_prob_tab_neigh%fill_tab_range simple_eul_prob_tab_neigh eul_prob_tab_neigh%fill_tab_range
+mlxf_toy_eul_prob_tab_neigh eul_prob_tab_neigh%kill simple_eul_prob_tab_neigh eul_prob_tab_neigh%kill
+mlxf_toy_eul_prob_tab_neigh eul_prob_tab_neigh%set_eulspace addition the directions and the previous orientations come from the fixture; SIMPLE reads build%eulspace and build%spproj_field
+mlxf_toy_eul_prob_tab_neigh eul_prob_tab_neigh%set_subspace addition each direction's cell and each cell's representative; SIMPLE reads build%subspace_full2sub_map and build%subspace_inds
+mlxf_toy_eul_prob_tab_neigh eul_prob_tab_neigh%set_neigh_options addition the mode, cone, peaks and block order; SIMPLE reads prob_neigh_mode, athres_cont and npeaks from its parameters and cuts its blocks in its own order
+mlxf_toy_eul_prob_tab_neigh eul_prob_tab_neigh%set_neigh_cover addition the dense cover, every reference for every block and the lists selected after: the baseline a list route is judged against; SIMPLE has one route
+mlxf_toy_eul_prob_tab_neigh eul_prob_tab_neigh%batch_list_entries addition hands the listed entries over for the oracle's comparison; SIMPLE keeps them in its table for the assignment
+mlxf_toy_eul_prob_tab_neigh eul_prob_tab_neigh%batch_pooled_cells addition hands each particle's pooled cells over for the oracle's rule; SIMPLE keeps them in its workspace
+mlxf_toy_eul_prob_tab_neigh eul_prob_tab_neigh%fill_occupancy addition inquiry: listed and computed pairs, blocks and the host step's seconds; SIMPLE scores per pair and counts nothing
+mlxf_toy_eul_prob_tab_utils cone_view_dist addition SIMPLE's cone_view_dist in c1 without the mirror view, on unit vectors: SIMPLE's takes the point group, Euler angles and the mirror
+mlxf_toy_srchspace_map srchspace_map simple_srchspace_map srchspace_map
+mlxf_toy_srchspace_map srchspace_map%new simple_srchspace_map srchspace_map%new
+mlxf_toy_srchspace_map srchspace_map%get_sub2full_map simple_srchspace_map srchspace_map%get_sub2full_map
+mlxf_toy_srchspace_map srchspace_map%get_full2sub_map simple_srchspace_map srchspace_map%get_full2sub_map
+mlxf_toy_srchspace_map srchspace_map%kill simple_srchspace_map srchspace_map%kill
+mlxf_toy_srchspace_map srchspace_map%message addition inquiry: the reason of the last refusal; SIMPLE stops where the toy refuses
 
 # ---- its GPU workspace: everything here is the toy's own (the seam, policy section 2, point 6) ----
 mlxf_toy_polarft_workspace polarft_workspace addition the one type that holds MLX handles and compiled functions: one parity's resident reference tiles and the blocks in flight

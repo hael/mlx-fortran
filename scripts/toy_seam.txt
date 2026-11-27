@@ -13,6 +13,8 @@
 
 mlxf_toy_device_work host
 mlxf_toy_eul_prob_tab host
+mlxf_toy_eul_prob_tab_neigh host
+mlxf_toy_eul_prob_tab_utils host
 mlxf_toy_pcg_solver host
 mlxf_toy_pcg_solver_mlx device
 mlxf_toy_polarft_block host
@@ -26,6 +28,7 @@ mlxf_toy_polarft_shiftmap host
 mlxf_toy_polarft_shiftmap_mlx glue
 mlxf_toy_polarft_workspace device
 mlxf_toy_polarft_workspace_lifecycle device
+mlxf_toy_polarft_workspace_lists device
 mlxf_toy_polarft_workspace_mapreduce device
 mlxf_toy_polarft_workspace_score device
 mlxf_toy_polarft_workspace_shiftmap device
@@ -38,3 +41,4 @@ mlxf_toy_projector_workspace device
 mlxf_toy_reconstructor_pcg host
 mlxf_toy_reconstructor_pcg_mlx glue
 mlxf_toy_reconstructor_pcg_workspace device
+mlxf_toy_srchspace_map host

@@ -544,6 +544,22 @@ layout does 2.9 million pairs per second on 24 cores; the target machine is an M
       headers off Apple (`-isystem`, `test/CMakeLists.txt`), so the header's warning is mlx-c's and the probe's own
       code keeps `-Werror`.
 
+39. **`gather_mm`'s fast sorted route serves one row of the left operand only: is a grouped route for larger
+    left operands planned?** Status: open, not sent; seen 2026-11-27 with MLX 0.32.4 on the M5 Ultra (run
+    `mlxf_kernel_k3`).
+    - Ask: `GatherMM::eval_gpu` takes the sorted route (`gather_mm_rhs`) only when the left operand has one row
+      and only the right list is given; one row or one column otherwise takes the matrix-vector route, and the wide
+      route `gemv_wide_config` gives only to float16 and bfloat16 outputs. Every other shape takes the generic
+      route, which looks every matrix up by its index and reads `sorted_indices` not at all. A product whose left
+      operand is a tile of particles (16 to 64 rows) against reference tiles chosen per bin cannot use the sorted
+      route. Measured: the sorted route ran at 4 times the unsorted (matrix-vector) one and equalled `matmul` bit for
+      bit, but per listed pair it reached 0.40 times a plain `matmul` of gathered tiles. Is a sorted route for a
+      left operand of several rows (grouped GEMM over runs of equal right indices) planned, and for float32?
+    - Where: `mlx/backend/metal/matmul.cpp`, `GatherMM::eval_gpu` (at `v0.32.4`). Reproducer: the run's scratch
+      probe of the four layouts (its report names it), not kept in the repository.
+    - Meanwhile: the toy gathers the listed references with `mlx_gather` into tiles of the dense graph, and a
+      custom kernel (a SIMD group per pair and bin) scores sparse lists.
+
 ## For information (not Apple's to fix)
 
 - gfortran mis-finalizes derived types in four patterns (allocatable components with defined assignment,

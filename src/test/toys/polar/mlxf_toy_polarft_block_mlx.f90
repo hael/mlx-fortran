@@ -1,6 +1,7 @@
 !@descr: the toy polar calculator's block scoring on MLX (glue): a block queued in its parity's workspace and collected from it
-! The synchronous scorer is a submission to the first slot and its collection. The body stands under USE_MLX; a
-! build without MLX compiles the stubs, which refuse.
+! The synchronous scorer is a submission to the first slot and its collection. A block's reference list crosses
+! here: every reference in order is the dense block, any other list the workspace's list form. The body stands
+! under USE_MLX; a build without MLX compiles the stubs, which refuse.
 submodule (mlxf_toy_polarft_calc) mlxf_toy_polarft_block_mlx
 #ifdef USE_MLX
 use mlxf_toy_polarft_workspace, only: polarft_workspace
@@ -20,22 +21,15 @@ contains
         complex(real32), optional, intent(in)    :: banks(:,:,:)
         logical,         optional, intent(in)    :: l_bank(nb)
         type(polarft_block_spec) :: blk
-        integer                  :: i
         dists    = huge(dists)
         irots    = 1
         self%msg = ''
-        ! the workspace's tiles hold all the references in their order
         if( present(banks) .neqv. present(l_bank) )then
             self%msg = 'polarft_calc%score_block_posterior: refused: banks and l_bank go together'
-        else if( nr /= self%nrefs )then
-            self%msg = 'polarft_calc%score_block_posterior: refused: the block''s reference list is not the memoized one'
-        endif
-        if( len(self%msg) > 0 ) return
-        if( any(irefs /= [(i, i = 1, nr)]) )then
-            self%msg = 'polarft_calc%score_block_posterior: refused: the block''s reference list is not the memoized one'
             return
         endif
         blk%slot  = 1
+        blk%irefs = irefs
         blk%temps = temps
         if( present(banks) )then
             blk%banks  = banks
@@ -105,8 +99,23 @@ contains
         type(polarft_block_spec), intent(inout) :: blk
         integer,                  intent(in)    :: iptcls(:)
         integer,                  intent(out)   :: ieo
+        integer :: i
         ieo = 0
         if( allocated(self%u_next) ) call move_alloc(self%u_next, blk%u)
+        ! a pending pair list makes the block a pair-list block
+        if( allocated(self%pair_ptr_next) )then
+            call move_alloc(self%pair_ptr_next, blk%pair_ptr)
+            if( allocated(blk%irefs) ) deallocate(blk%irefs)
+            if( allocated(self%refs_next) ) call move_alloc(self%refs_next, blk%irefs)
+        endif
+        ! a list given with the block replaces the pending one, which is consumed either way
+        if( allocated(self%refs_next) )then
+            if( .not. allocated(blk%irefs) )then
+                call move_alloc(self%refs_next, blk%irefs)
+            else
+                deallocate(self%refs_next)
+            endif
+        endif
         if( allocated(self%banks_next) .and. .not. allocated(blk%banks) )then
             call move_alloc(self%banks_next, blk%banks)
             call move_alloc(self%l_bank_next, blk%l_bank)
@@ -132,6 +141,18 @@ contains
             self%msg = 'polarft_calc: refused: no variates for the block (set_block_variates)'
         endif
         if( len(self%msg) > 0 ) return
+        if( allocated(blk%pair_ptr) )then
+            if( size(blk%pair_ptr) /= size(iptcls) + 1 ) self%msg = 'polarft_calc: refused: the pair list is not of '//&
+                &'the block''s particles'
+            if( len(self%msg) > 0 ) return
+        else if( allocated(blk%irefs) )then
+            self%msg = block_list_refusal(self, blk%irefs)
+            if( len(self%msg) > 0 ) return
+            ! every reference in order is the dense block, scored against the resident tiles
+            if( size(blk%irefs) == self%nrefs )then
+                if( all(blk%irefs == [(i, i = 1, self%nrefs)]) ) deallocate(blk%irefs)
+            endif
+        endif
         blk%islots = self%pinds(iptcls)
         if( any(blk%islots < 1) )then
             self%msg = 'polarft_calc: refused: a particle index is not in the batch'

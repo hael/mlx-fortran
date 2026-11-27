@@ -11,7 +11,7 @@ use mlxf_test_defs, only: POLAR_DIST_MAX, POLAR_DIST_INVALID, POLAR_DIST_VALID, 
 implicit none
 
 ! why the host kernel cannot score a block (block_refusal's codes)
-character(len=*), parameter :: BLOCK_REFUSALS(13) = [character(len=120) :: &
+character(len=*), parameter :: BLOCK_REFUSALS(15) = [character(len=120) :: &
     &'polarft_calc: refused: no calculator on the host backend (new)', &
     &'polarft_calc: refused: references were set and not memoized (memoize_refs)', &
     &'polarft_calc: refused: the reference tiles are not those of the memoized references and tile plan (memoize_refs)', &
@@ -24,7 +24,9 @@ character(len=*), parameter :: BLOCK_REFUSALS(13) = [character(len=120) :: &
     &'polarft_calc%score_block_posterior: refused: banks and l_bank go together, the banks (2nk, pftsz+1, nb)', &
     &'polarft_calc: refused: a particle index is outside the calculator''s range', &
     &'polarft_calc: refused: a particle index is not in the batch', &
-    &'polarft_calc: refused: the block mixes the two halves']
+    &'polarft_calc: refused: the block mixes the two halves', &
+    &'polarft_calc: refused: an empty reference list', &
+    &'polarft_calc: refused: the reference list repeats a reference']
 
 contains
 
@@ -149,6 +151,10 @@ contains
             why = 9
         else if( any(iptcls < self%pfromto(1) .or. iptcls > self%pfromto(2)) )then
             why = 11
+        else if( size(irefs) < 1 )then
+            why = 14
+        else if( has_repeat(irefs, self%nrefs) )then
+            why = 15
         endif
         if( why /= 0 ) return
         do b = 1, size(iptcls)
@@ -160,6 +166,36 @@ contains
             if( self%iseven(i) .neqv. self%iseven(self%pinds(iptcls(1))) ) why = 13
         end do
     end function block_refusal
+
+    ! whether a list of references of 1..nrefs holds one twice
+    pure logical function has_repeat( irefs, nrefs )
+        integer, intent(in) :: irefs(:), nrefs
+        logical :: seen(nrefs)
+        integer :: r
+        has_repeat = .false.
+        seen       = .false.
+        do r = 1, size(irefs)
+            if( seen(irefs(r)) )then
+                has_repeat = .true.
+                return
+            endif
+            seen(irefs(r)) = .true.
+        end do
+    end function has_repeat
+
+    pure module function block_list_refusal( self, irefs ) result(msg)
+        class(polarft_calc), intent(in) :: self
+        integer,             intent(in) :: irefs(:)
+        character(len=:), allocatable :: msg
+        msg = ''
+        if( size(irefs) < 1 )then
+            msg = trim(BLOCK_REFUSALS(14))
+        else if( any(irefs < 1 .or. irefs > self%nrefs) )then
+            msg = trim(BLOCK_REFUSALS(9))
+        else if( has_repeat(irefs, self%nrefs) )then
+            msg = trim(BLOCK_REFUSALS(15))
+        endif
+    end function block_list_refusal
 
     ! the nrots samples of the inverse real transform of a pair's pftsz+1 bins, unscaled, as a direct sum: the
     ! first and the last bin once (their imaginary parts are ignored, as an inverse real transform ignores them),
@@ -326,6 +362,34 @@ contains
         if( allocated(self%u_next) ) deallocate(self%u_next)
         if( allocated(u) ) call move_alloc(u, self%u_next)
     end subroutine set_block_variates
+
+    module subroutine set_block_refs( self, irefs )
+        class(polarft_calc), intent(inout) :: self
+        integer,             intent(in)    :: irefs(:)
+        if( allocated(self%refs_next) ) deallocate(self%refs_next)
+        self%msg = block_list_refusal(self, irefs)
+        if( len(self%msg) == 0 ) self%refs_next = irefs
+    end subroutine set_block_refs
+
+    module subroutine set_block_pairs( self, ptr, irefs )
+        class(polarft_calc), intent(inout) :: self
+        integer,             intent(in)    :: ptr(:), irefs(:)
+        integer :: nb
+        if( allocated(self%refs_next) ) deallocate(self%refs_next)
+        if( allocated(self%pair_ptr_next) ) deallocate(self%pair_ptr_next)
+        self%msg = ''
+        nb       = size(ptr) - 1
+        if( nb < 1 .or. size(irefs) < 1 )then
+            self%msg = 'polarft_calc%set_block_pairs: refused: a pair at least'
+        else if( ptr(1) /= 1 .or. ptr(nb + 1) /= size(irefs) + 1 .or. any(ptr(2:) < ptr(:nb)) )then
+            self%msg = 'polarft_calc%set_block_pairs: refused: the pointers are not a partition of the references'
+        else if( any(irefs < 1 .or. irefs > self%nrefs) )then
+            self%msg = trim(BLOCK_REFUSALS(9))
+        endif
+        if( len(self%msg) > 0 ) return
+        self%pair_ptr_next = ptr
+        self%refs_next     = irefs
+    end subroutine set_block_pairs
 
     module subroutine set_block_banks( self, banks, l_bank )
         class(polarft_calc), intent(inout) :: self

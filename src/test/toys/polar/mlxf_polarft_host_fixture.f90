@@ -3,18 +3,24 @@
 ! imports no MLX name. The values come from an integer hash of the seed, computed in double precision and rounded
 ! once, so that every compiler and build makes the same fixture: references per half, particles as their CTF
 ! times a reference of their half rotated plus noise (one particle a thousandth as strong, whose rows are
-! invalid), shell weights, inverse temperatures and keys of the draws. The table is filled as SIMPLE fills it:
-! calculator, setters, memoization, the driver's fill_tab_range.
+! invalid), shell weights, inverse temperatures and keys of the draws; the directions on a golden-angle spiral and
+! the particles' previous orientations near a direction, from hash streams of their own. The table is filled as
+! SIMPLE fills it: calculator, setters, memoization, the driver's fill_tab_range; the neighbourhood tables the
+! same way through eul_prob_tab_neigh, the cells those of PH_NCELLS centres on a spiral of their own.
 module mlxf_polarft_host_fixture
 use, intrinsic :: iso_fortran_env, only: int32, int64, real32, real64
-use mlxf_test_defs,        only: PH_PFTSZ, PH_KFROM, PH_NK, PH_NREFS, PH_NPTCLS, PFTC_BLOCK_NB, parameters, &
-                                 polarft_host_fixture, polarft_host_table
-use mlxf_toy_polarft_calc, only: polarft_calc
-use mlxf_toy_eul_prob_tab, only: eul_prob_tab
+use mlxf_test_defs,              only: PH_PFTSZ, PH_KFROM, PH_NK, PH_NREFS, PH_NPTCLS, PH_NSPACE, PH_PREV_SPAN, &
+                                       PH_NCELLS, PFTC_BLOCK_NB, POLARFT_TAILS, parameters, polarft_host_fixture, &
+                                       polarft_host_table, polarft_neigh_table
+use mlxf_toy_polarft_calc,       only: polarft_calc
+use mlxf_toy_eul_prob_tab,       only: eul_prob_tab
+use mlxf_toy_eul_prob_tab_neigh, only: eul_prob_tab_neigh
+use mlxf_toy_eul_prob_tab_utils, only: cone_view_dist
+use mlxf_toy_srchspace_map,      only: srchspace_map
 implicit none
 
 public :: make_polarft_host_fixture, polarft_host_half, polarft_host_calc, fill_polarft_host_table
-public :: write_polarft_host_table
+public :: write_polarft_host_table, polarft_host_centres, fill_polarft_neigh_table, write_polarft_neigh_table
 private
 
 integer, parameter :: NROTS = 2 * PH_PFTSZ
@@ -103,7 +109,147 @@ contains
         do r = 1, PH_NREFS
             fx%ref_full(r) = 1000 + 7 * r
         end do
+        call orientations(fx)
     end function make_polarft_host_fixture
+
+    ! the directions, a golden-angle spiral (polar angle acos(1 - (2i - 1)/n), azimuth i times the golden angle),
+    ! and particle i's previous orientation: a direction of the seed's choice tilted by at most PH_PREV_SPAN
+    ! degrees towards a seeded azimuth
+    subroutine orientations( fx )
+        type(polarft_host_fixture), intent(inout) :: fx
+        real(real64), parameter :: PI = acos(-1._real64)
+        real(real64)            :: ph, a, d(3), e1(3), e2(3)
+        integer                 :: i, j
+        allocate(fx%prev(3, PH_NPTCLS))
+        fx%dirs = spiral(PH_NSPACE)
+        do i = 1, PH_NPTCLS
+            j = 1 + int(real(PH_NSPACE, real64) * unit_of(fx%seed, 60, i, 1))
+            d = fx%dirs(:, min(j, PH_NSPACE))
+            ! a basis of the plane normal to d
+            e1 = [-d(2), d(1), 0._real64]
+            if( norm2(e1) < 1.e-6_real64 ) e1 = [1._real64, 0._real64, 0._real64]
+            e1 = e1 / norm2(e1)
+            e2 = [d(2) * e1(3) - d(3) * e1(2), d(3) * e1(1) - d(1) * e1(3), d(1) * e1(2) - d(2) * e1(1)]
+            a  = PH_PREV_SPAN * PI / 180._real64 * unit_of(fx%seed, 61, i, 1)
+            ph = 2._real64 * PI * unit_of(fx%seed, 62, i, 1)
+            fx%prev(:, i) = cos(a) * d + sin(a) * (cos(ph) * e1 + sin(ph) * e2)
+        end do
+    end subroutine orientations
+
+    ! n unit vectors on the golden-angle spiral
+    function spiral( n ) result(v)
+        integer, intent(in) :: n
+        real(real64) :: v(3, n), th, ph
+        integer      :: j
+        do j = 1, n
+            th = acos(1._real64 - real(2 * j - 1, real64) / real(n, real64))
+            ph = real(j, real64) * acos(-1._real64) * (3._real64 - sqrt(5._real64))
+            v(:, j) = [sin(th) * cos(ph), sin(th) * sin(ph), cos(th)]
+        end do
+    end function spiral
+
+    ! the centres of the fixture's cells
+    function polarft_host_centres() result(v)
+        real(real64) :: v(3, PH_NCELLS)
+        v = spiral(PH_NCELLS)
+    end function polarft_host_centres
+
+    ! a neighbourhood fill of the fixture through eul_prob_tab_neigh on the backend, team, tail and options of
+    ! tab, its cells by srchspace_map from the centres: the listed entries, pooled cells and occupancy, and the
+    ! first refusal in tab%msg
+    subroutine fill_polarft_neigh_table( fx, tab )
+        type(polarft_host_fixture), intent(in)    :: fx
+        type(polarft_neigh_table),  intent(inout) :: tab
+        type(polarft_calc), target :: pftc
+        type(eul_prob_tab_neigh)   :: drv
+        type(srchspace_map)        :: map
+        type(parameters)           :: params
+        real(real64)               :: centres(3, PH_NCELLS)
+        real                       :: distmat(PH_NCELLS, PH_NSPACE)
+        integer                    :: i, c
+        params = parameters(pftsz=PH_PFTSZ, box=2 * PH_PFTSZ, nthr=tab%nthr, l_mlx=tab%l_mlx)
+        call polarft_host_calc(fx, params, pftc, tab%msg)
+        if( len(tab%msg) == 0 .and. tab%tail /= POLARFT_TAILS%graph )then
+            call pftc%set_tail_form(tab%tail)
+            if( len(pftc%message()) == 0 ) call pftc%memoize_refs()
+            call note(pftc%message())
+        endif
+        centres = polarft_host_centres()
+        do i = 1, PH_NSPACE
+            do c = 1, PH_NCELLS
+                distmat(c, i) = real(cone_view_dist(centres(:, c), fx%dirs(:, i)))
+            end do
+        end do
+        call map%new(PH_NSPACE, PH_NCELLS, distmat)
+        call note(map%message())
+        if( len(tab%msg) == 0 )then
+            call drv%new_neigh_pipeline(params, pftc, [(i, i = 1, PH_NPTCLS)])
+            call note(drv%message())
+            call drv%set_draw_keys(fx%seed, fx%ref_full)
+            call note(drv%message())
+            call drv%set_temps(fx%temps)
+            call note(drv%message())
+            call drv%set_fill_options(tab%block_nb, tab%nslots, .false., .false.)
+            call note(drv%message())
+            call drv%set_eulspace(fx%dirs, fx%prev)
+            call note(drv%message())
+            call drv%set_subspace(map%get_full2sub_map(), map%get_sub2full_map())
+            call note(drv%message())
+            call drv%set_neigh_options(trim(tab%mode), tab%cone, tab%npeaks, tab%order)
+            call note(drv%message())
+            call drv%set_neigh_cover(trim(tab%cover))
+            call note(drv%message())
+            if( len(tab%msg) == 0 )then
+                call drv%fill_tab_range(1, PH_NPTCLS)
+                call note(drv%message())
+            endif
+            if( len(tab%msg) == 0 )then
+                call drv%batch_list_entries(tab%lst)
+                call drv%batch_pooled_cells(tab%pool_ptr, tab%pool_cells)
+                tab%occ = drv%fill_occupancy()
+            endif
+            call drv%kill()
+        endif
+        call map%kill()
+        call pftc%kill()
+
+      contains
+
+        subroutine note( m )
+            character(len=*), intent(in) :: m
+            if( len(tab%msg) == 0 .and. len(m) > 0 ) tab%msg = m
+        end subroutine note
+
+    end subroutine fill_polarft_neigh_table
+
+    ! a neighbourhood table as lines of standard output, every value's bit pattern in hexadecimal: a header, then
+    ! per column its particle, its listed references and their distances and rotations; for state also the
+    ! pooled cells and the representatives' entries
+    subroutine write_polarft_neigh_table( fx, tab )
+        type(polarft_host_fixture), intent(in) :: fx
+        type(polarft_neigh_table),  intent(in) :: tab
+        integer :: j, k
+        write(*,'(a,i0,a,f6.1,a,i0)') 'neigh_host table seed=', fx%seed, ' mode='//trim(tab%mode)//' cone=', tab%cone, &
+            &' order=', tab%order
+        do j = 1, size(tab%lst%order)
+            write(*,'(a,i0)', advance='no') 'neigh_host '//trim(tab%mode)//' ', tab%lst%order(j)
+            do k = tab%lst%ptr(j), tab%lst%ptr(j + 1) - 1
+                write(*,'(1x,i0,1x,z8.8,1x,z8.8)', advance='no') tab%lst%refs(k), transfer(tab%lst%dists(k), 0_int32), &
+                    &int(tab%lst%irots(k), int32)
+            end do
+            write(*,'(a)') ''
+            if( .not. allocated(tab%pool_ptr) ) cycle
+            write(*,'(a,i0,a)', advance='no') 'neigh_host pool ', tab%lst%order(j), ':'
+            do k = tab%pool_ptr(j), tab%pool_ptr(j + 1) - 1
+                write(*,'(1x,i0)', advance='no') tab%pool_cells(k)
+            end do
+            do k = 1, size(tab%lst%reps)
+                write(*,'(1x,z8.8,1x,z8.8)', advance='no') transfer(tab%lst%rep_dists(k, j), 0_int32), &
+                    &int(tab%lst%rep_irots(k, j), int32)
+            end do
+            write(*,'(a)') ''
+        end do
+    end subroutine write_polarft_neigh_table
 
     ! a calculator of the fixture on the backend and with the team of params: references and particles set and
     ! memoized (on the MLX backend with the reference tiles); msg is the first refusal, empty when there was none

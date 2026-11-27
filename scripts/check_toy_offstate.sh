@@ -7,10 +7,11 @@
 # without USE_MLX, with no path to the library's modules and no link to the library) in a scratch directory under
 # TMPDIR, in Debug and Release with MLXF_WERROR, builds it and runs its program mlxf_offstate_exec, which fails
 # when a refusal of the MLX backend is missing. The program's lines `polarft_host ...` are the table of the polar
-# host route in hexadecimal. With --exec, a Release mlxf_test_exec of this checkout, the same lines of its
-# sub-suite `unit_kernels suite=polarft_host` (the host backend, one thread) must equal the Release program's byte
-# for byte. --fc names another GNU Fortran (the gate is the default one); --keep keeps the builds and logs in DIR.
-# A relative path of an option is the caller's: it is made absolute when the option is read.
+# host route in hexadecimal, its lines `neigh_host ...` the neighbourhood tables of the same fixture. With --exec,
+# a Release mlxf_test_exec of this checkout, the same lines of its sub-suites `unit_kernels suite=polarft_host` and
+# `suite=eul_prob_tab_neigh` (the host backend, one thread) must equal the Release program's byte for byte. --fc
+# names another GNU Fortran (the gate is the default one); --keep keeps the builds and logs in DIR. A relative path
+# of an option is the caller's: it is made absolute when the option is read.
 # No binary of the build may refer to an MLX symbol. Run by scripts/release_gate.sh; not a CTest entry.
 # Exit 0 when both builds configure, build without a warning and run, and the tables agree when --exec is given.
 set -u
@@ -80,6 +81,7 @@ for build_type in Debug Release; do
     ( cd "$B" && OMP_NUM_THREADS=1 ./mlxf_offstate_exec ) > "$WORK/$build_type.run.log" 2>&1 ||
         { tail -n 30 "$WORK/$build_type.run.log"; fail "$build_type: mlxf_offstate_exec failed"; }
     grep '^polarft_host ' "$WORK/$build_type.run.log" > "$WORK/$build_type.table.txt"
+    grep '^neigh_host ' "$WORK/$build_type.run.log" > "$WORK/$build_type.neigh.txt"
     echo "check_toy_offstate: $build_type built without the library in $((SECONDS - t0)) s and ran" \
         "($(grep -c . "$WORK/$build_type.table.txt") table lines)"
 done
@@ -92,6 +94,14 @@ if [[ -n "$EXEC" ]]; then
     [[ -s "$WORK/exec.table.txt" ]] || fail "$EXEC wrote no table of the host route"
     cmp "$WORK/Release.table.txt" "$WORK/exec.table.txt" ||
         fail "the host route's table differs between the build without MLX and $EXEC"
-    compared="the host route's table equals mlxf_test_exec's byte for byte ($(grep -c . "$WORK/exec.table.txt") lines)"
+    ( cd "$WORK/exec" && OMP_NUM_THREADS=1 OMP_THREAD_LIMIT=4 MLX_ENABLE_TF32=0 "$EXEC" test=unit_kernels \
+        suite=eul_prob_tab_neigh ) > "$WORK/exec.neigh.log" 2>&1 ||
+        { tail -n 30 "$WORK/exec.neigh.log"; fail "$EXEC: the sub-suite eul_prob_tab_neigh failed"; }
+    grep '^neigh_host ' "$WORK/exec.neigh.log" > "$WORK/exec.neigh.txt"
+    [[ -s "$WORK/exec.neigh.txt" ]] || fail "$EXEC wrote no neighbourhood table of the host route"
+    cmp "$WORK/Release.neigh.txt" "$WORK/exec.neigh.txt" ||
+        fail "the host route's neighbourhood tables differ between the build without MLX and $EXEC"
+    compared="the host route's table equals mlxf_test_exec's byte for byte ($(grep -c . "$WORK/exec.table.txt") lines),"
+    compared="$compared and its neighbourhood tables ($(grep -c . "$WORK/exec.neigh.txt") lines)"
 fi
 echo "check_toy_offstate: passed (Debug and Release without USE_MLX and without the library; $compared)"

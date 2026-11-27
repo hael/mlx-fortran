@@ -779,6 +779,18 @@ contains
             &'tile plan changed after the references were memoized')
         call pftc%set_tile_plan(BT, RT)
         call pftc%memoize_refs
+        tb = toy_banks(pftc, blk)
+        ! another order or another list of the references is scored; its list tiles stay with the workspace
+        u = blk%u
+        call pftc%set_block_variates(u)
+        call pftc%score_block_posterior(6, blk%ptcl_ids, NREFS, [2, 1, 3, 4, 5, 6, 7, 8], blk%temps, ent%dists, &
+            &ent%irots, banks=tb, l_bank=blk%l_bank)
+        call assert_int(0, refused(pftc), device_name(dev)//': a block naming the references in another order is '//&
+            &'scored')
+        u = blk%u(1:3, :)
+        call pftc%set_block_variates(u)
+        call pftc%score_block_posterior(6, blk%ptcl_ids, 3, [1, 2, 3], blk%temps, d3, i3, banks=tb, l_bank=blk%l_bank)
+        call assert_int(0, refused(pftc), device_name(dev)//': a block naming another list of references is scored')
         live0 = mlx_live_count()
         bad   = make_block(fx, ALL_REFS, [1, 3, 5, 7, 9, 2])
         call score_block(pftc, bad, ent)
@@ -786,22 +798,9 @@ contains
             &'is refused')
         u = blk%u
         call pftc%set_block_variates(u)
-        tb = toy_banks(pftc, blk)
         call pftc%score_block_posterior(6, blk%ptcl_ids, NREFS, ALL_REFS, blk%temps, ent%dists, ent%irots, &
             &banks=tb(:, 1:NBINS-1, :), l_bank=blk%l_bank)
         call assert_true(refused_for(pftc, 'shapes'), device_name(dev)//': seed banks of another shape are refused')
-        u = blk%u
-        call pftc%set_block_variates(u)
-        call pftc%score_block_posterior(6, blk%ptcl_ids, NREFS, [2, 1, 3, 4, 5, 6, 7, 8], blk%temps, ent%dists, &
-            &ent%irots, banks=tb, l_bank=blk%l_bank)
-        call assert_true(refused_for(pftc, 'reference list'), device_name(dev)//': a block naming the references '//&
-            &'in another order is refused')
-        u = blk%u
-        call pftc%set_block_variates(u)
-        call pftc%score_block_posterior(6, blk%ptcl_ids, 3, [1, 2, 3], blk%temps, d3, i3, banks=tb, &
-            &l_bank=blk%l_bank)
-        call assert_true(refused_for(pftc, 'reference list'), device_name(dev)//': a block naming another list '//&
-            &'of references is refused')
         u = blk%u
         call pftc%set_block_variates(u)
         call pftc%score_block_posterior(6, blk%ptcl_ids, NREFS, ALL_REFS, blk%temps, ent%dists, ent%irots, &

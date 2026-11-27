@@ -279,10 +279,66 @@ integer, parameter :: PH_KFROM  = 2
 integer, parameter :: PH_NK     = 6
 integer, parameter :: PH_NREFS  = 40
 integer, parameter :: PH_NPTCLS = 44
+! the fixture's references read as states of directions (reference (state - 1) nspace + i has direction i), and
+! the largest angle of a particle's previous orientation from its direction (degrees), so that no cone is empty
+integer,      parameter :: PH_NSPACE    = 20
+integer,      parameter :: PH_NSTATES   = 2
+real(real64), parameter :: PH_PREV_SPAN = 10._real64
+
+! the neighbourhood fill on the fixture: its cones (degrees), its cells (centres on a spiral of their own), the
+! peaks per state of the state fill
+real(real64), parameter :: PH_CONES(2) = [30._real64, 60._real64]
+integer,      parameter :: PH_NCELLS   = 4
+integer,      parameter :: PH_NPEAKS   = 2
+
+! the block orders of the neighbourhood fill: the batch's, or SIMPLE's (by half, then by the cell of the
+! particle's previous direction)
+type :: neigh_block_orders
+    integer :: batch  = 1
+    integer :: simple = 2
+end type neigh_block_orders
+type(neigh_block_orders), parameter :: NEIGH_ORDERS = neigh_block_orders()
+
+! a neighbourhood fill's listed entries: order(j) the place in pinds of the particle of column j (the batch's
+! order, the even half first); per column j its references refs(ptr(j):ptr(j+1)-1), ascending, with their
+! distances and drawn rotations; for the state fill also the representatives' list (state, cell) and every
+! column's entries against it
+type :: polar_list_entries
+    integer,      allocatable :: order(:)
+    integer,      allocatable :: ptr(:)
+    integer,      allocatable :: refs(:)
+    real(real32), allocatable :: dists(:)
+    integer,      allocatable :: irots(:)
+    integer,      allocatable :: reps(:)
+    real(real32), allocatable :: rep_dists(:,:)
+    integer,      allocatable :: rep_irots(:,:)
+end type polar_list_entries
+
+! one neighbourhood fill of the fixture: the backend, host team, tail, slots, block size, mode, cone, peaks and
+! block order and cover (route: the lists' unions; dense: every reference; pairs: the pair-list kernel) asked for; the listed entries, every
+! column's pooled cells, the fill's statistics (eul_prob_tab_neigh%fill_occupancy), and the reason of a refusal
+type :: polarft_neigh_table
+    logical                       :: l_mlx    = .false.
+    integer                       :: nthr     = 1
+    integer                       :: tail     = POLARFT_TAILS%graph
+    integer                       :: nslots   = 1
+    integer                       :: block_nb = 8
+    character(len=8)              :: mode     = 'geom'
+    real(real64)                  :: cone     = 30._real64
+    integer                       :: npeaks   = PH_NPEAKS
+    integer                       :: order    = NEIGH_ORDERS%simple
+    character(len=8)              :: cover    = 'route'
+    type(polar_list_entries)      :: lst
+    integer,          allocatable :: pool_ptr(:)
+    integer,          allocatable :: pool_cells(:)
+    real(real64)                  :: occ(10)  = 0._real64
+    character(len=:), allocatable :: msg
+end type polarft_neigh_table
 
 ! the fixture's values of one seed: the shell weights k / sigma2 of both halves, the reference rings of both
-! parities, the particles' rings and CTFs, their inverse temperatures, and each reference's full index (the key of
-! its draws)
+! parities, the particles' rings and CTFs, their inverse temperatures, each reference's full index (the key of
+! its draws), the directions (unit vectors, 3 x PH_NSPACE) and the particles' previous orientations (unit
+! vectors, 3 x PH_NPTCLS)
 type :: polarft_host_fixture
     integer                      :: seed = 0
     real(real64),    allocatable :: w(:,:)
@@ -291,6 +347,8 @@ type :: polarft_host_fixture
     real(real32),    allocatable :: ctf(:,:,:)
     real(real32),    allocatable :: temps(:)
     integer,         allocatable :: ref_full(:)
+    real(real64),    allocatable :: dirs(:,:)
+    real(real64),    allocatable :: prev(:,:)
 end type polarft_host_fixture
 
 ! one fill of the fixture's table: the backend and the host team asked for, whether the full rows are kept; the
@@ -318,8 +376,10 @@ type :: polarft_tile_spec
 end type polarft_tile_spec
 
 ! one block for a workspace: the slot it is queued in, the batch slots of its particles in the calculator's
-! memos, their weighted square sums and inverse temperatures, each pair's variate (references, particles), and
-! the seed banks (2nk, pftsz+1, particles of the block), particle terms with a shifted cross term, that replace
+! memos, their weighted square sums and inverse temperatures, the block's reference list when it is not every
+! reference in order (the entries and variates then follow the list), or with pair_ptr its pair list (particle b's
+! references irefs(pair_ptr(b):pair_ptr(b+1)-1), its entries and variates (1, pairs)), each pair's variate
+! (references, particles), and the seed banks (2nk, pftsz+1, particles of the block), particle terms with a shifted cross term, that replace
 ! a particle's terms where l_bank; rows asks for the full rows of distances as well; profile evaluates after
 ! every stage and adds the stages' seconds
 type :: polarft_block_spec
@@ -329,6 +389,8 @@ type :: polarft_block_spec
     integer,         allocatable :: islots(:)
     real(real64),    allocatable :: wsq(:)
     real(real32),    allocatable :: temps(:)
+    integer,         allocatable :: irefs(:)
+    integer,         allocatable :: pair_ptr(:)
     real(real32),    allocatable :: u(:,:)
     complex(real32), allocatable :: banks(:,:,:)
     logical,         allocatable :: l_bank(:)
@@ -370,6 +432,22 @@ integer,      parameter :: POLAR_FIXTURE_ROT_CPU = 0
 ! below 1e-4 over the fixture's 96 pairs
 real(real64), parameter :: POLAR_ROW_FACTOR      = 2._real64
 integer,      parameter :: POLAR_FIXTURE_ROT_Q   = 1
+! the reference lists' calibration on the CPU device, the polar host fixture's seed 1 (every list of the
+! sub-suite eul_prob_tab_neigh against the memo oracle), frozen: e_cpu and n_cpu as the fixture's pair above; the
+! gates are POLAR_ROW_FACTOR times e_cpu and max(factor * n_cpu, POLAR_FIXTURE_ROT_Q)
+real(real64), parameter :: POLAR_NEIGH_ERR_CPU = 1.9740748624149251e-07_real64
+integer,      parameter :: POLAR_NEIGH_ROT_CPU = 0
+! the lists' calibration on the accuracy block (bench_polar_table suite=neigh check=1: the case's geometry, block
+! seed 1, the CPU device, geom and state together), frozen: e_cpu, and n_cpu the drawn rotations that differ from
+! the oracle's draw on its own row with the pair's variate; the gates are POLAR_ROW_FACTOR times e_cpu and
+! max(factor * n_cpu, POLAR_BLOCK_ROT_Q)
+! the pair-list kernel against the dense table on the GPU (the compiled tail), calibrated on the fixture's seed 1
+! and frozen as the tail's are: the entries' largest difference relative to the dense row's largest valid |d|,
+! max(2 x seed 1's, 2^-23); the drawn rotations that differ, max(2 x seed 1's count, the house floor 1)
+real(real64), parameter :: POLAR_NEIGH_PAIR_ROW_TOL = 3.8269356377353838e-07_real64
+integer,      parameter :: POLAR_NEIGH_PAIR_ROT     = 1
+real(real64), parameter :: POLAR_NEIGH_BLOCK_ERR_CPU = 5.8641977255458778e-07_real64
+integer,      parameter :: POLAR_NEIGH_BLOCK_ROT_CPU = 2
 ! the accuracy block's calibration on the CPU device, block seed 1 (64 particles against 1,000 references per
 ! half at SIMPLE's case geometry), frozen as the fixture's pair is; q = 5 for its 64,000 pairs
 real(real64), parameter :: POLAR_BLOCK_ERR_CPU = 7.2525524223032628e-07_real64
